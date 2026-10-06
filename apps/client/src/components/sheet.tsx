@@ -16,8 +16,12 @@ const sheetGlow =
   'radial-gradient(circle at 12% 0%, rgba(139,92,246,0.24) 0%, rgba(139,92,246,0) 55%), ' +
   'radial-gradient(circle at 100% 8%, rgba(76,215,246,0.10) 0%, rgba(76,215,246,0) 40%)';
 
-/** Опции экрана-шторки корневого стека. detents — доли высоты экрана (iOS). */
-export function sheetOptions(detents: number[] = [1]) {
+/**
+ * Опции экрана-шторки корневого стека (iOS). detents — доли высоты экрана или
+ * 'fitToContents' — по высоте содержимого, как системные короткие шторки (тогда у
+ * экрана не должно быть flex: 1 и прокрутки, иначе высота схлопнется).
+ */
+export function sheetOptions(detents: number[] | 'fitToContents' = [1]) {
   if (IS_IOS) {
     return {
       presentation: 'formSheet' as const,

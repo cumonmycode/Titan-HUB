@@ -60,8 +60,8 @@ function Root() {
           <Stack.Screen name="(tabs)" options={{ animation: 'fade' }} />
           <Stack.Screen name="pay" options={sheetOptions([1])} />
           <Stack.Screen name="check/[id]" options={sheetOptions([0.7, 1])} />
-          <Stack.Screen name="profile-edit" options={sheetOptions([1])} />
-          <Stack.Screen name="bonus-rules" options={sheetOptions([0.75, 1])} />
+          <Stack.Screen name="profile-edit" options={sheetOptions('fitToContents')} />
+          <Stack.Screen name="bonus-rules" options={sheetOptions('fitToContents')} />
           <Stack.Screen name="notifications" options={sheetOptions([0.7, 1])} />
         </Stack.Protected>
         <Stack.Protected guard={!inside}>

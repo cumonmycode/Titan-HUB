@@ -5,11 +5,11 @@ import { useEffect, useEffectEvent, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, FlatList, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { Glass, GlassButton } from '@/components/glass';
+import { GlassButton } from '@/components/glass';
 import type { IconName } from '@/components/icon';
 import { SheetHeader, useCloseSheet } from '@/components/sheet';
 import { Tap } from '@/components/tap';
-import { EmptyState, IconTile, Skeleton } from '@/components/ui';
+import { EmptyState, IconTile, Skeleton, Surface } from '@/components/ui';
 import { errorText } from '@/lib/api';
 import { relative } from '@/lib/format';
 import { openFromNotificationData, setBadge } from '@/lib/push';
@@ -98,12 +98,7 @@ function NotificationCard({ n, highlighted, onOpen }: { n: ClientNotification; h
   const screen = typeof n.meta.screen === 'string' ? n.meta.screen : null;
   const actionable = !!screen && screen !== 'notifications';
   const body = (
-    <Glass
-      interactive={actionable}
-      tint={highlighted ? 'rgba(139,92,246,0.22)' : undefined}
-      fallback={highlighted ? styles.cardNewFallback : null}
-      style={styles.card}
-    >
+    <Surface tone={highlighted ? colors.violet : undefined} style={styles.card}>
       <IconTile name={look.icon} color={look.color} size={42} />
       <View style={styles.texts}>
         <View style={[styles.titleRow, highlighted && styles.titleRowNew]}>
@@ -113,7 +108,7 @@ function NotificationCard({ n, highlighted, onOpen }: { n: ClientNotification; h
         <Text style={styles.body}>{n.body}</Text>
       </View>
       {highlighted ? <View style={styles.dot} /> : null}
-    </Glass>
+    </Surface>
   );
   if (!actionable) return body;
   return (
@@ -131,7 +126,6 @@ const styles = StyleSheet.create({
   loading: { gap: space.md },
   item: { marginBottom: space.md },
   card: { flexDirection: 'row', gap: space.md, padding: space.lg, borderRadius: radius.tile },
-  cardNewFallback: { borderColor: colors.borderViolet, backgroundColor: 'rgba(43,33,61,0.9)' },
   texts: { flex: 1 },
   titleRow: { flexDirection: 'row', alignItems: 'flex-start', gap: space.sm },
   titleRowNew: { paddingRight: space.md },

@@ -15,7 +15,7 @@ import { Icon } from '@/components/icon';
 import { ListRow, ListSection, ToggleRow } from '@/components/list';
 import { TabScroll } from '@/components/screen';
 import { Tap } from '@/components/tap';
-import { Avatar, Skeleton, TierBadge } from '@/components/ui';
+import { Avatar, Skeleton, Surface, TierBadge } from '@/components/ui';
 import { api, API_URL, errorText } from '@/lib/api';
 import { longDate } from '@/lib/format';
 import { haptic } from '@/lib/haptics';
@@ -127,10 +127,10 @@ export default function ProfileScreen() {
           </View>
 
           {demo ? (
-            <Glass tint="rgba(251,191,36,0.16)" fallback={styles.demoFallback} style={styles.demo}>
+            <Surface tone={colors.amber} style={styles.demo}>
               <Icon name="demo" size={18} color={colors.amber} />
               <Text style={styles.demoText}>Демо-режим: данные ненастоящие, оплата проходит понарошку.</Text>
-            </Glass>
+            </Surface>
           ) : null}
 
           <ListSection title="Личные данные">
@@ -180,7 +180,6 @@ const styles = StyleSheet.create({
   badges: { flexDirection: 'row', alignItems: 'center', gap: space.sm, marginTop: space.sm },
   editText: { color: colors.lavender, fontSize: 16, fontWeight: '600' },
   demo: { flexDirection: 'row', alignItems: 'center', gap: space.sm, marginTop: space.xl, padding: space.md, borderRadius: radius.row },
-  demoFallback: { backgroundColor: colors.amberTint, borderColor: 'rgba(251,191,36,0.25)' },
   demoText: { ...StyleSheet.flatten(type.callout), color: colors.amber, flex: 1 },
   logout: { marginTop: space.xxl + space.xs },
   version: { color: colors.textMuted, fontSize: 12, textAlign: 'center', marginTop: space.lg },

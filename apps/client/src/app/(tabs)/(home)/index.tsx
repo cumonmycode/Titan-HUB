@@ -11,12 +11,12 @@ import { StyleSheet, Text, View } from 'react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 
 import { FEED_ROW_INSET, FeedRow } from '@/components/feed-row';
-import { Glass, GlassButton, GlassIconButton } from '@/components/glass';
+import { GlassButton, GlassIconButton } from '@/components/glass';
 import type { IconName } from '@/components/icon';
 import { HoloCard } from '@/components/holo-card';
 import { RollingNumber } from '@/components/rolling-number';
 import { TabScroll } from '@/components/screen';
-import { Divider, EmptyState, IconTile, SectionHeader, Skeleton } from '@/components/ui';
+import { Divider, EmptyState, IconTile, SectionHeader, Skeleton, Surface } from '@/components/ui';
 import { errorText } from '@/lib/api';
 import { bonus, inDays, money, plural } from '@/lib/format';
 import { pushPermission, registerForPush } from '@/lib/push';
@@ -114,7 +114,7 @@ export default function HomeScreen() {
 
       <View style={styles.section}>
         <SectionHeader title="Последние операции" action={items.length ? 'Все' : undefined} onAction={() => router.navigate('/history')} />
-        <Glass style={styles.group}>
+        <Surface style={styles.group}>
           {recent.isLoading ? (
             <View style={styles.listLoading}><Skeleton height={40} /><Skeleton height={40} /><Skeleton height={40} /></View>
           ) : items.length === 0 ? (
@@ -125,7 +125,7 @@ export default function HomeScreen() {
               <FeedRow item={it} dated onOpenCheck={(id) => router.push({ pathname: '/check/[id]', params: { id } })} />
             </View>
           ))}
-        </Glass>
+        </Surface>
       </View>
     </TabScroll>
   );
@@ -136,7 +136,7 @@ function DepositCard({ wallet }: { wallet: Wallet }) {
   const router = useRouter();
   const active = wallet.deposit > 0;
   return (
-    <Glass tint={active ? 'rgba(52,211,153,0.16)' : undefined} style={styles.deposit}>
+    <Surface tone={active ? colors.green : undefined} style={styles.deposit}>
       <View style={styles.flex}>
         <Text style={type.overline}>Депозит</Text>
         <RollingNumber value={wallet.deposit} format={(n) => money(n)}
@@ -148,7 +148,7 @@ function DepositCard({ wallet }: { wallet: Wallet }) {
       ) : (
         <Text style={styles.offlineNote}>Пополнить можно{'\n'}на кассе клуба</Text>
       )}
-    </Glass>
+    </Surface>
   );
 }
 
@@ -203,7 +203,7 @@ function Dues({ wallet }: { wallet: Wallet }) {
   return (
     <View style={styles.section}>
       <SectionHeader title={owes ? 'К оплате' : 'Взносы'} />
-      <Glass style={styles.group}>
+      <Surface style={styles.group}>
         {dues.map((d, i) => (
           <View key={d.key}>
             {i > 0 ? <Divider inset={DUE_INSET} /> : null}
@@ -225,7 +225,7 @@ function Dues({ wallet }: { wallet: Wallet }) {
             </View>
           </View>
         ))}
-      </Glass>
+      </Surface>
       {!online && owes ? <Text style={styles.footer}>Онлайн-оплата временно недоступна — оплатить можно на кассе клуба.</Text> : null}
     </View>
   );
@@ -237,7 +237,7 @@ function ResidentProgress({ wallet }: { wallet: Wallet }) {
   const vp = wallet.visitProgress;
   const pct = Math.min(1, vp.visits / Math.max(1, vp.threshold));
   return (
-    <Glass tint="rgba(76,215,246,0.14)" fallback={styles.progressFallback} style={[styles.card, styles.section]}>
+    <Surface tone={colors.cyan} style={[styles.card, styles.section]}>
       <View style={styles.row}>
         <IconTile name="trophy" color={colors.cyan} />
         <Text style={[type.headline, styles.flex]}>До статуса «Резидент»</Text>
@@ -251,7 +251,7 @@ function ResidentProgress({ wallet }: { wallet: Wallet }) {
           ? `Ещё ${vp.remaining} ${plural(vp.remaining, 'посещение', 'посещения', 'посещений')} — и вы Резидент`
           : 'Порог достигнут — статус повысится после следующего визита'}
       </Text>
-    </Glass>
+    </Surface>
   );
 }
 
@@ -272,7 +272,7 @@ function PushPrompt() {
   if (!visible) return null;
   const dismiss = () => { setVisible(false); void SecureStore.setItemAsync(PUSH_PROMPT_KEY, '1'); };
   return (
-    <Glass tint="rgba(139,92,246,0.20)" fallback={styles.promptFallback} style={[styles.card, styles.section]}>
+    <Surface tone={colors.violet} style={[styles.card, styles.section]}>
       <View style={styles.row}>
         <IconTile name="inbox" color={colors.violetLight} />
         <View style={styles.flex}>
@@ -287,7 +287,7 @@ function PushPrompt() {
           dismiss();
         }} />
       </View>
-    </Glass>
+    </Surface>
   );
 }
 
@@ -309,11 +309,9 @@ const styles = StyleSheet.create({
   footer: { ...StyleSheet.flatten(type.caption), marginTop: space.sm, marginHorizontal: space.lg },
   card: { borderRadius: radius.tile, padding: space.lg },
   note: { marginTop: space.sm },
-  progressFallback: { backgroundColor: colors.cyanTint, borderColor: 'rgba(76,215,246,0.3)' },
   progressCount: { color: colors.cyan, fontWeight: '800', fontSize: 14, fontVariant: ['tabular-nums'] },
   track: { height: 8, borderRadius: 4, backgroundColor: 'rgba(255,255,255,0.12)', overflow: 'hidden', marginTop: space.md },
   fill: { height: '100%', borderRadius: 4, experimental_backgroundImage: 'linear-gradient(90deg, #8B5CF6, #4cd7f6)' },
-  promptFallback: { backgroundColor: colors.violetTint, borderColor: colors.borderViolet },
   promptText: { marginTop: 2 },
   promptActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: space.sm, marginTop: space.md },
   listLoading: { padding: space.lg, gap: space.md },

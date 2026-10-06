@@ -10,11 +10,11 @@ import { ActivityIndicator, AppState, Linking, ScrollView, StyleSheet, Text, Vie
 import Animated, { FadeIn, FadeInDown, FadeOut } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { Glass, GlassButton } from '@/components/glass';
+import { GlassButton } from '@/components/glass';
 import { HoloCard } from '@/components/holo-card';
 import { Icon, type IconName } from '@/components/icon';
 import { Tap } from '@/components/tap';
-import { Divider, IconTile } from '@/components/ui';
+import { Divider, IconTile, Surface } from '@/components/ui';
 import { api, errorText } from '@/lib/api';
 import { resetDemo } from '@/lib/demo';
 import { haptic } from '@/lib/haptics';
@@ -128,7 +128,7 @@ export default function LoginScreen() {
 
         {phase === 'waiting' && login ? (
           <Animated.View entering={FadeIn.duration(300)} exiting={FadeOut.duration(200)}>
-            <Glass tint="rgba(42,171,238,0.14)" fallback={styles.waitFallback} style={styles.card}>
+            <Surface tone={colors.telegram} style={styles.card}>
               <View style={styles.waitHead}>
                 <ActivityIndicator color={colors.telegram} />
                 <Text style={[type.headline, styles.flex]}>Подтвердите вход в Telegram</Text>
@@ -144,9 +144,9 @@ export default function LoginScreen() {
                 <Tap onPress={copyCode} scaleTo={0.96} accessibilityRole="button" accessibilityLabel={`Код ${login.code.split('').join(' ')}. Скопировать`}>
                   <View style={styles.codeRow}>
                     {login.code.split('').map((d, i) => (
-                      <Glass key={i} tint="rgba(139,92,246,0.24)" fallback={styles.codeFallback} style={styles.codeDigit}>
+                      <Surface key={i} tone={colors.violet} style={styles.codeDigit}>
                         <Text style={styles.codeText}>{d}</Text>
-                      </Glass>
+                      </Surface>
                     ))}
                   </View>
                 </Tap>
@@ -157,11 +157,11 @@ export default function LoginScreen() {
               </View>
 
               <GlassButton title="Отмена" variant="ghost" size="md" onPress={() => { setPhase('idle'); setLogin(null); }} />
-            </Glass>
+            </Surface>
           </Animated.View>
         ) : phase === 'rejected' ? (
           <Animated.View entering={FadeIn.duration(300)}>
-            <Glass tint="rgba(251,191,36,0.14)" fallback={styles.rejectFallback} style={styles.card}>
+            <Surface tone={colors.amber} style={styles.card}>
               <View style={styles.waitHead}>
                 <Icon name="shield" size={22} color={colors.amber} />
                 <Text style={[type.headline, styles.flex]}>Вход отклонён</Text>
@@ -170,11 +170,11 @@ export default function LoginScreen() {
                 В Telegram нажали «Это не я» — доступ не выдан. Если это были вы, начните вход заново.
               </Text>
               <GlassButton title="Попробовать снова" variant="telegram" icon="telegram" style={styles.cardButton} onPress={() => void begin(true)} />
-            </Glass>
+            </Surface>
           </Animated.View>
         ) : (
           <View>
-            <Glass style={styles.features}>
+            <Surface style={styles.features}>
               {FEATURES.map((f, i) => (
                 <View key={f.title}>
                   {i > 0 ? <Divider inset={FEATURE_INSET} /> : null}
@@ -187,7 +187,7 @@ export default function LoginScreen() {
                   </View>
                 </View>
               ))}
-            </Glass>
+            </Surface>
 
             <GlassButton
               title="Войти через Telegram"
@@ -232,8 +232,6 @@ const styles = StyleSheet.create({
   note: { color: colors.textSecondary, fontSize: 12, lineHeight: 17, textAlign: 'center', marginTop: space.md, paddingHorizontal: space.sm },
   demo: { marginTop: space.lg },
   card: { padding: space.lg, borderRadius: radius.card },
-  waitFallback: { borderColor: 'rgba(42,171,238,0.3)' },
-  rejectFallback: { borderColor: 'rgba(251,191,36,0.3)' },
   waitHead: { flexDirection: 'row', alignItems: 'center', gap: space.md },
   cardText: { ...StyleSheet.flatten(type.callout), color: colors.textSecondary, marginTop: space.sm },
   cardButton: { marginTop: space.lg },
@@ -243,7 +241,6 @@ const styles = StyleSheet.create({
   },
   codeRow: { flexDirection: 'row', gap: 10, marginTop: space.md },
   codeDigit: { width: 54, height: 66, borderRadius: radius.control, alignItems: 'center', justifyContent: 'center' },
-  codeFallback: { backgroundColor: colors.violetTint, borderColor: 'rgba(139,92,246,0.35)' },
   codeText: { color: '#fff', fontSize: 32, fontWeight: '800', fontVariant: ['tabular-nums'] },
   copyRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: space.sm, marginBottom: space.sm },
   copyHint: { color: colors.lavender, fontSize: 12, fontWeight: '600' },

@@ -3,9 +3,9 @@ import { useLocalSearchParams } from 'expo-router';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { Glass, GlassButton } from '@/components/glass';
+import { GlassButton } from '@/components/glass';
 import { SheetHeader, useCloseSheet } from '@/components/sheet';
-import { EmptyState } from '@/components/ui';
+import { EmptyState, Surface } from '@/components/ui';
 import { errorText } from '@/lib/api';
 import { clock, longDate, money } from '@/lib/format';
 import { useCheck } from '@/lib/queries';
@@ -36,7 +36,7 @@ export default function CheckScreen() {
                 <GlassButton title="Закрыть" variant="secondary" onPress={close} />
               </EmptyState>
             ) : (
-              <Glass style={styles.paper}>
+              <Surface style={styles.paper}>
                 <View style={styles.paperHead}>
                   <Text style={styles.brand}>TITAN</Text>
                   {when ? <Text style={type.caption}>{longDate(when)} · {clock(when)}</Text> : null}
@@ -82,7 +82,7 @@ export default function CheckScreen() {
                     </View>
                   ))}
                 </View>
-              </Glass>
+              </Surface>
             )}
         </View>
       </ScrollView>

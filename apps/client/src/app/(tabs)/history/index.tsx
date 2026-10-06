@@ -5,10 +5,10 @@ import { useMemo, useState } from 'react';
 import { ActivityIndicator, FlatList, StyleSheet, Text, View } from 'react-native';
 
 import { FEED_ROW_INSET, FeedRow } from '@/components/feed-row';
-import { Glass, GlassButton } from '@/components/glass';
+import { GlassButton } from '@/components/glass';
 import { ScreenTitle, useTabScrollProps } from '@/components/screen';
 import { Segmented } from '@/components/segmented';
-import { Divider, EmptyState, Skeleton } from '@/components/ui';
+import { Divider, EmptyState, Skeleton, Surface } from '@/components/ui';
 import { errorText } from '@/lib/api';
 import { dayKey, dayTitle } from '@/lib/format';
 import { type FeedKind, useFeed } from '@/lib/queries';
@@ -63,14 +63,14 @@ export default function HistoryScreen() {
       renderItem={({ item: day }) => (
         <View style={[styles.column, styles.day]}>
           <Text style={styles.dayTitle} accessibilityRole="header">{day.title}</Text>
-          <Glass style={styles.group}>
+          <Surface style={styles.group}>
             {day.items.map((it, i) => (
               <View key={it.id}>
                 {i > 0 ? <Divider inset={FEED_ROW_INSET} /> : null}
                 <FeedRow item={it} onOpenCheck={openCheck} />
               </View>
             ))}
-          </Glass>
+          </Surface>
         </View>
       )}
       onEndReachedThreshold={0.4}

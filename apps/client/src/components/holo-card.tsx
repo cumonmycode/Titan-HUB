@@ -139,6 +139,7 @@ const styles = StyleSheet.create({
   card: {
     height: CARD_HEIGHT,
     borderRadius: 26,
+    borderCurve: 'continuous',
     overflow: 'hidden',
     backgroundColor: colors.violetDeep,
     boxShadow: '0 18px 44px rgba(109,40,217,0.38)',

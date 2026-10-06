@@ -1,20 +1,21 @@
 // Правка своих данных: никнейм, имя, телефон, день рождения (PATCH /auth/me).
-// Форма как в «Настройках» iOS: поля — строки стеклянной группы, подпись слева.
+// Форма как в «Настройках» iOS: поля — строки одной группы, подпись слева.
+// Шторка по высоте содержимого; при вводе iOS сам поднимает её над клавиатурой.
 import { useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import {
-  KeyboardAvoidingView, ScrollView, StyleSheet, Text, TextInput, type TextInputProps, View,
+  StyleSheet, Text, TextInput, type TextInputProps, View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { Glass, GlassButton } from '@/components/glass';
+import { GlassButton } from '@/components/glass';
 import { SheetHeader, useCloseSheet } from '@/components/sheet';
-import { Divider } from '@/components/ui';
+import { Divider, Surface } from '@/components/ui';
 import { api, errorText } from '@/lib/api';
 import { birthdayToInput, inputToBirthday, maskBirthday, normalizePhone } from '@/lib/format';
 import { haptic } from '@/lib/haptics';
 import { keys, useWallet } from '@/lib/queries';
-import { colors, GUTTER, IS_IOS, MAX_WIDTH, radius, space, type } from '@/lib/theme';
+import { colors, GUTTER, MAX_WIDTH, radius, space, type } from '@/lib/theme';
 
 const LABEL_WIDTH = 124;
 
@@ -51,11 +52,11 @@ export default function ProfileEditScreen() {
   }
 
   return (
-    <KeyboardAvoidingView style={styles.root} behavior={IS_IOS ? 'padding' : undefined}>
+    <View>
       <SheetHeader title="Личные данные" onClose={close} />
-      <ScrollView contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + space.xxl }]} keyboardShouldPersistTaps="handled">
+      <View style={[styles.content, { paddingBottom: insets.bottom + space.xl }]}>
         <View style={styles.column}>
-          <Glass style={styles.group}>
+          <Surface style={styles.group}>
             <Field label="Никнейм" value={nickname} onChangeText={setNickname} maxLength={40} autoCapitalize="none" autoCorrect={false} />
             <Divider inset={space.lg} />
             <Field label="Имя" value={fullName} onChangeText={setFullName} maxLength={120} placeholder="Как к вам обращаться" textContentType="name" />
@@ -63,13 +64,13 @@ export default function ProfileEditScreen() {
             <Field label="Телефон" value={phone} onChangeText={(t) => setPhone(normalizePhone(t))} keyboardType="phone-pad" placeholder="+7…" textContentType="telephoneNumber" />
             <Divider inset={space.lg} />
             <Field label="День рождения" value={birthday} onChangeText={(t) => setBirthday(maskBirthday(t))} keyboardType="number-pad" placeholder="ДД.ММ.ГГГГ" />
-          </Glass>
+          </Surface>
           <Text style={styles.footer}>В день рождения клуб может подарить бонусы.</Text>
           {error ? <Text style={styles.error}>{error}</Text> : null}
           <GlassButton title="Сохранить" loading={saving} onPress={() => void save()} style={styles.save} />
         </View>
-      </ScrollView>
-    </KeyboardAvoidingView>
+      </View>
+    </View>
   );
 }
 
@@ -91,7 +92,6 @@ function Field({ label, ...props }: TextInputProps & { label: string }) {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1 },
   content: { paddingHorizontal: GUTTER },
   column: { width: '100%', maxWidth: MAX_WIDTH, alignSelf: 'center' },
   group: { borderRadius: radius.card, overflow: 'hidden', marginTop: space.sm },

@@ -183,11 +183,19 @@ export interface GlassChipProps {
   icon?: IconName;
   color?: string;
   selected?: boolean;
+  /** Без стекла — внутри шторки (стекло на стеклянной шторке выглядит мутно). */
+  flat?: boolean;
   onPress?: () => void;
 }
 
 /** Чип выбора (назначение платежа, быстрые суммы): выбранный — насыщенное стекло своего цвета. */
-export function GlassChip({ label, icon, color = colors.violetLight, selected, onPress }: GlassChipProps) {
+export function GlassChip({ label, icon, color = colors.violetLight, selected, flat, onPress }: GlassChipProps) {
+  const content = (
+    <>
+      {icon ? <Icon name={icon} size={15} color={selected ? color : colors.textSecondary} /> : null}
+      <Text style={[styles.chipText, selected && styles.chipTextOn]} numberOfLines={1}>{label}</Text>
+    </>
+  );
   return (
     <Pressable
       onPress={() => { haptic.select(); onPress?.(); }}
@@ -195,15 +203,18 @@ export function GlassChip({ label, icon, color = colors.violetLight, selected, o
       accessibilityState={{ selected: !!selected }}
       accessibilityLabel={label}
     >
-      <Glass
-        interactive
-        tint={selected ? `${color}55` : glassTint.card}
-        fallback={selected ? { backgroundColor: `${color}26`, borderColor: `${color}80` } : null}
-        style={styles.chip}
-      >
-        {icon ? <Icon name={icon} size={15} color={selected ? color : colors.textSecondary} /> : null}
-        <Text style={[styles.chipText, selected && styles.chipTextOn]} numberOfLines={1}>{label}</Text>
-      </Glass>
+      {flat ? (
+        <View style={[styles.chip, styles.chipFlat, selected && { backgroundColor: `${color}2e`, borderColor: `${color}80` }]}>{content}</View>
+      ) : (
+        <Glass
+          interactive
+          tint={selected ? `${color}55` : glassTint.card}
+          fallback={selected ? { backgroundColor: `${color}26`, borderColor: `${color}80` } : null}
+          style={styles.chip}
+        >
+          {content}
+        </Glass>
+      )}
     </Pressable>
   );
 }
@@ -213,6 +224,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(33,29,42,0.82)',
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(255,255,255,0.10)',
+    borderCurve: 'continuous',
   },
   button: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: space.sm,
@@ -232,6 +244,9 @@ const styles = StyleSheet.create({
   chip: {
     flexDirection: 'row', alignItems: 'center', gap: 6, height: 40, paddingHorizontal: 15,
     borderRadius: radius.pill, maxWidth: 240,
+  },
+  chipFlat: {
+    backgroundColor: 'rgba(255,255,255,0.07)', borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.12)',
   },
   chipText: { color: colors.textSecondary, fontSize: 14, fontWeight: '700' },
   chipTextOn: { color: colors.text },

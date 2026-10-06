@@ -12,11 +12,11 @@ import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import Animated, { FadeIn, FadeInDown, ZoomIn } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { Glass, GlassButton, GlassChip } from '@/components/glass';
+import { GlassButton, GlassChip } from '@/components/glass';
 import { Icon, type IconName } from '@/components/icon';
 import { amountToInput, Keypad, parseAmount } from '@/components/keypad';
 import { SheetHeader, useCloseSheet } from '@/components/sheet';
-import { EmptyState } from '@/components/ui';
+import { EmptyState, Surface } from '@/components/ui';
 import { errorText } from '@/lib/api';
 import { money } from '@/lib/format';
 import { haptic } from '@/lib/haptics';
@@ -184,11 +184,11 @@ export default function PayScreen() {
             <View style={styles.quickRow}>
               {target?.purpose === 'deposit'
                 ? QUICK.map((q) => (
-                    <GlassChip key={q} label={q.toLocaleString('ru')} selected={parseAmount(amountStr) === q}
+                    <GlassChip key={q} flat label={q.toLocaleString('ru')} selected={parseAmount(amountStr) === q}
                       onPress={() => setAmountInput(String(q))} />
                   ))
                 : suggestedAmount > 0 ? (
-                    <GlassChip label={`${target?.purpose === 'debt' ? 'Весь долг' : 'Вся сумма'} · ${money(suggestedAmount)}`}
+                    <GlassChip flat label={`${target?.purpose === 'debt' ? 'Весь долг' : 'Вся сумма'} · ${money(suggestedAmount)}`}
                       selected={amount === suggestedAmount} onPress={() => setAmountInput(amountToInput(suggestedAmount))} />
                   ) : null}
             </View>
@@ -240,9 +240,9 @@ function Breakdown({ target, amount, charged, surcharge, wallet }: { target: Tar
 
 function StatusLens({ icon, color, spinning }: { icon?: IconName; color: string; spinning?: boolean }) {
   return (
-    <Glass tint={`${color}33`} fallback={{ backgroundColor: `${color}1f`, borderColor: `${color}40` }} style={styles.statusCircle}>
+    <Surface tone={color} style={styles.statusCircle}>
       {spinning ? <ActivityIndicator size="large" color={color} /> : icon ? <Icon name={icon} size={40} color={color} weight="bold" /> : null}
-    </Glass>
+    </Surface>
   );
 }
 

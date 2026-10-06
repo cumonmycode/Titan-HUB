@@ -6,9 +6,8 @@ import { Pressable, StyleSheet, Switch, Text, View } from 'react-native';
 import { haptic } from '@/lib/haptics';
 import { colors, radius, space, type } from '@/lib/theme';
 
-import { Glass } from './glass';
 import { Icon, type IconName } from './icon';
-import { Divider, IconTile } from './ui';
+import { Divider, IconTile, Surface } from './ui';
 
 const ICON_SIZE = 32;
 const ROW_INSET = space.lg + ICON_SIZE + space.md;
@@ -18,14 +17,14 @@ export function ListSection({ title, footer, children }: { title?: string; foote
   return (
     <View style={styles.section}>
       {title ? <Text style={styles.title} accessibilityRole="header">{title}</Text> : null}
-      <Glass style={styles.group}>
+      <Surface style={styles.group}>
         {rows.map((row, i) => (
           <View key={i}>
             {i > 0 ? <Divider inset={ROW_INSET} /> : null}
             {row}
           </View>
         ))}
-      </Glass>
+      </Surface>
       {footer ? <Text style={styles.footer}>{footer}</Text> : null}
     </View>
   );

@@ -1,11 +1,11 @@
 // «Бонусная программа»: как начисляются и тратятся бонусы, когда сгорают, статус.
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+// Открывается нажатием на голо-карту. Шторка по высоте содержимого — без прокрутки.
+import { StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { Glass } from '@/components/glass';
 import type { IconName } from '@/components/icon';
 import { SheetHeader, useCloseSheet } from '@/components/sheet';
-import { Divider, IconTile } from '@/components/ui';
+import { Divider, IconTile, Surface } from '@/components/ui';
 import { bonus, inDays, longDate, money, plural } from '@/lib/format';
 import { useWallet } from '@/lib/queries';
 import { colors, GUTTER, MAX_WIDTH, radius, space, type } from '@/lib/theme';
@@ -38,12 +38,12 @@ export default function BonusRulesScreen() {
   ] : [];
 
   return (
-    <View style={styles.root}>
+    <View>
       <SheetHeader title="Бонусная программа" onClose={close} />
-      <ScrollView contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + space.xxl }]}>
+      <View style={[styles.content, { paddingBottom: insets.bottom + space.xl }]}>
         <View style={styles.column}>
           {w ? (
-            <Glass tint="rgba(139,92,246,0.22)" fallback={styles.balanceFallback} style={styles.balance}>
+            <Surface tone={colors.violet} style={styles.balance}>
               {w.bonusHidden ? (
                 <Text style={type.headline}>Скоро тут появятся бонусы ⭐</Text>
               ) : (
@@ -57,11 +57,11 @@ export default function BonusRulesScreen() {
                   ) : null}
                 </>
               )}
-            </Glass>
+            </Surface>
           ) : null}
 
           {rules.length ? (
-            <Glass style={styles.rules}>
+            <Surface style={styles.rules}>
               {rules.map((rule, i) => (
                 <View key={rule.title}>
                   {i > 0 ? <Divider inset={RULE_INSET} /> : null}
@@ -74,21 +74,19 @@ export default function BonusRulesScreen() {
                   </View>
                 </View>
               ))}
-            </Glass>
+            </Surface>
           ) : null}
         </View>
-      </ScrollView>
+      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1 },
   flex: { flex: 1 },
   content: { paddingHorizontal: GUTTER },
   column: { width: '100%', maxWidth: MAX_WIDTH, alignSelf: 'center' },
   balance: { alignItems: 'center', paddingVertical: space.xl, paddingHorizontal: space.lg, borderRadius: radius.card },
-  balanceFallback: { backgroundColor: colors.violetTint, borderColor: colors.borderViolet },
   big: { color: colors.text, fontSize: 42, fontWeight: '900', fontStyle: 'italic', marginTop: 4, fontVariant: ['tabular-nums'] },
   expiring: { ...StyleSheet.flatten(type.callout), color: colors.amber, marginTop: 6, textAlign: 'center' },
   rules: { marginTop: space.lg, borderRadius: radius.card, overflow: 'hidden' },

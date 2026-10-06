@@ -18,8 +18,9 @@
 - **Вкладки (Android):** своя плавающая капсула `components/tab-bar.tsx`.
 - **Шапки:** у каждой вкладки свой `Stack` (`components/tab-stack.tsx`): прозрачная шапка с крупным заголовком и размытием края (`scrollEdgeEffects`), кнопки — `Stack.Toolbar` (например, «Изменить» в профиле). На Android заголовок рисуется в контенте (`ScreenTitle`).
 - **Фон:** статичные пятна света `backdrop` из `lib/theme.ts` — стилем контейнера экрана (`contentStyle`), не отдельным слоем: размытие края iOS ищет ScrollView первым ребёнком экрана.
-- **Стекло:** `components/glass.tsx` — `Glass` (GlassView с violet-тоном и «досоздаванием» эффекта после появления), `GlassButton`, `GlassIconButton`, `GlassChip`. Без iOS 26 (Android, старые iPhone) — полупрозрачные поверхности бренда той же формы.
-- **Шторки:** `pay`, `check/[id]`, `profile-edit`, `bonus-rules` — `formSheet` с ручкой и упорами (`components/sheet.tsx`); на iOS 26 фон шторки — системное стекло с фиолетовым отсветом. На Android — полноэкранное окно снизу.
+- **Стекло — только слой управления** (правило iOS 26): `components/glass.tsx` — `GlassButton`, `GlassIconButton`, `GlassChip`, кнопка камеры в профиле; плюс системные таб-бар, шапки и шторки. Карточки, группы списков, чек — `Surface` из `components/ui.tsx` (полупрозрачная поверхность с мягким бликом и `tone` для смыслового цвета). Стекло на контенте и особенно внутри стеклянных шторок выглядело мутным — убрано в 1.1.0 (8). Внутри шторок чипы — `GlassChip flat`. Без iOS 26 (Android, старые iPhone) стекло кнопок заменяется полупрозрачными поверхностями бренда.
+- **Углы** — `borderCurve: 'continuous'` (squircle iOS) у поверхностей, плашек значков и голо-карты.
+- **Шторки:** `formSheet` с ручкой (`components/sheet.tsx`); на iOS 26 фон — системное стекло с фиолетовым отсветом. Высота: `pay` — во весь экран (клавиатура суммы), `check/[id]` и `notifications` — 70 % с подъёмом до полной, `bonus-rules` и `profile-edit` — `fitToContents` (по содержимому: без `flex: 1` и прокрутки в корне). На Android — полноэкранное окно снизу.
 - **Иконки:** `components/icon.tsx` — смысловые имена, SF Symbols на iOS (не новее SF Symbols 4), Ionicons на Android.
 - **Списки и формы:** `components/list.tsx` — секции как «Настройки» iOS на стекле, системный `Switch`; сегмент «Все / Деньги / Бонусы» — `UISegmentedControl`.
 
