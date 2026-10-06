@@ -1,5 +1,6 @@
 // Голографическая карта клуба — главный элемент кошелька (как в веб-версии):
 // переливающийся градиент, 3D-наклон за пальцем и блик, который бежит за касанием.
+// Нажатие открывает бонусную программу; срок сгорания бонусов — строкой на самой карте.
 import { useEffect, useState } from 'react';
 import { type LayoutChangeEvent, StyleSheet, Text, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
@@ -18,7 +19,7 @@ const CARD_HEIGHT = 212;
 const TILT = 13;
 
 export function HoloCard({
-  nickname, tierLabel, tierColor, bonus, bonusHidden, memberSince,
+  nickname, tierLabel, tierColor, bonus, bonusHidden, memberSince, expiring, onPress,
 }: {
   nickname: string;
   tierLabel: string;
@@ -26,6 +27,9 @@ export function HoloCard({
   bonus: number;
   bonusHidden: boolean;
   memberSince?: string;
+  /** «120 сгорят через 3 дня» — показывается под суммой бонусов. */
+  expiring?: string | null;
+  onPress?: () => void;
 }) {
   const reduceMotion = useReducedMotion();
   const [width, setWidth] = useState(0);
@@ -67,6 +71,7 @@ export function HoloCard({
 
   const tap = Gesture.Tap().onEnd(() => {
     haptic.soft();
+    onPress?.();
   }).runOnJS(true);
 
   const cardStyle = useAnimatedStyle(() => ({
@@ -92,8 +97,9 @@ export function HoloCard({
 
   return (
     <GestureDetector gesture={Gesture.Simultaneous(pan, tap)}>
-      <Animated.View style={[styles.card, cardStyle]} onLayout={onLayout} accessibilityRole="summary"
-        accessibilityLabel={bonusHidden ? `Карта клуба, статус ${tierLabel}` : `Карта клуба, статус ${tierLabel}, ${fmtBonus(bonus)} бонусов`}>
+      <Animated.View style={[styles.card, cardStyle]} onLayout={onLayout} accessibilityRole={onPress ? 'button' : 'summary'}
+        accessibilityLabel={`${bonusHidden ? `Карта клуба, статус ${tierLabel}` : `Карта клуба, статус ${tierLabel}, ${fmtBonus(bonus)} бонусов`}${expiring ? `, ${expiring}` : ''}`}
+        accessibilityHint={onPress ? 'Открыть бонусную программу' : undefined}>
         <Animated.View style={[styles.holo, { width: width * 3 }, holoStyle]} />
         <Animated.View style={[styles.glare, glareStyle]} pointerEvents="none" />
         <View style={styles.shade} pointerEvents="none" />
@@ -113,6 +119,7 @@ export function HoloCard({
                   <RollingNumber value={bonus} format={fmtBonus} style={styles.bonus} />
                   <Text style={styles.star}> ⭐</Text>
                 </View>
+                {expiring ? <Text style={styles.expiring} numberOfLines={1}>🔥 {expiring}</Text> : null}
               </>
             )}
             <View style={styles.bottom}>
@@ -157,6 +164,7 @@ const styles = StyleSheet.create({
   bonusRow: { flexDirection: 'row', alignItems: 'baseline', marginTop: 2 },
   bonus: { color: '#fff', fontSize: 42, lineHeight: 48, fontWeight: '900', fontStyle: 'italic', letterSpacing: -1, ...shadowText },
   star: { fontSize: 24, color: '#fff' },
+  expiring: { color: '#fff', fontSize: 12.5, fontWeight: '700', opacity: 0.92, marginTop: -2, ...shadowText },
   soon: { color: '#fff', fontSize: 21, fontWeight: '800', fontStyle: 'italic', maxWidth: 240, lineHeight: 27, ...shadowText },
   bottom: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 4 },
   nick: { color: '#fff', fontSize: 15, fontWeight: '700', opacity: 0.95, flexShrink: 1, ...shadowText },

@@ -132,6 +132,6 @@ export function openFromNotificationData(data: Record<string, unknown> | undefin
       router.navigate('/');
       return;
     default:
-      router.navigate('/inbox');
+      router.push('/notifications');
   }
 }

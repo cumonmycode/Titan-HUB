@@ -110,7 +110,8 @@ export interface GlassButtonProps {
   icon?: IconName;
   loading?: boolean;
   disabled?: boolean;
-  size?: 'lg' | 'md';
+  /** lg — главная кнопка экрана, md — в карточке, sm — в строке списка. */
+  size?: 'lg' | 'md' | 'sm';
   style?: StyleProp<ViewStyle>;
 }
 
@@ -119,14 +120,16 @@ export function GlassButton({
   title, onPress, variant = 'primary', icon, loading, disabled, size = 'lg', style,
 }: GlassButtonProps) {
   const inactive = disabled || loading;
-  const sizeStyle = size === 'md' ? styles.buttonMd : styles.buttonLg;
+  const sizeStyle = size === 'sm' ? styles.buttonSm : size === 'md' ? styles.buttonMd : styles.buttonLg;
+  const textSize = size === 'sm' ? styles.buttonTextSm : size === 'md' ? styles.buttonTextMd : null;
+  const iconSize = size === 'sm' ? 13 : size === 'md' ? 16 : 18;
   const fg = variant === 'ghost' ? colors.violetLight : BUTTON_LOOK[variant].fg;
   const content = loading ? (
     <ActivityIndicator color={fg} />
   ) : (
     <>
-      {icon ? <Icon name={icon} size={size === 'md' ? 16 : 18} color={fg} weight="bold" /> : null}
-      <Text style={[styles.buttonText, size === 'md' && styles.buttonTextMd, { color: fg }]} numberOfLines={1}>{title}</Text>
+      {icon ? <Icon name={icon} size={iconSize} color={fg} weight="bold" /> : null}
+      <Text style={[styles.buttonText, textSize, { color: fg }]} numberOfLines={1}>{title}</Text>
     </>
   );
 
@@ -217,8 +220,10 @@ const styles = StyleSheet.create({
   },
   buttonLg: { minHeight: 54 },
   buttonMd: { minHeight: 44, paddingHorizontal: space.lg },
+  buttonSm: { minHeight: 32, paddingHorizontal: 14, gap: 5 },
   buttonText: { fontSize: 17, fontWeight: '700', letterSpacing: 0.1 },
   buttonTextMd: { fontSize: 15 },
+  buttonTextSm: { fontSize: 14 },
   circle: { alignItems: 'center', justifyContent: 'center' },
   dot: {
     position: 'absolute', top: 9, right: 10, width: 9, height: 9, borderRadius: 5,

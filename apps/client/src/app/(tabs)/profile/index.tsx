@@ -1,5 +1,7 @@
 // «Профиль»: фото, личные данные, настройки уведомлений, клуб, выход. Списки — как
-// «Настройки» iOS 26 на стекле; «Изменить» — стеклянная кнопка системной шапки.
+// «Настройки» iOS 26 на стекле. Данные здесь только читаются: правка — одной кнопкой
+// «Изменить» в шапке (на Android — справа от заголовка). Бонусная программа живёт
+// на главной (нажатие на карту), здесь её нет.
 import { useQueryClient } from '@tanstack/react-query';
 import Constants from 'expo-constants';
 import * as ImagePicker from 'expo-image-picker';
@@ -132,9 +134,9 @@ export default function ProfileScreen() {
           ) : null}
 
           <ListSection title="Личные данные">
-            <ListRow icon="person" color={colors.violetLight} title="Имя" value={w.profile.fullName || w.profile.nickname} onPress={edit} />
-            <ListRow icon="phone" color={colors.green} title="Телефон" value={w.profile.phone || 'Не указан'} onPress={edit} />
-            <ListRow icon="birthday" color={colors.pink} title="День рождения" value={w.profile.birthday ? longDate(w.profile.birthday) : 'Не указан'} onPress={edit} />
+            <ListRow icon="person" color={colors.violetLight} title="Имя" value={w.profile.fullName || 'Не указано'} />
+            <ListRow icon="phone" color={colors.green} title="Телефон" value={w.profile.phone || 'Не указан'} />
+            <ListRow icon="birthday" color={colors.pink} title="День рождения" value={w.profile.birthday ? longDate(w.profile.birthday) : 'Не указан'} />
             <ListRow icon="telegram" color={colors.telegram} title="Telegram"
               value={w.profile.tgUsername ? `@${w.profile.tgUsername}` : w.profile.telegramLinked ? 'Привязан' : 'Не привязан'} />
           </ListSection>
@@ -151,7 +153,6 @@ export default function ProfileScreen() {
           </ListSection>
 
           <ListSection title="Клуб">
-            <ListRow icon="sparkles" color={colors.gold} title="Бонусная программа" onPress={() => router.push('/bonus-rules')} />
             <ListRow icon="chat" color={colors.telegram} title="Написать в бот клуба" value={`@${BOT}`} external
               onPress={() => void Linking.openURL(`https://t.me/${BOT}`)} />
             <ListRow icon="document" color={colors.textSecondary} title="Политика конфиденциальности" external

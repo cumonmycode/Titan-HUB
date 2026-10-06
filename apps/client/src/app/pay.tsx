@@ -1,4 +1,6 @@
 // Оплата: пополнить депозит, погасить долг, внести взнос (фонд клуба и разовые сборы).
+// Шторка открывается уже под конкретный платёж (purpose/collectionId в параметрах) —
+// с главной: «Пополнить» у депозита или «Оплатить» в блоке «К оплате».
 // Платёж создаётся на сервере и открывается страница СБП эквайера клуба; деньги
 // зачисляются, когда банк подтвердит платёж (вебхук) — приложение ждёт этого,
 // опрашивая статус. Закрыть шторку можно в любой момент: зачисление всё равно
@@ -6,7 +8,7 @@
 import { useLocalSearchParams } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
 import { useEffect, useEffectEvent, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import Animated, { FadeIn, FadeInDown, ZoomIn } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -24,7 +26,7 @@ import { colors, GUTTER, IS_IOS, MAX_WIDTH, space, type } from '@/lib/theme';
 import type { CreatedPayment, PayPurpose, Wallet } from '@/lib/types';
 
 type Phase = 'form' | 'creating' | 'waiting' | 'success' | 'failed' | 'timeout';
-interface Target { id: string; purpose: PayPurpose; collectionId?: string; label: string; icon: IconName; color: string; hint: string }
+interface Target { id: string; purpose: PayPurpose; collectionId?: string; title: string; label: string; hint: string }
 
 const POLL_MS = 3000;
 const WAIT_LIMIT_MS = 8 * 60 * 1000;
@@ -32,12 +34,12 @@ const QUICK = [500, 1000, 2000, 5000];
 
 function targetsFor(w: Wallet): Target[] {
   const list: Target[] = [
-    { id: 'deposit', purpose: 'deposit', label: 'Депозит', icon: 'deposit', color: colors.green, hint: 'Пополнить личный счёт в клубе' },
+    { id: 'deposit', purpose: 'deposit', title: 'Пополнить депозит', label: 'Депозит', hint: 'Деньги на личном счёте в клубе' },
   ];
-  if (w.debt > 0) list.unshift({ id: 'debt', purpose: 'debt', label: 'Долг', icon: 'debt', color: colors.red, hint: `Текущий долг ${money(w.debt)}` });
+  if (w.debt > 0) list.unshift({ id: 'debt', purpose: 'debt', title: 'Погасить долг', label: 'Долг', hint: `Текущий долг ${money(w.debt)}` });
   for (const c of w.collections.filter((x) => !x.excluded)) {
     list.push({
-      id: `fund:${c.id}`, purpose: 'fund', collectionId: c.id, label: c.name, icon: 'fund', color: colors.cyan,
+      id: `fund:${c.id}`, purpose: 'fund', collectionId: c.id, title: c.name, label: c.name,
       hint: c.topUp > 0 ? `К оплате ${money(c.topUp)}${c.kind === 'recurring' ? ` · ${c.period.label}` : ''}` : c.kind === 'recurring' ? 'Оплачено — можно внести вперёд' : 'Оплачено',
     });
   }
@@ -63,7 +65,7 @@ export default function PayScreen() {
   const demo = useSession((s) => s.status === 'demo');
 
   const targets = useMemo(() => (w ? targetsFor(w) : []), [w]);
-  const initial = useMemo(() => {
+  const target = useMemo(() => {
     if (!targets.length) return null;
     if (params.purpose === 'fund') {
       return targets.find((t) => t.collectionId === params.collectionId)
@@ -73,8 +75,6 @@ export default function PayScreen() {
     return targets.find((t) => t.purpose === params.purpose) ?? targets[0];
   }, [targets, params.purpose, params.collectionId, w]);
 
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const target = targets.find((t) => t.id === selectedId) ?? initial;
   const [amountInput, setAmountInput] = useState<string | null>(null);
   const amountStr = amountInput ?? (target && w ? amountToInput(suggested(target, w)) : '');
   const amount = parseAmount(amountStr);
@@ -89,12 +89,6 @@ export default function PayScreen() {
   const surcharge = w?.pay.surchargePercent ?? 8;
   const charged = Math.round(amount * (100 + surcharge)) / 100;
   const canPay = !!target && amount >= 1 && phase === 'form';
-
-  function select(t: Target) {
-    setSelectedId(t.id);
-    setAmountInput(w ? amountToInput(suggested(t, w)) : '');
-    setError(null);
-  }
 
   async function openBank(url: string) {
     if (demo) return;
@@ -162,7 +156,7 @@ export default function PayScreen() {
 
   return (
     <View style={[styles.root, { paddingBottom: Math.max(insets.bottom, space.lg) }]}>
-      <SheetHeader title="Оплата" onClose={close} />
+      <SheetHeader title={target?.title ?? 'Оплата'} onClose={close} />
 
       {!w ? (
         <ActivityIndicator color={colors.lavender} style={styles.loader} />
@@ -178,20 +172,14 @@ export default function PayScreen() {
           onRetry={() => { setPhase('form'); setPayment(null); }} onClose={close} />
       ) : (
         <View style={styles.form}>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chips} contentContainerStyle={styles.chipsRow}>
-            {targets.map((t) => (
-              <GlassChip key={t.id} label={t.label} icon={t.icon} color={t.color} selected={t.id === target?.id} onPress={() => select(t)} />
-            ))}
-          </ScrollView>
-
           {/* Сумма — по центру свободного места, клавиатура и кнопка — у нижнего края. */}
           <View style={[styles.column, styles.amountArea]}>
             <Text style={styles.hint}>{target?.hint}</Text>
-            <Animated.View key={target?.id} entering={FadeIn.duration(200)} style={styles.amountBox}>
+            <View style={styles.amountBox}>
               <Text style={[styles.amount, !amountStr && styles.amountEmpty]} numberOfLines={1} adjustsFontSizeToFit>
                 {amountStr ? `${groupDigits(amountStr)} ₽` : '0 ₽'}
               </Text>
-            </Animated.View>
+            </View>
 
             <View style={styles.quickRow}>
               {target?.purpose === 'deposit'
@@ -314,8 +302,6 @@ const styles = StyleSheet.create({
   root: { flex: 1 },
   loader: { marginTop: 60 },
   form: { flex: 1 },
-  chips: { flexGrow: 0, flexShrink: 0 },
-  chipsRow: { gap: space.sm, paddingHorizontal: GUTTER, paddingVertical: 2 },
   column: { width: '100%', maxWidth: MAX_WIDTH, alignSelf: 'center', paddingHorizontal: GUTTER },
   amountArea: { flex: 1, justifyContent: 'center', minHeight: 200 },
   hint: { ...StyleSheet.flatten(type.caption), textAlign: 'center' },

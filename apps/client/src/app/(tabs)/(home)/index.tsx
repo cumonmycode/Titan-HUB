@@ -1,6 +1,9 @@
-// «Кошелёк» — главный экран: голо-карта клуба с бонусами, депозит и долг, быстрые
-// действия, взносы (фонд клуба и разовые сборы), прогресс до «Резидента», последние
-// операции. Крупный заголовок шапки — приветствие по времени суток.
+// Главная. У каждого действия — ровно одно место:
+// • голо-карта — бонусы и срок их сгорания; нажатие открывает бонусную программу;
+// • «Депозит» — баланс и единственная кнопка «Пополнить»;
+// • «К оплате» — долг и взносы, у каждого своя кнопка оплаты;
+// • «Последние операции» — три свежие, «Все» ведёт во вкладку «История»;
+// • колокольчик в шапке — уведомления.
 import { Stack, useRouter } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
 import { useEffect, useState } from 'react';
@@ -8,22 +11,22 @@ import { StyleSheet, Text, View } from 'react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 
 import { FEED_ROW_INSET, FeedRow } from '@/components/feed-row';
-import { Glass, GlassButton } from '@/components/glass';
+import { Glass, GlassButton, GlassIconButton } from '@/components/glass';
+import type { IconName } from '@/components/icon';
 import { HoloCard } from '@/components/holo-card';
-import { Icon, type IconName } from '@/components/icon';
 import { RollingNumber } from '@/components/rolling-number';
 import { TabScroll } from '@/components/screen';
-import { Tap } from '@/components/tap';
 import { Divider, EmptyState, IconTile, SectionHeader, Skeleton } from '@/components/ui';
 import { errorText } from '@/lib/api';
 import { bonus, inDays, money, plural } from '@/lib/format';
 import { pushPermission, registerForPush } from '@/lib/push';
 import { refreshMoney, useFeed, useWallet } from '@/lib/queries';
 import { useSession } from '@/lib/session';
-import { colors, radius, space, type } from '@/lib/theme';
+import { colors, IS_IOS, radius, space, type } from '@/lib/theme';
 import type { Collection, Wallet } from '@/lib/types';
 
 const PUSH_PROMPT_KEY = 'push_prompt_dismissed';
+const RECENT_COUNT = 3;
 
 function greeting(demo: boolean): string {
   const hour = new Date().getHours();
@@ -31,49 +34,65 @@ function greeting(demo: boolean): string {
   return demo ? `${hello} · демо` : hello;
 }
 
-export default function WalletScreen() {
+export default function HomeScreen() {
   const router = useRouter();
   const demo = useSession((s) => s.status === 'demo');
   const wallet = useWallet();
   const recent = useFeed('all', 6);
   const w = wallet.data;
   const title = greeting(demo);
+  const unread = w?.unreadNotifications ?? 0;
+  const openNotifications = () => router.push('/notifications');
 
   const refresh = async () => {
     refreshMoney();
     await Promise.all([wallet.refetch(), recent.refetch()]);
   };
 
+  const header = (
+    <>
+      <Stack.Screen options={{ title }} />
+      {IS_IOS ? (
+        <Stack.Toolbar placement="right">
+          <Stack.Toolbar.Button onPress={openNotifications}
+            accessibilityLabel={unread ? `Уведомления, непрочитанных ${unread}` : 'Уведомления'}>
+            <Stack.Toolbar.Icon sf={unread ? 'bell.badge' : 'bell'} />
+            {unread > 0 ? <Stack.Toolbar.Badge>{unread > 99 ? '99+' : String(unread)}</Stack.Toolbar.Badge> : null}
+          </Stack.Toolbar.Button>
+        </Stack.Toolbar>
+      ) : null}
+    </>
+  );
+  const androidBell = <GlassIconButton icon="bell" label="Уведомления" dot={unread > 0} onPress={openNotifications} />;
+
   if (!w) {
     return (
-      <TabScroll title={title} onRefresh={refresh}>
-        <Stack.Screen options={{ title }} />
+      <TabScroll title={title} right={androidBell} onRefresh={refresh}>
+        {header}
         {wallet.isError ? (
-          <EmptyState icon="offline" title="Не удалось загрузить кошелёк" text={errorText(wallet.error)}>
+          <EmptyState icon="offline" title="Не удалось загрузить данные" text={errorText(wallet.error)}>
             <GlassButton title="Повторить" variant="secondary" onPress={() => void wallet.refetch()} />
           </EmptyState>
         ) : (
           <View style={styles.skeletons}>
             <Skeleton height={212} rounded={radius.card} />
-            <View style={styles.row}>
-              <Skeleton height={112} rounded={radius.tile} style={styles.flex} />
-              <Skeleton height={112} rounded={radius.tile} style={styles.flex} />
-            </View>
-            <Skeleton height={86} rounded={radius.tile} />
-            <Skeleton height={220} rounded={radius.card} />
+            <Skeleton height={96} rounded={radius.tile} />
+            <Skeleton height={150} rounded={radius.card} />
+            <Skeleton height={200} rounded={radius.card} />
           </View>
         )}
       </TabScroll>
     );
   }
 
-  const items = recent.data?.pages[0]?.items.slice(0, 5) ?? [];
-  const collections = w.collections.filter((c) => !c.excluded);
-  const openCheck = (id: string) => router.push({ pathname: '/check/[id]', params: { id } });
+  const items = recent.data?.pages[0]?.items.slice(0, RECENT_COUNT) ?? [];
+  const expiring = w.bonusExpiring && !w.bonusHidden
+    ? `${bonus(w.bonusExpiring.amount)} ${plural(w.bonusExpiring.amount, 'сгорит', 'сгорят', 'сгорят')} ${inDays(w.bonusExpiring.date)}`
+    : null;
 
   return (
-    <TabScroll title={title} onRefresh={refresh}>
-      <Stack.Screen options={{ title }} />
+    <TabScroll title={title} right={androidBell} onRefresh={refresh}>
+      {header}
 
       <Animated.View entering={FadeInDown.duration(500).springify().damping(18)}>
         <HoloCard
@@ -83,60 +102,19 @@ export default function WalletScreen() {
           bonus={w.bonus}
           bonusHidden={w.bonusHidden}
           memberSince={w.profile.memberSince}
+          expiring={expiring}
+          onPress={() => router.push('/bonus-rules')}
         />
       </Animated.View>
 
-      {w.bonusExpiring && !w.bonusHidden ? (
-        <Tap onPress={() => router.push('/bonus-rules')} scaleTo={0.97} style={styles.expiryWrap}
-          accessibilityRole="button" accessibilityLabel="Бонусы сгорают — подробнее">
-          <Glass interactive tint="rgba(251,191,36,0.22)" fallback={styles.expiryFallback} style={styles.expiry}>
-            <Icon name="flame" size={15} color={colors.amber} />
-            <Text style={styles.expiryText}>
-              {bonus(w.bonusExpiring.amount)} {plural(w.bonusExpiring.amount, 'бонус сгорит', 'бонуса сгорят', 'бонусов сгорят')} {inDays(w.bonusExpiring.date)}
-            </Text>
-            <Icon name="chevron" size={11} color={colors.amber} weight="bold" />
-          </Glass>
-        </Tap>
-      ) : null}
-
-      <View style={[styles.row, styles.tiles]}>
-        <BalanceTile
-          label="Депозит"
-          value={w.deposit}
-          color={colors.green}
-          active={w.deposit > 0}
-          hint="Пополнить"
-          onPress={() => router.push({ pathname: '/pay', params: { purpose: 'deposit' } })}
-        />
-        <BalanceTile
-          label="Долг"
-          value={w.debt}
-          color={colors.red}
-          active={w.debt > 0}
-          hint={w.debt > 0 ? 'Погасить' : 'Нет долга'}
-          negative
-          onPress={w.debt > 0 ? () => router.push({ pathname: '/pay', params: { purpose: 'debt' } }) : undefined}
-        />
-      </View>
-
-      <QuickActions wallet={w} />
-
+      <DepositCard wallet={w} />
       <PushPrompt />
-
-      {collections.length ? (
-        <View style={styles.section}>
-          <SectionHeader title="Взносы" />
-          <View style={styles.stack}>
-            {collections.map((c) => <CollectionCard key={c.id} c={c} online={w.pay.online} />)}
-          </View>
-        </View>
-      ) : null}
-
+      <Dues wallet={w} />
       {w.visitProgress.tier === 'newbie' && w.visitProgress.remaining >= 0 ? <ResidentProgress wallet={w} /> : null}
 
       <View style={styles.section}>
-        <SectionHeader title="Операции" action={items.length ? 'Все' : undefined} onAction={() => router.navigate('/history')} />
-        <Glass style={styles.list}>
+        <SectionHeader title="Последние операции" action={items.length ? 'Все' : undefined} onAction={() => router.navigate('/history')} />
+        <Glass style={styles.group}>
           {recent.isLoading ? (
             <View style={styles.listLoading}><Skeleton height={40} /><Skeleton height={40} /><Skeleton height={40} /></View>
           ) : items.length === 0 ? (
@@ -144,7 +122,7 @@ export default function WalletScreen() {
           ) : items.map((it, i) => (
             <View key={it.id}>
               {i > 0 ? <Divider inset={FEED_ROW_INSET} /> : null}
-              <FeedRow item={it} dated onOpenCheck={openCheck} />
+              <FeedRow item={it} dated onOpenCheck={(id) => router.push({ pathname: '/check/[id]', params: { id } })} />
             </View>
           ))}
         </Glass>
@@ -153,106 +131,114 @@ export default function WalletScreen() {
   );
 }
 
-function BalanceTile({
-  label, value, color, active, hint, onPress, negative,
-}: { label: string; value: number; color: string; active: boolean; hint: string; onPress?: () => void; negative?: boolean }) {
-  const tint = active ? `${color}2e` : undefined;
-  const content = (
-    <Glass interactive={!!onPress} tint={tint} fallback={active ? { backgroundColor: `${color}1a`, borderColor: `${color}55` } : null}
-      style={styles.tile}>
-      <Text style={type.overline}>{label}</Text>
-      <RollingNumber
-        value={value}
-        format={(n) => (negative && n > 0 ? `−${money(n)}` : money(n))}
-        style={[styles.tileValue, { color: active ? color : colors.textMuted }]}
-      />
-      <View style={styles.tileHint}>
-        <Text style={[styles.tileHintText, { color: onPress ? (active ? color : colors.lavender) : colors.textMuted }]}>{hint}</Text>
-        {onPress ? <Icon name="arrow" size={12} color={active ? color : colors.lavender} weight="bold" /> : null}
-      </View>
-    </Glass>
-  );
-  if (!onPress) return <View style={styles.flex}>{content}</View>;
+/** Депозит — баланс и единственная кнопка пополнения в приложении. */
+function DepositCard({ wallet }: { wallet: Wallet }) {
+  const router = useRouter();
+  const active = wallet.deposit > 0;
   return (
-    <Tap onPress={onPress} scaleTo={0.97} style={styles.flex} accessibilityRole="button" accessibilityLabel={`${label} ${money(value)}. ${hint}`}>
-      {content}
-    </Tap>
+    <Glass tint={active ? 'rgba(52,211,153,0.16)' : undefined} style={styles.deposit}>
+      <View style={styles.flex}>
+        <Text style={type.overline}>Депозит</Text>
+        <RollingNumber value={wallet.deposit} format={(n) => money(n)}
+          style={[styles.depositValue, { color: active ? colors.green : colors.textMuted }]} />
+      </View>
+      {wallet.pay.online ? (
+        <GlassButton title="Пополнить" icon="pay" size="md"
+          onPress={() => router.push({ pathname: '/pay', params: { purpose: 'deposit' } })} />
+      ) : (
+        <Text style={styles.offlineNote}>Пополнить можно{'\n'}на кассе клуба</Text>
+      )}
+    </Glass>
   );
 }
 
-function QuickActions({ wallet }: { wallet: Wallet }) {
-  const router = useRouter();
-  const due = wallet.collections.find((c) => !c.excluded && c.topUp > 0);
-  const actions: { icon: IconName; label: string; color: string; onPress: () => void }[] = [
-    { icon: 'deposit', label: 'Пополнить', color: colors.green, onPress: () => router.push({ pathname: '/pay', params: { purpose: 'deposit' } }) },
-  ];
-  if (wallet.debt > 0) {
-    actions.push({ icon: 'debt', label: 'Погасить', color: colors.red, onPress: () => router.push({ pathname: '/pay', params: { purpose: 'debt' } }) });
-  }
-  if (wallet.collections.some((c) => !c.excluded)) {
-    actions.push({
-      icon: 'fund', label: due ? 'Взнос' : 'Взносы', color: colors.cyan,
-      onPress: () => router.push({ pathname: '/pay', params: { purpose: 'fund', ...(due ? { collectionId: due.id } : {}) } }),
+interface Due {
+  key: string;
+  icon: IconName;
+  color: string;
+  title: string;
+  subtitle: string;
+  amount: number | null;
+  /** Кнопка оплаты: «Оплатить» — есть что платить, «Вперёд» — взнос оплачен, можно вперёд. */
+  action: { label: string; params: Record<string, string>; primary: boolean } | null;
+}
+
+function duesFor(w: Wallet): Due[] {
+  const dues: Due[] = [];
+  if (w.debt > 0) {
+    dues.push({
+      key: 'debt', icon: 'debt', color: colors.red, title: 'Долг', subtitle: 'Погасить онлайн через СБП',
+      amount: w.debt, action: { label: 'Оплатить', params: { purpose: 'debt' }, primary: true },
     });
   }
-  actions.push({ icon: 'sparkles', label: 'Бонусы', color: colors.gold, onPress: () => router.push('/bonus-rules') });
+  for (const c of w.collections.filter((x) => !x.excluded)) dues.push(collectionDue(c));
+  // Сначала то, что нужно оплатить.
+  return [...dues].sort((a, b) => Number(!!b.amount) - Number(!!a.amount));
+}
+
+function collectionDue(c: Collection): Due {
+  const owes = c.topUp > 0;
+  const kind = c.kind === 'recurring' ? c.period.label : c.isMandatory ? 'Разовый сбор' : 'Добровольный сбор';
+  const ahead = c.prepaidMonths > 0 ? ` · вперёд на ${c.prepaidMonths} ${plural(c.prepaidMonths, 'месяц', 'месяца', 'месяцев')}` : '';
+  const params = { purpose: 'fund', collectionId: c.id };
+  if (owes) {
+    return {
+      key: c.id, icon: 'pending', color: colors.amber, title: c.name, subtitle: kind,
+      amount: c.topUp, action: { label: 'Оплатить', params, primary: true },
+    };
+  }
+  return {
+    key: c.id, icon: 'paid', color: colors.green, title: c.name, subtitle: `Оплачено · ${kind}${ahead}`,
+    amount: null, action: c.kind === 'recurring' ? { label: 'Вперёд', params, primary: false } : null,
+  };
+}
+
+/** «К оплате»: долг и взносы одним списком, у каждого своя кнопка. */
+function Dues({ wallet }: { wallet: Wallet }) {
+  const router = useRouter();
+  const dues = duesFor(wallet);
+  if (!dues.length) return null;
+  const owes = dues.some((d) => d.amount);
+  const online = wallet.pay.online;
   return (
-    <View style={styles.actions}>
-      {actions.map((a) => (
-        <Tap key={a.label} onPress={a.onPress} style={styles.action} scaleTo={0.92} accessibilityRole="button" accessibilityLabel={a.label}>
-          <Glass interactive tint={`${a.color}30`} fallback={{ backgroundColor: `${a.color}1f`, borderColor: `${a.color}40` }} style={styles.actionLens}>
-            <Icon name={a.icon} size={24} color={a.color} />
-          </Glass>
-          <Text style={styles.actionLabel} numberOfLines={1}>{a.label}</Text>
-        </Tap>
-      ))}
+    <View style={styles.section}>
+      <SectionHeader title={owes ? 'К оплате' : 'Взносы'} />
+      <Glass style={styles.group}>
+        {dues.map((d, i) => (
+          <View key={d.key}>
+            {i > 0 ? <Divider inset={DUE_INSET} /> : null}
+            <View style={styles.due}>
+              <IconTile name={d.icon} color={d.color} size={38} />
+              <View style={styles.flex}>
+                <View style={styles.dueLine}>
+                  <Text style={[type.headline, styles.flex]} numberOfLines={1}>{d.title}</Text>
+                  {d.amount ? <Text style={[styles.dueAmount, { color: d.color }]}>{money(d.amount)}</Text> : null}
+                </View>
+                <View style={styles.dueLine}>
+                  <Text style={[type.caption, styles.flex]} numberOfLines={2}>{d.subtitle}</Text>
+                  {online && d.action ? (
+                    <GlassButton title={d.action.label} size="sm" variant={d.action.primary ? 'primary' : 'secondary'}
+                      onPress={() => router.push({ pathname: '/pay', params: d.action!.params })} />
+                  ) : null}
+                </View>
+              </View>
+            </View>
+          </View>
+        ))}
+      </Glass>
+      {!online && owes ? <Text style={styles.footer}>Онлайн-оплата временно недоступна — оплатить можно на кассе клуба.</Text> : null}
     </View>
   );
 }
 
-function CollectionCard({ c, online }: { c: Collection; online: boolean }) {
-  const router = useRouter();
-  const owes = c.topUp > 0;
-  const tone = owes ? colors.amber : colors.green;
-  return (
-    <Glass tint={`${tone}1f`} fallback={{ backgroundColor: `${tone}14`, borderColor: `${tone}40` }} style={styles.card}>
-      <View style={styles.cardRow}>
-        <IconTile name={owes ? 'pending' : 'paid'} color={tone} />
-        <View style={styles.flex}>
-          <Text style={type.headline} numberOfLines={1}>{c.name}</Text>
-          <Text style={type.caption}>
-            {c.kind === 'recurring' ? c.period.label : c.isMandatory ? 'Разовый сбор' : 'Добровольный сбор'}
-            {c.due > 0 ? ` · ${money(c.due)}` : ''}
-          </Text>
-        </View>
-        {owes
-          ? <Text style={[styles.collAmount, { color: tone }]}>{money(c.topUp)}</Text>
-          : <Text style={[styles.collPaid, { color: tone }]}>Оплачено</Text>}
-      </View>
-      {c.prepaidMonths > 0 ? (
-        <Text style={[type.caption, styles.cardNote]}>
-          Оплачено вперёд на {c.prepaidMonths} {plural(c.prepaidMonths, 'месяц', 'месяца', 'месяцев')}
-        </Text>
-      ) : null}
-      {owes && online ? (
-        <GlassButton
-          title={`Оплатить ${money(c.topUp)}`}
-          size="md"
-          style={styles.cardButton}
-          onPress={() => router.push({ pathname: '/pay', params: { purpose: 'fund', collectionId: c.id } })}
-        />
-      ) : null}
-    </Glass>
-  );
-}
+const DUE_INSET = space.lg + 38 + space.md;
 
 function ResidentProgress({ wallet }: { wallet: Wallet }) {
   const vp = wallet.visitProgress;
   const pct = Math.min(1, vp.visits / Math.max(1, vp.threshold));
   return (
-    <Glass tint="rgba(76,215,246,0.14)" fallback={{ backgroundColor: colors.cyanTint, borderColor: 'rgba(76,215,246,0.3)' }}
-      style={[styles.card, styles.section]}>
-      <View style={styles.cardRow}>
+    <Glass tint="rgba(76,215,246,0.14)" fallback={styles.progressFallback} style={[styles.card, styles.section]}>
+      <View style={styles.row}>
         <IconTile name="trophy" color={colors.cyan} />
         <Text style={[type.headline, styles.flex]}>До статуса «Резидент»</Text>
         <Text style={styles.progressCount}>{vp.visits}/{vp.threshold}</Text>
@@ -260,9 +246,9 @@ function ResidentProgress({ wallet }: { wallet: Wallet }) {
       <View style={styles.track}>
         <View style={[styles.fill, { width: `${pct * 100}%` }]} />
       </View>
-      <Text style={[type.caption, styles.cardNote]}>
+      <Text style={[type.caption, styles.note]}>
         {vp.remaining > 0
-          ? `Ещё ${vp.remaining} ${plural(vp.remaining, 'посещение', 'посещения', 'посещений')} — и вы Резидент 🎉`
+          ? `Ещё ${vp.remaining} ${plural(vp.remaining, 'посещение', 'посещения', 'посещений')} — и вы Резидент`
           : 'Порог достигнут — статус повысится после следующего визита'}
       </Text>
     </Glass>
@@ -286,58 +272,49 @@ function PushPrompt() {
   if (!visible) return null;
   const dismiss = () => { setVisible(false); void SecureStore.setItemAsync(PUSH_PROMPT_KEY, '1'); };
   return (
-    <Glass tint="rgba(139,92,246,0.20)" fallback={{ backgroundColor: colors.violetTint, borderColor: colors.borderViolet }}
-      style={[styles.card, styles.section]}>
-      <View style={styles.cardRow}>
+    <Glass tint="rgba(139,92,246,0.20)" fallback={styles.promptFallback} style={[styles.card, styles.section]}>
+      <View style={styles.row}>
         <IconTile name="inbox" color={colors.violetLight} />
         <View style={styles.flex}>
           <Text style={type.headline}>Уведомления об операциях</Text>
           <Text style={[type.caption, styles.promptText]}>Бонусы, пополнения, долг и новости клуба — сразу на телефон.</Text>
         </View>
-        <Tap onPress={dismiss} hitSlop={12} accessibilityRole="button" accessibilityLabel="Скрыть">
-          <Icon name="close" size={14} color={colors.textMuted} weight="bold" />
-        </Tap>
       </View>
-      <GlassButton title="Включить" size="md" style={styles.cardButton} onPress={async () => {
-        await registerForPush(true);
-        dismiss();
-      }} />
+      <View style={styles.promptActions}>
+        <GlassButton title="Не сейчас" variant="ghost" size="md" onPress={dismiss} />
+        <GlassButton title="Включить" size="md" onPress={async () => {
+          await registerForPush(true);
+          dismiss();
+        }} />
+      </View>
     </Glass>
   );
 }
 
 const styles = StyleSheet.create({
   flex: { flex: 1 },
-  row: { flexDirection: 'row', gap: space.md },
+  row: { flexDirection: 'row', alignItems: 'center', gap: space.md },
   skeletons: { gap: space.lg },
-  expiryWrap: { alignSelf: 'center', marginTop: space.md },
-  expiry: {
-    flexDirection: 'row', alignItems: 'center', gap: 6,
-    paddingHorizontal: 14, height: 34, borderRadius: radius.pill,
+  deposit: {
+    flexDirection: 'row', alignItems: 'center', gap: space.md, marginTop: space.lg,
+    paddingVertical: space.lg, paddingLeft: space.xl, paddingRight: space.lg, borderRadius: radius.tile,
   },
-  expiryFallback: { backgroundColor: colors.amberTint, borderColor: 'rgba(251,191,36,0.3)' },
-  expiryText: { color: colors.amber, fontSize: 13, fontWeight: '700' },
-  tiles: { marginTop: space.lg },
-  tile: { borderRadius: radius.tile, padding: space.lg, minHeight: 112, justifyContent: 'space-between' },
-  tileValue: { fontSize: 24, fontWeight: '800', fontStyle: 'italic', marginTop: 4 },
-  tileHint: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 6 },
-  tileHintText: { fontSize: 13, fontWeight: '700' },
-  actions: { flexDirection: 'row', justifyContent: 'space-around', marginTop: space.xl },
-  action: { alignItems: 'center', width: 78, gap: 7 },
-  actionLens: { width: 60, height: 60, borderRadius: 30, alignItems: 'center', justifyContent: 'center' },
-  actionLabel: { color: colors.textBody, fontSize: 12.5, fontWeight: '600' },
+  depositValue: { fontSize: 28, fontWeight: '800', fontStyle: 'italic', marginTop: 2 },
+  offlineNote: { ...StyleSheet.flatten(type.caption), textAlign: 'right' },
   section: { marginTop: space.xxl + space.xs },
-  stack: { gap: space.md },
+  group: { borderRadius: radius.card, overflow: 'hidden' },
+  due: { flexDirection: 'row', alignItems: 'center', gap: space.md, paddingHorizontal: space.lg, paddingVertical: space.md },
+  dueLine: { flexDirection: 'row', alignItems: 'center', gap: space.sm, minHeight: 24 },
+  dueAmount: { fontSize: 17, fontWeight: '800', fontStyle: 'italic', fontVariant: ['tabular-nums'] },
+  footer: { ...StyleSheet.flatten(type.caption), marginTop: space.sm, marginHorizontal: space.lg },
   card: { borderRadius: radius.tile, padding: space.lg },
-  cardRow: { flexDirection: 'row', alignItems: 'center', gap: space.md },
-  cardNote: { marginTop: space.sm },
-  cardButton: { marginTop: space.md },
-  promptText: { marginTop: 2 },
-  collAmount: { fontSize: 17, fontWeight: '800', fontStyle: 'italic', fontVariant: ['tabular-nums'] },
-  collPaid: { fontSize: 13, fontWeight: '800' },
+  note: { marginTop: space.sm },
+  progressFallback: { backgroundColor: colors.cyanTint, borderColor: 'rgba(76,215,246,0.3)' },
   progressCount: { color: colors.cyan, fontWeight: '800', fontSize: 14, fontVariant: ['tabular-nums'] },
   track: { height: 8, borderRadius: 4, backgroundColor: 'rgba(255,255,255,0.12)', overflow: 'hidden', marginTop: space.md },
   fill: { height: '100%', borderRadius: 4, experimental_backgroundImage: 'linear-gradient(90deg, #8B5CF6, #4cd7f6)' },
-  list: { borderRadius: radius.card, overflow: 'hidden' },
+  promptFallback: { backgroundColor: colors.violetTint, borderColor: colors.borderViolet },
+  promptText: { marginTop: 2 },
+  promptActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: space.sm, marginTop: space.md },
   listLoading: { padding: space.lg, gap: space.md },
 });

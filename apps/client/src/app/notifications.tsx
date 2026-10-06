@@ -1,20 +1,20 @@
-// «Входящие» — лента уведомлений: операции по балансу, оплаты, статус, новости клуба.
-// Открыли экран — непрочитанные помечаются прочитанными на сервере, но подсветка
-// «новое» остаётся до ухода с экрана, чтобы было видно, что именно пришло.
-import { useFocusEffect } from 'expo-router';
-import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from 'react';
+// Уведомления — шторка по колокольчику на главной: операции по балансу, оплаты, статус,
+// новости клуба. Открыли — непрочитанные помечаются прочитанными на сервере, но
+// подсветка «новое» остаётся, пока шторка открыта, чтобы было видно, что именно пришло.
+import { useEffect, useEffectEvent, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, FlatList, StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Glass, GlassButton } from '@/components/glass';
 import type { IconName } from '@/components/icon';
-import { ScreenTitle, useTabScrollProps } from '@/components/screen';
+import { SheetHeader, useCloseSheet } from '@/components/sheet';
 import { Tap } from '@/components/tap';
 import { EmptyState, IconTile, Skeleton } from '@/components/ui';
 import { errorText } from '@/lib/api';
 import { relative } from '@/lib/format';
 import { openFromNotificationData, setBadge } from '@/lib/push';
 import { useMarkRead, useNotifications } from '@/lib/queries';
-import { colors, MAX_WIDTH, radius, space, type } from '@/lib/theme';
+import { colors, GUTTER, MAX_WIDTH, radius, space, type } from '@/lib/theme';
 import type { ClientNotification, NotificationKind } from '@/lib/types';
 
 const LOOK: Record<NotificationKind, { icon: IconName; color: string }> = {
@@ -28,28 +28,22 @@ const LOOK: Record<NotificationKind, { icon: IconName; color: string }> = {
   system: { icon: 'inbox', color: colors.violetLight },
 };
 
-export default function InboxScreen() {
+/** Шторка успевает уехать, прежде чем откроется экран, на который ведёт уведомление. */
+const CLOSE_DELAY_MS = 350;
+
+export default function NotificationsScreen() {
+  const insets = useSafeAreaInsets();
+  const close = useCloseSheet();
   const list = useNotifications();
   const markRead = useMarkRead();
-  const scroll = useTabScrollProps(() => list.refetch());
-  // id, которые были непрочитанными при входе на экран (подсветка до ухода).
+  // id, которые были непрочитанными при открытии шторки (подсветка до закрытия).
   const [fresh, setFresh] = useState<Set<string>>(new Set());
-  const [focused, setFocused] = useState(false);
   const marked = useRef(false);
 
   const items = useMemo(() => list.data?.pages.flatMap((p) => p.items) ?? [], [list.data]);
   const unread = list.data?.pages[0]?.unread ?? 0;
 
-  useFocusEffect(useCallback(() => {
-    setFocused(true);
-    return () => {
-      setFocused(false);
-      setFresh(new Set());
-      marked.current = false;
-    };
-  }, []));
-
-  // Лента загрузилась на открытом экране — отмечаем прочитанным (один раз за визит).
+  // Лента загрузилась — отмечаем прочитанным (один раз за открытие).
   const markVisible = useEffectEvent(() => {
     if (marked.current) return;
     marked.current = true;
@@ -57,44 +51,49 @@ export default function InboxScreen() {
     markRead.mutate(undefined, { onSuccess: () => void setBadge(0) });
   });
   useEffect(() => {
-    if (focused && unread > 0) markVisible();
-  }, [focused, unread]);
+    if (unread > 0) markVisible();
+  }, [unread]);
+
+  const open = (n: ClientNotification) => {
+    close();
+    setTimeout(() => openFromNotificationData(n.meta), CLOSE_DELAY_MS);
+  };
 
   return (
-    <FlatList
-      {...scroll}
-      data={items}
-      keyExtractor={(n) => n.id}
-      ListHeaderComponent={
-        <View style={styles.column}>
-          <ScreenTitle title="Входящие" subtitle="Операции, оплаты и новости клуба" />
-          {list.isLoading ? (
-            <View style={styles.loading}>{[0, 1, 2, 3].map((i) => <Skeleton key={i} height={88} rounded={radius.tile} />)}</View>
-          ) : null}
-        </View>
-      }
-      renderItem={({ item }) => (
-        <View style={[styles.column, styles.item]}>
-          <NotificationCard n={item} highlighted={!item.isRead || fresh.has(item.id)} />
-        </View>
-      )}
-      onEndReachedThreshold={0.4}
-      onEndReached={() => { if (list.hasNextPage && !list.isFetchingNextPage) void list.fetchNextPage(); }}
-      ListEmptyComponent={
-        list.isLoading ? null : list.isError ? (
-          <EmptyState icon="offline" title="Не удалось загрузить" text={errorText(list.error)}>
-            <GlassButton title="Повторить" variant="secondary" onPress={() => void list.refetch()} />
-          </EmptyState>
-        ) : (
-          <EmptyState icon="bell" title="Пока тихо" text="Здесь появятся начисления бонусов, оплаты и новости клуба" />
-        )
-      }
-      ListFooterComponent={list.isFetchingNextPage ? <ActivityIndicator color={colors.lavender} style={styles.more} /> : null}
-    />
+    <View style={styles.root}>
+      <SheetHeader title="Уведомления" onClose={close} />
+      <FlatList
+        data={items}
+        keyExtractor={(n) => n.id}
+        contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + space.xxl }]}
+        ListHeaderComponent={list.isLoading ? (
+          <View style={[styles.column, styles.loading]}>
+            {[0, 1, 2, 3].map((i) => <Skeleton key={i} height={88} rounded={radius.tile} />)}
+          </View>
+        ) : null}
+        renderItem={({ item }) => (
+          <View style={[styles.column, styles.item]}>
+            <NotificationCard n={item} highlighted={!item.isRead || fresh.has(item.id)} onOpen={open} />
+          </View>
+        )}
+        onEndReachedThreshold={0.4}
+        onEndReached={() => { if (list.hasNextPage && !list.isFetchingNextPage) void list.fetchNextPage(); }}
+        ListEmptyComponent={
+          list.isLoading ? null : list.isError ? (
+            <EmptyState icon="offline" title="Не удалось загрузить" text={errorText(list.error)}>
+              <GlassButton title="Повторить" variant="secondary" onPress={() => void list.refetch()} />
+            </EmptyState>
+          ) : (
+            <EmptyState icon="bell" title="Пока тихо" text="Здесь появятся начисления бонусов, оплаты и новости клуба" />
+          )
+        }
+        ListFooterComponent={list.isFetchingNextPage ? <ActivityIndicator color={colors.lavender} style={styles.more} /> : null}
+      />
+    </View>
   );
 }
 
-function NotificationCard({ n, highlighted }: { n: ClientNotification; highlighted: boolean }) {
+function NotificationCard({ n, highlighted, onOpen }: { n: ClientNotification; highlighted: boolean; onOpen: (n: ClientNotification) => void }) {
   const look = LOOK[n.kind] ?? LOOK.system;
   const screen = typeof n.meta.screen === 'string' ? n.meta.screen : null;
   const actionable = !!screen && screen !== 'notifications';
@@ -118,14 +117,16 @@ function NotificationCard({ n, highlighted }: { n: ClientNotification; highlight
   );
   if (!actionable) return body;
   return (
-    <Tap onPress={() => openFromNotificationData(n.meta)} scaleTo={0.98} accessibilityRole="button" accessibilityLabel={`${n.title}. ${n.body}`}>
+    <Tap onPress={() => onOpen(n)} scaleTo={0.98} accessibilityRole="button" accessibilityLabel={`${n.title}. ${n.body}`}>
       {body}
     </Tap>
   );
 }
 
 const styles = StyleSheet.create({
+  root: { flex: 1 },
   flex: { flex: 1 },
+  content: { paddingHorizontal: GUTTER },
   column: { width: '100%', maxWidth: MAX_WIDTH, alignSelf: 'center' },
   loading: { gap: space.md },
   item: { marginBottom: space.md },
