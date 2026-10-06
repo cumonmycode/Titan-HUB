@@ -1,11 +1,11 @@
 // Цифровая клавиатура суммы (как в Apple Pay): крупные клавиши, запятая, стирание.
-// Своя, а не системная — не перекрывает экран и одинакова на iOS и Android.
+// Своя, а не системная — не перекрывает шторку и одинакова на iOS и Android.
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { haptic } from '@/lib/haptics';
 import { colors } from '@/lib/theme';
 
-import { Icon } from './ui';
+import { Icon } from './icon';
 
 const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', ',', '0', 'del'] as const;
 
@@ -43,13 +43,17 @@ export function Keypad({ value, onChange, disabled }: { value: string; onChange:
           disabled={disabled}
           onPress={() => { haptic.tap(); onChange(applyKey(value, k)); }}
           onLongPress={k === 'del' ? () => { haptic.soft(); onChange(''); } : undefined}
-          style={({ pressed }) => [styles.key, pressed && styles.keyPressed]}
+          style={styles.cell}
           accessibilityRole="button"
           accessibilityLabel={k === 'del' ? 'Стереть' : k === ',' ? 'Запятая' : k}
         >
-          {k === 'del'
-            ? <Icon name="backspace-outline" size={26} color={colors.textBody} />
-            : <Text style={styles.keyText}>{k}</Text>}
+          {({ pressed }) => (
+            <View style={[styles.key, pressed && styles.keyPressed]}>
+              {k === 'del'
+                ? <Icon name="backspace" size={24} color={colors.textBody} weight="medium" />
+                : <Text style={styles.keyText}>{k}</Text>}
+            </View>
+          )}
         </Pressable>
       ))}
     </View>
@@ -57,8 +61,9 @@ export function Keypad({ value, onChange, disabled }: { value: string; onChange:
 }
 
 const styles = StyleSheet.create({
-  grid: { flexDirection: 'row', flexWrap: 'wrap', rowGap: 8 },
-  key: { width: '33.333%', height: 56, alignItems: 'center', justifyContent: 'center', borderRadius: 16 },
-  keyPressed: { backgroundColor: 'rgba(255,255,255,0.07)' },
+  grid: { flexDirection: 'row', flexWrap: 'wrap', rowGap: 6 },
+  cell: { width: '33.333%', alignItems: 'center' },
+  key: { width: '82%', height: 54, alignItems: 'center', justifyContent: 'center', borderRadius: 27 },
+  keyPressed: { backgroundColor: 'rgba(255,255,255,0.10)' },
   keyText: { color: colors.text, fontSize: 28, fontWeight: '500', fontVariant: ['tabular-nums'] },
 });

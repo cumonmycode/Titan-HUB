@@ -131,7 +131,7 @@ const shadowText = { textShadowColor: 'rgba(0,0,0,0.4)', textShadowRadius: 6, te
 const styles = StyleSheet.create({
   card: {
     height: CARD_HEIGHT,
-    borderRadius: 24,
+    borderRadius: 26,
     overflow: 'hidden',
     backgroundColor: colors.violetDeep,
     boxShadow: '0 18px 44px rgba(109,40,217,0.38)',

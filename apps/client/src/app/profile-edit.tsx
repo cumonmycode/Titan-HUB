@@ -1,20 +1,26 @@
 // Правка своих данных: никнейм, имя, телефон, день рождения (PATCH /auth/me).
+// Форма как в «Настройках» iOS: поля — строки стеклянной группы, подпись слева.
 import { useQueryClient } from '@tanstack/react-query';
-import { useRouter } from 'expo-router';
 import { useState } from 'react';
-import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, type TextInputProps, View } from 'react-native';
+import {
+  KeyboardAvoidingView, ScrollView, StyleSheet, Text, TextInput, type TextInputProps, View,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { Button, Icon, Tap } from '@/components/ui';
+import { Glass, GlassButton } from '@/components/glass';
+import { SheetHeader, useCloseSheet } from '@/components/sheet';
+import { Divider } from '@/components/ui';
 import { api, errorText } from '@/lib/api';
 import { birthdayToInput, inputToBirthday, maskBirthday, normalizePhone } from '@/lib/format';
 import { haptic } from '@/lib/haptics';
 import { keys, useWallet } from '@/lib/queries';
-import { colors, GUTTER, MAX_WIDTH, space, type } from '@/lib/theme';
+import { colors, GUTTER, IS_IOS, MAX_WIDTH, radius, space, type } from '@/lib/theme';
+
+const LABEL_WIDTH = 124;
 
 export default function ProfileEditScreen() {
-  const router = useRouter();
   const insets = useSafeAreaInsets();
+  const close = useCloseSheet('/profile');
   const qc = useQueryClient();
   const { data: w } = useWallet();
   const [nickname, setNickname] = useState(w?.profile.nickname ?? '');
@@ -23,7 +29,6 @@ export default function ProfileEditScreen() {
   const [birthday, setBirthday] = useState(birthdayToInput(w?.profile.birthday));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const close = () => (router.canGoBack() ? router.back() : router.replace('/profile'));
 
   async function save() {
     const bd = inputToBirthday(birthday);
@@ -46,56 +51,54 @@ export default function ProfileEditScreen() {
   }
 
   return (
-    <KeyboardAvoidingView style={{ flex: 1, backgroundColor: colors.background }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <View style={[styles.header, { paddingTop: Platform.OS === 'android' ? insets.top + space.md : space.lg }]}>
-        <Text style={type.heading}>Личные данные</Text>
-        <Tap onPress={close} scaleTo={0.9} style={styles.close} accessibilityLabel="Закрыть">
-          <Icon name="close" size={20} color={colors.textBody} />
-        </Tap>
-      </View>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: GUTTER, paddingBottom: insets.bottom + space.xxl }} keyboardShouldPersistTaps="handled">
+    <KeyboardAvoidingView style={styles.root} behavior={IS_IOS ? 'padding' : undefined}>
+      <SheetHeader title="Личные данные" onClose={close} />
+      <ScrollView contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + space.xxl }]} keyboardShouldPersistTaps="handled">
         <View style={styles.column}>
-          <Field label="Никнейм" value={nickname} onChangeText={setNickname} maxLength={40} autoCapitalize="none" autoCorrect={false} />
-          <Field label="Имя" value={fullName} onChangeText={setFullName} maxLength={120} placeholder="Как к вам обращаться" textContentType="name" />
-          <Field label="Телефон" value={phone} onChangeText={(t) => setPhone(normalizePhone(t))} keyboardType="phone-pad" placeholder="+7…" textContentType="telephoneNumber" />
-          <Field label="День рождения" value={birthday} onChangeText={(t) => setBirthday(maskBirthday(t))} keyboardType="number-pad" placeholder="ДД.ММ.ГГГГ"
-            hint="В день рождения клуб может подарить бонусы" />
+          <Glass style={styles.group}>
+            <Field label="Никнейм" value={nickname} onChangeText={setNickname} maxLength={40} autoCapitalize="none" autoCorrect={false} />
+            <Divider inset={space.lg} />
+            <Field label="Имя" value={fullName} onChangeText={setFullName} maxLength={120} placeholder="Как к вам обращаться" textContentType="name" />
+            <Divider inset={space.lg} />
+            <Field label="Телефон" value={phone} onChangeText={(t) => setPhone(normalizePhone(t))} keyboardType="phone-pad" placeholder="+7…" textContentType="telephoneNumber" />
+            <Divider inset={space.lg} />
+            <Field label="День рождения" value={birthday} onChangeText={(t) => setBirthday(maskBirthday(t))} keyboardType="number-pad" placeholder="ДД.ММ.ГГГГ" />
+          </Glass>
+          <Text style={styles.footer}>В день рождения клуб может подарить бонусы.</Text>
           {error ? <Text style={styles.error}>{error}</Text> : null}
-          <Button title="Сохранить" loading={saving} onPress={() => void save()} style={{ marginTop: space.xl }} />
+          <GlassButton title="Сохранить" loading={saving} onPress={() => void save()} style={styles.save} />
         </View>
       </ScrollView>
     </KeyboardAvoidingView>
   );
 }
 
-function Field({ label, hint, ...props }: TextInputProps & { label: string; hint?: string }) {
-  const [focused, setFocused] = useState(false);
+function Field({ label, ...props }: TextInputProps & { label: string }) {
   return (
-    <View style={{ marginTop: space.lg }}>
+    <View style={styles.field}>
       <Text style={styles.label}>{label}</Text>
       <TextInput
         {...props}
-        onFocus={(e) => { setFocused(true); props.onFocus?.(e); }}
-        onBlur={(e) => { setFocused(false); props.onBlur?.(e); }}
         placeholderTextColor={colors.textMuted}
         selectionColor={colors.violet}
+        cursorColor={colors.violet}
         keyboardAppearance="dark"
-        style={[styles.input, focused && { borderColor: colors.violet }]}
+        style={styles.input}
         accessibilityLabel={label}
       />
-      {hint ? <Text style={[type.caption, { marginTop: 6, marginLeft: 2 }]}>{hint}</Text> : null}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: GUTTER, marginBottom: space.sm },
-  close: { width: 36, height: 36, borderRadius: 18, backgroundColor: colors.surfaceRaised, alignItems: 'center', justifyContent: 'center' },
+  root: { flex: 1 },
+  content: { paddingHorizontal: GUTTER },
   column: { width: '100%', maxWidth: MAX_WIDTH, alignSelf: 'center' },
-  label: { color: colors.textSecondary, fontSize: 12, fontWeight: '700', marginBottom: 6, marginLeft: 2 },
-  input: {
-    height: 50, borderRadius: 13, paddingHorizontal: 14, fontSize: 16, color: colors.text,
-    backgroundColor: 'rgba(255,255,255,0.04)', borderWidth: 1, borderColor: colors.border,
-  },
+  group: { borderRadius: radius.card, overflow: 'hidden', marginTop: space.sm },
+  field: { flexDirection: 'row', alignItems: 'center', minHeight: 56, paddingHorizontal: space.lg },
+  label: { width: LABEL_WIDTH, color: colors.text, fontSize: 16, fontWeight: '500' },
+  input: { flex: 1, color: colors.text, fontSize: 16, paddingVertical: space.md },
+  footer: { ...StyleSheet.flatten(type.caption), marginTop: space.sm, marginHorizontal: space.lg },
   error: { color: colors.red, fontSize: 13, marginTop: space.lg, textAlign: 'center' },
+  save: { marginTop: space.xl },
 });

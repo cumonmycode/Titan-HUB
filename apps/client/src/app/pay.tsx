@@ -1,23 +1,26 @@
 // Оплата: пополнить депозит, погасить долг, внести взнос (фонд клуба и разовые сборы).
 // Платёж создаётся на сервере и открывается страница СБП эквайера клуба; деньги
 // зачисляются, когда банк подтвердит платёж (вебхук) — приложение ждёт этого,
-// опрашивая статус. Закрыть экран можно в любой момент: зачисление всё равно
+// опрашивая статус. Закрыть шторку можно в любой момент: зачисление всё равно
 // произойдёт, а клиент получит уведомление.
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useLocalSearchParams } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
 import { useEffect, useEffectEvent, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Animated, { FadeIn, FadeInDown, ZoomIn } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { Glass, GlassButton, GlassChip } from '@/components/glass';
+import { Icon, type IconName } from '@/components/icon';
 import { amountToInput, Keypad, parseAmount } from '@/components/keypad';
-import { Button, EmptyState, Icon, type IconName, Tap } from '@/components/ui';
+import { SheetHeader, useCloseSheet } from '@/components/sheet';
+import { EmptyState } from '@/components/ui';
 import { errorText } from '@/lib/api';
 import { money } from '@/lib/format';
 import { haptic } from '@/lib/haptics';
 import { createPayment, paymentStatus, refreshMoney, useWallet } from '@/lib/queries';
 import { useSession } from '@/lib/session';
-import { colors, GUTTER, MAX_WIDTH, space, type } from '@/lib/theme';
+import { colors, GUTTER, IS_IOS, MAX_WIDTH, space, type } from '@/lib/theme';
 import type { CreatedPayment, PayPurpose, Wallet } from '@/lib/types';
 
 type Phase = 'form' | 'creating' | 'waiting' | 'success' | 'failed' | 'timeout';
@@ -29,12 +32,12 @@ const QUICK = [500, 1000, 2000, 5000];
 
 function targetsFor(w: Wallet): Target[] {
   const list: Target[] = [
-    { id: 'deposit', purpose: 'deposit', label: 'Депозит', icon: 'wallet', color: colors.green, hint: 'Пополнить личный счёт в клубе' },
+    { id: 'deposit', purpose: 'deposit', label: 'Депозит', icon: 'deposit', color: colors.green, hint: 'Пополнить личный счёт в клубе' },
   ];
-  if (w.debt > 0) list.unshift({ id: 'debt', purpose: 'debt', label: 'Долг', icon: 'card', color: colors.red, hint: `Текущий долг ${money(w.debt)}` });
+  if (w.debt > 0) list.unshift({ id: 'debt', purpose: 'debt', label: 'Долг', icon: 'debt', color: colors.red, hint: `Текущий долг ${money(w.debt)}` });
   for (const c of w.collections.filter((x) => !x.excluded)) {
     list.push({
-      id: `fund:${c.id}`, purpose: 'fund', collectionId: c.id, label: c.name, icon: 'people', color: colors.cyan,
+      id: `fund:${c.id}`, purpose: 'fund', collectionId: c.id, label: c.name, icon: 'fund', color: colors.cyan,
       hint: c.topUp > 0 ? `К оплате ${money(c.topUp)}${c.kind === 'recurring' ? ` · ${c.period.label}` : ''}` : c.kind === 'recurring' ? 'Оплачено — можно внести вперёд' : 'Оплачено',
     });
   }
@@ -50,9 +53,11 @@ function suggested(t: Target, w: Wallet): number {
   return 0;
 }
 
+const groupDigits = (s: string) => s.replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+
 export default function PayScreen() {
-  const router = useRouter();
   const insets = useSafeAreaInsets();
+  const close = useCloseSheet();
   const params = useLocalSearchParams<{ purpose?: string; collectionId?: string }>();
   const { data: w } = useWallet();
   const demo = useSession((s) => s.status === 'demo');
@@ -86,7 +91,6 @@ export default function PayScreen() {
   const canPay = !!target && amount >= 1 && phase === 'form';
 
   function select(t: Target) {
-    haptic.select();
     setSelectedId(t.id);
     setAmountInput(w ? amountToInput(suggested(t, w)) : '');
     setError(null);
@@ -106,7 +110,6 @@ export default function PayScreen() {
 
   async function pay() {
     if (!target || !canPay) return;
-    haptic.tap();
     setError(null);
     setPhase('creating');
     try {
@@ -128,7 +131,7 @@ export default function PayScreen() {
     try {
       const s = await paymentStatus(payment.paymentId);
       if (s === 'confirmed') {
-        if (Platform.OS === 'ios') void WebBrowser.dismissBrowser().catch(() => {});
+        if (IS_IOS) void WebBrowser.dismissBrowser().catch(() => {});
         haptic.success();
         refreshMoney();
         setPhase('success');
@@ -155,69 +158,50 @@ export default function PayScreen() {
     return () => clearTimeout(t);
   }, [kick]);
 
-  const close = () => (router.canGoBack() ? router.back() : router.replace('/'));
+  const suggestedAmount = target && w ? suggested(target, w) : 0;
 
   return (
-    <View style={[styles.root, { paddingBottom: insets.bottom + space.md }]}>
-      <View style={[styles.top, { paddingTop: Platform.OS === 'android' ? insets.top + space.md : space.lg }]}>
-        <View style={styles.grabber} />
-        <View style={styles.headerRow}>
-          <Text style={type.heading}>Оплата</Text>
-          <Tap onPress={close} scaleTo={0.9} style={styles.close} accessibilityLabel="Закрыть">
-            <Icon name="close" size={20} color={colors.textBody} />
-          </Tap>
-        </View>
-      </View>
+    <View style={[styles.root, { paddingBottom: Math.max(insets.bottom, space.lg) }]}>
+      <SheetHeader title="Оплата" onClose={close} />
 
       {!w ? (
-        <ActivityIndicator color={colors.violetLight} style={{ marginTop: 60 }} />
+        <ActivityIndicator color={colors.lavender} style={styles.loader} />
       ) : !w.pay.online ? (
-        <EmptyState icon="card-outline" title="Онлайн-оплата временно недоступна"
+        <EmptyState icon="wallet" title="Онлайн-оплата временно недоступна"
           text="Пополнить депозит, погасить долг или внести взнос можно на кассе клуба.">
-          <Button title="Понятно" variant="secondary" onPress={close} />
+          <GlassButton title="Понятно" variant="secondary" onPress={close} />
         </EmptyState>
       ) : phase === 'success' && payment ? (
         <Success payment={payment} target={target} onDone={close} />
-      ) : phase === 'waiting' || phase === 'timeout' || phase === 'failed' ? (
-        <Waiting phase={phase} payment={payment!} demo={demo} onReopen={() => payment && void openBank(payment.paymentUrl)}
+      ) : (phase === 'waiting' || phase === 'timeout' || phase === 'failed') && payment ? (
+        <Waiting phase={phase} payment={payment} demo={demo} onReopen={() => void openBank(payment.paymentUrl)}
           onRetry={() => { setPhase('form'); setPayment(null); }} onClose={close} />
       ) : (
         <View style={styles.form}>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0, flexShrink: 0 }}
-            contentContainerStyle={{ gap: space.sm, paddingHorizontal: GUTTER }}>
-            {targets.map((t) => {
-              const active = t.id === target?.id;
-              return (
-                <Tap key={t.id} onPress={() => select(t)} scaleTo={0.95} hapticOnPress={false}
-                  style={[styles.chip, active && { backgroundColor: `${t.color}1f`, borderColor: `${t.color}66` }]}
-                  accessibilityRole="radio" accessibilityState={{ selected: active }} accessibilityLabel={t.label}>
-                  <Icon name={t.icon} size={16} color={active ? t.color : colors.textSecondary} />
-                  <Text style={[styles.chipText, active && { color: colors.text }]} numberOfLines={1}>{t.label}</Text>
-                </Tap>
-              );
-            })}
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chips} contentContainerStyle={styles.chipsRow}>
+            {targets.map((t) => (
+              <GlassChip key={t.id} label={t.label} icon={t.icon} color={t.color} selected={t.id === target?.id} onPress={() => select(t)} />
+            ))}
           </ScrollView>
 
           {/* Сумма — по центру свободного места, клавиатура и кнопка — у нижнего края. */}
           <View style={[styles.column, styles.amountArea]}>
-            <Text style={[type.caption, { textAlign: 'center' }]}>{target?.hint}</Text>
+            <Text style={styles.hint}>{target?.hint}</Text>
             <Animated.View key={target?.id} entering={FadeIn.duration(200)} style={styles.amountBox}>
-              <Text style={[styles.amount, !amountStr && { color: colors.textMuted }]} numberOfLines={1} adjustsFontSizeToFit>
-                {amountStr ? `${amountStr.replace(/\B(?=(\d{3})+(?!\d))/g, ' ')} ₽` : '0 ₽'}
+              <Text style={[styles.amount, !amountStr && styles.amountEmpty]} numberOfLines={1} adjustsFontSizeToFit>
+                {amountStr ? `${groupDigits(amountStr)} ₽` : '0 ₽'}
               </Text>
             </Animated.View>
 
             <View style={styles.quickRow}>
               {target?.purpose === 'deposit'
                 ? QUICK.map((q) => (
-                    <Tap key={q} onPress={() => setAmountInput(String(q))} scaleTo={0.94} style={styles.quick}>
-                      <Text style={styles.quickText}>{q.toLocaleString('ru')}</Text>
-                    </Tap>
+                    <GlassChip key={q} label={q.toLocaleString('ru')} selected={parseAmount(amountStr) === q}
+                      onPress={() => setAmountInput(String(q))} />
                   ))
-                : target && w && suggested(target, w) > 0 ? (
-                    <Tap onPress={() => setAmountInput(amountToInput(suggested(target, w)))} scaleTo={0.94} style={styles.quick}>
-                      <Text style={styles.quickText}>{target.purpose === 'debt' ? 'Весь долг' : 'Вся сумма'} · {money(suggested(target, w))}</Text>
-                    </Tap>
+                : suggestedAmount > 0 ? (
+                    <GlassChip label={`${target?.purpose === 'debt' ? 'Весь долг' : 'Вся сумма'} · ${money(suggestedAmount)}`}
+                      selected={amount === suggestedAmount} onPress={() => setAmountInput(amountToInput(suggestedAmount))} />
                   ) : null}
             </View>
 
@@ -226,15 +210,14 @@ export default function PayScreen() {
 
           <View style={styles.column}>
             <Keypad value={amountStr} onChange={(v) => { setAmountInput(v); setError(null); }} />
-
             {error ? <Text style={styles.error}>{error}</Text> : null}
-            <Button
+            <GlassButton
               title={amount >= 1 ? `Оплатить ${money(charged)}` : 'Введите сумму'}
-              icon="flash"
+              icon="bolt"
               loading={phase === 'creating'}
               disabled={!canPay}
               onPress={() => void pay()}
-              style={{ marginTop: space.md }}
+              style={styles.payButton}
             />
             <Text style={styles.sbp}>Оплата через СБП · откроется страница банка</Text>
           </View>
@@ -245,7 +228,7 @@ export default function PayScreen() {
 }
 
 function Breakdown({ target, amount, charged, surcharge, wallet }: { target: Target | null | undefined; amount: number; charged: number; surcharge: number; wallet: Wallet }) {
-  if (!target || amount < 1) return <View style={{ height: 44 }} />;
+  if (!target || amount < 1) return <View style={styles.breakdown} />;
   let note: string | null = null;
   if (target.purpose === 'debt' && amount > wallet.debt && wallet.debt > 0) note = `Сверх долга ${money(amount - wallet.debt)} уйдёт на депозит`;
   if (target.purpose === 'fund') {
@@ -259,11 +242,19 @@ function Breakdown({ target, amount, charged, surcharge, wallet }: { target: Tar
   return (
     <View style={styles.breakdown}>
       <Text style={styles.breakdownText}>
-        Зачислим <Text style={{ color: colors.text, fontWeight: '700' }}>{money(amount)}</Text> · банк +{surcharge}% · к оплате{' '}
-        <Text style={{ color: colors.lavender, fontWeight: '800' }}>{money(charged)}</Text>
+        Зачислим <Text style={styles.strong}>{money(amount)}</Text> · банк +{surcharge}% · к оплате{' '}
+        <Text style={styles.total}>{money(charged)}</Text>
       </Text>
-      {note ? <Text style={[styles.breakdownText, { color: colors.amber, marginTop: 2 }]}>{note}</Text> : null}
+      {note ? <Text style={[styles.breakdownText, styles.note]}>{note}</Text> : null}
     </View>
+  );
+}
+
+function StatusLens({ icon, color, spinning }: { icon?: IconName; color: string; spinning?: boolean }) {
+  return (
+    <Glass tint={`${color}33`} fallback={{ backgroundColor: `${color}1f`, borderColor: `${color}40` }} style={styles.statusCircle}>
+      {spinning ? <ActivityIndicator size="large" color={color} /> : icon ? <Icon name={icon} size={40} color={color} weight="bold" /> : null}
+    </Glass>
   );
 }
 
@@ -273,31 +264,27 @@ function Waiting({
   if (phase === 'failed') {
     return (
       <Animated.View entering={FadeInDown.duration(300)} style={[styles.column, styles.center]}>
-        <View style={[styles.statusCircle, { backgroundColor: colors.redTint }]}><Icon name="close" size={44} color={colors.red} /></View>
-        <Text style={[type.heading, { textAlign: 'center', marginTop: space.xl }]}>Платёж не прошёл</Text>
-        <Text style={[type.callout, styles.centerText]}>Деньги не списаны. Попробуйте ещё раз или выберите другой банк.</Text>
-        <Button title="Попробовать снова" onPress={onRetry} style={styles.wide} />
-        <Button title="Закрыть" variant="ghost" onPress={onClose} />
+        <StatusLens icon="close" color={colors.red} />
+        <Text style={styles.statusTitle}>Платёж не прошёл</Text>
+        <Text style={styles.centerText}>Деньги не списаны. Попробуйте ещё раз или выберите другой банк.</Text>
+        <GlassButton title="Попробовать снова" onPress={onRetry} style={styles.wide} />
+        <GlassButton title="Закрыть" variant="ghost" onPress={onClose} />
       </Animated.View>
     );
   }
   return (
     <Animated.View entering={FadeInDown.duration(300)} style={[styles.column, styles.center]}>
-      <View style={[styles.statusCircle, { backgroundColor: colors.violetTint }]}>
-        {phase === 'timeout' ? <Icon name="time" size={40} color={colors.violetLight} /> : <ActivityIndicator size="large" color={colors.violetLight} />}
-      </View>
-      <Text style={[type.heading, { textAlign: 'center', marginTop: space.xl }]}>
-        {phase === 'timeout' ? 'Ждём подтверждение банка' : 'Ожидаем оплату'}
-      </Text>
-      <Text style={[type.callout, styles.centerText]}>
+      <StatusLens icon={phase === 'timeout' ? 'pending' : undefined} spinning={phase !== 'timeout'} color={colors.lavender} />
+      <Text style={styles.statusTitle}>{phase === 'timeout' ? 'Ждём подтверждение банка' : 'Ожидаем оплату'}</Text>
+      <Text style={styles.centerText}>
         {demo
           ? 'Демо-режим: платёж подтвердится сам через пару секунд.'
           : phase === 'timeout'
-            ? 'Если вы оплатили — деньги зачислятся автоматически, мы пришлём уведомление. Экран можно закрыть.'
+            ? 'Если вы оплатили — деньги зачислятся автоматически, мы пришлём уведомление. Шторку можно закрыть.'
             : `Подтвердите платёж ${money(payment.charged)} в приложении банка. Как только банк ответит, баланс обновится.`}
       </Text>
-      {!demo ? <Button title="Открыть страницу оплаты" variant="secondary" icon="open-outline" onPress={onReopen} style={styles.wide} /> : null}
-      <Button title="Закрыть" variant="ghost" onPress={onClose} />
+      {!demo ? <GlassButton title="Открыть страницу оплаты" variant="secondary" icon="external" onPress={onReopen} style={styles.wide} /> : null}
+      <GlassButton title="Закрыть" variant="ghost" onPress={onClose} />
     </Animated.View>
   );
 }
@@ -307,49 +294,50 @@ function Success({ payment, target, onDone }: { payment: CreatedPayment; target:
   return (
     <View style={[styles.column, styles.center]}>
       <Animated.View entering={ZoomIn.springify().damping(12)} style={[styles.statusCircle, styles.successCircle]}>
-        <Icon name="checkmark" size={52} color="#fff" />
+        <Icon name="check" size={48} color="#fff" weight="heavy" />
       </Animated.View>
-      <Animated.Text entering={FadeInDown.delay(150).duration(350)} style={[type.title, { textAlign: 'center', marginTop: space.xl }]}>
+      <Animated.Text entering={FadeInDown.delay(150).duration(350)} style={[type.title, styles.successTitle]}>
         {title}
       </Animated.Text>
-      <Animated.Text entering={FadeInDown.delay(230).duration(350)} style={[styles.successAmount]}>
+      <Animated.Text entering={FadeInDown.delay(230).duration(350)} style={styles.successAmount}>
         +{money(payment.base)}
       </Animated.Text>
-      <Animated.View entering={FadeIn.delay(400)} style={{ alignSelf: 'stretch' }}>
-        <Text style={[type.callout, styles.centerText]}>{target?.label ?? ''} · оплачено {money(payment.charged)} с учётом комиссии банка</Text>
-        <Button title="Готово" onPress={onDone} style={styles.wide} />
+      <Animated.View entering={FadeIn.delay(400)} style={styles.stretch}>
+        <Text style={styles.centerText}>{target?.label ?? ''} · оплачено {money(payment.charged)} с учётом комиссии банка</Text>
+        <GlassButton title="Готово" onPress={onDone} style={styles.wide} />
       </Animated.View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: colors.background },
-  top: { paddingHorizontal: GUTTER },
-  grabber: { alignSelf: 'center', width: 38, height: 5, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.18)', marginBottom: space.md, display: Platform.OS === 'ios' ? 'flex' : 'none' },
-  headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: space.lg },
-  close: { width: 36, height: 36, borderRadius: 18, backgroundColor: colors.surfaceRaised, alignItems: 'center', justifyContent: 'center' },
+  root: { flex: 1 },
+  loader: { marginTop: 60 },
   form: { flex: 1 },
-  amountArea: { flex: 1, justifyContent: 'center', minHeight: 190 },
+  chips: { flexGrow: 0, flexShrink: 0 },
+  chipsRow: { gap: space.sm, paddingHorizontal: GUTTER, paddingVertical: 2 },
   column: { width: '100%', maxWidth: MAX_WIDTH, alignSelf: 'center', paddingHorizontal: GUTTER },
-  chip: {
-    flexDirection: 'row', alignItems: 'center', gap: 6, height: 40, paddingHorizontal: 14, borderRadius: 20,
-    backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, maxWidth: 220,
-  },
-  chipText: { color: colors.textSecondary, fontSize: 14, fontWeight: '700' },
-  amountBox: { alignItems: 'center', justifyContent: 'center', height: 76, marginTop: space.sm },
-  amount: { color: colors.text, fontSize: 52, fontWeight: '900', fontStyle: 'italic', letterSpacing: -1.5, fontVariant: ['tabular-nums'] },
-  quickRow: { flexDirection: 'row', justifyContent: 'center', gap: space.sm, minHeight: 34, flexWrap: 'wrap' },
-  quick: { paddingHorizontal: 14, height: 34, borderRadius: 17, backgroundColor: colors.violetTint, borderWidth: 1, borderColor: colors.borderViolet, justifyContent: 'center' },
-  quickText: { color: colors.lavender, fontSize: 13, fontWeight: '700' },
-  breakdown: { minHeight: 44, justifyContent: 'center', marginVertical: space.sm },
+  amountArea: { flex: 1, justifyContent: 'center', minHeight: 200 },
+  hint: { ...StyleSheet.flatten(type.caption), textAlign: 'center' },
+  amountBox: { alignItems: 'center', justifyContent: 'center', height: 80, marginTop: space.xs },
+  amount: { color: colors.text, fontSize: 56, fontWeight: '900', fontStyle: 'italic', letterSpacing: -1.5, fontVariant: ['tabular-nums'] },
+  amountEmpty: { color: colors.textMuted },
+  quickRow: { flexDirection: 'row', justifyContent: 'center', gap: space.sm, minHeight: 40, flexWrap: 'wrap', marginTop: space.xs },
+  breakdown: { minHeight: 48, justifyContent: 'center', marginTop: space.sm },
   breakdownText: { color: colors.textSecondary, fontSize: 13, textAlign: 'center', lineHeight: 18 },
+  strong: { color: colors.text, fontWeight: '700' },
+  total: { color: colors.lavender, fontWeight: '800' },
+  note: { color: colors.amber, marginTop: 2 },
   error: { color: colors.red, fontSize: 13, textAlign: 'center', marginTop: space.sm },
+  payButton: { marginTop: space.md },
   sbp: { color: colors.textMuted, fontSize: 11.5, textAlign: 'center', marginTop: space.sm },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingBottom: 40 },
-  centerText: { color: colors.textSecondary, textAlign: 'center', marginTop: space.sm, paddingHorizontal: space.md },
+  centerText: { ...StyleSheet.flatten(type.callout), color: colors.textSecondary, textAlign: 'center', marginTop: space.sm, paddingHorizontal: space.md },
+  statusTitle: { ...StyleSheet.flatten(type.heading), textAlign: 'center', marginTop: space.xl },
   statusCircle: { width: 96, height: 96, borderRadius: 48, alignItems: 'center', justifyContent: 'center' },
   successCircle: { experimental_backgroundImage: 'linear-gradient(135deg, #34D399 0%, #059669 100%)', boxShadow: '0 14px 36px rgba(16,185,129,0.4)' },
+  successTitle: { textAlign: 'center', marginTop: space.xl },
   successAmount: { color: colors.greenBright, fontSize: 34, fontWeight: '900', fontStyle: 'italic', textAlign: 'center', marginTop: space.sm, fontVariant: ['tabular-nums'] },
+  stretch: { alignSelf: 'stretch' },
   wide: { alignSelf: 'stretch', marginTop: space.xl },
 });

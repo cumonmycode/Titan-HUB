@@ -3,37 +3,35 @@
 // «новое» остаётся до ухода с экрана, чтобы было видно, что именно пришло.
 import { useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, FlatList, RefreshControl, StyleSheet, Text, View } from 'react-native';
-import Animated, { FadeInDown } from 'react-native-reanimated';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { ActivityIndicator, FlatList, StyleSheet, Text, View } from 'react-native';
 
-import { ScreenHeader, useManualRefresh } from '@/components/screen';
-import { useTabClearance } from '@/components/tab-bar';
-import { Button, EmptyState, IconBubble, type IconName, Skeleton, Tap } from '@/components/ui';
+import { Glass, GlassButton } from '@/components/glass';
+import type { IconName } from '@/components/icon';
+import { ScreenTitle, useTabScrollProps } from '@/components/screen';
+import { Tap } from '@/components/tap';
+import { EmptyState, IconTile, Skeleton } from '@/components/ui';
 import { errorText } from '@/lib/api';
 import { relative } from '@/lib/format';
 import { openFromNotificationData, setBadge } from '@/lib/push';
 import { useMarkRead, useNotifications } from '@/lib/queries';
-import { colors, GUTTER, MAX_WIDTH, space, type } from '@/lib/theme';
+import { colors, MAX_WIDTH, radius, space, type } from '@/lib/theme';
 import type { ClientNotification, NotificationKind } from '@/lib/types';
 
 const LOOK: Record<NotificationKind, { icon: IconName; color: string }> = {
-  bonus: { icon: 'star', color: '#FACC15' },
-  deposit: { icon: 'wallet', color: colors.green },
-  debt: { icon: 'alert-circle', color: colors.red },
-  payment: { icon: 'checkmark-circle', color: colors.greenBright },
+  bonus: { icon: 'bonus', color: colors.gold },
+  deposit: { icon: 'deposit', color: colors.green },
+  debt: { icon: 'alert', color: colors.red },
+  payment: { icon: 'paid', color: colors.greenBright },
   tier: { icon: 'trophy', color: colors.violetLight },
-  fund: { icon: 'people', color: colors.cyan },
-  news: { icon: 'megaphone', color: colors.pink },
-  system: { icon: 'notifications', color: colors.violetLight },
+  fund: { icon: 'fund', color: colors.cyan },
+  news: { icon: 'news', color: colors.pink },
+  system: { icon: 'inbox', color: colors.violetLight },
 };
 
 export default function InboxScreen() {
-  const insets = useSafeAreaInsets();
-  const clearance = useTabClearance();
   const list = useNotifications();
   const markRead = useMarkRead();
-  const refresh = useManualRefresh(() => list.refetch());
+  const scroll = useTabScrollProps(() => list.refetch());
   // id, которые были непрочитанными при входе на экран (подсветка до ухода).
   const [fresh, setFresh] = useState<Set<string>>(new Set());
   const [focused, setFocused] = useState(false);
@@ -64,37 +62,34 @@ export default function InboxScreen() {
 
   return (
     <FlatList
-      style={{ flex: 1, backgroundColor: colors.background }}
-      contentContainerStyle={{ paddingTop: insets.top + space.md, paddingBottom: clearance, paddingHorizontal: GUTTER, gap: space.md }}
+      {...scroll}
       data={items}
       keyExtractor={(n) => n.id}
-      refreshControl={
-        <RefreshControl refreshing={refresh.refreshing} onRefresh={refresh.onRefresh} tintColor={colors.violetLight}
-          colors={[colors.violet]} progressBackgroundColor={colors.surface} progressViewOffset={insets.top} />
-      }
       ListHeaderComponent={
         <View style={styles.column}>
-          <ScreenHeader title="Входящие" subtitle="Операции, оплаты и новости клуба" />
-          {list.isLoading ? <View style={{ gap: space.md }}>{[0, 1, 2, 3].map((i) => <Skeleton key={i} height={84} />)}</View> : null}
+          <ScreenTitle title="Входящие" subtitle="Операции, оплаты и новости клуба" />
+          {list.isLoading ? (
+            <View style={styles.loading}>{[0, 1, 2, 3].map((i) => <Skeleton key={i} height={88} rounded={radius.tile} />)}</View>
+          ) : null}
         </View>
       }
-      renderItem={({ item, index }) => (
-        <Animated.View entering={index < 12 ? FadeInDown.delay(index * 35).duration(320) : undefined} style={styles.column}>
+      renderItem={({ item }) => (
+        <View style={[styles.column, styles.item]}>
           <NotificationCard n={item} highlighted={!item.isRead || fresh.has(item.id)} />
-        </Animated.View>
+        </View>
       )}
       onEndReachedThreshold={0.4}
       onEndReached={() => { if (list.hasNextPage && !list.isFetchingNextPage) void list.fetchNextPage(); }}
       ListEmptyComponent={
         list.isLoading ? null : list.isError ? (
-          <EmptyState icon="cloud-offline" title="Не удалось загрузить" text={errorText(list.error)}>
-            <Button title="Повторить" variant="secondary" onPress={() => void list.refetch()} />
+          <EmptyState icon="offline" title="Не удалось загрузить" text={errorText(list.error)}>
+            <GlassButton title="Повторить" variant="secondary" onPress={() => void list.refetch()} />
           </EmptyState>
         ) : (
-          <EmptyState icon="notifications-outline" title="Пока тихо" text="Здесь появятся начисления бонусов, оплаты и новости клуба" />
+          <EmptyState icon="bell" title="Пока тихо" text="Здесь появятся начисления бонусов, оплаты и новости клуба" />
         )
       }
-      ListFooterComponent={list.isFetchingNextPage ? <ActivityIndicator color={colors.violetLight} style={{ marginVertical: space.lg }} /> : null}
+      ListFooterComponent={list.isFetchingNextPage ? <ActivityIndicator color={colors.lavender} style={styles.more} /> : null}
     />
   );
 }
@@ -104,34 +99,43 @@ function NotificationCard({ n, highlighted }: { n: ClientNotification; highlight
   const screen = typeof n.meta.screen === 'string' ? n.meta.screen : null;
   const actionable = !!screen && screen !== 'notifications';
   const body = (
-    <View style={[styles.card, highlighted && styles.cardNew]}>
-      <IconBubble name={look.icon} color={look.color} size={42} />
-      <View style={{ flex: 1 }}>
-        <View style={[styles.titleRow, highlighted && { paddingRight: 12 }]}>
-          <Text style={[type.headline, { flex: 1 }]} numberOfLines={2}>{n.title}</Text>
+    <Glass
+      interactive={actionable}
+      tint={highlighted ? 'rgba(139,92,246,0.22)' : undefined}
+      fallback={highlighted ? styles.cardNewFallback : null}
+      style={styles.card}
+    >
+      <IconTile name={look.icon} color={look.color} size={42} />
+      <View style={styles.texts}>
+        <View style={[styles.titleRow, highlighted && styles.titleRowNew]}>
+          <Text style={[type.headline, styles.flex]} numberOfLines={2}>{n.title}</Text>
           <Text style={styles.time}>{relative(n.createdAt)}</Text>
         </View>
-        <Text style={[type.callout, { color: colors.textSecondary, marginTop: 3 }]}>{n.body}</Text>
+        <Text style={styles.body}>{n.body}</Text>
       </View>
       {highlighted ? <View style={styles.dot} /> : null}
-    </View>
+    </Glass>
   );
   if (!actionable) return body;
   return (
-    <Tap onPress={() => openFromNotificationData(n.meta)} scaleTo={0.985} accessibilityRole="button" accessibilityLabel={`${n.title}. ${n.body}`}>
+    <Tap onPress={() => openFromNotificationData(n.meta)} scaleTo={0.98} accessibilityRole="button" accessibilityLabel={`${n.title}. ${n.body}`}>
       {body}
     </Tap>
   );
 }
 
 const styles = StyleSheet.create({
+  flex: { flex: 1 },
   column: { width: '100%', maxWidth: MAX_WIDTH, alignSelf: 'center' },
-  card: {
-    flexDirection: 'row', gap: space.md, padding: space.lg, borderRadius: 18,
-    backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border,
-  },
-  cardNew: { borderColor: colors.borderViolet, backgroundColor: '#211b2d' },
+  loading: { gap: space.md },
+  item: { marginBottom: space.md },
+  card: { flexDirection: 'row', gap: space.md, padding: space.lg, borderRadius: radius.tile },
+  cardNewFallback: { borderColor: colors.borderViolet, backgroundColor: 'rgba(43,33,61,0.9)' },
+  texts: { flex: 1 },
   titleRow: { flexDirection: 'row', alignItems: 'flex-start', gap: space.sm },
+  titleRowNew: { paddingRight: space.md },
   time: { color: colors.textMuted, fontSize: 12, marginTop: 2 },
+  body: { ...StyleSheet.flatten(type.callout), color: colors.textSecondary, marginTop: 3 },
   dot: { position: 'absolute', top: 14, right: 14, width: 8, height: 8, borderRadius: 4, backgroundColor: colors.pink },
+  more: { marginVertical: space.lg },
 });

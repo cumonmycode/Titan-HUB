@@ -1,6 +1,6 @@
-// Панель вкладок: плавающая тёмная капсула (одинаковая на iOS и Android), выбранная
-// вкладка подсвечена «таблеткой», которая переезжает пружиной. В центре — круглая
-// кнопка «Оплатить»: пополнение депозита, долг, взносы — главное действие клиента.
+// Панель вкладок Android: плавающая тёмная капсула, выбранная вкладка подсвечена
+// «таблеткой», которая переезжает пружиной. В центре — круглая кнопка «Оплатить».
+// На iOS вместо неё системный таб-бар Liquid Glass (app/(tabs)/_layout.tsx).
 import { useRouter } from 'expo-router';
 import type { BottomTabBarProps } from 'expo-router/tabs';
 import { useEffect, useState } from 'react';
@@ -10,27 +10,28 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { haptic } from '@/lib/haptics';
 import { useWallet } from '@/lib/queries';
-import { colors, springs, violetGradient } from '@/lib/theme';
+import { colors, IS_IOS, springs, violetGradient } from '@/lib/theme';
 
-import { Icon, type IconName, Tap } from './ui';
+import { Icon, type IconName } from './icon';
+import { Tap } from './tap';
 
 export const TAB_BAR_HEIGHT = 64;
 const PAD = 6;
 
-/** Нижний отступ контента, чтобы последняя строка не пряталась под панелью. */
+/** Нижний отступ контента над капсулой (Android). На iOS отступ даёт система. */
 export function useTabClearance(): number {
   const insets = useSafeAreaInsets();
-  return TAB_BAR_HEIGHT + Math.max(insets.bottom, 12) + 20;
+  return IS_IOS ? 0 : TAB_BAR_HEIGHT + Math.max(insets.bottom, 12) + 20;
 }
 
-type Slot = { key: string; label: string; icon: IconName; iconActive: IconName } | { key: 'pay'; action: true };
+type Slot = { key: string; label: string; icon: IconName } | { key: 'pay-action'; action: true };
 
 const SLOTS: Slot[] = [
-  { key: 'index', label: 'Кошелёк', icon: 'wallet-outline', iconActive: 'wallet' },
-  { key: 'history', label: 'История', icon: 'time-outline', iconActive: 'time' },
-  { key: 'pay', action: true },
-  { key: 'inbox', label: 'Входящие', icon: 'notifications-outline', iconActive: 'notifications' },
-  { key: 'profile', label: 'Профиль', icon: 'person-outline', iconActive: 'person' },
+  { key: '(home)', label: 'Кошелёк', icon: 'wallet' },
+  { key: 'history', label: 'История', icon: 'history' },
+  { key: 'pay-action', action: true },
+  { key: 'inbox', label: 'Входящие', icon: 'inbox' },
+  { key: 'profile', label: 'Профиль', icon: 'person' },
 ];
 
 export function TabBar({ state, navigation }: BottomTabBarProps) {
@@ -40,7 +41,7 @@ export function TabBar({ state, navigation }: BottomTabBarProps) {
   const unread = wallet?.unreadNotifications ?? 0;
   const [width, setWidth] = useState(0);
 
-  const focusedName = state.routes[state.index]?.name ?? 'index';
+  const focusedName = state.routes[state.index]?.name ?? '(home)';
   const slotIndex = Math.max(0, SLOTS.findIndex((s) => s.key === focusedName));
   const slotWidth = width > 0 ? (width - PAD * 2) / SLOTS.length : 0;
 
@@ -57,15 +58,10 @@ export function TabBar({ state, navigation }: BottomTabBarProps) {
         {SLOTS.map((slot) => {
           if ('action' in slot) {
             return (
-              <View key="pay" style={styles.slot}>
-                <Tap
-                  onPress={() => router.push('/pay')}
-                  scaleTo={0.9}
-                  accessibilityRole="button"
-                  accessibilityLabel="Оплатить"
-                  style={styles.payButton}
-                >
-                  <Icon name="add" size={30} color="#fff" />
+              <View key={slot.key} style={styles.slot}>
+                <Tap onPress={() => router.push('/pay')} scaleTo={0.9} accessibilityRole="button" accessibilityLabel="Оплатить"
+                  style={styles.payButton}>
+                  <Icon name="pay" size={28} color="#fff" />
                 </Tap>
               </View>
             );
@@ -90,14 +86,14 @@ export function TabBar({ state, navigation }: BottomTabBarProps) {
               accessibilityLabel={slot.key === 'inbox' && unread ? `${slot.label}, непрочитанных: ${unread}` : slot.label}
             >
               <View>
-                <Icon name={focused ? slot.iconActive : slot.icon} size={23} color={focused ? colors.lavender : colors.textSecondary} />
+                <Icon name={slot.icon} size={23} color={focused ? colors.lavender : colors.textSecondary} />
                 {slot.key === 'inbox' && unread > 0 ? (
                   <View style={styles.badge}>
                     <Text style={styles.badgeText}>{unread > 9 ? '9+' : unread}</Text>
                   </View>
                 ) : null}
               </View>
-              <Text style={[styles.label, focused && { color: colors.lavender, fontWeight: '700' }]}>{slot.label}</Text>
+              <Text style={[styles.label, focused && styles.labelOn]}>{slot.label}</Text>
             </Pressable>
           );
         })}
@@ -109,17 +105,18 @@ export function TabBar({ state, navigation }: BottomTabBarProps) {
 const styles = StyleSheet.create({
   wrap: { position: 'absolute', left: 0, right: 0, bottom: 0, alignItems: 'center', paddingHorizontal: 14 },
   bar: {
-    width: '100%', maxWidth: 520, height: TAB_BAR_HEIGHT, borderRadius: 26,
+    width: '100%', maxWidth: 520, height: TAB_BAR_HEIGHT, borderRadius: 32,
     flexDirection: 'row', alignItems: 'center', paddingHorizontal: PAD,
-    backgroundColor: 'rgba(29,26,36,0.97)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.09)',
+    backgroundColor: 'rgba(29,26,36,0.96)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.09)',
     boxShadow: '0 12px 32px rgba(0,0,0,0.45)',
   },
   pill: {
-    position: 'absolute', left: 0, top: PAD, bottom: PAD, borderRadius: 20,
+    position: 'absolute', left: 0, top: PAD, bottom: PAD, borderRadius: 26,
     backgroundColor: 'rgba(139,92,246,0.16)', borderWidth: 1, borderColor: 'rgba(139,92,246,0.25)',
   },
   slot: { flex: 1, height: '100%', alignItems: 'center', justifyContent: 'center', gap: 2 },
   label: { fontSize: 10.5, fontWeight: '600', color: colors.textSecondary },
+  labelOn: { color: colors.lavender, fontWeight: '700' },
   payButton: {
     width: 52, height: 52, borderRadius: 26, alignItems: 'center', justifyContent: 'center',
     experimental_backgroundImage: violetGradient,

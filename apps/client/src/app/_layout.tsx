@@ -5,22 +5,23 @@ import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import * as SystemUI from 'expo-system-ui';
 import { useEffect, useEffectEvent, useRef } from 'react';
-import { AppState, Platform } from 'react-native';
+import { AppState, StyleSheet } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
+import { sheetOptions } from '@/components/sheet';
 import { api } from '@/lib/api';
 import { openFromNotificationData, registerForPush, setBadge } from '@/lib/push';
 import { queryClient, refreshMoney, useWallet } from '@/lib/queries';
 import { tokenRefreshDue, useSession } from '@/lib/session';
-import { colors } from '@/lib/theme';
+import { backdrop, colors, IS_IOS } from '@/lib/theme';
 
 void SplashScreen.preventAutoHideAsync();
 void SystemUI.setBackgroundColorAsync(colors.background);
 
 export default function RootLayout() {
   return (
-    <GestureHandlerRootView style={{ flex: 1, backgroundColor: colors.background }}>
+    <GestureHandlerRootView style={styles.root}>
       <SafeAreaProvider>
         <QueryClientProvider client={queryClient}>
           <StatusBar style="light" />
@@ -51,16 +52,16 @@ function Root() {
       <Stack
         screenOptions={{
           headerShown: false,
-          contentStyle: { backgroundColor: colors.background },
-          animation: Platform.OS === 'android' ? 'fade_from_bottom' : 'default',
+          contentStyle: backdrop,
+          animation: IS_IOS ? 'default' : 'fade_from_bottom',
         }}
       >
         <Stack.Protected guard={inside}>
           <Stack.Screen name="(tabs)" options={{ animation: 'fade' }} />
-          <Stack.Screen name="pay" options={{ presentation: 'modal', gestureEnabled: true }} />
-          <Stack.Screen name="check/[id]" options={{ presentation: 'modal' }} />
-          <Stack.Screen name="profile-edit" options={{ presentation: 'modal' }} />
-          <Stack.Screen name="bonus-rules" options={{ presentation: 'modal' }} />
+          <Stack.Screen name="pay" options={sheetOptions([1])} />
+          <Stack.Screen name="check/[id]" options={sheetOptions([0.7, 1])} />
+          <Stack.Screen name="profile-edit" options={sheetOptions([1])} />
+          <Stack.Screen name="bonus-rules" options={sheetOptions([0.75, 1])} />
         </Stack.Protected>
         <Stack.Protected guard={!inside}>
           <Stack.Screen name="login" options={{ animation: 'fade' }} />
@@ -131,3 +132,7 @@ function NotificationRouting() {
 
   return null;
 }
+
+const styles = StyleSheet.create({
+  root: { flex: 1, backgroundColor: colors.background },
+});

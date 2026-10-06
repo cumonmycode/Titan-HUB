@@ -2,7 +2,7 @@
   "expo": {
     "name": "My Titan",
     "slug": "titan-resident",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "orientation": "portrait",
     "scheme": "titanresident",
     "userInterfaceStyle": "dark",

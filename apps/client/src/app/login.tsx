@@ -6,26 +6,30 @@
 import * as Clipboard from 'expo-clipboard';
 import * as Device from 'expo-device';
 import { useEffect, useEffectEvent, useRef, useState } from 'react';
-import { ActivityIndicator, AppState, Linking, Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, AppState, Linking, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Animated, { FadeIn, FadeInDown, FadeOut } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { Glass, GlassButton } from '@/components/glass';
 import { HoloCard } from '@/components/holo-card';
-import { Button, Icon, type IconName, Tap } from '@/components/ui';
+import { Icon, type IconName } from '@/components/icon';
+import { Tap } from '@/components/tap';
+import { Divider, IconTile } from '@/components/ui';
 import { api, errorText } from '@/lib/api';
 import { resetDemo } from '@/lib/demo';
 import { haptic } from '@/lib/haptics';
 import { useSession } from '@/lib/session';
-import { colors, GUTTER, MAX_WIDTH, space, type } from '@/lib/theme';
+import { colors, GUTTER, IS_IOS, MAX_WIDTH, radius, space, type } from '@/lib/theme';
 import type { LoginStart, LoginStatus } from '@/lib/types';
 
 type Phase = 'idle' | 'starting' | 'waiting' | 'rejected';
 
-const FEATURES: { icon: IconName; title: string; text: string }[] = [
-  { icon: 'star', title: 'Бонусы', text: 'Баланс, начисления и когда что сгорит' },
-  { icon: 'wallet', title: 'Депозит и долг', text: 'Пополнение и погашение через СБП' },
-  { icon: 'notifications', title: 'Уведомления', text: 'Каждая операция — сразу на телефон' },
+const FEATURES: { icon: IconName; color: string; title: string; text: string }[] = [
+  { icon: 'bonus', color: colors.gold, title: 'Бонусы', text: 'Баланс, начисления и когда что сгорит' },
+  { icon: 'wallet', color: colors.green, title: 'Депозит и долг', text: 'Пополнение и погашение через СБП' },
+  { icon: 'inbox', color: colors.violetLight, title: 'Уведомления', text: 'Каждая операция — сразу на телефон' },
 ];
+const FEATURE_INSET = space.lg + 36 + space.md;
 
 /** Открыть бота в приложении Telegram (tg://), а без него — через t.me в браузере. */
 async function openTelegram(deepLink: string) {
@@ -55,8 +59,8 @@ export default function LoginScreen() {
     if (openBot) setPhase('starting');
     try {
       const r = await api.post<LoginStart>('/auth/wallet-code/start', {
-        deviceName: Device.modelName ?? (Platform.OS === 'ios' ? 'iPhone' : 'Android'),
-        platform: Platform.OS === 'ios' ? 'ios' : 'android',
+        deviceName: Device.modelName ?? (IS_IOS ? 'iPhone' : 'Android'),
+        platform: IS_IOS ? 'ios' : 'android',
       }, { auth: false });
       setLogin(r);
       setPhase('waiting');
@@ -108,8 +112,8 @@ export default function LoginScreen() {
 
   return (
     <ScrollView
-      style={{ flex: 1, backgroundColor: colors.background }}
-      contentContainerStyle={[styles.container, { paddingTop: insets.top + 20, paddingBottom: insets.bottom + 24 }]}
+      style={styles.fill}
+      contentContainerStyle={[styles.container, { paddingTop: insets.top + space.xl, paddingBottom: insets.bottom + space.xxl }]}
       keyboardShouldPersistTaps="handled"
     >
       <View style={styles.column}>
@@ -117,82 +121,94 @@ export default function LoginScreen() {
           <HoloCard nickname="titan" tierLabel="Резидент" tierColor={colors.violet} bonus={1240} bonusHidden={false} />
         </Animated.View>
 
-        <Animated.View entering={FadeInDown.delay(120).duration(500)} style={{ marginTop: space.xxl }}>
+        <View style={styles.intro}>
           <Text style={styles.kicker}>MY TITAN</Text>
-          <Text style={[type.title, { marginTop: 6 }]}>Кошелёк клуба{'\n'}в вашем телефоне</Text>
-        </Animated.View>
+          <Text style={styles.headline}>Кошелёк клуба{'\n'}в вашем телефоне</Text>
+        </View>
 
         {phase === 'waiting' && login ? (
-          <Animated.View entering={FadeIn.duration(300)} exiting={FadeOut.duration(200)} style={styles.waitCard}>
-            <View style={styles.waitHead}>
-              <ActivityIndicator color={colors.telegram} />
-              <Text style={[type.headline, { flex: 1 }]}>Подтвердите вход в Telegram</Text>
-            </View>
-            <Text style={[type.callout, { color: colors.textSecondary, marginTop: 8 }]}>
-              Бот @{bot} прислал запрос «Вход в My Titan» — нажмите «Да, войти» и вернитесь сюда.
-            </Text>
-            <Button title="Открыть Telegram" variant="telegram" icon="paper-plane" size="md" style={{ marginTop: space.lg }}
-              onPress={() => login.deepLink && void openTelegram(login.deepLink)} />
+          <Animated.View entering={FadeIn.duration(300)} exiting={FadeOut.duration(200)}>
+            <Glass tint="rgba(42,171,238,0.14)" fallback={styles.waitFallback} style={styles.card}>
+              <View style={styles.waitHead}>
+                <ActivityIndicator color={colors.telegram} />
+                <Text style={[type.headline, styles.flex]}>Подтвердите вход в Telegram</Text>
+              </View>
+              <Text style={styles.cardText}>
+                Бот @{bot} прислал запрос «Вход в My Titan» — нажмите «Да, войти» и вернитесь сюда.
+              </Text>
+              <GlassButton title="Открыть Telegram" variant="telegram" icon="telegram" size="md" style={styles.cardButton}
+                onPress={() => login.deepLink && void openTelegram(login.deepLink)} />
 
-            <View style={styles.codeBlock}>
-              <Text style={[type.caption, { textAlign: 'center' }]}>Telegram на другом устройстве? Отправьте боту код:</Text>
-              <Tap onPress={copyCode} scaleTo={0.96} accessibilityRole="button" accessibilityLabel={`Код ${login.code.split('').join(' ')}. Скопировать`}>
-                <View style={styles.codeRow}>
-                  {login.code.split('').map((d, i) => (
-                    <View key={i} style={styles.codeDigit}><Text style={styles.codeText}>{d}</Text></View>
-                  ))}
+              <View style={styles.codeBlock}>
+                <Text style={[type.caption, styles.centered]}>Telegram на другом устройстве? Отправьте боту код:</Text>
+                <Tap onPress={copyCode} scaleTo={0.96} accessibilityRole="button" accessibilityLabel={`Код ${login.code.split('').join(' ')}. Скопировать`}>
+                  <View style={styles.codeRow}>
+                    {login.code.split('').map((d, i) => (
+                      <Glass key={i} tint="rgba(139,92,246,0.24)" fallback={styles.codeFallback} style={styles.codeDigit}>
+                        <Text style={styles.codeText}>{d}</Text>
+                      </Glass>
+                    ))}
+                  </View>
+                </Tap>
+                <View style={styles.copyRow}>
+                  <Icon name={copied ? 'check' : 'copy'} size={12} color={colors.lavender} />
+                  <Text style={styles.copyHint}>{copied ? 'Скопировано' : 'Нажмите, чтобы скопировать'}</Text>
                 </View>
-              </Tap>
-              <Text style={styles.copyHint}>{copied ? 'Скопировано ✓' : 'Нажмите, чтобы скопировать'}</Text>
-            </View>
+              </View>
 
-            <Button title="Отмена" variant="ghost" size="md" onPress={() => { setPhase('idle'); setLogin(null); }} />
+              <GlassButton title="Отмена" variant="ghost" size="md" onPress={() => { setPhase('idle'); setLogin(null); }} />
+            </Glass>
           </Animated.View>
         ) : phase === 'rejected' ? (
-          <Animated.View entering={FadeIn.duration(300)} style={styles.waitCard}>
-            <View style={styles.waitHead}>
-              <Icon name="shield-checkmark" size={24} color={colors.amber} />
-              <Text style={[type.headline, { flex: 1 }]}>Вход отклонён</Text>
-            </View>
-            <Text style={[type.callout, { color: colors.textSecondary, marginTop: 8 }]}>
-              В Telegram нажали «Это не я» — доступ не выдан. Если это были вы, начните вход заново.
-            </Text>
-            <Button title="Попробовать снова" variant="telegram" icon="paper-plane" style={{ marginTop: space.lg }} onPress={() => void begin(true)} />
+          <Animated.View entering={FadeIn.duration(300)}>
+            <Glass tint="rgba(251,191,36,0.14)" fallback={styles.rejectFallback} style={styles.card}>
+              <View style={styles.waitHead}>
+                <Icon name="shield" size={22} color={colors.amber} />
+                <Text style={[type.headline, styles.flex]}>Вход отклонён</Text>
+              </View>
+              <Text style={styles.cardText}>
+                В Telegram нажали «Это не я» — доступ не выдан. Если это были вы, начните вход заново.
+              </Text>
+              <GlassButton title="Попробовать снова" variant="telegram" icon="telegram" style={styles.cardButton} onPress={() => void begin(true)} />
+            </Glass>
           </Animated.View>
         ) : (
-          <Animated.View entering={FadeInDown.delay(200).duration(500)}>
-            <View style={styles.features}>
-              {FEATURES.map((f) => (
-                <View key={f.title} style={styles.feature}>
-                  <View style={styles.featureIcon}><Icon name={f.icon} size={18} color={colors.violetLight} /></View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.featureTitle}>{f.title}</Text>
-                    <Text style={type.caption}>{f.text}</Text>
+          <View>
+            <Glass style={styles.features}>
+              {FEATURES.map((f, i) => (
+                <View key={f.title}>
+                  {i > 0 ? <Divider inset={FEATURE_INSET} /> : null}
+                  <View style={styles.feature}>
+                    <IconTile name={f.icon} color={f.color} size={36} />
+                    <View style={styles.flex}>
+                      <Text style={styles.featureTitle}>{f.title}</Text>
+                      <Text style={type.caption}>{f.text}</Text>
+                    </View>
                   </View>
                 </View>
               ))}
-            </View>
+            </Glass>
 
-            <Button
+            <GlassButton
               title="Войти через Telegram"
               variant="telegram"
-              icon="paper-plane"
+              icon="telegram"
               loading={phase === 'starting'}
               onPress={() => void begin(true)}
-              style={{ marginTop: space.xxl }}
+              style={styles.signIn}
             />
             {error ? <Text style={styles.error}>{error}</Text> : null}
             <Text style={styles.note}>
               Вход через бота @titanwalletrobot. Ваш Telegram должен быть привязан к профилю в клубе — если нет, попросите администратора.
             </Text>
-            <Button
+            <GlassButton
               title="Посмотреть демо"
               variant="secondary"
               size="md"
-              style={{ marginTop: space.lg }}
+              style={styles.demo}
               onPress={() => { resetDemo(); enterDemo(); }}
             />
-          </Animated.View>
+          </View>
         )}
       </View>
     </ScrollView>
@@ -200,29 +216,35 @@ export default function LoginScreen() {
 }
 
 const styles = StyleSheet.create({
+  fill: { flex: 1 },
+  flex: { flex: 1 },
   container: { paddingHorizontal: GUTTER, flexGrow: 1 },
   column: { width: '100%', maxWidth: MAX_WIDTH, alignSelf: 'center' },
+  intro: { marginTop: space.xxl, marginBottom: space.xl },
   kicker: { color: colors.violetLight, fontSize: 12, fontWeight: '900', letterSpacing: 3 },
-  features: { marginTop: space.xl, gap: space.md },
-  feature: { flexDirection: 'row', alignItems: 'center', gap: space.md },
-  featureIcon: {
-    width: 36, height: 36, borderRadius: 11, backgroundColor: colors.violetTint,
-    alignItems: 'center', justifyContent: 'center',
-  },
-  featureTitle: { color: colors.text, fontSize: 15, fontWeight: '700' },
+  headline: { ...StyleSheet.flatten(type.title), marginTop: 6 },
+  centered: { textAlign: 'center' },
+  features: { borderRadius: radius.card, overflow: 'hidden' },
+  feature: { flexDirection: 'row', alignItems: 'center', gap: space.md, paddingHorizontal: space.lg, paddingVertical: space.md },
+  featureTitle: { color: colors.text, fontSize: 15.5, fontWeight: '700' },
+  signIn: { marginTop: space.xl },
   error: { color: colors.red, fontSize: 13, textAlign: 'center', marginTop: space.md },
   note: { color: colors.textSecondary, fontSize: 12, lineHeight: 17, textAlign: 'center', marginTop: space.md, paddingHorizontal: space.sm },
-  waitCard: {
-    marginTop: space.xl, padding: space.lg, borderRadius: 20, backgroundColor: colors.surface,
-    borderWidth: 1, borderColor: 'rgba(42,171,238,0.25)',
-  },
+  demo: { marginTop: space.lg },
+  card: { padding: space.lg, borderRadius: radius.card },
+  waitFallback: { borderColor: 'rgba(42,171,238,0.3)' },
+  rejectFallback: { borderColor: 'rgba(251,191,36,0.3)' },
   waitHead: { flexDirection: 'row', alignItems: 'center', gap: space.md },
-  codeBlock: { marginTop: space.xl, paddingTop: space.lg, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border, alignItems: 'center' },
-  codeRow: { flexDirection: 'row', gap: 10, marginTop: space.md },
-  codeDigit: {
-    width: 52, height: 64, borderRadius: 14, alignItems: 'center', justifyContent: 'center',
-    backgroundColor: colors.violetTint, borderWidth: 1, borderColor: 'rgba(139,92,246,0.35)',
+  cardText: { ...StyleSheet.flatten(type.callout), color: colors.textSecondary, marginTop: space.sm },
+  cardButton: { marginTop: space.lg },
+  codeBlock: {
+    marginTop: space.xl, paddingTop: space.lg, borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: 'rgba(255,255,255,0.12)', alignItems: 'center',
   },
+  codeRow: { flexDirection: 'row', gap: 10, marginTop: space.md },
+  codeDigit: { width: 54, height: 66, borderRadius: radius.control, alignItems: 'center', justifyContent: 'center' },
+  codeFallback: { backgroundColor: colors.violetTint, borderColor: 'rgba(139,92,246,0.35)' },
   codeText: { color: '#fff', fontSize: 32, fontWeight: '800', fontVariant: ['tabular-nums'] },
-  copyHint: { color: colors.violetLight, fontSize: 12, fontWeight: '600', marginTop: space.sm, marginBottom: space.sm },
+  copyRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: space.sm, marginBottom: space.sm },
+  copyHint: { color: colors.lavender, fontSize: 12, fontWeight: '600' },
 });
