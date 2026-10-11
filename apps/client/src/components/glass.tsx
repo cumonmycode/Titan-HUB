@@ -242,7 +242,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.pink, borderWidth: 1.5, borderColor: colors.background,
   },
   chip: {
-    flexDirection: 'row', alignItems: 'center', gap: 6, height: 40, paddingHorizontal: 15,
+    flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 40, paddingHorizontal: 15, paddingVertical: 6,
     borderRadius: radius.pill, maxWidth: 240,
   },
   chipFlat: {

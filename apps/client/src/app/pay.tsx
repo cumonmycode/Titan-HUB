@@ -176,7 +176,7 @@ export default function PayScreen() {
           <View style={[styles.column, styles.amountArea]}>
             <Text style={styles.hint}>{target?.hint}</Text>
             <View style={styles.amountBox}>
-              <Text style={[styles.amount, !amountStr && styles.amountEmpty]} numberOfLines={1} adjustsFontSizeToFit>
+              <Text style={[styles.amount, !amountStr && styles.amountEmpty]} numberOfLines={1} adjustsFontSizeToFit maxFontSizeMultiplier={1.1}>
                 {amountStr ? `${groupDigits(amountStr)} ₽` : '0 ₽'}
               </Text>
             </View>
@@ -305,7 +305,7 @@ const styles = StyleSheet.create({
   column: { width: '100%', maxWidth: MAX_WIDTH, alignSelf: 'center', paddingHorizontal: GUTTER },
   amountArea: { flex: 1, justifyContent: 'center', minHeight: 200 },
   hint: { ...StyleSheet.flatten(type.caption), textAlign: 'center' },
-  amountBox: { alignItems: 'center', justifyContent: 'center', height: 80, marginTop: space.xs },
+  amountBox: { alignItems: 'center', justifyContent: 'center', minHeight: 80, marginTop: space.xs },
   amount: { color: colors.text, fontSize: 56, fontWeight: '900', fontStyle: 'italic', letterSpacing: -1.5, fontVariant: ['tabular-nums'] },
   amountEmpty: { color: colors.textMuted },
   quickRow: { flexDirection: 'row', justifyContent: 'center', gap: space.sm, minHeight: 40, flexWrap: 'wrap', marginTop: space.xs },

@@ -16,6 +16,8 @@ import { RollingNumber } from './rolling-number';
 import { TierBadge } from './ui';
 
 const CARD_HEIGHT = 212;
+/** Карта фиксированной высоты: крупный системный шрифт растёт не больше чем на 15 %. */
+const CARD_FONT_SCALE = 1.15;
 const TILT = 13;
 
 export function HoloCard({
@@ -105,26 +107,26 @@ export function HoloCard({
         <View style={styles.shade} pointerEvents="none" />
         <View style={styles.content} pointerEvents="none">
           <View style={styles.top}>
-            <Text style={styles.brand}>TITAN</Text>
+            <Text maxFontSizeMultiplier={CARD_FONT_SCALE} style={styles.brand}>TITAN</Text>
             <TierBadge label={tierLabel} color={tierColor} onCard />
           </View>
           <View style={styles.chip} />
           <View>
             {bonusHidden ? (
-              <Text style={styles.soon}>Скоро тут появятся бонусы ⭐</Text>
+              <Text maxFontSizeMultiplier={CARD_FONT_SCALE} style={styles.soon}>Скоро тут появятся бонусы ⭐</Text>
             ) : (
               <>
-                <Text style={styles.label}>Бонусный баланс</Text>
+                <Text maxFontSizeMultiplier={CARD_FONT_SCALE} style={styles.label}>Бонусный баланс</Text>
                 <View style={styles.bonusRow}>
-                  <RollingNumber value={bonus} format={fmtBonus} style={styles.bonus} />
-                  <Text style={styles.star}> ⭐</Text>
+                  <RollingNumber value={bonus} format={fmtBonus} style={styles.bonus} maxFontSizeMultiplier={CARD_FONT_SCALE} />
+                  <Text maxFontSizeMultiplier={CARD_FONT_SCALE} style={styles.star}> ⭐</Text>
                 </View>
-                {expiring ? <Text style={styles.expiring} numberOfLines={1}>🔥 {expiring}</Text> : null}
+                {expiring ? <Text maxFontSizeMultiplier={CARD_FONT_SCALE} style={styles.expiring} numberOfLines={1}>🔥 {expiring}</Text> : null}
               </>
             )}
             <View style={styles.bottom}>
-              <Text style={styles.nick} numberOfLines={1}>@{nickname || 'гость'}</Text>
-              {since ? <Text style={styles.since}>с {since}</Text> : null}
+              <Text maxFontSizeMultiplier={CARD_FONT_SCALE} style={styles.nick} numberOfLines={1}>@{nickname || 'гость'}</Text>
+              {since ? <Text maxFontSizeMultiplier={CARD_FONT_SCALE} style={styles.since}>с {since}</Text> : null}
             </View>
           </View>
         </View>

@@ -51,7 +51,7 @@ export function Keypad({ value, onChange, disabled }: { value: string; onChange:
             <View style={[styles.key, pressed && styles.keyPressed]}>
               {k === 'del'
                 ? <Icon name="backspace" size={24} color={colors.textBody} weight="medium" />
-                : <Text style={styles.keyText}>{k}</Text>}
+                : <Text style={styles.keyText} maxFontSizeMultiplier={1.2}>{k}</Text>}
             </View>
           )}
         </Pressable>
@@ -63,7 +63,7 @@ export function Keypad({ value, onChange, disabled }: { value: string; onChange:
 const styles = StyleSheet.create({
   grid: { flexDirection: 'row', flexWrap: 'wrap', rowGap: 6 },
   cell: { width: '33.333%', alignItems: 'center' },
-  key: { width: '82%', height: 54, alignItems: 'center', justifyContent: 'center', borderRadius: 27 },
+  key: { width: '82%', minHeight: 54, alignItems: 'center', justifyContent: 'center', borderRadius: 27 },
   keyPressed: { backgroundColor: 'rgba(255,255,255,0.10)' },
   keyText: { color: colors.text, fontSize: 28, fontWeight: '500', fontVariant: ['tabular-nums'] },
 });

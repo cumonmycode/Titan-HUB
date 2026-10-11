@@ -5,8 +5,8 @@ import { type StyleProp, Text, type TextStyle } from 'react-native';
 import { useReducedMotion } from 'react-native-reanimated';
 
 export function RollingNumber({
-  value, format, style, duration = 700,
-}: { value: number; format: (n: number) => string; style?: StyleProp<TextStyle>; duration?: number }) {
+  value, format, style, duration = 700, maxFontSizeMultiplier,
+}: { value: number; format: (n: number) => string; style?: StyleProp<TextStyle>; duration?: number; maxFontSizeMultiplier?: number }) {
   const reduceMotion = useReducedMotion();
   const [shown, setShown] = useState(value);
   const fromRef = useRef(value);
@@ -30,5 +30,9 @@ export function RollingNumber({
     return () => cancelAnimationFrame(frame);
   }, [value, duration, reduceMotion]);
 
-  return <Text style={[{ fontVariant: ['tabular-nums'] }, style]}>{format(shown)}</Text>;
+  return (
+    <Text style={[{ fontVariant: ['tabular-nums'] }, style]} numberOfLines={1} adjustsFontSizeToFit maxFontSizeMultiplier={maxFontSizeMultiplier}>
+      {format(shown)}
+    </Text>
+  );
 }

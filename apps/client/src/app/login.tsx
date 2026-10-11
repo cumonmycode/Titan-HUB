@@ -145,7 +145,7 @@ export default function LoginScreen() {
                   <View style={styles.codeRow}>
                     {login.code.split('').map((d, i) => (
                       <Surface key={i} tone={colors.violet} style={styles.codeDigit}>
-                        <Text style={styles.codeText}>{d}</Text>
+                        <Text style={styles.codeText} maxFontSizeMultiplier={1.1}>{d}</Text>
                       </Surface>
                     ))}
                   </View>
