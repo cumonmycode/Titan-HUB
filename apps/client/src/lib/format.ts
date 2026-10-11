@@ -42,6 +42,12 @@ export function dayTitle(iso: string, now = new Date()): string {
   return d.getFullYear() === now.getFullYear() ? dayMonth.format(d) : dayMonthYear.format(d);
 }
 
+/** «21 октября» — год только если не текущий. */
+export function calendarDate(iso: string, now = new Date()): string {
+  const d = new Date(iso);
+  return d.getFullYear() === now.getFullYear() ? dayMonth.format(d) : dayMonthYear.format(d);
+}
+
 export function dayKey(iso: string): string {
   const d = new Date(iso);
   return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
