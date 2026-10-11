@@ -13,6 +13,7 @@ import { CheckDetailView } from '@/components/CheckDetailView'
 import { PullToRefreshContainer } from '@/components/PullToRefreshContainer'
 import { useToast } from '@/components/Toast'
 import { NotificationBell } from '@/components/NotificationBell'
+import { TaiButton } from '@/components/tai/TaiPanel'
 import { useNotifications } from '@/components/NotificationsProvider'
 
 interface CheckCard {
@@ -556,6 +557,8 @@ function PosPageInner() {
                 <Icon name="money_return" size={18} color="var(--on-surface-variant)" />
               </button>
             )}
+            {/* Tai: «открой чек на Саида», «как идёт смена?» */}
+            <TaiButton context={{ screen: 'pos' }} />
             {/* Колокольчик уведомлений: бейдж непрочитанных + тряска при важных */}
             <NotificationBell />
           </div>

@@ -10,6 +10,7 @@ import { ru } from 'date-fns/locale'
 import { useCountUp } from '@/hooks/useCountUp'
 import { StateView } from '@/components/StateView'
 import { Chip } from '@/components/manage/DesignSystem'
+import { TaiButton } from '@/components/tai/TaiPanel'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 // ВНИМАНИЕ: 'expenses' здесь нет — «Расходы» — отдельный раздел /manage/expenses.
@@ -123,15 +124,25 @@ function getRange(range: ReportRange, from: string, to: string): [string, string
 // бизнес-день, а не календарные сутки. Якорь «сегодня» и час начала дня берём с
 // сервера (/analytics/business-day, настройка business_day_start_hour); from/to
 // (YYYY-MM-DD) шлём в /analytics/*, где они разворачиваются в [from h:00, to+1 h:00).
-type PeriodPreset = 'today' | 'yesterday' | '7d' | '30d' | 'month' | 'custom'
-const PERIOD_OPTS: { key: PeriodPreset; label: string }[] = [
+type PeriodPreset = 'today' | 'yesterday' | 'thisWeek' | 'month' | 'days7' | 'days30' | 'lastWeek' | 'lastMonth' | 'days90' | 'year' | 'custom'
+// Быстрые периоды — чипами; остальные — в меню календаря (как в приложении HUB).
+const QUICK_OPTS: { key: PeriodPreset; label: string }[] = [
   { key: 'today', label: 'Сегодня' },
   { key: 'yesterday', label: 'Вчера' },
-  { key: '7d', label: '7 дней' },
-  { key: '30d', label: '30 дней' },
+  { key: 'thisWeek', label: 'Эта неделя' },
   { key: 'month', label: 'Этот месяц' },
-  { key: 'custom', label: 'Период' },
 ]
+const MORE_OPTS: { key: PeriodPreset; label: string }[] = [
+  { key: 'days7', label: '7 дней' },
+  { key: 'days30', label: '30 дней' },
+  { key: 'lastWeek', label: 'Прошлая неделя' },
+  { key: 'lastMonth', label: 'Прошлый месяц' },
+  { key: 'days90', label: '90 дней' },
+  { key: 'year', label: 'С начала года' },
+]
+const PERIOD_OPTS = [...QUICK_OPTS, ...MORE_OPTS]
+// Старые ключи из localStorage (до календаря) — к новым.
+const LEGACY_PRESETS: Record<string, PeriodPreset> = { '7d': 'days7', '30d': 'days30' }
 const MSK_OFFSET = 3 * 3600 * 1000
 // Запасной расчёт, пока сервер не ответил: тот же сдвиг, что в bizDayStr на сервере.
 function localBizDay(startHour: number): string {
@@ -159,18 +170,27 @@ function bizHoursLabel(startHour: number): string {
   return `${hh} → ${hh}`
 }
 function periodRange(preset: PeriodPreset, cf: string, ct: string, today: string): { from: string; to: string } {
+  // Неделя — с понедельника (бизнес-дни клуба).
+  const monday = addDaysStr(today, -((new Date(`${today}T12:00:00Z`).getUTCDay() + 6) % 7))
+  const monthStart = `${today.slice(0, 7)}-01`
   switch (preset) {
     case 'today': return { from: today, to: today }
     case 'yesterday': return { from: addDaysStr(today, -1), to: addDaysStr(today, -1) }
-    case '7d': return { from: addDaysStr(today, -6), to: today }
-    case '30d': return { from: addDaysStr(today, -29), to: today }
-    case 'month': return { from: `${today.slice(0, 7)}-01`, to: today }
+    case 'thisWeek': return { from: monday, to: today }
+    case 'month': return { from: monthStart, to: today }
+    case 'days7': return { from: addDaysStr(today, -6), to: today }
+    case 'days30': return { from: addDaysStr(today, -29), to: today }
+    case 'lastWeek': return { from: addDaysStr(monday, -7), to: addDaysStr(monday, -1) }
+    case 'lastMonth': { const end = addDaysStr(monthStart, -1); return { from: `${end.slice(0, 7)}-01`, to: end } }
+    case 'days90': return { from: addDaysStr(today, -89), to: today }
+    case 'year': return { from: `${today.slice(0, 4)}-01-01`, to: today }
     case 'custom': return { from: cf || addDaysStr(today, -6), to: ct || today }
   }
 }
 function periodLabel(preset: PeriodPreset, from: string, to: string): string {
-  if (preset === 'custom' || preset === 'month') return from === to ? from : `${from} — ${to}`
-  return PERIOD_OPTS.find(o => o.key === preset)?.label ?? ''
+  const range = from === to ? dayLabel(from) : `${dayLabel(from)} — ${dayLabel(to)}`
+  const name = PERIOD_OPTS.find(o => o.key === preset)?.label
+  return name ? `${name}, ${range}` : range
 }
 
 function usePeriod() {
@@ -183,7 +203,7 @@ function usePeriod() {
       const raw = localStorage.getItem('analytics:period')
       if (raw) {
         const p = JSON.parse(raw)
-        if (p.preset) setPreset(p.preset)
+        if (p.preset) setPreset(LEGACY_PRESETS[p.preset] ?? (PERIOD_OPTS.some(o => o.key === p.preset) || p.preset === 'custom' ? p.preset : 'today'))
         if (p.customFrom) setCustomFrom(p.customFrom)
         if (p.customTo) setCustomTo(p.customTo)
       }
@@ -198,20 +218,59 @@ function usePeriod() {
 }
 
 function PeriodSelector({ p }: { p: ReturnType<typeof usePeriod> }) {
+  const [open, setOpen] = useState(false)
+  const [from, setFrom] = useState(p.from)
+  const [to, setTo] = useState(p.to)
+  const moreActive = p.preset === 'custom' || MORE_OPTS.some(o => o.key === p.preset)
+  useEffect(() => {
+    if (!open) return
+    const close = (e: MouseEvent) => { if (!(e.target as HTMLElement).closest('[data-period-menu]')) setOpen(false) }
+    document.addEventListener('mousedown', close)
+    return () => document.removeEventListener('mousedown', close)
+  }, [open])
+  const item = (active: boolean): React.CSSProperties => ({ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, width: '100%', padding: '9px 12px', borderRadius: 10, border: 'none', background: active ? 'rgba(139,92,246,0.14)' : 'transparent', color: active ? 'var(--primary-violet)' : 'var(--on-surface)', fontSize: 13, fontWeight: active ? 700 : 500, cursor: 'pointer', textAlign: 'left' })
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
       <div style={{ display: 'flex', gap: 6, overflowX: 'auto', scrollbarWidth: 'none' }}>
-        {PERIOD_OPTS.map(o => (
+        {QUICK_OPTS.map(o => (
           <Chip key={o.key} active={p.preset === o.key} onClick={() => p.setPreset(o.key)} size="sm">{o.label}</Chip>
         ))}
       </div>
-      {p.preset === 'custom' && (
-        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-          <input type="date" value={p.customFrom} onChange={e => p.setCustomFrom(e.target.value)} style={{ padding: '5px 8px', borderRadius: 8, border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.05)', color: 'var(--on-surface)', fontSize: 12 }} />
-          <span style={{ color: 'var(--on-surface-variant)', fontSize: 12 }}>—</span>
-          <input type="date" value={p.customTo} onChange={e => p.setCustomTo(e.target.value)} style={{ padding: '5px 8px', borderRadius: 8, border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.05)', color: 'var(--on-surface)', fontSize: 12 }} />
-        </div>
-      )}
+      {/* Остальные периоды и свои даты — в календаре, как в приложении. */}
+      <div data-period-menu style={{ position: 'relative' }}>
+        <button
+          onClick={() => { setFrom(p.from); setTo(p.to); setOpen(v => !v) }}
+          aria-label="Другой период"
+          aria-expanded={open}
+          title="Другой период"
+          style={{ width: 34, height: 34, borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', border: `1px solid ${moreActive ? 'var(--primary-violet)' : 'rgba(255,255,255,0.1)'}`, background: moreActive ? 'rgba(139,92,246,0.14)' : 'rgba(255,255,255,0.05)', color: moreActive ? 'var(--primary-violet)' : 'var(--on-surface-variant)' }}
+        >
+          <Icon name="calendar_month" size={17} />
+        </button>
+        {open && (
+          <div className="glass-l1" style={{ position: 'absolute', right: 0, top: 40, zIndex: 50, width: 240, borderRadius: 14, padding: 6, boxShadow: '0 12px 32px rgba(0,0,0,0.45)', background: 'rgba(29,26,36,0.98)' }}>
+            {MORE_OPTS.map(o => (
+              <button key={o.key} style={item(p.preset === o.key)} onClick={() => { p.setPreset(o.key); setOpen(false) }}>
+                {o.label}{p.preset === o.key && <Icon name="check" size={15} />}
+              </button>
+            ))}
+            <div style={{ borderTop: '1px solid rgba(255,255,255,0.08)', margin: '6px 4px 0', padding: '10px 6px 6px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <span style={{ fontSize: 11, color: 'var(--on-surface-variant)' }}>Свои даты</span>
+              <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                <input type="date" value={from} max={to} onChange={e => setFrom(e.target.value)} style={{ ...INP, padding: '6px 8px', flex: 1, minWidth: 0 }} />
+                <input type="date" value={to} min={from} onChange={e => setTo(e.target.value)} style={{ ...INP, padding: '6px 8px', flex: 1, minWidth: 0 }} />
+              </div>
+              <button
+                disabled={!from || !to}
+                onClick={() => { p.setCustomFrom(from <= to ? from : to); p.setCustomTo(from <= to ? to : from); p.setPreset('custom'); setOpen(false) }}
+                style={{ padding: '8px 12px', borderRadius: 10, border: 'none', background: 'var(--primary-violet)', color: '#fff', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}
+              >
+                Показать
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   )
 }
@@ -287,7 +346,7 @@ function DeltaBadge({ delta }: { delta: number }) {
   )
 }
 
-function PayBreakdown({ data }: { data: { method: string; total: string | number }[] }) {
+function PayBreakdown({ data, onPick }: { data: { method: string; total: string | number }[]; onPick?: (method: string) => void }) {
   const total = data.reduce((s, p) => s + parseNum(p.total), 0)
   if (!data.length) return <p style={{ fontSize: 12, color: 'rgba(204,195,216,0.4)', textAlign: 'center', padding: '20px 0' }}>Нет данных</p>
   const payAria = 'Методы оплаты: ' + data.map(p => {
@@ -299,19 +358,21 @@ function PayBreakdown({ data }: { data: { method: string; total: string | number
       <div role="img" aria-label={payAria} style={{ height: 18, borderRadius: 9999, display: 'flex', overflow: 'hidden', marginBottom: 14, gap: 2 }}>
         {data.map(p => {
           const pct = total > 0 ? (parseNum(p.total) / total) * 100 : 0
-          return <div key={p.method} style={{ width: `${pct}%`, minWidth: pct > 0 ? 3 : 0, background: PAY_COLORS[p.method] ?? '#8B5CF6' }} title={`${payLabel(p.method)}: ${pct.toFixed(1)}%`} />
+          return <div key={p.method} onClick={() => onPick?.(p.method)} style={{ width: `${pct}%`, minWidth: pct > 0 ? 3 : 0, background: PAY_COLORS[p.method] ?? '#8B5CF6', cursor: onPick ? 'pointer' : 'default' }} title={`${payLabel(p.method)}: ${pct.toFixed(1)}%`} />
         })}
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
         {data.map(p => {
           const pct = total > 0 ? ((parseNum(p.total) / total) * 100).toFixed(0) : '0'
           return (
-            <div key={p.method} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <button key={p.method} disabled={!onPick} onClick={() => onPick?.(p.method)} title={onPick ? `Чеки: ${payLabel(p.method)}` : undefined}
+              style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', padding: '4px 0', background: 'transparent', border: 'none', color: 'inherit', cursor: onPick ? 'pointer' : 'default', textAlign: 'left' }}>
               <div style={{ width: 8, height: 8, borderRadius: '50%', background: PAY_COLORS[p.method] ?? '#8B5CF6', flexShrink: 0 }} />
               <span style={{ flex: 1, fontSize: 12, color: 'var(--on-surface-variant)' }}>{payLabel(p.method)}</span>
               <span style={{ fontSize: 12, fontWeight: 700 }}>{fmt(parseNum(p.total))} ₽</span>
               <span style={{ fontSize: 11, color: 'rgba(204,195,216,0.45)', width: 30, textAlign: 'right' }}>{pct}%</span>
-            </div>
+              {onPick && <Icon name="chevron_right" size={14} color="rgba(204,195,216,0.4)" />}
+            </button>
           )
         })}
       </div>
@@ -684,9 +745,11 @@ function TodayTab({ businessDay }: { businessDay: string }) {
 }
 
 // ─── Tab: Сводка (live overview) ──────────────────────────────────────────────
-function OverviewTab({ overview, periodText }: { overview: any; periodText: string }) {
-  const { startHour } = useBusinessDay()
+function OverviewTab({ overview, periodText, from, to }: { overview: any; periodText: string; from: string; to: string }) {
   const [modal, setModal] = useState<null | { title: string; subtitle?: string; b: NetBreak }>(null)
+  const [drill, setDrill] = useState<Drill | null>(null)
+  const [dayMethod, setDayMethod] = useState<string | null>(null)
+  const oneDay = from === to
 
   const cur = (overview?.current ?? {}) as NetBreak & { margin: number | null }
   const today: NetBreak | undefined = overview?.today
@@ -820,36 +883,16 @@ function OverviewTab({ overview, periodText }: { overview: any; periodText: stri
         </div>
       )}
 
-      {/* Бизнес-день (сегодня) — всегда отдельно */}
-      {today && (
-        <div className="glass-l2" onClick={() => setModal({ title: 'Выручка · бизнес-день', subtitle: `${bizDayLabel(overview?.businessDay ?? '')} · ${bizHoursLabel(startHour)}`, b: today })}
-          style={{ borderRadius: 16, padding: 20, cursor: 'pointer' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-            <span style={{ ...LBL, margin: 0 }}>Сегодня · бизнес-день</span>
-            <Icon name="chevron_right" size={16} color="rgba(204,195,216,0.4)" />
-          </div>
-          <p style={{ fontSize: 11, color: 'rgba(204,195,216,0.45)', margin: '0 0 14px' }}>{bizDayLabel(overview?.businessDay ?? '')} · {bizHoursLabel(startHour)}</p>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-            {[
-              { label: 'Выручка', value: `${fmt(parseNum(today.gross))} ₽`, color: '#8B5CF6' },
-              { label: 'Чеков', value: String(today.checks ?? 0), color: '#4cd7f6' },
-              { label: 'Средний чек', value: `${fmt(parseNum(today.avgCheck))} ₽`, color: '#A78BFA' },
-              { label: 'Эквайринг (потери)', value: `${fmt(parseNum(today.commission))} ₽`, color: '#F59E0B' },
-            ].map(it => (
-              <div key={it.label} style={{ padding: '12px 14px', borderRadius: 10, background: 'rgba(255,255,255,0.04)' }}>
-                <p style={{ fontSize: 18, fontWeight: 800, margin: '0 0 4px', color: it.color, lineHeight: 1 }}>{it.value}</p>
-                <p style={{ fontSize: 10, color: 'var(--on-surface-variant)', margin: 0, textTransform: 'uppercase', letterSpacing: '0.06em', fontFamily: "'JetBrains Mono',monospace" }}>{it.label}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
       {/* Способы оплаты — строго за выбранный период (§9.1) */}
       <div className="glass-l2" style={{ borderRadius: 16, padding: 20 }}>
         <span style={LBL}>Методы оплаты — {periodText}</span>
-        <PayBreakdown data={overview?.paymentBreakdown ?? []} />
+        {/* Способ оплаты нажимается: за день — фильтр списка чеков ниже, за период — чеки этим способом. */}
+        <PayBreakdown data={overview?.paymentBreakdown ?? []} onPick={(method) => oneDay ? setDayMethod(m => m === method ? null : method) : setDrill({ from, to, method, title: `Чеки: ${payLabel(method)}` })} />
       </div>
+
+      {/* За один день — все чеки дня сразу на обзоре. */}
+      {oneDay && <DayChecks from={from} method={dayMethod} onClearMethod={() => setDayMethod(null)} />}
+      {drill && <DrillChecksSheet drill={drill} onClose={() => setDrill(null)} />}
 
       {modal && <KpiBreakdownModal title={modal.title} subtitle={modal.subtitle} b={modal.b} onClose={() => setModal(null)} />}
     </div>
@@ -861,6 +904,7 @@ function ReportsTab({ from, to }: { from: string; to: string }) {
   const [subTab, setSubTab] = useState<'revenue' | 'products' | 'payments'>('revenue')
   const [metricModal, setMetricModal] = useState<null | { title: string; subtitle?: string; value: string; valueColor?: string; rows: { label: string; value: string; color?: string }[] }>(null)
   const [openItem, setOpenItem] = useState<any | null>(null)
+  const [drill, setDrill] = useState<Drill | null>(null)
 
   const { data: revData } = useQuery({
     queryKey: ['analytics', 'revenue', from, to],
@@ -979,14 +1023,15 @@ function ReportsTab({ from, to }: { from: string; to: string }) {
                 const pct = maxDayRev > 0 ? (rev / maxDayRev) * 100 : 0
                 const isZero = rev === 0
                 return (
-                  <div key={d.date} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <button key={d.date} onClick={() => setDrill({ from: d.date, to: d.date, title: `Чеки за ${dayLabel(d.date)}` })} title={`Чеки за ${dayLabel(d.date)}`} className="ti-bar-row"
+                    style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', padding: 0, background: 'transparent', border: 'none', color: 'inherit', cursor: 'pointer' }}>
                     <span style={{ fontSize: 11, color: 'var(--on-surface-variant)', width: 50, flexShrink: 0, textAlign: 'right' }}>{dayLabel(d.date)}</span>
                     {/* Нулевой день: видимая пустая дорожка (а не пропуск) — провал выручки заметен. */}
                     <div style={{ flex: 1, height: 22, borderRadius: 6, background: 'rgba(255,255,255,0.04)', overflow: 'hidden', border: isZero ? '1px dashed rgba(244,63,94,0.3)' : 'none', boxSizing: 'border-box' }}>
-                      <div style={{ height: '100%', width: `${pct}%`, background: 'linear-gradient(90deg, #8B5CF6, #4cd7f6)', borderRadius: 6, transition: 'width 0.4s' }} />
+                      <div style={{ height: '100%', width: `${pct}%`, background: 'var(--primary-violet)', borderRadius: 6, transition: 'width 0.4s' }} />
                     </div>
                     <span style={{ fontSize: 11, fontWeight: 700, width: 80, textAlign: 'right', flexShrink: 0, color: isZero ? 'rgba(244,63,94,0.7)' : 'var(--on-surface)' }}>{isZero ? '0 ₽' : `${fmt(rev)} ₽`}</span>
-                  </div>
+                  </button>
                 )
               })}
             </div>
@@ -1062,15 +1107,16 @@ function ReportsTab({ from, to }: { from: string; to: string }) {
                   const pct = totalPay > 0 ? (parseNum(p.total) / totalPay) * 100 : 0
                   const color = PAY_COLORS[p.method] ?? '#94A3B8'
                   return (
-                    <div key={p.method}>
+                    <button key={p.method} onClick={() => setDrill({ from, to, method: p.method, title: `Чеки: ${payLabel(p.method)}` })} title={`Чеки: ${payLabel(p.method)}`}
+                      style={{ display: 'block', width: '100%', padding: 0, background: 'transparent', border: 'none', color: 'inherit', cursor: 'pointer', textAlign: 'left' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
                         <span style={{ fontSize: 12, color: 'var(--on-surface-variant)' }}>{payLabel(p.method)}</span>
-                        <span style={{ fontSize: 12, fontWeight: 700 }}>{fmt(parseNum(p.total))} ₽ · {pct.toFixed(1)}%</span>
+                        <span style={{ fontSize: 12, fontWeight: 700 }}>{fmt(parseNum(p.total))} ₽ · {pct.toFixed(1)}% ›</span>
                       </div>
                       <div style={{ height: 6, borderRadius: 3, background: 'rgba(255,255,255,0.06)', overflow: 'hidden' }}>
                         <div style={{ height: '100%', width: `${pct}%`, background: color, borderRadius: 3 }} />
                       </div>
-                    </div>
+                    </button>
                   )
                 })
               })()}
@@ -1081,6 +1127,7 @@ function ReportsTab({ from, to }: { from: string; to: string }) {
 
       {metricModal && <MetricDetailModal title={metricModal.title} subtitle={metricModal.subtitle} value={metricModal.value} valueColor={metricModal.valueColor} rows={metricModal.rows} onClose={() => setMetricModal(null)} />}
       {openItem && <ItemDetailModal item={openItem} totalRev={totalProdRev} onClose={() => setOpenItem(null)} />}
+      {drill && <DrillChecksSheet drill={drill} onClose={() => setDrill(null)} />}
     </div>
   )
 }
@@ -1579,6 +1626,57 @@ function ChecksTab({ from, to }: { from: string; to: string }) {
   )
 }
 
+// ─── Переход из графика в чеки: день, способ оплаты ───────────────────────────
+type Drill = { from: string; to: string; method?: string; title: string }
+
+function useChecks(from: string, to: string) {
+  return useQuery({
+    queryKey: ['analytics', 'checks', from, to],
+    queryFn: () => api.get<any>(`/analytics/checks?from=${from}&to=${to}`),
+    enabled: !!from && !!to,
+  })
+}
+
+/** Чеки за столбец или долю графика — шторкой поверх отчёта. */
+function DrillChecksSheet({ drill, onClose }: { drill: Drill; onClose: () => void }) {
+  const [openId, setOpenId] = useState<string | null>(null)
+  const { data, isLoading } = useChecks(drill.from, drill.to)
+  const checks: any[] = (data?.checks ?? []).filter((c: any) => !drill.method || (c.payments ?? []).some((p: any) => p.method === drill.method))
+  const total = checks.reduce((s, c) => s + parseNum(c.totalAmount), 0)
+  return (
+    <Sheet title={drill.title} subtitle={isLoading ? 'Загружаем…' : `${checks.length} чек. · ${fmt(total)} ₽ · ${drill.from === drill.to ? dayLabel(drill.from) : `${dayLabel(drill.from)} — ${dayLabel(drill.to)}`}`} onClose={onClose}>
+      <div style={{ margin: '0 -22px' }}>
+        {isLoading ? <StateView state="loading" /> : checks.length === 0 ? <p style={{ padding: 24, textAlign: 'center', fontSize: 13, color: 'var(--on-surface-variant)' }}>Чеков нет</p> : checks.map(c => <CheckRow key={c.id} c={c} onClick={() => setOpenId(c.id)} />)}
+      </div>
+      {openId && <CheckDetailModal id={openId} onClose={() => setOpenId(null)} />}
+    </Sheet>
+  )
+}
+
+/** Все чеки одного дня на обзоре; способ оплаты из блока выше сужает список. */
+function DayChecks({ from, method, onClearMethod }: { from: string; method: string | null; onClearMethod: () => void }) {
+  const [openId, setOpenId] = useState<string | null>(null)
+  const { data, isLoading, isError, refetch } = useChecks(from, from)
+  const checks: any[] = (data?.checks ?? []).filter((c: any) => !method || (c.payments ?? []).some((p: any) => p.method === method))
+  const total = checks.reduce((s, c) => s + parseNum(c.totalAmount), 0)
+  return (
+    <div className="glass-l2" style={{ borderRadius: 16, overflow: 'hidden' }}>
+      <div style={{ padding: '14px 18px', borderBottom: '1px solid rgba(255,255,255,0.06)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
+        <span style={{ ...LBL, margin: 0 }}>Чеки за день{method ? ` · ${payLabel(method)}` : ''}</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span style={{ fontSize: 12, color: 'var(--on-surface-variant)' }}>{checks.length} · {fmt(total)} ₽</span>
+          {method && <button onClick={onClearMethod} style={{ fontSize: 11, color: 'var(--primary-violet)', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600 }}>Все</button>}
+        </div>
+      </div>
+      {isLoading ? <StateView state="loading" />
+        : isError ? <StateView state="error" description="Не удалось загрузить чеки." action={{ label: 'Повторить', onClick: () => refetch() }} />
+        : checks.length === 0 ? <p style={{ padding: 28, textAlign: 'center', fontSize: 13, color: 'var(--on-surface-variant)' }}>Закрытых чеков нет</p>
+        : checks.map(c => <CheckRow key={c.id} c={c} onClick={() => setOpenId(c.id)} />)}
+      {openId && <CheckDetailModal id={openId} onClose={() => setOpenId(null)} />}
+    </div>
+  )
+}
+
 // ─── Tab: Мероприятия (часы/кол-во/дни + выручка, заказчики, загрузка) ────────
 function EvSection({ title, right, children }: { title: string; right?: React.ReactNode; children: React.ReactNode }) {
   return (
@@ -2056,10 +2154,25 @@ export default function DashboardPage() {
   // Глубокая ссылка на вкладку: /dashboard?tab=expenses → активируем вкладку.
   // Читаем window.location в useEffect (без next/navigation useSearchParams,
   // чтобы не требовать Suspense-границу).
+  // Переходы из Tai: ?from&to — период, ?check — чек, ?player — карточка гостя.
+  const [linkedCheck, setLinkedCheck] = useState<string | null>(null)
+  const [linkedPlayer, setLinkedPlayer] = useState<string | null>(null)
   useEffect(() => {
     const TAB_KEYS: MainTab[] = ['overview', 'finance', 'events', 'games', 'bar', 'players', 'staff', 'feedback']
-    const tab = new URLSearchParams(window.location.search).get('tab')
+    const params = new URLSearchParams(window.location.search)
+    const tab = params.get('tab')
     if (tab && (TAB_KEYS as string[]).includes(tab)) setActiveTab(tab as MainTab)
+    const from = params.get('from')
+    const to = params.get('to')
+    if (from && to && /^\d{4}-\d{2}-\d{2}$/.test(from) && /^\d{4}-\d{2}-\d{2}$/.test(to)) {
+      period.setCustomFrom(from)
+      period.setCustomTo(to)
+      period.setPreset('custom')
+    }
+    setLinkedCheck(params.get('check'))
+    setLinkedPlayer(params.get('player'))
+    // Период — разовая установка по ссылке.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // Свайп для обновления (как на экране кассы) — перезагружает все витрины аналитики.
@@ -2118,6 +2231,7 @@ export default function DashboardPage() {
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
             <PeriodSelector p={period} />
+            <TaiButton context={{ screen: 'analytics', period: { from: period.from, to: period.to } }} />
             <button onClick={() => { track('export_pdf', { section: activeTab }); if (typeof window !== 'undefined') window.print() }} title="Печать / сохранить в PDF" style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '6px 10px', borderRadius: 8, border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.05)', color: 'var(--on-surface-variant)', fontSize: 11, fontWeight: 600, cursor: 'pointer' }}>
               <Icon name="upload_file" size={14} /> PDF
             </button>
@@ -2145,7 +2259,7 @@ export default function DashboardPage() {
       <div style={{ flex: 1, minHeight: 0 }}>
         <PullToRefreshContainer onRefresh={onRefresh}>
           <div style={{ padding: '16px clamp(16px, 2vw, 24px) var(--bottom-nav-clear)', width: '100%', maxWidth: 'var(--content-wide)', margin: '0 auto', boxSizing: 'border-box' }}>
-            {activeTab === 'overview'  && (overview ? <OverviewTab overview={overview} periodText={period.label} /> : ovError ? <StateView state="error" description="Не удалось загрузить аналитику." action={{ label: 'Повторить', onClick: () => refetchOv() }} /> : <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}><Skeleton h={156} /><SkeletonCards /></div>)}
+            {activeTab === 'overview'  && (overview ? <OverviewTab overview={overview} periodText={period.label} from={period.from} to={period.to} /> : ovError ? <StateView state="error" description="Не удалось загрузить аналитику." action={{ label: 'Повторить', onClick: () => refetchOv() }} /> : <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}><Skeleton h={156} /><SkeletonCards /></div>)}
             {activeTab === 'finance'   && <FinanceTab from={period.from} to={period.to} />}
             {activeTab === 'events'    && <EventsTab from={period.from} to={period.to} />}
             {activeTab === 'games'     && <TariffsTab from={period.from} to={period.to} />}
@@ -2157,7 +2271,11 @@ export default function DashboardPage() {
         </PullToRefreshContainer>
       </div>
 
+      {linkedCheck && <CheckDetailModal id={linkedCheck} onClose={() => setLinkedCheck(null)} />}
+      {linkedPlayer && <PlayerDetailModal player={{ playerId: linkedPlayer }} onClose={() => setLinkedPlayer(null)} />}
+
       <style>{`
+        .ti-bar-row:hover > div { background: rgba(255,255,255,0.07) !important; }
         @media (max-width: 768px) { .dash-row { grid-template-columns: 1fr !important; } }
         /* Скрываем скроллбар у таб-бара */
         div::-webkit-scrollbar { display: none; }

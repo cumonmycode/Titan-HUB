@@ -5,6 +5,7 @@ import { Component, useState, type ReactNode } from 'react'
 import { ToastProvider } from '@/components/Toast'
 import { NotificationsProvider } from '@/components/NotificationsProvider'
 import { ClubGate } from '@/components/ClubGate'
+import { TaiPanel } from '@/components/tai/TaiPanel'
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean }> {
   state = { hasError: false }
@@ -55,6 +56,8 @@ export function Providers({ children }: { children: React.ReactNode }) {
           <ClubGate>
             <NotificationsProvider>
               {children}
+              {/* Tai — панель поверх любого экрана (касса, чек, аналитика). */}
+              <TaiPanel />
             </NotificationsProvider>
           </ClubGate>
         </ToastProvider>

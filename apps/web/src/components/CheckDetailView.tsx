@@ -7,6 +7,7 @@ import { funnyGuestName } from '@/lib/funnyName'
 import { SwipeableRow } from '@/components/SwipeableRow'
 import { Icon } from '@/components/Icon'
 import { TaiLogo } from '@/components/TaiLogo'
+import { TaiButton } from '@/components/tai/TaiPanel'
 import { useToast } from '@/components/Toast'
 import { ConfirmDialog } from '@/components/manage/DesignSystem'
 import { TimeInput24 } from '@/components/TimeInput24'
@@ -1030,6 +1031,9 @@ export function CheckDetailView({ checkId, onBack, onClose }: CheckDetailViewPro
             </p>
           </div>
         </div>
+
+        {/* Tai знает этот чек: «добавь колу» — сюда. */}
+        {check?.status === 'open' && <TaiButton context={{ screen: 'check', checkId }} />}
 
         {check?.spaceId && (
         <button
