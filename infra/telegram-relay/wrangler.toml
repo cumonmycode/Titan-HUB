@@ -1,0 +1,10 @@
+# Шлюз Telegram (см. worker.js). Деплой: npx wrangler deploy
+# Секрет: npx wrangler secret put RELAY_KEY  (тот же ключ — в TELEGRAM_API_ROOT на сервере)
+name = "titan-telegram-relay"
+main = "worker.js"
+compatibility_date = "2026-09-01"
+workers_dev = false
+routes = [{ pattern = "tg.titanpos.ru", custom_domain = true }]
+
+[vars]
+ORIGIN_HOST = "titanpos.ru"

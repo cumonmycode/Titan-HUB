@@ -17,6 +17,7 @@ import {
   eq, and, inArray, isNotNull, sql, type Database,
 } from '@titan/database'
 import { isApnsToken, sendApns } from './apns.js'
+import { TG_API } from '../../lib/telegram.js'
 
 export type ClientNotifyKind = 'bonus' | 'deposit' | 'debt' | 'payment' | 'tier' | 'fund' | 'news' | 'system'
 
@@ -38,7 +39,7 @@ const WALLET_TOKEN = process.env['WALLET_BOT_TOKEN']
 export async function sendWalletTelegram(tgId: string, text: string): Promise<boolean> {
   if (!WALLET_TOKEN || !tgId) return false
   try {
-    const r = await fetch(`https://api.telegram.org/bot${WALLET_TOKEN}/sendMessage`, {
+    const r = await fetch(`${TG_API}/bot${WALLET_TOKEN}/sendMessage`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ chat_id: tgId, text, disable_web_page_preview: true }),

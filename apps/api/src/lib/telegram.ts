@@ -4,7 +4,10 @@
 // токена бота. (Чтение результатов опросов потребует getUpdates/вебхук — отдельно.)
 // ─────────────────────────────────────────────────────────────────────────────
 
-const TG_API = 'https://api.telegram.org'
+// Корень Bot API. На сервере в РФ api.telegram.org заблокирован — TELEGRAM_API_ROOT
+// указывает на шлюз (Cloudflare Worker, infra/telegram-relay), который проксирует
+// вызовы в Telegram. Без переменной — прямой адрес, как раньше.
+export const TG_API = (process.env['TELEGRAM_API_ROOT'] || 'https://api.telegram.org').replace(/\/+$/, '')
 
 export interface SendPollParams {
   chatId: string | number

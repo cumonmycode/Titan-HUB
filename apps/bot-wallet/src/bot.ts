@@ -13,6 +13,8 @@ import { createHmac, timingSafeEqual } from 'node:crypto'
 // ─────────────────────────────────────────────────────────────────────────────
 
 const LINK_SECRET = process.env['JWT_SECRET']
+// Корень Bot API: на сервере в РФ — шлюз (TELEGRAM_API_ROOT), иначе api.telegram.org.
+const TG_API_ROOT = (process.env['TELEGRAM_API_ROOT'] || 'https://api.telegram.org').replace(/\/+$/, '')
 if (!LINK_SECRET || LINK_SECRET.length < 32) {
   throw new Error('JWT_SECRET must be set (>=32 chars) for signed account-linking deep links')
 }
@@ -144,7 +146,7 @@ export interface WalletBotCtx {
 
 export function createWalletBot(ctx: WalletBotCtx): Bot {
   const { db } = ctx
-  const bot = new Bot(ctx.token)
+  const bot = new Bot(ctx.token, { client: { apiRoot: TG_API_ROOT } })
 
   const walletKeyboard = new InlineKeyboard()
     .text('💰 Баланс', 'balance').text('📋 История', 'history').row()

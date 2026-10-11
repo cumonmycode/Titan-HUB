@@ -10,6 +10,7 @@ import { requireAuth, requireRole, invalidateProfileAuthCache } from '../../midd
 import { hashPassword, hashPin } from '@titan/auth'
 import { isPinTaken, PIN_TAKEN_ERROR } from '../auth/staff-pin.js'
 import { createHmac } from 'node:crypto'
+import { TG_API } from '../../lib/telegram.js'
 
 // Username админ-бота для диплинка привязки. Если не задан в env — берём через
 // getMe (кэшируем). Токен админ-бота доступен API через env_file (.env).
@@ -19,7 +20,7 @@ async function getAdminBotUsername(): Promise<string | null> {
   const token = process.env['ADMIN_BOT_TOKEN']
   if (!token) return null
   try {
-    const r = await fetch(`https://api.telegram.org/bot${token}/getMe`)
+    const r = await fetch(`${TG_API}/bot${token}/getMe`)
     const j: any = await r.json()
     adminBotUsername = j?.result?.username ?? null
   } catch { /* ignore */ }

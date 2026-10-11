@@ -5,6 +5,7 @@ import {
   eq, and, inArray, isNull, desc, gt, sql, type Database,
 } from '@titan/database'
 import { notifChannel } from '../../lib/realtime.js'
+import { TG_API } from '../../lib/telegram.js'
 import { deliverStaffApns } from './staff-calls.js'
 
 // Переходный режим: пер-клубный db передаётся параметром, дефолт — модульный синглтон.
@@ -114,7 +115,7 @@ const TG_TOKEN = process.env['ADMIN_BOT_TOKEN']
 async function sendTelegram(tgId: string, text: string): Promise<void> {
   if (!TG_TOKEN || !tgId) return
   try {
-    await fetch(`https://api.telegram.org/bot${TG_TOKEN}/sendMessage`, {
+    await fetch(`${TG_API}/bot${TG_TOKEN}/sendMessage`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ chat_id: tgId, text, disable_web_page_preview: true }),

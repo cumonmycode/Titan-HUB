@@ -5,6 +5,7 @@ import { visitProgress } from '../../lib/loyalty.js'
 import { clientCollections } from '../resident/resident.router.js'
 import { getActiveSbpProvider, getProvider, resolveCreds, getPaymentTestMode } from '../pay/registry.js'
 import { getClubIntegration } from '../../lib/secrets.js'
+import { TG_API } from '../../lib/telegram.js'
 import { round2 } from '../../lib/money.js'
 // @ts-ignore
 import { passkeys } from '@titan/database'
@@ -64,7 +65,7 @@ async function getWalletBotUsername(): Promise<string | null> {
   const token = process.env['WALLET_BOT_TOKEN']
   if (!token) return null
   try {
-    const r = await fetch(`https://api.telegram.org/bot${token}/getMe`)
+    const r = await fetch(`${TG_API}/bot${token}/getMe`)
     const j = (await r.json()) as { result?: { username?: string } }
     walletBotUsername = j?.result?.username ?? null
   } catch { /* недоступно — вернём null, экран покажет инструкцию без ссылки */ }

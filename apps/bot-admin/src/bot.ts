@@ -32,6 +32,8 @@ import { createHmac, timingSafeEqual } from 'node:crypto'
 // ─────────────────────────────────────────────────────────────────────────────
 
 const LINK_SECRET = process.env['JWT_SECRET']
+// Корень Bot API: на сервере в РФ — шлюз (TELEGRAM_API_ROOT), иначе api.telegram.org.
+const TG_API_ROOT = (process.env['TELEGRAM_API_ROOT'] || 'https://api.telegram.org').replace(/\/+$/, '')
 const LINK_TTL_SECONDS = 15 * 60
 function idB64ToUuid(idB64: string): string | null {
   let buf: Buffer
@@ -129,7 +131,7 @@ export interface AdminBotCtx {
 
 export function createAdminBot(ctx: AdminBotCtx): Bot {
   const { db, apiBase: API_URL, allowedTgIds: ALLOWED_TG_IDS } = ctx
-  const bot = new Bot(ctx.token)
+  const bot = new Bot(ctx.token, { client: { apiRoot: TG_API_ROOT } })
   const pending = new Map<number, Pending>()
 
   const mainKeyboard = new InlineKeyboard()
