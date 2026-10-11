@@ -18,6 +18,7 @@ import { bookingsPublicRouter, bookingsRouter } from './modules/bookings/booking
 import { geoRouter } from './modules/geo/geo.router.js'
 
 import { authRouter } from './modules/auth/auth.router.js'
+import { appLoginRouter } from './modules/auth/app-login.js'
 import { posRouter } from './modules/pos/pos.router.js'
 import { tabletRouter, tabletsRouter } from './modules/tablet/tablet.router.js'
 import { smartHomeRouter } from './modules/smart-home/smart-home.router.js'
@@ -110,10 +111,12 @@ app.use(
   })
 )
 app.use('*', prettyJSON())
-// Общий предел тела 1 МБ. У загрузки картинок (/api/upload) свой — в роутере: файл до 8 МБ;
+// Общий предел тела 1 МБ. У загрузки картинок (/api/upload, фото анкеты /api/auth/app/photo)
+// свой — в роутере: файл до 8 МБ;
 // у восстановления из файла (/api/system/restore-upload) — тоже свой, в system.router.
 const defaultBodyLimit = bodyLimit({ maxSize: 1 * 1024 * 1024 })
-const hasOwnBodyLimit = (path: string): boolean => path.startsWith('/api/upload/') || path === '/api/system/restore-upload'
+const hasOwnBodyLimit = (path: string): boolean =>
+  path.startsWith('/api/upload/') || path === '/api/auth/app/photo' || path === '/api/system/restore-upload'
 app.use('/api/*', (c, next) => (hasOwnBodyLimit(c.req.path) ? next() : defaultBodyLimit(c, next)))
 app.use('/api/*', rateLimit)
 // Инжект БД клуба в контекст (Фаза 1). Wave 0: дефолтная БД = синглтон.
@@ -189,6 +192,8 @@ app.use('/api/discounts/*', requireModule('discounts'))
 // fail-open на основном домене (оператор всегда видит).
 app.use('/api/analytics/*', requireModule('analytics'))
 
+// Вход в My Titan по номеру телефона + регистрация (подтверждение — в боте клуба).
+app.route('/api/auth/app', appLoginRouter)
 app.route('/api/auth', authRouter)
 // Клиентское приложение My Titan: сводка, лента, сборы, уведомления, push.
 app.route('/api/resident', residentRouter)

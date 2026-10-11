@@ -22,6 +22,8 @@ const nextConfig: NextConfig = {
         { source: '/menu', destination: '/tv-menu.html' },
         // Экран из раздела «Экраны» (приставка Titan Menu открывает /screen/<id>).
         { source: '/screen/:id', destination: '/tv-menu.html' },
+        // Кнопка «Открыть приложение» из бота My Titan: https-страница → titanresident://.
+        { source: '/my-titan', destination: '/my-titan.html' },
       ],
     }
   },

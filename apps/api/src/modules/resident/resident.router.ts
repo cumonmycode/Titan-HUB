@@ -436,6 +436,8 @@ residentRouter.post('/session/refresh', async (c) => {
   if (user.role !== 'client') return c.json({ error: 'Forbidden' }, 403)
   const [p] = await db.select().from(profiles).where(eq(profiles.id, user.sub))
   if (!p || p.deletedAt) return c.json({ error: 'Not found' }, 404)
-  const token = await signToken({ sub: p.id, role: p.role, nickname: p.nickname, clubId: c.var.club?.id ?? null }, '30d')
+  // Год, как при входе (APP_TOKEN_TTL в auth/app-login.ts): клиент входит один раз,
+  // а приложение раз в несколько дней меняет токен на свежий.
+  const token = await signToken({ sub: p.id, role: p.role, nickname: p.nickname, clubId: c.var.club?.id ?? null }, '365d')
   return c.json({ token })
 })

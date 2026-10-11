@@ -1,6 +1,7 @@
 import { Bot, InlineKeyboard } from 'grammy'
-import { profiles, tgLinkRequests, transactions, clientTiers, appSettings, walletLoginCodes, eq, and, gt, desc, type Database } from '@titan/database'
+import { profiles, tgLinkRequests, transactions, clientTiers, appSettings, walletLoginCodes, eq, and, gt, isNull, desc, type Database } from '@titan/database'
 import { createHmac, timingSafeEqual } from 'node:crypto'
+import { registerAppLogin } from './app-login.js'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Фабрика wallet-бота (мульти-тенант). createWalletBot(ctx) поднимает grammy Bot
@@ -174,6 +175,16 @@ export function createWalletBot(ctx: WalletBotCtx): Bot {
     return null
   }
 
+  // Вход/регистрация в приложении по номеру телефона (/start app_…). Регистрируем
+  // до обработчика текста ниже: он гасит любые сообщения, кроме 4-значного кода.
+  const appLogin = registerAppLogin(bot, {
+    db,
+    label: ctx.label,
+    openAppUrl: `${new URL(ctx.webappUrl).origin}/my-titan`,
+    resolveProfileByTg,
+    escapeMd,
+  })
+
   bot.command('start', async (ctx2) => {
     const payload = ctx2.match
     const tgId = String(ctx2.from?.id)
@@ -218,7 +229,12 @@ export function createWalletBot(ctx: WalletBotCtx): Bot {
       return
     }
 
-    // Вход в приложение My Titan в одно касание: приложение открывает
+    if (payload?.startsWith('app_')) {
+      await appLogin.handleStart(ctx2, payload.slice(4))
+      return
+    }
+
+    // Вход в приложение My Titan в одно касание (сборки до входа по телефону): приложение открывает
     // t.me/<bot>?start=login_<deepCode>. Код одноразовый и длинный (не 4 цифры),
     // но вход всё равно подтверждается кнопкой с именем устройства — иначе ссылку,
     // пересланную злоумышленником, можно было бы «нажать не глядя».
@@ -234,7 +250,7 @@ export function createWalletBot(ctx: WalletBotCtx): Bot {
         return
       }
       const [row] = await db.select().from(walletLoginCodes)
-        .where(and(eq(walletLoginCodes.deepCode, deepCode), eq(walletLoginCodes.status, 'pending'), gt(walletLoginCodes.expiresAt, new Date())))
+        .where(and(eq(walletLoginCodes.deepCode, deepCode), isNull(walletLoginCodes.mode), eq(walletLoginCodes.status, 'pending'), gt(walletLoginCodes.expiresAt, new Date())))
         .limit(1)
       if (!row) {
         await ctx2.reply('⌛ Ссылка для входа устарела. Нажмите «Войти через Telegram» в приложении ещё раз.')
@@ -270,7 +286,7 @@ export function createWalletBot(ctx: WalletBotCtx): Bot {
     // Атомарно: только пока запрос ещё ждёт и не истёк (повторное нажатие — no-op).
     const claimed = await db.update(walletLoginCodes)
       .set({ status: 'claimed', profileId: profile.id })
-      .where(and(eq(walletLoginCodes.id, id), eq(walletLoginCodes.status, 'pending'), gt(walletLoginCodes.expiresAt, new Date())))
+      .where(and(eq(walletLoginCodes.id, id), isNull(walletLoginCodes.mode), eq(walletLoginCodes.status, 'pending'), gt(walletLoginCodes.expiresAt, new Date())))
       .returning({ id: walletLoginCodes.id })
     if (!claimed.length) {
       await ctx2.answerCallbackQuery({ text: 'Запрос устарел' })
@@ -287,7 +303,7 @@ export function createWalletBot(ctx: WalletBotCtx): Bot {
     const id = ctx2.match[1] ?? ''
     if (UUID_RE.test(id)) {
       await db.update(walletLoginCodes).set({ status: 'rejected' })
-        .where(and(eq(walletLoginCodes.id, id), eq(walletLoginCodes.status, 'pending')))
+        .where(and(eq(walletLoginCodes.id, id), isNull(walletLoginCodes.mode), eq(walletLoginCodes.status, 'pending')))
     }
     await ctx2.answerCallbackQuery({ text: 'Вход отклонён' })
     await ctx2.editMessageText('🛡 Вход отклонён — доступ никому не выдан. Если это были не вы, ничего делать не нужно.').catch(() => {})
@@ -394,7 +410,7 @@ export function createWalletBot(ctx: WalletBotCtx): Bot {
     }
     // Активный (pending, не истёкший) код. Берём самый свежий — на случай повторов.
     const [row] = await db.select().from(walletLoginCodes)
-      .where(and(eq(walletLoginCodes.code, text), eq(walletLoginCodes.status, 'pending'), gt(walletLoginCodes.expiresAt, new Date())))
+      .where(and(eq(walletLoginCodes.code, text), isNull(walletLoginCodes.mode), eq(walletLoginCodes.status, 'pending'), gt(walletLoginCodes.expiresAt, new Date())))
       .orderBy(desc(walletLoginCodes.createdAt))
       .limit(1)
     if (!row) {

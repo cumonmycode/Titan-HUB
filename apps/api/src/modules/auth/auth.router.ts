@@ -60,7 +60,7 @@ function getRedis() {
 // @username бота My Titan для подсказки/диплинка на экране входа из браузера.
 // Из env (WALLET_BOT_USERNAME), иначе через getMe (кэшируем). Без '@'.
 let walletBotUsername: string | null = process.env['WALLET_BOT_USERNAME']?.replace(/^@/, '') ?? null
-async function getWalletBotUsername(): Promise<string | null> {
+export async function getWalletBotUsername(): Promise<string | null> {
   if (walletBotUsername) return walletBotUsername
   const token = process.env['WALLET_BOT_TOKEN']
   if (!token) return null
