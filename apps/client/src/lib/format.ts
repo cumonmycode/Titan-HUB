@@ -87,21 +87,33 @@ export function normalizePhone(raw: string): string {
   return '+' + d.slice(0, 11);
 }
 
-/** Маска поля телефона по мере ввода: «+7 999 123-45-67» (разделители — только перед цифрами). */
-export function maskPhone(raw: string): string {
-  const full = normalizePhone(raw);
-  if (!full) return '';
-  const d = full.slice(2);
-  let out = '+7';
-  if (d.length) out += ` ${d.slice(0, 3)}`;
-  if (d.length > 3) out += ` ${d.slice(3, 6)}`;
-  if (d.length > 6) out += `-${d.slice(6, 8)}`;
-  if (d.length > 8) out += `-${d.slice(8, 10)}`;
+const NATIONAL_LENGTH = 10;
+
+/**
+ * Номер без «+7» из того, что ввели, вставили или подставила клавиатура (iOS
+ * подставляет «+7 (999) 123-45-67», бывает «8 999…» или «999…»). Длину поля не
+ * ограничиваем — иначе система обрезает автозаполнение. prev — прошлое значение:
+ * лишняя цифра, набранная к полному номеру, отбрасывается.
+ */
+export function nationalPhoneDigits(prev: string, text: string): string {
+  const digits = text.replace(/\D/g, '');
+  if (digits.length <= NATIONAL_LENGTH) return digits;
+  if (prev.length === NATIONAL_LENGTH && digits.length === NATIONAL_LENGTH + 1 && digits.startsWith(prev)) return prev;
+  if (digits.length === NATIONAL_LENGTH + 1 && (digits.startsWith('7') || digits.startsWith('8'))) return digits.slice(1);
+  return digits.slice(-NATIONAL_LENGTH);
+}
+
+/** «9991234567» → «999 123-45-67» (разделители — только перед цифрами). */
+export function formatNationalPhone(digits: string): string {
+  let out = digits.slice(0, 3);
+  if (digits.length > 3) out += ` ${digits.slice(3, 6)}`;
+  if (digits.length > 6) out += `-${digits.slice(6, 8)}`;
+  if (digits.length > 8) out += `-${digits.slice(8, 10)}`;
   return out;
 }
 
-/** Номер набран полностью: +7 и 10 цифр. */
-export const isFullPhone = (value: string) => value.replace(/\D/g, '').length === 11;
+export const isFullNationalPhone = (digits: string) => digits.length === NATIONAL_LENGTH;
+export const displayPhone = (digits: string) => `+7 ${formatNationalPhone(digits)}`;
 
 /** ДД.ММ.ГГГГ ↔ YYYY-MM-DD для поля дня рождения. */
 export function birthdayToInput(iso: string | null | undefined): string {

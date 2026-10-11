@@ -11,6 +11,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { sheetOptions } from '@/components/sheet';
 import { api } from '@/lib/api';
+import { useCardStyle } from '@/lib/card-style';
 import { openFromNotificationData, registerForPush, setBadge } from '@/lib/push';
 import { queryClient, refreshMoney, useWallet } from '@/lib/queries';
 import { tokenRefreshDue, useSession } from '@/lib/session';
@@ -39,6 +40,7 @@ function Root() {
 
   useEffect(() => {
     void restore();
+    void useCardStyle.getState().load();
   }, [restore]);
 
   useEffect(() => {
@@ -63,6 +65,7 @@ function Root() {
           <Stack.Screen name="profile-edit" options={sheetOptions('fitToContents')} />
           <Stack.Screen name="bonus-rules" options={sheetOptions('fitToContents')} />
           <Stack.Screen name="notifications" options={sheetOptions([0.7, 1])} />
+          <Stack.Screen name="card-style" options={sheetOptions([1])} />
         </Stack.Protected>
         <Stack.Protected guard={!inside}>
           <Stack.Screen name="login" options={{ animation: 'fade' }} />

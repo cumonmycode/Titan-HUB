@@ -10,10 +10,10 @@ import { useEffect, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 
+import { ClubCard } from '@/components/club-card';
 import { FEED_ROW_INSET, FeedRow } from '@/components/feed-row';
 import { GlassButton, GlassIconButton } from '@/components/glass';
 import type { IconName } from '@/components/icon';
-import { HoloCard } from '@/components/holo-card';
 import { RollingNumber } from '@/components/rolling-number';
 import { TabScroll } from '@/components/screen';
 import { Divider, EmptyState, IconTile, SectionHeader, Skeleton, Surface } from '@/components/ui';
@@ -95,14 +95,17 @@ export default function HomeScreen() {
       {header}
 
       <Animated.View entering={FadeInDown.duration(500).springify().damping(18)}>
-        <HoloCard
-          nickname={w.profile.nickname}
-          tierLabel={w.tier.label}
-          tierColor={w.tier.color}
-          bonus={w.bonus}
-          bonusHidden={w.bonusHidden}
-          memberSince={w.profile.memberSince}
-          expiring={expiring}
+        <ClubCard
+          data={{
+            nickname: w.profile.nickname,
+            tierLabel: w.tier.label,
+            tierColor: w.tier.color,
+            bonus: w.bonus,
+            bonusHidden: w.bonusHidden,
+            expiring,
+            deposit: w.deposit,
+            visits: w.visitProgress.visits,
+          }}
           onPress={() => router.push('/bonus-rules')}
         />
       </Animated.View>

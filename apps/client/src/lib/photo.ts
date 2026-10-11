@@ -1,4 +1,4 @@
-// Фото профиля: выбор из галереи (квадрат) и файл для отправки на сервер.
+// Фото профиля: снимок с камеры или выбор из галереи (квадрат) и файл для отправки на сервер.
 // Нужен в анкете нового клиента (вход) и на экране профиля.
 import { File } from 'expo-file-system';
 import * as ImagePicker from 'expo-image-picker';
@@ -11,15 +11,41 @@ const PICK_OPTIONS: ImagePicker.ImagePickerOptions = {
   quality: 0.6,
 };
 
-/** Галерея → квадратное фото; null — отмена или нет доступа (сами объясняем, как дать). */
+type PhotoSource = 'camera' | 'library';
+
+/** Спросить, откуда взять фото: снять (фронтальная камера) или выбрать из галереи. */
+function askSource(): Promise<PhotoSource | null> {
+  return new Promise((resolve) => {
+    Alert.alert('Фото профиля', undefined, [
+      { text: 'Снять фото', onPress: () => resolve('camera') },
+      { text: 'Выбрать из галереи', onPress: () => resolve('library') },
+      { text: 'Отмена', style: 'cancel', onPress: () => resolve(null) },
+    ], { cancelable: true, onDismiss: () => resolve(null) });
+  });
+}
+
+function explainSettings(title: string, text: string) {
+  Alert.alert(title, text, [
+    { text: 'Отмена', style: 'cancel' },
+    { text: 'Открыть настройки', onPress: () => void Linking.openSettings() },
+  ]);
+}
+
+/**
+ * Квадратное фото с камеры или из галереи; null — отмена. Галерее разрешение не
+ * нужно (системный выбор фото), камере — да: если доступ закрыт, ведём в настройки.
+ */
 export async function pickSquarePhoto(): Promise<ImagePicker.ImagePickerAsset | null> {
-  const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-  if (!permission.granted) {
-    Alert.alert('Нужен доступ к фото', 'Разрешите My Titan доступ к фото в настройках телефона.', [
-      { text: 'Отмена', style: 'cancel' },
-      { text: 'Открыть настройки', onPress: () => void Linking.openSettings() },
-    ]);
-    return null;
+  const source = await askSource();
+  if (!source) return null;
+  if (source === 'camera') {
+    const permission = await ImagePicker.requestCameraPermissionsAsync();
+    if (!permission.granted) {
+      explainSettings('Нет доступа к камере', 'Разрешите My Titan доступ к камере в настройках телефона.');
+      return null;
+    }
+    const shot = await ImagePicker.launchCameraAsync({ ...PICK_OPTIONS, cameraType: ImagePicker.CameraType.front });
+    return shot.canceled ? null : (shot.assets[0] ?? null);
   }
   const result = await ImagePicker.launchImageLibraryAsync(PICK_OPTIONS);
   return result.canceled ? null : (result.assets[0] ?? null);

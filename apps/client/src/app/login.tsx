@@ -1,32 +1,45 @@
 // Вход в My Titan по номеру телефона с подтверждением в Telegram-боте клуба
-// (@titanwalletrobot). Входить нужно один раз — дальше приложение само продлевает сессию.
-// 1) Номер телефона. Есть в клубе → сразу шаг 3.
-// 2) Нет в клубе → анкета: фото, никнейм, имя, день рождения.
-// 3) Мини-инструкция и «Подтвердить в Telegram»: бот спрашивает «Да / Нет» и даёт
-//    кнопку «Открыть приложение»; экран тем временем опрашивает статус и входит.
+// (@titanwalletrobot). Как в Telegram: знакомство → разрешения (уведомления и камера,
+// только если ещё не спрашивали) → номер → (анкета нового клиента) → подтверждение
+// в боте. Входить нужно один раз — дальше приложение само продлевает сессию.
+import * as ImagePicker from 'expo-image-picker';
 import { useEffect, useEffectEvent, useRef, useState } from 'react';
-import { AppState, ScrollView, StyleSheet, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { AppState, StyleSheet } from 'react-native';
+import Animated, { FadeIn } from 'react-native-reanimated';
 
 import { ConfirmStep, type ConfirmState } from '@/components/login/confirm-step';
+import { CAMERA_PERMISSION, IntroStep, NOTIFICATIONS_PERMISSION, PermissionStep } from '@/components/login/onboarding-steps';
 import { PhoneStep } from '@/components/login/phone-step';
 import { RegisterStep, type RegistrationDraft } from '@/components/login/register-step';
 import { errorText } from '@/lib/api';
 import { resetDemo } from '@/lib/demo';
-import { inputToBirthday, isFullPhone } from '@/lib/format';
+import { displayPhone, inputToBirthday, isFullNationalPhone } from '@/lib/format';
 import { haptic } from '@/lib/haptics';
 import {
   clearPending, loadPending, loginStatus, openTelegram, type PendingLogin, savePending, startLogin, uploadRegistrationPhoto,
 } from '@/lib/login-flow';
 import { pickSquarePhoto } from '@/lib/photo';
+import { pushPermission, registerForPush } from '@/lib/push';
 import { useSession } from '@/lib/session';
-import { GUTTER, MAX_WIDTH, space } from '@/lib/theme';
 import type { LoginStart } from '@/lib/types';
 
-type Step = 'restoring' | 'phone' | 'register' | 'confirm';
+type Step = 'restoring' | 'intro' | 'notifications' | 'camera' | 'phone' | 'register' | 'confirm';
 
 const POLL_MS = 2000;
 const EMPTY_DRAFT: RegistrationDraft = { nickname: '', fullName: '', birthday: '', photoUri: null };
+
+/** Камеру ещё не спрашивали (системный запрос показывается один раз). */
+async function cameraUndetermined(): Promise<boolean> {
+  const p = await ImagePicker.getCameraPermissionsAsync().catch(() => null);
+  return !!p && !p.granted && p.canAskAgain && p.status === ImagePicker.PermissionStatus.UNDETERMINED;
+}
+
+/** Следующий экран: разрешения, которые ещё не спрашивали, затем номер телефона. */
+async function nextAfter(step: 'intro' | 'notifications'): Promise<Step> {
+  if (step === 'intro' && (await pushPermission().catch(() => 'denied')) === 'undetermined') return 'notifications';
+  if (await cameraUndetermined()) return 'camera';
+  return 'phone';
+}
 
 /** Проверка анкеты до отправки; null — всё заполнено. */
 function draftError(draft: RegistrationDraft): string | null {
@@ -39,11 +52,10 @@ function draftError(draft: RegistrationDraft): string | null {
 }
 
 export default function LoginScreen() {
-  const insets = useSafeAreaInsets();
   const signIn = useSession((s) => s.signIn);
   const enterDemo = useSession((s) => s.enterDemo);
   const [step, setStep] = useState<Step>('restoring');
-  const [phone, setPhone] = useState('');
+  const [digits, setDigits] = useState('');
   const [draft, setDraft] = useState<RegistrationDraft>(EMPTY_DRAFT);
   const [pending, setPending] = useState<PendingLogin | null>(null);
   const [confirmState, setConfirmState] = useState<ConfirmState>('waiting');
@@ -56,33 +68,49 @@ export default function LoginScreen() {
   // Вход не закончен (система выгрузила приложение, пока клиент был в Telegram) — продолжаем.
   useEffect(() => {
     void loadPending().then((saved) => {
-      if (!saved) { setStep('phone'); return; }
+      if (!saved) { setStep('intro'); return; }
       setPending(saved);
-      setPhone(saved.phone);
+      setDigits(saved.phone.replace(/\D/g, '').slice(-10));
       setBotOpened(true);
       setStep('confirm');
     });
   }, []);
 
+  const go = (next: Step) => { setError(null); setStep(next); };
+
+  async function allowNotifications() {
+    setBusy(true);
+    await registerForPush(true).catch(() => null);
+    setBusy(false);
+    go(await nextAfter('notifications'));
+  }
+
+  async function allowCamera() {
+    setBusy(true);
+    await ImagePicker.requestCameraPermissionsAsync().catch(() => null);
+    setBusy(false);
+    go('phone');
+  }
+
   async function toConfirm(r: Extract<LoginStart, { status: 'pending' }>) {
     const next: PendingLogin = {
-      ticket: r.ticket, deepLink: r.deepLink, botUsername: r.botUsername, mode: r.mode, phone, expiresAt: r.expiresAt,
+      ticket: r.ticket, deepLink: r.deepLink, botUsername: r.botUsername, mode: r.mode, phone: displayPhone(digits), expiresAt: r.expiresAt,
     };
     await savePending(next);
     setPending(next);
     setConfirmState('waiting');
     setBotOpened(false);
     setNote(null);
-    setStep('confirm');
+    go('confirm');
   }
 
   async function submitPhone() {
-    if (!isFullPhone(phone)) { setError('Введите номер полностью'); return; }
+    if (!isFullNationalPhone(digits)) { setError('Введите номер полностью'); return; }
     setBusy(true);
     setError(null);
     try {
-      const r = await startLogin(phone);
-      if (r.status === 'register') setStep('register');
+      const r = await startLogin(`+7${digits}`);
+      if (r.status === 'register') go('register');
       else await toConfirm(r);
     } catch (e) {
       haptic.error();
@@ -98,7 +126,7 @@ export default function LoginScreen() {
     setBusy(true);
     setError(null);
     try {
-      const r = await startLogin(phone, {
+      const r = await startLogin(`+7${digits}`, {
         nickname: draft.nickname.trim(),
         fullName: draft.fullName.trim(),
         birthday: inputToBirthday(draft.birthday) as string,
@@ -129,8 +157,7 @@ export default function LoginScreen() {
   function leaveConfirm(next: 'phone' | 'register') {
     void clearPending();
     setPending(null);
-    setError(null);
-    setStep(next);
+    go(next);
   }
 
   // После отказа (например, «никнейм занят») — обратно к анкете, если она заполнялась.
@@ -169,53 +196,41 @@ export default function LoginScreen() {
     return () => { clearInterval(timer); sub.remove(); };
   }, [step, confirmState]);
 
+  let content = null;
+  if (step === 'intro') {
+    content = <IntroStep onStart={() => void nextAfter('intro').then(go)} onDemo={() => { resetDemo(); enterDemo(); }} />;
+  } else if (step === 'notifications') {
+    content = (
+      <PermissionStep info={NOTIFICATIONS_PERMISSION} busy={busy} onAllow={() => void allowNotifications()}
+        onSkip={() => void nextAfter('notifications').then(go)} onBack={() => go('intro')} />
+    );
+  } else if (step === 'camera') {
+    content = <PermissionStep info={CAMERA_PERMISSION} busy={busy} onAllow={() => void allowCamera()} onSkip={() => go('phone')} onBack={() => go('intro')} />;
+  } else if (step === 'phone') {
+    content = (
+      <PhoneStep digits={digits} onChangeDigits={(d) => { setDigits(d); setError(null); }} busy={busy} error={error}
+        onSubmit={() => void submitPhone()} onBack={() => go('intro')} />
+    );
+  } else if (step === 'register') {
+    content = (
+      <RegisterStep draft={draft} onChange={(d) => { setDraft(d); setError(null); }} onPickPhoto={() => void pickPhoto()}
+        busy={busy} error={error} onSubmit={() => void submitRegistration()} onBack={() => go('phone')} />
+    );
+  } else if (step === 'confirm' && pending) {
+    content = (
+      <ConfirmStep pending={pending} state={confirmState} waiting={botOpened} note={note}
+        onOpenBot={openBot} onRestart={restart} onChangePhone={() => leaveConfirm('phone')} />
+    );
+  }
+
+  // Фон — фирменные пятна стека (backdrop в contentStyle), своего фона у экрана нет.
   return (
-    <ScrollView
-      style={styles.screen}
-      contentContainerStyle={[styles.container, { paddingTop: insets.top + space.xl, paddingBottom: insets.bottom + space.xxl }]}
-      keyboardShouldPersistTaps="handled"
-      automaticallyAdjustKeyboardInsets
-    >
-      <View style={styles.column}>
-        {step === 'phone' ? (
-          <PhoneStep
-            phone={phone}
-            onChangePhone={(p) => { setPhone(p); setError(null); }}
-            busy={busy}
-            error={error}
-            onSubmit={() => void submitPhone()}
-            onDemo={() => { resetDemo(); enterDemo(); }}
-          />
-        ) : step === 'register' ? (
-          <RegisterStep
-            phone={phone}
-            draft={draft}
-            onChange={(d) => { setDraft(d); setError(null); }}
-            onPickPhoto={() => void pickPhoto()}
-            busy={busy}
-            error={error}
-            onSubmit={() => void submitRegistration()}
-            onBack={() => { setError(null); setStep('phone'); }}
-          />
-        ) : step === 'confirm' && pending ? (
-          <ConfirmStep
-            pending={pending}
-            state={confirmState}
-            waiting={botOpened}
-            note={note}
-            onOpenBot={openBot}
-            onRestart={restart}
-            onChangePhone={() => leaveConfirm('phone')}
-          />
-        ) : null}
-      </View>
-    </ScrollView>
+    <Animated.View key={step} entering={FadeIn.duration(220)} style={styles.screen}>
+      {content}
+    </Animated.View>
   );
 }
 
 const styles = StyleSheet.create({
-  // Фон — фирменные пятна стека (backdrop в contentStyle), своего фона у экрана нет.
   screen: { flex: 1 },
-  container: { paddingHorizontal: GUTTER, flexGrow: 1 },
-  column: { width: '100%', maxWidth: MAX_WIDTH, alignSelf: 'center' },
 });

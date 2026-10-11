@@ -2,7 +2,7 @@
   "expo": {
     "name": "My Titan",
     "slug": "titan-resident",
-    "version": "1.2.0",
+    "version": "1.3.0",
     "orientation": "portrait",
     "scheme": "titanresident",
     "userInterfaceStyle": "dark",
@@ -10,7 +10,7 @@
     "icon": "./assets/images/icon.png",
     "ios": {
       "bundleIdentifier": "ru.titan.resident",
-      "buildNumber": "9",
+      "buildNumber": "10",
       "appleTeamId": "G99YH9UK8C",
       "supportsTablet": false,
       "infoPlist": {
@@ -70,7 +70,7 @@
         "expo-image-picker",
         {
           "photosPermission": "Фото нужно, чтобы поставить снимок в ваш профиль клуба.",
-          "cameraPermission": false,
+          "cameraPermission": "Камера нужна, чтобы сфотографироваться для профиля в клубе.",
           "microphonePermission": false
         }
       ],

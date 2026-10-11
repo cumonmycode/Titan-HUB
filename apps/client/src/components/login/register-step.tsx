@@ -1,7 +1,6 @@
-// Вход, шаг 2 (номера нет в клубе): анкета нового клиента — фото, никнейм, имя, день рождения.
+// Вход, номера нет в клубе: анкета нового клиента — фото, никнейм, имя, день рождения.
 import { Image } from 'expo-image';
 import { StyleSheet, Text, View } from 'react-native';
-import Animated, { FadeIn } from 'react-native-reanimated';
 
 import { FormRow } from '@/components/form-row';
 import { GlassButton } from '@/components/glass';
@@ -10,6 +9,8 @@ import { Tap } from '@/components/tap';
 import { Divider, Surface } from '@/components/ui';
 import { maskBirthday } from '@/lib/format';
 import { colors, radius, space, type } from '@/lib/theme';
+
+import { OnboardingLayout } from './onboarding-layout';
 
 export interface RegistrationDraft {
   nickname: string;
@@ -22,7 +23,6 @@ export interface RegistrationDraft {
 const PHOTO_SIZE = 104;
 
 interface RegisterStepProps {
-  phone: string;
   draft: RegistrationDraft;
   onChange: (draft: RegistrationDraft) => void;
   onPickPhoto: () => void;
@@ -32,20 +32,15 @@ interface RegisterStepProps {
   onBack: () => void;
 }
 
-export function RegisterStep({ phone, draft, onChange, onPickPhoto, busy, error, onSubmit, onBack }: RegisterStepProps) {
+export function RegisterStep({ draft, onChange, onPickPhoto, busy, error, onSubmit, onBack }: RegisterStepProps) {
   const set = (patch: Partial<RegistrationDraft>) => onChange({ ...draft, ...patch });
   return (
-    <Animated.View entering={FadeIn.duration(250)}>
-      <Tap onPress={onBack} scaleTo={0.94} hitSlop={10} style={styles.back} accessibilityRole="button" accessibilityLabel="Изменить номер">
-        <Icon name="back" size={16} color={colors.violetLight} weight="bold" />
-        <Text style={styles.backText}>{phone}</Text>
-      </Tap>
-
-      <Text style={styles.title}>Давайте знакомиться</Text>
-      <Text style={styles.lead}>
-        Этого номера ещё нет в клубе. Заполните анкету, а затем подтвердите регистрацию в Telegram.
-      </Text>
-
+    <OnboardingLayout
+      onBack={onBack}
+      title="Давайте знакомиться"
+      subtitle="Этого номера ещё нет в клубе. Заполните анкету — затем подтвердите регистрацию в Telegram."
+      footer={<GlassButton title="Продолжить" loading={busy} onPress={onSubmit} />}
+    >
       <View style={styles.photoBlock}>
         <Tap onPress={onPickPhoto} scaleTo={0.95} accessibilityRole="button" accessibilityLabel={draft.photoUri ? 'Сменить фото' : 'Добавить фото'}>
           <Surface tone={colors.violet} style={[styles.photo, draft.photoUri ? styles.photoFilled : null]}>
@@ -71,19 +66,13 @@ export function RegisterStep({ phone, draft, onChange, onPickPhoto, busy, error,
           keyboardType="number-pad" placeholder="ДД.ММ.ГГГГ" maxLength={10} />
       </Surface>
       <Text style={styles.footer}>В день рождения клуб может подарить бонусы.</Text>
-
       {error ? <Text style={styles.error}>{error}</Text> : null}
-      <GlassButton title="Продолжить" loading={busy} onPress={onSubmit} style={styles.submit} />
-    </Animated.View>
+    </OnboardingLayout>
   );
 }
 
 const styles = StyleSheet.create({
-  back: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', gap: 4 },
-  backText: { color: colors.violetLight, fontSize: 15, fontWeight: '700' },
-  title: { ...StyleSheet.flatten(type.title), marginTop: space.lg },
-  lead: { ...StyleSheet.flatten(type.callout), color: colors.textSecondary, marginTop: space.sm },
-  photoBlock: { alignItems: 'center', marginTop: space.xl, marginBottom: space.lg },
+  photoBlock: { alignItems: 'center', marginTop: space.xxl, marginBottom: space.lg },
   photo: {
     width: PHOTO_SIZE, height: PHOTO_SIZE, borderRadius: PHOTO_SIZE / 2, overflow: 'hidden',
     alignItems: 'center', justifyContent: 'center', borderStyle: 'dashed', borderWidth: 1.5,
@@ -98,5 +87,4 @@ const styles = StyleSheet.create({
   group: { borderRadius: radius.card, overflow: 'hidden' },
   footer: { ...StyleSheet.flatten(type.caption), marginTop: space.sm, marginHorizontal: space.lg },
   error: { color: colors.red, fontSize: 13, textAlign: 'center', marginTop: space.lg },
-  submit: { marginTop: space.xl },
 });

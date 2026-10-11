@@ -1,67 +1,72 @@
-// Вход, шаг 1: номер телефона.
-import { StyleSheet, Text, View } from 'react-native';
-import Animated, { FadeIn, FadeInDown } from 'react-native-reanimated';
+// Вход: номер телефона, как в Telegram — строка страны, отдельно «+7» и номер.
+// Автозаполнение и вставка в любом формате разбираются (lib/format nationalPhoneDigits).
+import { StyleSheet, Text, TextInput, View } from 'react-native';
 
-import { FormRow } from '@/components/form-row';
 import { GlassButton } from '@/components/glass';
-import { HoloCard } from '@/components/holo-card';
-import { Surface } from '@/components/ui';
-import { isFullPhone, maskPhone } from '@/lib/format';
-import { colors, radius, space, type } from '@/lib/theme';
+import { Divider, Surface } from '@/components/ui';
+import { formatNationalPhone, isFullNationalPhone, nationalPhoneDigits } from '@/lib/format';
+import { colors, radius, space } from '@/lib/theme';
+
+import { OnboardingLayout } from './onboarding-layout';
 
 interface PhoneStepProps {
-  phone: string;
-  onChangePhone: (phone: string) => void;
+  /** Номер без «+7», до 10 цифр. */
+  digits: string;
+  onChangeDigits: (digits: string) => void;
   busy: boolean;
   error: string | null;
   onSubmit: () => void;
-  onDemo: () => void;
+  onBack: () => void;
 }
 
-export function PhoneStep({ phone, onChangePhone, busy, error, onSubmit, onDemo }: PhoneStepProps) {
+export function PhoneStep({ digits, onChangeDigits, busy, error, onSubmit, onBack }: PhoneStepProps) {
   return (
-    <Animated.View entering={FadeIn.duration(250)}>
-      <Animated.View entering={FadeInDown.duration(600).springify().damping(16)}>
-        <HoloCard nickname="titan" tierLabel="Резидент" tierColor={colors.violet} bonus={1240} bonusHidden={false} />
-      </Animated.View>
-
-      <View style={styles.intro}>
-        <Text style={styles.kicker}>MY TITAN</Text>
-        <Text style={styles.headline}>Кошелёк клуба{'\n'}в вашем телефоне</Text>
-        <Text style={styles.lead}>
-          Войдите по номеру телефона и подтвердите вход в Telegram — это нужно сделать один раз.
-        </Text>
-      </View>
-
+    <OnboardingLayout
+      onBack={onBack}
+      title="Ваш телефон"
+      subtitle="Номер, по которому вас знают в клубе. Подтвердить вход нужно будет в Telegram."
+      footer={<GlassButton title="Продолжить" loading={busy} disabled={!isFullNationalPhone(digits)} onPress={onSubmit} />}
+    >
       <Surface style={styles.group}>
-        <FormRow
-          label="Телефон"
-          value={phone}
-          onChangeText={(t) => onChangePhone(maskPhone(t))}
-          keyboardType="phone-pad"
-          textContentType="telephoneNumber"
-          autoComplete="tel"
-          placeholder="+7 900 000-00-00"
-          maxLength={16}
-          returnKeyType="done"
-          onSubmitEditing={onSubmit}
-        />
+        <View style={styles.row}>
+          <Text style={styles.label}>Страна</Text>
+          <Text style={styles.value}>Россия</Text>
+        </View>
+        <Divider inset={space.lg} />
+        <View style={styles.row}>
+          <Text style={styles.code}>+7</Text>
+          <View style={styles.sep} />
+          <TextInput
+            style={styles.input}
+            value={formatNationalPhone(digits)}
+            onChangeText={(text) => onChangeDigits(nationalPhoneDigits(digits, text))}
+            placeholder="000 000-00-00"
+            placeholderTextColor={colors.textMuted}
+            keyboardType="phone-pad"
+            textContentType="telephoneNumber"
+            autoComplete="tel"
+            autoFocus
+            returnKeyType="done"
+            onSubmitEditing={onSubmit}
+            selectionColor={colors.violet}
+            cursorColor={colors.violet}
+            keyboardAppearance="dark"
+            accessibilityLabel="Номер телефона"
+          />
+        </View>
       </Surface>
       {error ? <Text style={styles.error}>{error}</Text> : null}
-
-      <GlassButton title="Продолжить" loading={busy} disabled={!isFullPhone(phone)} onPress={onSubmit} style={styles.submit} />
-      <GlassButton title="Посмотреть демо" variant="secondary" size="md" style={styles.demo} onPress={onDemo} />
-    </Animated.View>
+    </OnboardingLayout>
   );
 }
 
 const styles = StyleSheet.create({
-  intro: { marginTop: space.xxl, marginBottom: space.xl },
-  kicker: { color: colors.violetLight, fontSize: 12, fontWeight: '900', letterSpacing: 3 },
-  headline: { ...StyleSheet.flatten(type.title), marginTop: 6 },
-  lead: { ...StyleSheet.flatten(type.callout), color: colors.textSecondary, marginTop: space.sm },
-  group: { borderRadius: radius.card, overflow: 'hidden' },
+  group: { marginTop: space.xxl, borderRadius: radius.card, overflow: 'hidden' },
+  row: { flexDirection: 'row', alignItems: 'center', minHeight: 56, paddingHorizontal: space.lg, gap: space.md },
+  label: { flex: 1, color: colors.text, fontSize: 16, fontWeight: '500' },
+  value: { color: colors.violetLight, fontSize: 16, fontWeight: '600' },
+  code: { color: colors.text, fontSize: 20, fontWeight: '600', fontVariant: ['tabular-nums'] },
+  sep: { width: StyleSheet.hairlineWidth, alignSelf: 'stretch', marginVertical: space.md, backgroundColor: colors.borderStrong },
+  input: { flex: 1, color: colors.text, fontSize: 20, fontWeight: '600', letterSpacing: 0.5, fontVariant: ['tabular-nums'], paddingVertical: space.md },
   error: { color: colors.red, fontSize: 13, textAlign: 'center', marginTop: space.md },
-  submit: { marginTop: space.xl },
-  demo: { marginTop: space.lg },
 });

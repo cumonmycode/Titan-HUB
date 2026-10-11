@@ -17,6 +17,7 @@ import { Tap } from '@/components/tap';
 import { Avatar, Skeleton, Surface, TierBadge } from '@/components/ui';
 import { api, API_URL, errorText } from '@/lib/api';
 import { longDate } from '@/lib/format';
+import { CARD_STYLES, useCardStyle } from '@/lib/card-style';
 import { haptic } from '@/lib/haptics';
 import { photoFile, pickSquarePhoto } from '@/lib/photo';
 import { pushPermission, registerForPush, unregisterPush } from '@/lib/push';
@@ -31,6 +32,8 @@ export default function ProfileScreen() {
   const qc = useQueryClient();
   const wallet = useWallet();
   const w = wallet.data;
+  const cardStyle = useCardStyle((st) => st.style);
+  const cardTitle = CARD_STYLES.find((c) => c.key === cardStyle)?.title;
   const demo = useSession((s) => s.status === 'demo');
   const signOut = useSession((s) => s.signOut);
   const prefs = useUpdatePrefs();
@@ -121,7 +124,6 @@ export default function ProfileScreen() {
             {w.profile.fullName ? <Text style={styles.fullName} numberOfLines={1}>{w.profile.fullName}</Text> : null}
             <View style={styles.badges}>
               <TierBadge label={w.tier.label} color={w.tier.color} />
-              <Text style={type.caption}>в клубе с {longDate(w.profile.memberSince)}</Text>
             </View>
           </View>
 
@@ -138,6 +140,10 @@ export default function ProfileScreen() {
             <ListRow icon="birthday" color={colors.pink} title="День рождения" value={w.profile.birthday ? longDate(w.profile.birthday) : 'Не указан'} />
             <ListRow icon="telegram" color={colors.telegram} title="Telegram"
               value={w.profile.tgUsername ? `@${w.profile.tgUsername}` : w.profile.telegramLinked ? 'Привязан' : 'Не привязан'} />
+          </ListSection>
+
+          <ListSection title="Карта">
+            <ListRow icon="wallet" color={colors.violetLight} title="Вид карты" value={cardTitle} onPress={() => router.push('/card-style')} />
           </ListSection>
 
           <ListSection title="Уведомления">
