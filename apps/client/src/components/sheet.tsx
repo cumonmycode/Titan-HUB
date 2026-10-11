@@ -47,10 +47,16 @@ export function useCloseSheet(fallback: Href = '/') {
   return () => (router.canGoBack() ? router.back() : router.replace(fallback));
 }
 
+/**
+ * Шапка шторки. collapsable={false} обязателен: шторка iOS (react-native-screens) ищет
+ * среди своих детей «шапку + ScrollView» и подгоняет прокрутку под высоту под шапкой.
+ * Без него React Native «сплющивает» обёртку без фона, детей становится больше двух,
+ * и прокрутка растягивается на всю шторку поверх шапки (чек, уведомления).
+ */
 export function SheetHeader({ title, onClose }: { title: string; onClose: () => void }) {
   const insets = useSafeAreaInsets();
   return (
-    <View style={[styles.header, { paddingTop: IS_IOS ? space.xl + space.xs : insets.top + space.md }]}>
+    <View collapsable={false} style={[styles.header, { paddingTop: IS_IOS ? space.xl + space.xs : insets.top + space.md }]}>
       <Text style={styles.title} accessibilityRole="header" numberOfLines={1}>{title}</Text>
       <GlassIconButton icon="close" label="Закрыть" size={40} onPress={onClose} />
     </View>
