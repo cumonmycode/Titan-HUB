@@ -24,6 +24,7 @@ import { signToken } from '@titan/auth'
 import { clientIp } from '../../lib/clientIp.js'
 import { getSharedRedis } from '../../lib/redis.js'
 import { findProfilesByPhone, normalizePhone } from '../../lib/phone.js'
+import { appLoginBlockedUntil, reloginBanMessage } from '../../lib/app-account.js'
 import { MAX_UPLOAD_BODY_BYTES, storeImage } from '../../lib/imageStore.js'
 import { notify } from '../notifications/push.js'
 import { getWalletBotUsername } from './auth.router.js'
@@ -104,6 +105,9 @@ appLoginRouter.post('/start', zValidator('json', StartSchema, invalid), async (c
 
   const existing = await findProfilesByPhone(db, phone)
   if (!existing.length && !body.register) return c.json({ status: 'register' as const })
+  // Клиент удалил аккаунт приложения — сутки войти снова нельзя.
+  const banned = existing.map((p) => appLoginBlockedUntil(p)).find(Boolean)
+  if (banned) return c.json({ error: reloginBanMessage(banned) }, 403)
 
   // Номер нашёлся, хотя прислали анкету (его успели добавить) — это обычный вход.
   const mode = existing.length ? 'login' as const : 'register' as const
@@ -193,6 +197,10 @@ appLoginRouter.get('/status', async (c) => {
   const [profile] = await db.select().from(profiles).where(eq(profiles.id, row.profileId))
   await drop()
   if (!profile || profile.deletedAt) return c.json({ status: 'expired' as const })
+  const banned = appLoginBlockedUntil(profile)
+  if (banned) return c.json({ status: 'rejected' as const, note: reloginBanMessage(banned).replace(/\.$/, '') })
+  // Вход после удаления аккаунта — снимаем пометку в HUB.
+  if (profile.appDeletedAt) await db.update(profiles).set({ appDeletedAt: null }).where(eq(profiles.id, profile.id))
 
   // Профиль создан этой регистрацией (а не найден готовым) — персонал подтверждает
   // его в «Клиентах»; до этого бонусы не начисляются и оплата в приложении закрыта.

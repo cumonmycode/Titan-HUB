@@ -264,6 +264,18 @@ export default function ClientScreen() {
             </HStack>
           </Section>
 
+          {data.appDeletedAt ? (
+            <Section footer={<Text>Карточка клиента не изменилась. Войти в приложение снова можно через сутки после удаления.</Text>}>
+              <LinkRow
+                icon="person.crop.circle.badge.xmark"
+                color="#FF3B30"
+                title="Удалил аккаунт My Titan"
+                value={new Date(data.appDeletedAt).toLocaleString('ru-RU', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })}
+                chevron={false}
+              />
+            </Section>
+          ) : null}
+
           <Section>
             <Picker
               selection={tab}

@@ -37,6 +37,8 @@ export type Client = {
   createdAt: string;
   /** Не null — клиент в архиве. */
   deletedAt: string | null;
+  /** Клиент сам удалил аккаунт My Titan (сутки без входа; при следующем входе снимается). */
+  appDeletedAt?: string | null;
 };
 
 export type ClientTierRow = { key: string; label: string; color: string; sortOrder: number; isSystem: boolean; price: NumericString };

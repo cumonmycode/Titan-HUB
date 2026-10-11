@@ -91,6 +91,34 @@ export default function ProfileScreen() {
     ]);
   }
 
+  // Удаление аккаунта приложения (обязательно для приложений с регистрацией): вход на всех
+  // устройствах, уведомления и данные приложения; в HUB — пометка, сутки без повторного входа.
+  function confirmDelete() {
+    if (demo) { Alert.alert('Демо-режим', 'В демо удалять нечего — это пример с выдуманными данными.'); return; }
+    Alert.alert(
+      'Удалить аккаунт?',
+      'Аккаунт My Titan будет удалён: вход на всех устройствах, уведомления и данные приложения. Войти снова можно будет через 24 часа. Карточка клиента в клубе (бонусы, депозит, история) остаётся у клуба — чтобы удалить и её, обратитесь к администратору.',
+      [
+        { text: 'Отмена', style: 'cancel' },
+        {
+          text: 'Удалить', style: 'destructive', onPress: async () => {
+            try {
+              await unregisterPush();
+              await api.post('/resident/account/delete');
+              haptic.success();
+              qc.clear();
+              await signOut();
+              Alert.alert('Аккаунт удалён', 'Аккаунт My Titan удалён. Войти снова по номеру телефона можно через 24 часа.');
+            } catch (e) {
+              haptic.error();
+              Alert.alert('Аккаунт не удалён', errorText(e));
+            }
+          },
+        },
+      ],
+    );
+  }
+
   const editAndroid = (
     <Tap onPress={edit} hitSlop={10} accessibilityRole="button" accessibilityLabel="Изменить личные данные">
       <Text style={styles.editText}>Изменить</Text>
@@ -165,6 +193,7 @@ export default function ProfileScreen() {
           </ListSection>
 
           <GlassButton title={demo ? 'Выйти из демо' : 'Выйти'} variant="danger" icon="logout" onPress={confirmLogout} style={styles.logout} />
+          {demo ? null : <GlassButton title="Удалить аккаунт" variant="ghost" size="md" onPress={confirmDelete} style={styles.deleteAccount} />}
           <Text style={styles.version}>My Titan {Constants.expoConfig?.version ?? ''}</Text>
         </>
       )}
@@ -186,6 +215,7 @@ const styles = StyleSheet.create({
   editText: { color: colors.lavender, fontSize: 16, fontWeight: '600' },
   demo: { flexDirection: 'row', alignItems: 'center', gap: space.sm, marginTop: space.xl, padding: space.md, borderRadius: radius.row },
   demoText: { ...StyleSheet.flatten(type.callout), color: colors.amber, flex: 1 },
+  deleteAccount: { marginTop: space.sm },
   logout: { marginTop: space.xxl + space.xs },
   version: { color: colors.textMuted, fontSize: 12, textAlign: 'center', marginTop: space.lg },
 });

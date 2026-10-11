@@ -17,6 +17,7 @@ import { getBoolSetting } from '../../lib/appSettings.js'
 import { getSharedRedis } from '../../lib/redis.js'
 import { clientIp } from '../../lib/clientIp.js'
 import { isRegistrationPending } from '../../lib/registration.js'
+import { appLoginBlockedUntil } from '../../lib/app-account.js'
 import { Redis } from 'ioredis'
 import {
   generateRegistrationOptions,
@@ -595,6 +596,9 @@ authRouter.get('/wallet-code/status', async (c) => {
   const [profile] = await db.select().from(profiles).where(and(eq(profiles.id, row.profileId), isNull(profiles.deletedAt)))
   await db.delete(walletLoginCodes).where(eq(walletLoginCodes.id, row.id)).catch(() => {})
   if (!profile) return c.json({ status: 'expired' })
+  // Клиент удалил аккаунт My Titan — сутки вход закрыт (и по коду), потом пометка снимается.
+  if (appLoginBlockedUntil(profile)) return c.json({ status: 'rejected' })
+  if (profile.appDeletedAt) await db.update(profiles).set({ appDeletedAt: null }).where(eq(profiles.id, profile.id))
   const token = await signToken({ sub: profile.id, role: profile.role, nickname: profile.nickname, clubId: c.var.club?.id ?? null }, '30d')
   return c.json({ status: 'ok', token, user: { id: profile.id, nickname: profile.nickname, role: profile.role, photoUrl: profile.photoUrl } })
 })

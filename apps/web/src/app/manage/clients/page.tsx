@@ -23,6 +23,12 @@ const gomafiaIdOf = (c: any): string | null => {
   return t ? t.split(':')[1] : null
 }
 // Эффективное фото клиента по приоритету: ручное → Telegram → GoMafia.
+// Клиент сам удалил аккаунт приложения My Titan: карточка не меняется, только пометка
+// (сутки после удаления войти в приложение нельзя; при следующем входе пометка снимается).
+const APP_DELETED_BADGE: React.CSSProperties = {
+  fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 6,
+  background: 'rgba(248,113,113,0.14)', color: '#F87171', letterSpacing: '0.02em',
+}
 const avatarOf = (c: any): string | null => c?.photoUrl || c?.tgPhotoUrl || c?.gomafiaPhotoUrl || null
 
 const TIER_COLORS: Record<string, string> = {
@@ -513,6 +519,7 @@ export default function ClientsPage() {
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' as const, marginBottom: 4 }}>
                       <p style={{ fontSize: 14, fontWeight: 700, margin: 0 }}>{c.nickname}</p>
                       <span style={{ fontSize: 10, fontWeight: 700, fontFamily: "'JetBrains Mono',monospace", padding: '2px 7px', borderRadius: 6, background: `${tierColor}22`, color: tierColor, textTransform: 'uppercase', letterSpacing: '0.06em' }}>{labelOf(tier)}</span>
+                      {c.appDeletedAt ? <span style={APP_DELETED_BADGE}>Удалил аккаунт</span> : null}
                     </div>
                     <p style={{ fontSize: 12, color: 'var(--on-surface-variant)', margin: 0 }}>{c.phone ?? 'Нет телефона'}</p>
                   </div>
@@ -783,6 +790,11 @@ export default function ClientsPage() {
                 <h2 style={{ fontSize: 18, fontWeight: 600, margin: '8px 0 0', textAlign: 'center' }}>{selected.nickname}</h2>
                 {selected.fullName ? <p style={{ fontSize: 13, color: 'var(--on-surface-variant)', margin: 0, textAlign: 'center' }}>{selected.fullName}</p> : null}
                 <span style={{ fontSize: 11, fontWeight: 700, fontFamily: "'JetBrains Mono',monospace", padding: '3px 8px', borderRadius: 6, background: `${tierColor}22`, color: tierColor, textTransform: 'uppercase', letterSpacing: '0.06em', marginTop: 2 }}>{labelOf(tier)}</span>
+                {selected.appDeletedAt ? (
+                  <span style={{ ...APP_DELETED_BADGE, marginTop: 6 }}>
+                    Удалил аккаунт My Titan · {new Date(selected.appDeletedAt).toLocaleString('ru', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })}
+                  </span>
+                ) : null}
               </div>
 
               {/* Пилюли статистики + Редактировать */}

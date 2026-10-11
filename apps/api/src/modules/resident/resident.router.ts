@@ -25,6 +25,15 @@ import type { AppEnv } from '../../types.js'
 
 export const residentRouter = new Hono<AppEnv>()
 residentRouter.use('*', requireAuth)
+// Аккаунт приложения удалён (/account/delete): сессии, выданные раньше, недействительны везде.
+residentRouter.use('*', async (c, next) => {
+  const user = c.get('user')
+  const [p] = await c.var.db.select({ revokedAt: profiles.appRevokedAt }).from(profiles).where(eq(profiles.id, user.sub))
+  if (p?.revokedAt && (user.iat ?? 0) * 1000 < new Date(p.revokedAt).getTime()) {
+    return c.json({ error: 'Сессия завершена — войдите снова' }, 401)
+  }
+  await next()
+})
 
 const num = (v: unknown) => parseFloat(String(v ?? 0)) || 0
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -435,6 +444,23 @@ residentRouter.patch('/prefs', zValidator('json', z.object({
 // Скользящая сессия: приложение раз в несколько дней меняет токен на свежий
 // (30 дней). Не открывали приложение месяц — вход заново через бота. Только для
 // клиентов: токен сотрудника так продлить нельзя (у него свой срок и PIN).
+// Удаление аккаунта самим клиентом (обязательно для приложений с регистрацией, App Store 5.1.1(v)).
+// Удаляется аккаунт приложения: вход на всех устройствах, push-токены и лента уведомлений.
+// Карточку клиента в HUB (имя, телефон, бонусы, депозит, история) не трогаем — только
+// помечаем «удалил аккаунт»; сутки после этого войти снова нельзя (lib/app-account.ts).
+residentRouter.post('/account/delete', async (c) => {
+  const db = c.var.db
+  const me = c.get('user').sub
+  await db.transaction(async (tx) => {
+    const now = new Date()
+    // Пометка для HUB «удалил аккаунт» и 24 ч запрета входа; карточка клиента не меняется.
+    await tx.update(profiles).set({ appRevokedAt: now, appDeletedAt: now }).where(eq(profiles.id, me))
+    await tx.delete(appDevices).where(eq(appDevices.profileId, me))
+    await tx.delete(clientNotifications).where(eq(clientNotifications.profileId, me))
+  })
+  return c.json({ ok: true })
+})
+
 residentRouter.post('/session/refresh', async (c) => {
   const db = c.var.db
   const user = c.get('user')
