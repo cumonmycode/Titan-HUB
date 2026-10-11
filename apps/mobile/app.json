@@ -2,14 +2,14 @@
   "expo": {
     "name": "Titan HUB",
     "slug": "titan-hub",
-    "version": "0.5.3",
+    "version": "0.6.0",
     "orientation": "default",
     "scheme": "titanhub",
     "userInterfaceStyle": "automatic",
     "ios": {
       "icon": "./assets/titan.icon",
       "bundleIdentifier": "ru.titan.hub",
-      "buildNumber": "25",
+      "buildNumber": "26",
       "appleTeamId": "G99YH9UK8C",
       "supportsTablet": true,
       "infoPlist": {
@@ -127,7 +127,9 @@
         {
           "microphonePermission": "Микрофон нужен, чтобы говорить с Tai голосом: он слушает только после нажатия на кнопку микрофона.",
           "speechRecognitionPermission": "Распознавание речи превращает ваши голосовые команды для Tai в текст.",
-          "androidSpeechServicePackages": ["com.google.android.googlequicksearchbox"]
+          "androidSpeechServicePackages": [
+            "com.google.android.googlequicksearchbox"
+          ]
         }
       ]
     ],
