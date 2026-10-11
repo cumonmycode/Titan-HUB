@@ -42,6 +42,7 @@ import type { TaiEvent } from './tai/blocks.js'
 import { runTai, taiErrorMessage } from './tai/engine.js'
 import { createApiCaller, forwardedHeaders } from './tai/internal.js'
 import { POLZA_BASE, resolveApiKey } from './tai/llm.js'
+import { synthesize } from './tai/speech.js'
 import { getBusinessDayStartHour } from '../../lib/appSettings.js'
 
 // Действия Tai, доступные только владельцу (зарплаты, расходы).
@@ -630,6 +631,13 @@ aiRouter.post('/assistant/actions/:id/dismiss', async (c) => {
   if (!ACTION_ID.test(id)) return c.json({ error: 'Неверная карточка' }, 400)
   const card = await dismissAction(c.var.club?.id ?? 'main', c.get('user').sub, id)
   return c.json({ action: card })
+})
+
+// Озвучить короткую фразу (итог карточки после голосового «да» и т.п.) тем же голосом Tai.
+aiRouter.post('/assistant/speech', zValidator('json', z.object({ text: z.string().min(1).max(600) })), async (c) => {
+  const audio = await synthesize(await resolveApiKey(c.var.db), c.req.valid('json').text)
+  if (!audio) return c.json({ error: 'Не удалось озвучить' }, 502)
+  return c.json(audio)
 })
 
 // Распознавание речи на сервере — для браузеров без встроенного (в приложении речь

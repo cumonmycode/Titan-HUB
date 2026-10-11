@@ -10,8 +10,8 @@ import { usePathname, useRouter } from 'next/navigation'
 import { useQueryClient } from '@tanstack/react-query'
 import { Icon } from '@/components/Icon'
 import { TaiLogo } from '@/components/TaiLogo'
-import { transcribeVoice, type TaiContext, type TaiRoute } from '@/lib/tai'
-import { taiHref, useTaiStore, type TaiMessage, type TaiReply } from '@/store/tai.store'
+import { speakTai, transcribeVoice, type TaiContext, type TaiRoute } from '@/lib/tai'
+import { setTaiAudioListener, taiHref, useTaiStore, type TaiMessage, type TaiReply } from '@/store/tai.store'
 import { TaiBlockView } from './TaiBlocks'
 
 const STARTERS: Record<NonNullable<TaiContext['screen']>, { hint: string; items: { text: string; draft?: boolean }[] }> = {
@@ -35,10 +35,6 @@ type Recognition = {
   onerror: ((e: { error: string }) => void) | null
 }
 
-function speakable(text: string) {
-  return text.replace(/\*\*/g, '').replace(/^#+\s*/gm, '').replace(/^\s*([-*•]|\d+[.)])\s+/gm, '').replace(/₽/g, ' рублей').trim()
-}
-
 /**
  * Голос в браузере: слушаем, пауза ~1,3 с — фраза уходит Tai; ответ читаем вслух
  * системным голосом и снова слушаем, пока не нажали «Стоп».
@@ -51,6 +47,9 @@ function useWebVoice(onUtterance: (text: string) => Promise<void>) {
   const heard = useRef('')
   const lastAt = useRef(0)
   const conversation = useRef(false)
+  const queue = useRef<HTMLAudioElement[]>([])
+  const playing = useRef<HTMLAudioElement | null>(null)
+  const replyFinished = useRef(false)
 
   const Ctor = typeof window !== 'undefined' ? ((window as unknown as { SpeechRecognition?: new () => Recognition; webkitSpeechRecognition?: new () => Recognition }).SpeechRecognition ?? (window as unknown as { webkitSpeechRecognition?: new () => Recognition }).webkitSpeechRecognition) : undefined
 
@@ -61,7 +60,10 @@ function useWebVoice(onUtterance: (text: string) => Promise<void>) {
   }, [onUtterance])
 
   const listen = useCallback(async () => {
-    window.speechSynthesis?.cancel()
+    playing.current?.pause()
+    playing.current = null
+    queue.current = []
+    replyFinished.current = false
     conversation.current = true
     heard.current = ''
     setTranscript('')
@@ -124,40 +126,59 @@ function useWebVoice(onUtterance: (text: string) => Promise<void>) {
     conversation.current = false
     recognition.current?.abort()
     recorder.current?.stop()
-    window.speechSynthesis?.cancel()
+    playing.current?.pause()
+    playing.current = null
+    queue.current = []
     setPhase('idle')
   }, [])
 
-  /** Прочитать ответ вслух; потом снова слушать. */
-  const say = useCallback((text: string) => {
-    const clean = speakable(text)
-    if (!conversation.current) { setPhase('idle'); return }
-    if (!clean || !window.speechSynthesis) { void listen(); return }
-    const utter = new SpeechSynthesisUtterance(clean)
-    utter.lang = 'ru-RU'
-    const voice = window.speechSynthesis.getVoices().find((v) => v.lang.toLowerCase().startsWith('ru'))
-    if (voice) utter.voice = voice
-    utter.onend = () => { if (conversation.current) setTimeout(() => conversation.current && void listen(), 300) }
-    setPhase('speaking')
-    window.speechSynthesis.speak(utter)
+  // Ответ озвучивает сервер нейросетевым голосом: фразы приходят звуком в потоке.
+  const afterSpeech = useCallback(() => {
+    if (playing.current || queue.current.length || !replyFinished.current) return
+    if (conversation.current) setTimeout(() => conversation.current && void listen(), 300)
+    else setPhase('idle')
   }, [listen])
+  const playNextRef = useRef<() => void>(() => undefined)
+  const playNext = useCallback(() => {
+    if (playing.current) return
+    const audio = queue.current.shift()
+    if (!audio) { afterSpeech(); return }
+    playing.current = audio
+    setPhase('speaking')
+    const next = () => { if (playing.current === audio) playing.current = null; playNextRef.current() }
+    audio.onended = next
+    audio.onerror = next
+    void audio.play().catch(next)
+  }, [afterSpeech])
+  useEffect(() => { playNextRef.current = playNext }, [playNext])
+  const enqueue = useCallback((format: 'mp3' | 'wav', data: string) => {
+    if (!conversation.current) return
+    queue.current.push(new Audio(`data:audio/${format === 'mp3' ? 'mpeg' : 'wav'};base64,${data}`))
+    playNext()
+  }, [playNext])
+  useEffect(() => {
+    setTaiAudioListener((event) => enqueue(event.format, event.data))
+    return () => setTaiAudioListener(null)
+  }, [enqueue])
 
-  useEffect(() => () => { conversation.current = false; recognition.current?.abort(); window.speechSynthesis?.cancel() }, [])
+  /** Ответ дописан — когда звук доиграет, снова слушаем. */
+  const replyDone = useCallback(() => { replyFinished.current = true; afterSpeech() }, [afterSpeech])
+  /** Короткая реплика голосом Tai (итог карточки после голосового «да»). */
+  const say = useCallback(async (text: string) => {
+    replyFinished.current = false
+    if (conversation.current && text) {
+      const audio = await speakTai(text)
+      if (audio) enqueue(audio.format, audio.data)
+    }
+    replyDone()
+  }, [enqueue, replyDone])
 
-  return { phase, transcript, active: phase !== 'idle', listen, done, end, say }
+  useEffect(() => () => { conversation.current = false; recognition.current?.abort(); playing.current?.pause() }, [])
+
+  return { phase, transcript, active: phase !== 'idle', listen, done, end, say, replyDone }
 }
 
 /* ─────────────────────────── Чат ─────────────────────────── */
-
-function voiceSummary(reply: TaiReply): string {
-  if (reply.error) return reply.error
-  if (reply.text) return reply.text
-  const action = reply.blocks.find((b) => b.type === 'action')
-  if (action?.type === 'action' && action.action.status === 'pending') return `${action.action.title}${action.action.total ? `, итого ${action.action.total}` : ''}. Подтверждаешь?`
-  const choice = reply.blocks.find((b) => b.type === 'choice')
-  if (choice?.type === 'choice') return choice.question
-  return reply.blocks.length ? 'Показал на экране.' : ''
-}
 
 export function TaiChat({ onClose, closeOnNavigate = true }: { onClose?: () => void; closeOnNavigate?: boolean }) {
   const router = useRouter()
@@ -195,8 +216,8 @@ export function TaiChat({ onClose, closeOnNavigate = true }: { onClose?: () => v
       const reply = [...state.messages].reverse().find((m): m is TaiReply => m.role === 'tai')
       const card = reply?.blocks.find((b) => b.type === 'action')
       voice.say(card?.type === 'action' ? (card.action.status === 'cancelled' ? 'Отменил.' : card.action.result ?? 'Готово.') : 'Готово.')
-    } else if (last?.role === 'tai') {
-      voice.say(voiceSummary(last))
+    } else {
+      voice.replyDone()
     }
   })
 

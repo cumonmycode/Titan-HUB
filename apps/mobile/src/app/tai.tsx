@@ -58,16 +58,6 @@ const STARTERS: Record<NonNullable<TaiContext['screen']>, { hint: string; items:
   },
 };
 
-/** Фраза для голоса, если ответ — только блоки без текста. */
-function voiceSummary(reply: TaiReply): string {
-  const action = reply.blocks.find((b) => b.type === 'action');
-  if (action?.type === 'action' && action.action.status === 'pending')
-    return `${action.action.title}${action.action.total ? `, итого ${action.action.total}` : ''}. Подтверждаете?`;
-  const choice = reply.blocks.find((b) => b.type === 'choice');
-  if (choice?.type === 'choice') return choice.question;
-  return reply.blocks.length ? 'Показал на экране.' : '';
-}
-
 /**
  * Tai — шторка поверх кассы, чека или аналитики. Помнит, откуда открыт: в чеке «добавь
  * колу» — в этот чек. Отвечает потоком: статус, текст, интерактивные блоки и карточки
@@ -109,19 +99,9 @@ export default function TaiScreen() {
     return card?.type === 'action' ? (card.action.status === 'cancelled' ? 'Отменил.' : (card.action.result ?? 'Готово.')) : 'Готово.';
   });
 
-  // Озвучка ответа, пока он печатается.
+  // Ответ озвучивает сервер (звук приходит в потоке ответа) — см. useTaiVoice.
   const last = messages.at(-1);
   const lastReply = last?.role === 'tai' ? last : null;
-  useEffect(() => {
-    if (!lastReply?.voice) return;
-    if (!lastReply.streaming && !lastReply.text) {
-      voice.say(lastReply.error ?? voiceSummary(lastReply));
-      return;
-    }
-    voice.feed(lastReply.id, lastReply.text, !lastReply.streaming);
-    // voice — стабильные колбэки; следим только за ответом.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lastReply?.id, lastReply?.text, lastReply?.streaming]);
 
   const submit = (text: string) => {
     if (!text.trim() || busy) return;

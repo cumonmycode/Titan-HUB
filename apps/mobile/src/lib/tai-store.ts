@@ -12,6 +12,7 @@ import {
   type TaiActionCard,
   type TaiBlock,
   type TaiContext,
+  type TaiEvent,
   type TaiTurn,
 } from './tai-api';
 
@@ -51,6 +52,13 @@ type TaiState = {
 };
 
 let controller: AbortController | null = null;
+
+/** Звук ответа уходит в голосовой режим (useTaiVoice), а не в состояние диалога. */
+type AudioEvent = Extract<TaiEvent, { type: 'audio' }>;
+let audioListener: ((event: AudioEvent) => void) | null = null;
+export function setTaiAudioListener(listener: ((event: AudioEvent) => void) | null) {
+  audioListener = listener;
+}
 let counter = 0;
 const nextId = () => `${Date.now().toString(36)}-${(counter += 1)}`;
 
@@ -154,6 +162,9 @@ export const useTaiStore = create<TaiState>((set, get) => ({
               break;
             case 'error':
               patchReply(reply.id, () => ({ error: event.message }));
+              break;
+            case 'audio':
+              audioListener?.(event);
               break;
           }
         },

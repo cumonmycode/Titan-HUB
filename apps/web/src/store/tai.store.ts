@@ -9,6 +9,7 @@ import {
   type TaiActionCard,
   type TaiBlock,
   type TaiContext,
+  type TaiEvent,
   type TaiRoute,
   type TaiTurn,
 } from '@/lib/tai'
@@ -53,6 +54,13 @@ type TaiState = {
 }
 
 let controller: AbortController | null = null
+
+/** Звук ответа уходит в голосовой режим чата, а не в состояние диалога. */
+type AudioEvent = Extract<TaiEvent, { type: 'audio' }>
+let audioListener: ((event: AudioEvent) => void) | null = null
+export function setTaiAudioListener(listener: ((event: AudioEvent) => void) | null) {
+  audioListener = listener
+}
 let counter = 0
 const nextId = () => `${Date.now().toString(36)}-${(counter += 1)}`
 
@@ -128,6 +136,7 @@ export const useTaiStore = create<TaiState>((set, get) => ({
           else if (event.type === 'suggestions') patchReply(reply.id, () => ({ suggestions: event.items }))
           else if (event.type === 'done') patchReply(reply.id, () => ({ memo: event.memo }))
           else if (event.type === 'error') patchReply(reply.id, () => ({ error: event.message }))
+          else if (event.type === 'audio') audioListener?.(event)
         },
         current.signal,
       )

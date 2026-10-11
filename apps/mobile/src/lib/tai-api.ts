@@ -58,6 +58,8 @@ export type TaiEvent =
   | { type: 'delta'; text: string }
   | { type: 'block'; block: TaiBlock }
   | { type: 'suggestions'; items: string[] }
+  /** Голосовой режим: озвученная фраза ответа (base64), по порядку seq. */
+  | { type: 'audio'; seq: number; format: 'mp3' | 'wav'; data: string }
   | { type: 'done'; memo: string }
   | { type: 'error'; message: string };
 
@@ -138,6 +140,11 @@ export async function streamTai(
 export async function confirmTaiAction(id: string): Promise<TaiActionCard> {
   const { action } = await api.post<{ action: TaiActionCard }>(`/ai/assistant/actions/${id}`);
   return action;
+}
+
+/** Озвучить короткую фразу голосом Tai (итог карточки после голосового «да»). */
+export async function speakTai(text: string): Promise<{ format: 'mp3' | 'wav'; data: string } | null> {
+  return api.post<{ format: 'mp3' | 'wav'; data: string }>('/ai/assistant/speech', { text }).catch(() => null);
 }
 
 export async function dismissTaiAction(id: string): Promise<void> {

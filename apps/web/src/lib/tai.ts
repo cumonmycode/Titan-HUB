@@ -55,6 +55,7 @@ export type TaiEvent =
   | { type: 'delta'; text: string }
   | { type: 'block'; block: TaiBlock }
   | { type: 'suggestions'; items: string[] }
+  | { type: 'audio'; seq: number; format: 'mp3' | 'wav'; data: string }
   | { type: 'done'; memo: string }
   | { type: 'error'; message: string }
 
@@ -124,6 +125,11 @@ export async function streamTai(
 export async function confirmTaiAction(id: string): Promise<TaiActionCard> {
   const { action } = await api.post<{ action: TaiActionCard }>(`/ai/assistant/actions/${id}`)
   return action
+}
+
+/** Озвучить короткую фразу голосом Tai. */
+export async function speakTai(text: string): Promise<{ format: 'mp3' | 'wav'; data: string } | null> {
+  return api.post<{ format: 'mp3' | 'wav'; data: string }>('/ai/assistant/speech', { text }).catch(() => null)
 }
 
 export async function dismissTaiAction(id: string): Promise<void> {

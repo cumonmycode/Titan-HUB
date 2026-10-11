@@ -8,11 +8,12 @@
  */
 import type { Context } from 'hono'
 import type { AppEnv } from '../../../types.js'
-import type { TaiEvent, TaiScreenContext } from './blocks.js'
+import type { TaiBlock, TaiEvent, TaiScreenContext } from './blocks.js'
 import { businessDates, systemPrompt } from './context.js'
 import { mskTime, num, rub } from './format.js'
 import { createApiCaller, forwardedHeaders, InternalApiError, type ApiCaller } from './internal.js'
 import { LlmError, resolveApiKey, streamChat, type LlmMessage, type LlmToolCall } from './llm.js'
+import { SpeechStream } from './speech.js'
 import { FOLLOW_UPS, llmTools, SCREEN_SUGGESTIONS, toolsFor } from './tools/index.js'
 import type { ToolContext, ToolResult } from './tools/types.js'
 
@@ -64,6 +65,15 @@ async function screenLine(api: ApiCaller, context: TaiScreenContext | undefined)
   return ''
 }
 
+/** Что сказать голосом, если ответ — только блоки без текста. */
+function voiceFallback(blocks: TaiBlock[]): string {
+  const action = blocks.find((b) => b.type === 'action')
+  if (action?.type === 'action') return `${action.action.title}${action.action.total ? `, итого ${action.action.total}` : ''}. Подтверждаешь?`
+  const choice = blocks.find((b) => b.type === 'choice')
+  if (choice?.type === 'choice') return choice.question
+  return blocks.length ? 'Глянь на экран.' : ''
+}
+
 function toolError(error: unknown): string {
   if (error instanceof InternalApiError) {
     if (error.status === 403) return `Нет доступа: ${error.message}`
@@ -110,7 +120,10 @@ export async function runTai(c: Context<AppEnv>, request: TaiRequest, emit: Emit
 
   const memos: string[] = []
   const used: string[] = []
+  const shown: TaiBlock[] = []
   let lastStatus = ''
+  // Голосовой режим: фразы озвучиваются по ходу ответа и уходят звуком в том же потоке.
+  const speech = request.voice ? new SpeechStream(apiKey, (audio) => emit({ type: 'audio', ...audio }), signal) : null
 
   for (let round = 0; round < MAX_ROUNDS; round += 1) {
     // Последний круг — без инструментов: модель обязана ответить текстом.
@@ -120,6 +133,7 @@ export async function runTai(c: Context<AppEnv>, request: TaiRequest, emit: Emit
     for await (const chunk of streamChat({ apiKey, messages, tools: offerTools ? llmTools(tools) : [], maxTokens: request.voice ? 400 : 900, signal })) {
       if (chunk.type === 'text') {
         text += chunk.text
+        speech?.push(chunk.text)
         await emit({ type: 'delta', text: chunk.text })
       } else {
         calls = chunk.calls
@@ -149,7 +163,10 @@ export async function runTai(c: Context<AppEnv>, request: TaiRequest, emit: Emit
     )
 
     for (const [index, result] of results.entries()) {
-      for (const block of result.blocks ?? []) await emit({ type: 'block', block })
+      for (const block of result.blocks ?? []) {
+        shown.push(block)
+        await emit({ type: 'block', block })
+      }
       if (result.memo) memos.push(result.memo)
       const name = prepared[index]!.call.function.name
       if (!result.terminal) used.push(name)
@@ -159,6 +176,8 @@ export async function runTai(c: Context<AppEnv>, request: TaiRequest, emit: Emit
     // Карточка действия или вопрос — ход окончен, ждём пользователя.
     if (results.every((r, i) => r.terminal || prepared[i]!.call.function.name === 'show_links')) break
   }
+
+  if (speech) await speech.finish(voiceFallback(shown))
 
   const lastTool = used[used.length - 1]
   const suggestions = (lastTool ? FOLLOW_UPS[lastTool] : SCREEN_SUGGESTIONS[request.context?.screen ?? 'other']) ?? []

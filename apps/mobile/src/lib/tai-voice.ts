@@ -1,15 +1,19 @@
-import * as Speech from 'expo-speech';
+import { createAudioPlayer, setAudioModeAsync, type AudioPlayer } from 'expo-audio';
+import { File, Paths } from 'expo-file-system';
 import { ExpoSpeechRecognitionModule, useSpeechRecognitionEvent } from 'expo-speech-recognition';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, Linking, Platform } from 'react-native';
+import { Alert, Linking } from 'react-native';
 
 import { haptic } from './haptics';
+import { speakTai } from './tai-api';
+import { setTaiAudioListener } from './tai-store';
 
 /**
  * Голосовой режим Tai, как разговор с Siri: нажали микрофон — телефон слушает и сразу
- * показывает распознанный текст; пауза ~1,3 с — фраза уходит Tai; ответ озвучивается
- * по фразам, пока ещё печатается; после ответа Tai снова слушает. Распознавание и
- * голос — системные (бесплатно, без задержки на сеть); выход — кнопка «Стоп» или тишина.
+ * показывает распознанный текст; пауза ~1,3 с — фраза уходит Tai. Отвечает Tai
+ * нейросетевым голосом: сервер озвучивает ответ по фразам, пока тот ещё пишется, и
+ * присылает звук в том же потоке (системный голос телефона звучал роботом). После
+ * ответа Tai снова слушает; выход — кнопка «Стоп» или тишина.
  */
 
 export type VoicePhase = 'idle' | 'listening' | 'thinking' | 'speaking';
@@ -18,52 +22,7 @@ const SILENCE_AFTER_SPEECH_MS = 1_300;
 const SILENCE_BEFORE_SPEECH_MS = 7_000;
 const RELISTEN_DELAY_MS = 350;
 
-/** Лучший русский голос устройства: «улучшенный» раньше обычного. */
-let voicePromise: Promise<string | undefined> | null = null;
-function russianVoice(): Promise<string | undefined> {
-  voicePromise ??= Speech.getAvailableVoicesAsync()
-    .then((voices) => {
-      const ru = voices.filter((v) => v.language?.toLowerCase().startsWith('ru'));
-      const best = ru.find((v) => v.quality === Speech.VoiceQuality.Enhanced) ?? ru[0];
-      return best?.identifier;
-    })
-    .catch(() => undefined);
-  return voicePromise;
-}
-
-const RUBLE_FORMS = ['рубль', 'рубля', 'рублей'] as const;
-function rubles(n: number) {
-  const a = n % 100;
-  const b = n % 10;
-  if (a > 10 && a < 20) return RUBLE_FORMS[2];
-  if (b === 1) return RUBLE_FORMS[0];
-  if (b > 1 && b < 5) return RUBLE_FORMS[1];
-  return RUBLE_FORMS[2];
-}
-
-/** Текст для озвучки: без разметки, «48 200 ₽» → «48200 рублей». */
-export function speakable(text: string): string {
-  return text
-    .replace(/\*\*/g, '')
-    .replace(/^#+\s*/gm, '')
-    .replace(/^\s*([-*•]|\d+[.)])\s+/gm, '')
-    .replace(/(\d[\d\s ]*)(?:,\d+)?\s*₽/g, (_, digits: string) => {
-      const n = Number(digits.replace(/[\s ]/g, ''));
-      return Number.isFinite(n) ? `${n} ${rubles(n)}` : digits;
-    })
-    .replace(/[«»]/g, '')
-    .trim();
-}
-
-/** Конец законченной фразы в тексте после позиции from; -1 — фраза ещё не дописана. */
-function sentenceEnd(text: string, from: number): number {
-  const rest = text.slice(from);
-  const match = /[.!?…](?=\s|$)|\n/g;
-  let last = -1;
-  let m: RegExpExecArray | null;
-  while ((m = match.exec(rest))) last = from + m.index + 1;
-  return last;
-}
+type Clip = { file: File };
 
 /** onUtterance отправляет фразу Tai; вернёт строку — её озвучим (ответа модели не было). */
 export function useTaiVoice(onUtterance: (text: string) => Promise<string | null>) {
@@ -73,17 +32,23 @@ export function useTaiVoice(onUtterance: (text: string) => Promise<string | null
   const conversation = useRef(false);
   const heard = useRef('');
   const lastHeardAt = useRef(0);
-  const spoken = useRef<{ id: string; upTo: number } | null>(null);
-  const pending = useRef(0);
-  const finished = useRef(false);
-  const phaseRef = useRef<VoicePhase>('idle');
-  useEffect(() => {
-    phaseRef.current = phase;
-  }, [phase]);
+  const queue = useRef<Clip[]>([]);
+  const playing = useRef<AudioPlayer | null>(null);
+  const replyFinished = useRef(false);
+  const clipCounter = useRef(0);
+  // Следующий фрагмент по окончании текущего (слушатель плеера живёт дольше рендера).
+  const playNextRef = useRef<() => void>(() => undefined);
+
+  const stopPlayback = useCallback(() => {
+    playing.current?.pause();
+    playing.current?.remove();
+    playing.current = null;
+    for (const clip of queue.current) clip.file.delete();
+    queue.current = [];
+  }, []);
 
   const listen = useCallback(async () => {
-    Speech.stop();
-    pending.current = 0;
+    stopPlayback();
     const permission = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
     if (!permission.granted) {
       conversation.current = false;
@@ -98,6 +63,7 @@ export function useTaiVoice(onUtterance: (text: string) => Promise<string | null
     setTranscript('');
     lastHeardAt.current = Date.now();
     conversation.current = true;
+    replyFinished.current = false;
     haptic.light();
     ExpoSpeechRecognitionModule.start({
       lang: 'ru-RU',
@@ -107,11 +73,91 @@ export function useTaiVoice(onUtterance: (text: string) => Promise<string | null
       addsPunctuation: true,
       iosTaskHint: 'dictation',
       volumeChangeEventOptions: { enabled: true, intervalMillis: 120 },
-      // Ответ потом звучит из динамика, а не из разговорного.
       iosCategory: { category: 'playAndRecord', categoryOptions: ['defaultToSpeaker', 'allowBluetooth'], mode: 'default' },
     });
     setPhase('listening');
-  }, []);
+  }, [stopPlayback]);
+
+  /** Всё сказано и ответ дописан — снова слушаем (или выходим, если разговор окончен). */
+  const afterSpeech = useCallback(() => {
+    if (playing.current || queue.current.length || !replyFinished.current) return;
+    if (conversation.current) setTimeout(() => conversation.current && void listen(), RELISTEN_DELAY_MS);
+    else setPhase('idle');
+  }, [listen]);
+
+  const playNext = useCallback(async () => {
+    if (playing.current) return;
+    const clip = queue.current.shift();
+    if (!clip) {
+      if (!replyFinished.current && conversation.current) setPhase('thinking');
+      afterSpeech();
+      return;
+    }
+    // Ответ — в динамик, громко, даже в беззвучном режиме: Tai заговорил по просьбе.
+    await setAudioModeAsync({
+      playsInSilentMode: true,
+      interruptionMode: 'duckOthers',
+      allowsRecording: false,
+      shouldPlayInBackground: false,
+      shouldRouteThroughEarpiece: false,
+    }).catch(() => undefined);
+    const player = createAudioPlayer({ uri: clip.file.uri });
+    playing.current = player;
+    setPhase('speaking');
+    const subscription = player.addListener('playbackStatusUpdate', (status) => {
+      if (!status.didJustFinish) return;
+      subscription.remove();
+      player.remove();
+      clip.file.delete();
+      if (playing.current === player) playing.current = null;
+      playNextRef.current();
+    });
+    player.play();
+  }, [afterSpeech]);
+
+  useEffect(() => {
+    playNextRef.current = () => void playNext();
+  }, [playNext]);
+
+  const enqueue = useCallback(
+    (format: 'mp3' | 'wav', data: string) => {
+      if (!conversation.current) return;
+      try {
+        const file = new File(Paths.cache, `tai-voice-${Date.now()}-${(clipCounter.current += 1)}.${format}`);
+        file.write(data, { encoding: 'base64' });
+        queue.current.push({ file });
+        void playNext();
+      } catch {
+        // Не записали звук — фраза уже на экране, разговор продолжается.
+      }
+    },
+    [playNext],
+  );
+
+  // Звук ответа приходит из потока Tai (стор диалога).
+  useEffect(() => {
+    setTaiAudioListener((event) => enqueue(event.format, event.data));
+    return () => setTaiAudioListener(null);
+  }, [enqueue]);
+
+  /** Ответ модели дописан — когда звук доиграет, снова слушаем. */
+  const replyDone = useCallback(() => {
+    replyFinished.current = true;
+    afterSpeech();
+  }, [afterSpeech]);
+
+  /** Короткая реплика голосом Tai (итог карточки после голосового «да»). */
+  const say = useCallback(
+    async (text: string) => {
+      replyFinished.current = false;
+      if (conversation.current) {
+        const audio = await speakTai(text);
+        if (audio) enqueue(audio.format, audio.data);
+      }
+      replyDone();
+    },
+    [enqueue, replyDone],
+  );
 
   /** Закончить фразу сейчас (кнопка «Готово») — распознанное уйдёт Tai. */
   const finishListening = useCallback(() => ExpoSpeechRecognitionModule.stop(), []);
@@ -120,66 +166,10 @@ export function useTaiVoice(onUtterance: (text: string) => Promise<string | null
   const end = useCallback(() => {
     conversation.current = false;
     ExpoSpeechRecognitionModule.abort();
-    Speech.stop();
-    pending.current = 0;
+    stopPlayback();
     setLevel(0);
     setPhase('idle');
-  }, []);
-
-  const afterSpeech = useCallback(() => {
-    if (pending.current > 0 || !finished.current) return;
-    if (conversation.current) setTimeout(() => conversation.current && void listen(), RELISTEN_DELAY_MS);
-    else setPhase('idle');
-  }, [listen]);
-
-  const speak = useCallback(
-    async (text: string) => {
-      const clean = speakable(text);
-      if (!clean) return;
-      pending.current += 1;
-      setPhase('speaking');
-      const voice = await russianVoice();
-      const done = () => {
-        pending.current = Math.max(0, pending.current - 1);
-        afterSpeech();
-      };
-      Speech.speak(clean, { language: 'ru-RU', voice, rate: Platform.OS === 'ios' ? 1.05 : 1.0, onDone: done, onStopped: done, onError: done });
-    },
-    [afterSpeech],
-  );
-
-  /**
-   * Озвучка ответа по мере печати: законченные фразы — сразу, хвост — когда ответ
-   * дописан. Вызывается при каждом изменении текста ответа.
-   */
-  const feed = useCallback(
-    (id: string, text: string, complete: boolean) => {
-      if (!conversation.current || phaseRef.current === 'listening') return;
-      if (spoken.current?.id !== id) spoken.current = { id, upTo: 0 };
-      const state = spoken.current;
-      const end = complete ? text.length : sentenceEnd(text, state.upTo);
-      if (end > state.upTo) {
-        const part = text.slice(state.upTo, end);
-        state.upTo = end;
-        void speak(part);
-      }
-      if (complete) {
-        finished.current = true;
-        afterSpeech();
-      }
-    },
-    [afterSpeech, speak],
-  );
-
-  /** Короткая реплика (итог карточки после голосового «да»). */
-  const say = useCallback(
-    (text: string) => {
-      finished.current = true;
-      if (conversation.current) void speak(text);
-      else setPhase('idle');
-    },
-    [speak],
-  );
+  }, [stopPlayback]);
 
   useSpeechRecognitionEvent('result', (event) => {
     const text = event.results[0]?.transcript ?? '';
@@ -206,10 +196,8 @@ export function useTaiVoice(onUtterance: (text: string) => Promise<string | null
     }
     haptic.selection();
     setPhase('thinking');
-    finished.current = false;
-    void onUtterance(said).then((reply) => {
-      if (reply) say(reply);
-    });
+    replyFinished.current = false;
+    void onUtterance(said).then((reply) => (reply ? say(reply) : replyDone()));
   });
 
   // Пауза после речи — конец фразы; долгая тишина без слов — выход.
@@ -226,10 +214,10 @@ export function useTaiVoice(onUtterance: (text: string) => Promise<string | null
     () => () => {
       conversation.current = false;
       ExpoSpeechRecognitionModule.abort();
-      Speech.stop();
+      stopPlayback();
     },
-    [],
+    [stopPlayback],
   );
 
-  return { phase, transcript, level, active: phase !== 'idle', listen, finishListening, end, feed, say };
+  return { phase, transcript, level, active: phase !== 'idle', listen, finishListening, end };
 }
