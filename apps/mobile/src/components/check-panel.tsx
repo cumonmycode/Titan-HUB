@@ -109,6 +109,7 @@ function SelectedCheck({ checkId }: { checkId: string }) {
               {data.spaceId && <Button label="Чат с кабинкой" systemImage="bubble.left" onPress={() => router.push({ pathname: '/chat', params: { checkId } })} />}
               {isOpen && (
                 <>
+                  <Button label="Спросить Tai" systemImage="sparkles" onPress={() => router.push({ pathname: '/tai', params: { screen: 'check', checkId } })} />
                   <Button label="Скидка" systemImage="percent" onPress={actions.onAddDiscount} />
                   <Button label="Отменить чек" systemImage="xmark.circle" role="destructive" onPress={actions.onCancel} />
                 </>

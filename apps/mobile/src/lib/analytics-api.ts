@@ -16,17 +16,27 @@ import type { NumericString } from './types';
 
 /* ─────────────────────────── Период ─────────────────────────── */
 
-export type PeriodPreset = 'today' | 'yesterday' | 'week' | 'days30' | 'month' | 'days90' | 'year' | 'custom';
+export type PeriodPreset = 'today' | 'yesterday' | 'thisWeek' | 'month' | 'days7' | 'days30' | 'lastWeek' | 'lastMonth' | 'days90' | 'year' | 'custom';
 
-export const PERIOD_PRESETS: { key: Exclude<PeriodPreset, 'custom'>; label: string }[] = [
+/** Быстрые периоды — сегментами над отчётом. */
+export const QUICK_PRESETS: { key: 'today' | 'yesterday' | 'thisWeek' | 'month'; label: string }[] = [
   { key: 'today', label: 'Сегодня' },
   { key: 'yesterday', label: 'Вчера' },
-  { key: 'week', label: '7 дней' },
+  { key: 'thisWeek', label: 'Эта неделя' },
+  { key: 'month', label: 'Этот месяц' },
+];
+
+/** Остальные периоды — в меню календаря в шапке. */
+export const MORE_PRESETS: { key: Exclude<PeriodPreset, 'custom' | (typeof QUICK_PRESETS)[number]['key']>; label: string }[] = [
+  { key: 'days7', label: '7 дней' },
   { key: 'days30', label: '30 дней' },
-  { key: 'month', label: 'Месяц' },
+  { key: 'lastWeek', label: 'Прошлая неделя' },
+  { key: 'lastMonth', label: 'Прошлый месяц' },
   { key: 'days90', label: '90 дней' },
   { key: 'year', label: 'С начала года' },
 ];
+
+export const PERIOD_PRESETS: { key: Exclude<PeriodPreset, 'custom'>; label: string }[] = [...QUICK_PRESETS, ...MORE_PRESETS];
 
 type PeriodState = {
   preset: PeriodPreset;
@@ -43,6 +53,9 @@ export const useAnalyticsPeriodStore = create<PeriodState>((set) => ({
   setPreset: (preset) => set({ preset }),
   setCustom: (from, to) => set({ preset: 'custom', customFrom: from <= to ? from : to, customTo: from <= to ? to : from }),
 }));
+
+/** Период по датам (переход из Tai): совпадение с готовым периодом подсветит его сегмент. */
+export const setAnalyticsRange = (from: string, to: string) => useAnalyticsPeriodStore.getState().setCustom(from, to);
 
 /** «2026-09-17» ± дни, в UTC — без сдвигов часового пояса устройства. */
 export function addDays(key: string, days: number): string {
@@ -76,45 +89,54 @@ function useServerBusinessDay(): string | null {
   return fresh ? (query.data?.businessDay ?? null) : null;
 }
 
+/** Даты готового периода относительно «сегодня» клуба. Неделя — с понедельника. */
+export function presetRange(preset: Exclude<PeriodPreset, 'custom'>, today: string): { from: string; to: string } {
+  const monday = addDays(today, -((new Date(`${today}T12:00:00Z`).getUTCDay() + 6) % 7));
+  const monthStart = `${today.slice(0, 8)}01`;
+  switch (preset) {
+    case 'today':
+      return { from: today, to: today };
+    case 'yesterday':
+      return { from: addDays(today, -1), to: addDays(today, -1) };
+    case 'thisWeek':
+      return { from: monday, to: today };
+    case 'month':
+      return { from: monthStart, to: today };
+    case 'days7':
+      return { from: addDays(today, -6), to: today };
+    case 'days30':
+      return { from: addDays(today, -29), to: today };
+    case 'lastWeek':
+      return { from: addDays(monday, -7), to: addDays(monday, -1) };
+    case 'lastMonth': {
+      const to = addDays(monthStart, -1);
+      return { from: `${to.slice(0, 8)}01`, to };
+    }
+    case 'days90':
+      return { from: addDays(today, -89), to: today };
+    case 'year':
+      return { from: `${today.slice(0, 5)}01-01`, to: today };
+  }
+}
+
 export function useAnalyticsPeriod(): ResolvedPeriod {
   const startHour = useBusinessDayStartHour();
   const serverDay = useServerBusinessDay();
-  const { preset, customFrom, customTo } = useAnalyticsPeriodStore();
+  const { preset: stored, customFrom, customTo } = useAnalyticsPeriodStore();
   const today = serverDay ?? currentBusinessDay(startHour);
-  let from = today;
-  let to = today;
-  switch (preset) {
-    case 'yesterday':
-      from = to = addDays(today, -1);
-      break;
-    case 'week':
-      from = addDays(today, -6);
-      break;
-    case 'days30':
-      from = addDays(today, -29);
-      break;
-    case 'month':
-      from = `${today.slice(0, 8)}01`;
-      break;
-    case 'days90':
-      from = addDays(today, -89);
-      break;
-    case 'year':
-      from = `${today.slice(0, 5)}01-01`;
-      break;
-    case 'custom':
-      from = customFrom ?? today;
-      to = customTo ?? today;
-      break;
-  }
-  const label =
-    preset === 'today'
-      ? `Сегодня, ${formatDay(today, true)}`
-      : preset === 'yesterday'
-        ? `Вчера, ${formatDay(from, true)}`
-        : from === to
-          ? formatDay(from, true)
-          : `${formatDay(from)} — ${formatDay(to)}`;
+  const { from, to } = stored === 'custom' ? { from: customFrom ?? today, to: customTo ?? today } : presetRange(stored, today);
+  // Свои даты, совпавшие с готовым периодом (например, «эта неделя» из Tai), — это он и есть.
+  const same =
+    stored === 'custom'
+      ? PERIOD_PRESETS.find((p) => {
+          const range = presetRange(p.key, today);
+          return range.from === from && range.to === to;
+        })
+      : undefined;
+  const preset: PeriodPreset = same?.key ?? stored;
+  const name = PERIOD_PRESETS.find((p) => p.key === preset)?.label;
+  const range = from === to ? formatDay(from, true) : `${formatDay(from)} — ${formatDay(to)}`;
+  const label = preset === 'custom' || !name ? range : `${name}, ${range}`;
   return { from, to, days: daysBetween(from, to), label, preset, today };
 }
 
@@ -301,7 +323,8 @@ function useAnalytics<T>(path: string, key: unknown[], options: { enabled?: bool
 export const useOverview = (from: string, to: string) => useAnalytics<Overview>(`/analytics/overview?${range(from, to)}`, ['overview', from, to], { refetchInterval: 60_000 });
 export const useRevenueSeries = (from: string, to: string, enabled = true) => useAnalytics<RevenueSeries>(`/analytics/revenue?${range(from, to)}`, ['revenue', from, to], { enabled });
 export const useProductsAnalytics = (from: string, to: string) => useAnalytics<{ products: ProductRow[]; totalRev: number }>(`/analytics/products?${range(from, to)}`, ['products', from, to]);
-export const useAnalyticsChecks = (from: string, to: string) => useAnalytics<{ summary: NetBreakdown; checks: AnalyticsCheck[] }>(`/analytics/checks?${range(from, to)}`, ['checks', from, to]);
+export const useAnalyticsChecks = (from: string, to: string, enabled = true) =>
+  useAnalytics<{ summary: NetBreakdown; checks: AnalyticsCheck[] }>(`/analytics/checks?${range(from, to)}`, ['checks', from, to], { enabled });
 export const useAnalyticsCheck = (checkId: string) => useAnalytics<CheckDetail>(`/analytics/checks/${checkId}`, ['check', checkId]);
 export const useClientsAnalytics = (from: string, to: string) => useAnalytics<ClientsAnalytics>(`/analytics/clients?${range(from, to)}`, ['clients', from, to]);
 export const useSegmentMembers = (segment: SegmentKey) => useAnalytics<{ players: SegmentMember[] }>(`/analytics/segment-members?segment=${segment}`, ['segment', segment]);

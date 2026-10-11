@@ -42,7 +42,9 @@ function route(raw: Record<string, unknown>, today: string): TaiRoute | null {
 
 const askUserChoice: ToolDef = {
   name: 'ask_user_choice',
-  description: 'Спросить пользователя и дать варианты кнопками (2–6). reply — что отправится от имени пользователя при нажатии (по умолчанию label). После этого остановись и жди ответа.',
+  description:
+    'Спросить пользователя и дать варианты кнопками (2–6). label — что видно на кнопке, reply — что уйдёт от имени пользователя при нажатии: ' +
+    'делай его однозначным и с id, например «Саид Мурат (playerId …)». После этого остановись и жди ответа.',
   parameters: {
     type: 'object',
     properties: {

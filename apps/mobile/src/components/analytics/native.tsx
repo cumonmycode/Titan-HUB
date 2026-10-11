@@ -7,7 +7,7 @@ import type { ColorValue } from 'react-native';
 import { Avatar } from '@/components/new-check-parts';
 import { primary, secondary } from '@/components/native-form';
 import { ToolbarMenu, ToolbarMenuAction } from '@/components/toolbar';
-import { analyticsErrorText, PERIOD_PRESETS, useAnalyticsPeriodStore, type ResolvedPeriod } from '@/lib/analytics-api';
+import { analyticsErrorText, MORE_PRESETS, QUICK_PRESETS, useAnalyticsPeriodStore, type ResolvedPeriod } from '@/lib/analytics-api';
 import { plural } from '@/lib/format';
 import { haptic } from '@/lib/haptics';
 import { colors } from '@/lib/theme';
@@ -21,21 +21,14 @@ import { colors } from '@/lib/theme';
 export const share = (part: number, total: number) => (total > 0 ? Math.round((part / total) * 100) : 0);
 export const signed = (delta: number) => `${delta > 0 ? '+' : '−'}${Math.abs(delta)}%`;
 
-const QUICK: { key: 'today' | 'week' | 'days30' | 'month'; label: string }[] = [
-  { key: 'today', label: 'Сегодня' },
-  { key: 'week', label: '7 дней' },
-  { key: 'days30', label: '30 дней' },
-  { key: 'month', label: 'Месяц' },
-];
-
-/** Меню периода в шапке: все пресеты с отметкой и «Выбрать даты…». Дети — другие кнопки шапки. */
+/** Меню календаря в шапке: остальные периоды с отметкой и «Выбрать даты…». Дети — другие кнопки шапки. */
 export function PeriodMenu({ period, children }: { period: ResolvedPeriod; children?: ReactNode }) {
   const router = useRouter();
   const setPreset = useAnalyticsPeriodStore((s) => s.setPreset);
   return (
     <Stack.Toolbar placement="right">
       <ToolbarMenu icon="calendar" title="Период" accessibilityLabel="Период">
-        {PERIOD_PRESETS.map((preset) => (
+        {MORE_PRESETS.map((preset) => (
           <ToolbarMenuAction key={preset.key} isOn={period.preset === preset.key} onPress={() => setPreset(preset.key)}>
             {preset.label}
           </ToolbarMenuAction>
@@ -54,19 +47,19 @@ export function periodCaption(period: ResolvedPeriod) {
   return `${period.label} · ${period.days} ${plural(period.days, ['день', 'дня', 'дней'])}`;
 }
 
-/** Быстрые периоды сегментами; остальные — в меню шапки. Подпись — выбранные даты. */
+/** Сегодня, вчера, эта неделя, этот месяц — сегментами; остальное — в календаре шапки. Подпись — выбранные даты. */
 export function PeriodSection({ period }: { period: ResolvedPeriod }) {
   const setPreset = useAnalyticsPeriodStore((s) => s.setPreset);
   return (
     <Section footer={<Text>{periodCaption(period)}</Text>}>
       <Picker
-        selection={QUICK.some((q) => q.key === period.preset) ? period.preset : null}
+        selection={QUICK_PRESETS.some((q) => q.key === period.preset) ? period.preset : null}
         onSelectionChange={(value) => {
           haptic.selection();
-          setPreset(value as (typeof QUICK)[number]['key']);
+          setPreset(value as (typeof QUICK_PRESETS)[number]['key']);
         }}
         modifiers={[pickerStyle('segmented')]}>
-        {QUICK.map((q) => (
+        {QUICK_PRESETS.map((q) => (
           <Text key={q.key} modifiers={[tag(q.key)]}>
             {q.label}
           </Text>

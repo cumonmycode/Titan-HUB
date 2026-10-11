@@ -306,6 +306,18 @@ export default function PosScreen() {
             style={styles.bellPress}
             onPress={() => {
               haptic.light();
+              router.push({ pathname: '/tai', params: { screen: 'pos' } });
+            }}
+            accessibilityRole="button"
+            accessibilityLabel="Спросить Tai">
+            <SymbolView name="sparkles" size={19} weight="medium" tintColor={colors.accent} />
+          </Pressable>
+        </GlassView>
+        <GlassView isInteractive style={styles.bell}>
+          <Pressable
+            style={styles.bellPress}
+            onPress={() => {
+              haptic.light();
               router.push('/pos/refunds');
             }}
             accessibilityRole="button"

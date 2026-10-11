@@ -6,7 +6,7 @@ import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import { Text } from '@/components/text';
 import { AmbientBackdrop } from '@/components/ambient-backdrop';
 import { CheckView } from '@/components/check-view';
-import { ToolbarMenu, ToolbarMenuAction } from '@/components/toolbar';
+import { ToolbarButton, ToolbarMenu, ToolbarMenuAction } from '@/components/toolbar';
 import { checkTitle, checkTotals } from '@/lib/checks';
 import { usePosPlayer } from '@/lib/payment';
 import { markCheckNotificationsRead, useCheck } from '@/lib/queries';
@@ -48,8 +48,13 @@ export default function CheckScreen() {
   return (
     <AmbientBackdrop style={styles.screen}>
       <Stack.Title>{data ? checkTitle(data) : 'Чек'}</Stack.Title>
-      {hasMenu && (
+      {(hasMenu || isOpen) && (
         <Stack.Toolbar placement="right">
+          {/* Tai знает этот чек: «добавь колу» — сюда. */}
+          {isOpen && (
+            <ToolbarButton icon="sparkles" accessibilityLabel="Спросить Tai" onPress={() => router.push({ pathname: '/tai', params: { screen: 'check', checkId } })} />
+          )}
+          {hasMenu && (
           <ToolbarMenu icon="ellipsis" accessibilityLabel="Действия с чеком">
             {/* Чат идёт через планшет кабинки — у чека без зоны его нет. */}
             {spaceId && (
@@ -71,6 +76,7 @@ export default function CheckScreen() {
               </ToolbarMenuAction>
             )}
           </ToolbarMenu>
+          )}
         </Stack.Toolbar>
       )}
 

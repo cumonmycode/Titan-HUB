@@ -121,7 +121,15 @@
           "color": "#8B5CF6"
         }
       ],
-      "./plugins/with-staff-calls"
+      "./plugins/with-staff-calls",
+      [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "Микрофон нужен, чтобы говорить с Tai голосом: он слушает только после нажатия на кнопку микрофона.",
+          "speechRecognitionPermission": "Распознавание речи превращает ваши голосовые команды для Tai в текст.",
+          "androidSpeechServicePackages": ["com.google.android.googlequicksearchbox"]
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,
