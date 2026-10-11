@@ -1,28 +1,28 @@
-// Карта клуба в духе Apple Wallet: металл, голографическая фольга или пасс.
-// Карта «ловит свет» при повороте телефона: датчик гравитации читается прямо на
-// UI-потоке (Reanimated), а «ноль» медленно догоняет текущее положение — держите
-// телефон спокойно, и карта выравнивается, как в Wallet. Пальцем карту тоже можно
-// наклонить. Вид выбирается в «Профиль → Вид карты».
+// Карта клуба в духе Apple Wallet на настоящих текстурах (виды — faces.tsx).
+// • Наклон: датчик гравитации на UI-потоке (Reanimated), «ноль» медленно догоняет
+//   положение телефона — держите телефон спокойно, и карта выравнивается, как в Wallet.
+// • Вращение (на главной): горизонтальный свайп крутит карту за пальцем, быстрый —
+//   раскручивает с инерцией; карта ложится лицом или обратной стороной.
+// Вид выбирается в «Профиль → Вид карты».
 import { useIsFocused } from 'expo-router';
-import type { ReactElement } from 'react';
 import { Platform, StyleSheet, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
-  SensorType, type SharedValue, useAnimatedReaction, useAnimatedSensor, useAnimatedStyle,
-  useDerivedValue, useReducedMotion, useSharedValue, withSpring,
+  cancelAnimation, type SharedValue, SensorType, useAnimatedReaction, useAnimatedSensor, useAnimatedStyle,
+  useReducedMotion, useSharedValue, withDecay, withSpring,
 } from 'react-native-reanimated';
+import { scheduleOnRN } from 'react-native-worklets';
 
 import { type CardStyle, useCardStyle } from '@/lib/card-style';
 import { bonus as fmtBonus } from '@/lib/format';
 import { haptic } from '@/lib/haptics';
 
-import { FoilFace, MetalFace, PassFace } from './faces';
-import { CARD_RATIO, type ClubCardData, type FaceProps } from './shared';
+import { CardBack } from './back';
+import { CardFace, LOOKS } from './faces';
+import { CARD_RATIO, type ClubCardData } from './shared';
 
 export type { ClubCardData } from './shared';
 
-// Локальная копия для worklet-ов (они захватывают значения, а не модули).
-const RATIO = CARD_RATIO;
 /** Поворот телефона (доля g, ≈15°) для полного наклона карты. */
 const FULL_TILT = 0.26;
 /** Скорость, с которой «ноль» догоняет положение телефона (за отсчёт ~60 Гц): 1–2 с. */
@@ -31,76 +31,80 @@ const BASE_FOLLOW = 0.012;
 const SMOOTH = 0.18;
 const MAX_ROTATE_X = 7;
 const MAX_ROTATE_Y = 9;
+/** Градусов поворота на пиксель свайпа. */
+const SPIN_PER_PX = 0.55;
+/** Предел скорости раскрутки, °/с — чтобы карта не превращалась в пропеллер. */
+const MAX_SPIN_VELOCITY = 2600;
+/** Сдвиг пальца, после которого касание — уже свайп, а не нажатие. */
+const TAP_SLOP = 10;
 // Android отдаёт гравитацию с обратным знаком относительно iOS.
 const AXIS_SIGN = Platform.OS === 'ios' ? 1 : -1;
-
-const FACES: Record<CardStyle, (p: FaceProps) => ReactElement> = {
-  metal: MetalFace,
-  foil: FoilFace,
-  pass: PassFace,
-};
 
 interface ClubCardProps {
   data: ClubCardData;
   /** Вид; по умолчанию — выбранный в профиле. */
   variant?: CardStyle;
   onPress?: () => void;
-  /** false — без датчика (превью в списке). */
+  /** false — без датчика (неактивные превью). */
   motion?: boolean;
-  /** false — карта не перехватывает касания (внутри листаемых страниц). */
+  /** false — карта не перехватывает касания (внутри листаемых лент). */
   interactive?: boolean;
 }
 
 export function ClubCard({ data, variant, onPress, motion = true, interactive = true }: ClubCardProps) {
   const chosen = useCardStyle((s) => s.style);
-  const Face = FACES[variant ?? chosen];
+  const look = LOOKS[variant ?? chosen];
   const reduceMotion = useReducedMotion();
   const focused = useIsFocused();
-  const sensorX = useSharedValue(0);
-  const sensorY = useSharedValue(0);
-  const fingerX = useSharedValue(0);
-  const fingerY = useSharedValue(0);
-  const finger = useSharedValue(0);
+  const tx = useSharedValue(0);
+  const ty = useSharedValue(0);
+  const spin = useSharedValue(0);
+  const spinStart = useSharedValue(0);
   const width = useSharedValue(0);
 
-  // Палец перекрывает датчик, пока касается карты.
-  const tx = useDerivedValue(() => sensorX.get() * (1 - finger.get()) + fingerX.get() * finger.get());
-  const ty = useDerivedValue(() => sensorY.get() * (1 - finger.get()) + fingerY.get() * finger.get());
+  // Ложимся на ближайшую сторону (кратно 180°) мягкой пружиной.
+  const settle = () => {
+    'worklet';
+    const target = Math.round(spin.get() / 180) * 180;
+    if (Math.abs(spin.get() - target) < 0.5) { spin.set(target); return; }
+    spin.set(withSpring(target, { damping: 14, stiffness: 120 }, (done) => {
+      if (done) scheduleOnRN(haptic.soft);
+    }));
+  };
 
-  // Горизонтальное ведение наклоняет карту; вертикальное отдаётся прокрутке экрана.
   const pan = Gesture.Pan()
-    .activeOffsetX([-6, 6])
-    .failOffsetY([-10, 10])
-    .onBegin((e) => {
-      const w = width.get();
-      if (w <= 0) return;
-      fingerX.set(Math.max(-1, Math.min(1, (e.x / w - 0.5) * 2)));
-      fingerY.set(Math.max(-1, Math.min(1, (e.y / (w / RATIO) - 0.5) * 2)));
-      finger.set(withSpring(1, { damping: 16, stiffness: 220 }));
+    .activeOffsetX([-8, 8])
+    .failOffsetY([-12, 12])
+    // Касание ловит крутящуюся карту; отпустили без свайпа — она ложится на ближайшую сторону.
+    .onBegin(() => { cancelAnimation(spin); spinStart.set(spin.get()); })
+    .onUpdate((e) => { spin.set(spinStart.get() + e.translationX * SPIN_PER_PX); })
+    .onEnd((e) => {
+      const velocity = Math.max(-MAX_SPIN_VELOCITY, Math.min(MAX_SPIN_VELOCITY, e.velocityX * SPIN_PER_PX));
+      if (Math.abs(velocity) < 250) { settle(); return; }
+      spin.set(withDecay({ velocity, deceleration: 0.996 }, (done) => { if (done) settle(); }));
     })
-    .onUpdate((e) => {
-      const w = width.get();
-      if (w <= 0) return;
-      fingerX.set(Math.max(-1, Math.min(1, (e.x / w - 0.5) * 2)));
-      fingerY.set(Math.max(-1, Math.min(1, (e.y / (w / RATIO) - 0.5) * 2)));
-    })
-    .onFinalize(() => {
-      finger.set(withSpring(0, { damping: 16, stiffness: 140 }));
-    })
+    .onFinalize((_e, success) => { if (!success) settle(); })
     .runOnJS(false);
 
-  const tap = Gesture.Tap().onEnd(() => {
-    if (!onPress) return;
+  // Нажатие открывает бонусы, только если карта лежала спокойно (а не была поймана на лету).
+  const tap = Gesture.Tap().maxDistance(TAP_SLOP).onEnd(() => {
+    if (!onPress || Math.abs(spinStart.get() % 180) > 1) return;
     haptic.soft();
     onPress();
   }).runOnJS(true);
 
-  const frame = useAnimatedStyle(() => ({
+  const front = useAnimatedStyle(() => ({
     transform: [
-      { perspective: 1000 },
+      { perspective: 1100 },
+      { rotateY: `${spin.get() + tx.get() * MAX_ROTATE_Y}deg` },
       { rotateX: `${-ty.get() * MAX_ROTATE_X}deg` },
-      { rotateY: `${tx.get() * MAX_ROTATE_Y}deg` },
-      { scale: 1 + 0.015 * finger.get() },
+    ],
+  }));
+  const back = useAnimatedStyle(() => ({
+    transform: [
+      { perspective: 1100 },
+      { rotateY: `${spin.get() + 180 + tx.get() * MAX_ROTATE_Y}deg` },
+      { rotateX: `${-ty.get() * MAX_ROTATE_X}deg` },
     ],
   }));
 
@@ -109,21 +113,31 @@ export function ClubCard({ data, variant, onPress, motion = true, interactive = 
     : `Карта клуба, статус ${data.tierLabel}, ${fmtBonus(data.bonus)} бонусов${data.expiring ? `, ${data.expiring}` : ''}`;
 
   const card = (
-      <Animated.View
-        style={[styles.shadow, frame]}
-        onLayout={(e) => width.set(e.nativeEvent.layout.width)}
-        accessibilityRole={onPress ? 'button' : 'summary'}
-        accessibilityLabel={label}
-        accessibilityHint={onPress ? 'Открыть бонусную программу' : undefined}
-      >
-        {motion && focused && !reduceMotion ? <GravityTilt x={sensorX} y={sensorY} /> : null}
-        <View style={styles.card} pointerEvents="none">
-          <Face data={data} tx={tx} ty={ty} width={width} />
+    <View
+      style={styles.frame}
+      onLayout={(e) => width.set(e.nativeEvent.layout.width)}
+      accessible
+      accessibilityRole={onPress ? 'button' : 'summary'}
+      accessibilityLabel={label}
+      accessibilityHint={onPress ? 'Открыть бонусную программу. Смахните в сторону, чтобы перевернуть карту' : undefined}
+    >
+      {motion && focused && !reduceMotion ? <GravityTilt x={tx} y={ty} /> : null}
+      <Animated.View style={[styles.side, front]}>
+        <View style={styles.clip} pointerEvents="none">
+          <CardFace look={look} data={data} tx={tx} ty={ty} width={width} />
         </View>
       </Animated.View>
+      {interactive ? (
+        <Animated.View style={[styles.side, back]}>
+          <View style={styles.clip} pointerEvents="none">
+            <CardBack look={look} data={data} />
+          </View>
+        </Animated.View>
+      ) : null}
+    </View>
   );
   if (!interactive) return card;
-  return <GestureDetector gesture={Gesture.Simultaneous(pan, tap)}>{card}</GestureDetector>;
+  return <GestureDetector gesture={Gesture.Race(pan, tap)}>{card}</GestureDetector>;
 }
 
 /** Подписка на датчик — монтируется, только пока карта на видимом экране (бережём батарею). */
@@ -150,17 +164,13 @@ function GravityTilt({ x, y }: { x: SharedValue<number>; y: SharedValue<number> 
 }
 
 const styles = StyleSheet.create({
-  shadow: {
-    width: '100%',
-    aspectRatio: CARD_RATIO,
+  frame: { width: '100%', aspectRatio: CARD_RATIO },
+  side: {
+    ...StyleSheet.absoluteFill,
     borderRadius: 20,
     borderCurve: 'continuous',
+    backfaceVisibility: 'hidden',
     boxShadow: '0 18px 36px rgba(0,0,0,0.45), 0 2px 6px rgba(0,0,0,0.3)',
   },
-  card: {
-    flex: 1,
-    borderRadius: 20,
-    borderCurve: 'continuous',
-    overflow: 'hidden',
-  },
+  clip: { flex: 1, borderRadius: 20, borderCurve: 'continuous', overflow: 'hidden' },
 });
