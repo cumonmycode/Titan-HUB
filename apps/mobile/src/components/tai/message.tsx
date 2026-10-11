@@ -24,15 +24,19 @@ export const TaiMessageView = memo(function TaiMessageView({ message }: { messag
 });
 
 function Reply({ reply }: { reply: TaiReply }) {
+  // Голосом — показываем только уже озвученное (как субтитры), остальное — когда дойдёт звук.
+  const text = reply.gate ? reply.text.slice(0, reply.gate.chars).trim() : reply.text;
+  const blocks = reply.gate ? reply.blocks.slice(0, reply.gate.blocks) : reply.blocks;
+  const status = reply.gate && reply.streaming && !reply.status ? 'Tai отвечает…' : reply.status;
   return (
     <Animated.View entering={FadeIn.duration(200)} style={styles.reply}>
-      {reply.text ? <RichText text={reply.text} /> : null}
-      {reply.blocks.map((block, index) => (
+      {text ? <RichText text={text} /> : null}
+      {blocks.map((block, index) => (
         <Animated.View key={index} entering={FadeInDown.duration(220)}>
           <TaiBlockView block={block} />
         </Animated.View>
       ))}
-      {reply.streaming && reply.status ? <Status text={reply.status} /> : null}
+      {(reply.streaming || reply.gate) && status ? <Status text={status} /> : null}
       {reply.error ? (
         <View style={styles.errorRow}>
           <SymbolView name="exclamationmark.triangle.fill" size={15} tintColor={colors.orange} />

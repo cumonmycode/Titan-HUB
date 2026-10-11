@@ -7,10 +7,9 @@
  * голос без сборки приложения.
  */
 import { POLZA_BASE } from './llm.js'
+import { speakable } from './ru-speech.js'
+import { voiceById, type TaiSettings } from './settings.js'
 
-const clean = (v: string | undefined): string => (v ?? '').trim().replace(/^["']|["']$/g, '')
-const MODEL = clean(process.env['TAI_TTS_MODEL']) || 'openai/gpt-4o-mini-tts'
-const VOICE = clean(process.env['TAI_TTS_VOICE']) || 'ash'
 // Подача для моделей, которые её понимают (OpenAI gpt-4o-mini-tts).
 const INSTRUCTIONS = 'Говори по-русски живо и непринуждённо, как дружелюбный коллега в клубе: разговорно, с лёгкой улыбкой, в среднем темпе.'
 const TIMEOUT_MS = 20_000
@@ -36,41 +35,17 @@ function pcmToWav(pcm: Buffer, sampleRate = 24_000): Buffer {
   return Buffer.concat([header, pcm])
 }
 
-const RUBLE = ['рубль', 'рубля', 'рублей'] as const
-function rubles(n: number): string {
-  const a = n % 100
-  const b = n % 10
-  if (a > 10 && a < 20) return RUBLE[2]
-  if (b === 1) return RUBLE[0]
-  if (b > 1 && b < 5) return RUBLE[1]
-  return RUBLE[2]
-}
-
-/** Текст для озвучки: без разметки, «48 200 ₽» → «48200 рублей». */
-export function speakable(text: string): string {
-  return text
-    .replace(/\*\*/g, '')
-    .replace(/^#+\s*/gm, '')
-    .replace(/^\s*([-*•]|\d+[.)])\s+/gm, '')
-    .replace(/(\d[\d\s ]*)(?:,\d+)?\s*₽/g, (_, digits: string) => {
-      const n = Number(digits.replace(/[\s ]/g, ''))
-      return Number.isFinite(n) ? `${n} ${rubles(n)}` : digits
-    })
-    .replace(/[«»]/g, '')
-    .replace(/\s+/g, ' ')
-    .trim()
-}
-
 /** Озвучить фразу. null — синтез не удался (клиент тогда промолчит, текст уже на экране). */
-export async function synthesize(apiKey: string, text: string, signal?: AbortSignal): Promise<SpeechAudio | null> {
+export async function synthesize(apiKey: string, text: string, voiceSettings: Pick<TaiSettings, 'voice' | 'speed'>, signal?: AbortSignal): Promise<SpeechAudio | null> {
   const input = speakable(text).slice(0, 1_000)
   if (!input) return null
-  const openai = MODEL.startsWith('openai/')
+  const { model: MODEL, voice: VOICE, tunable } = voiceById(voiceSettings.voice)
+  const openai = tunable
   try {
     const res = await fetch(`${POLZA_BASE}/audio/speech`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-      body: JSON.stringify({ model: MODEL, voice: VOICE, input, ...(openai ? { response_format: 'mp3', instructions: INSTRUCTIONS } : {}) }),
+      body: JSON.stringify({ model: MODEL, voice: VOICE, input, ...(openai ? { response_format: 'mp3', instructions: INSTRUCTIONS, speed: voiceSettings.speed } : {}) }),
       signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(TIMEOUT_MS)]) : AbortSignal.timeout(TIMEOUT_MS),
     })
     if (!res.ok) {
@@ -93,13 +68,17 @@ export async function synthesize(apiKey: string, text: string, signal?: AbortSig
 /** Конец законченной фразы в text после from; -1 — фраза ещё пишется. Короткие куски копим. */
 function sentenceEnd(text: string, from: number): number {
   const rest = text.slice(from)
-  const re = /[.!?…](?=\s|$)|\n/g
+  // Первый кусок режем и по запятой/тире: короткая фраза озвучивается за ~1,5 с.
+  const re = from === 0 ? /[.!?…,:—–](?=\s|$)|\n/g : /[.!?…](?=\s|$)|\n/g
   let end = -1
   let m: RegExpExecArray | null
   while ((m = re.exec(rest))) {
     const at = from + m.index + 1
     // Первая фраза — как можно раньше; следующие — не короче ~40 знаков, чтобы не дробить речь.
-    if (at - from >= (from === 0 ? 12 : 40)) end = at
+    if (at - from >= (from === 0 ? 14 : 40)) {
+      end = at
+      if (from === 0) break
+    }
   }
   return end
 }
@@ -116,7 +95,9 @@ export class SpeechStream {
 
   constructor(
     private readonly apiKey: string,
-    private readonly emit: (audio: SpeechAudio & { seq: number }) => Promise<void>,
+    private readonly voice: Pick<TaiSettings, 'voice' | 'speed'>,
+    /** upTo — сколько знаков текста ответа озвучено (клиент показывает текст вместе со звуком). */
+    private readonly emit: (audio: SpeechAudio & { seq: number; upTo: number }) => Promise<void>,
     private readonly signal: AbortSignal,
   ) {}
 
@@ -141,10 +122,10 @@ export class SpeechStream {
   private enqueue(part: string, upTo: number) {
     this.spokenUpTo = upTo
     const seq = (this.seq += 1)
-    const pending = synthesize(this.apiKey, part, this.signal)
+    const pending = synthesize(this.apiKey, part, this.voice, this.signal)
     this.chain = this.chain.then(async () => {
       const audio = await pending
-      if (audio && !this.signal.aborted) await this.emit({ ...audio, seq })
+      if (audio && !this.signal.aborted) await this.emit({ ...audio, seq, upTo })
     })
   }
 }

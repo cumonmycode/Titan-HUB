@@ -34,6 +34,8 @@ export type TaiReply = {
   error?: string;
   streaming: boolean;
   voice: boolean;
+  /** Голосовой режим: сколько текста и блоков уже озвучено — показываем вместе со звуком. null — всё. */
+  gate: { chars: number; blocks: number } | null;
 };
 export type TaiMessage = TaiUserMessage | TaiReply;
 
@@ -54,10 +56,20 @@ type TaiState = {
 let controller: AbortController | null = null;
 
 /** Звук ответа уходит в голосовой режим (useTaiVoice), а не в состояние диалога. */
-type AudioEvent = Extract<TaiEvent, { type: 'audio' }>;
-let audioListener: ((event: AudioEvent) => void) | null = null;
-export function setTaiAudioListener(listener: ((event: AudioEvent) => void) | null) {
+export type TaiAudioClip = Extract<TaiEvent, { type: 'audio' }> & { replyId: string; blocks: number };
+let audioListener: ((clip: TaiAudioClip) => void) | null = null;
+export function setTaiAudioListener(listener: ((clip: TaiAudioClip) => void) | null) {
   audioListener = listener;
+}
+
+/** Звук фразы начал играть — показать текст до неё и блоки перед ней. */
+export function revealTai(replyId: string, chars: number, blocks: number) {
+  patchReply(replyId, (m) => (m.gate ? { gate: { chars: Math.max(m.gate.chars, chars), blocks: Math.max(m.gate.blocks, blocks) } } : {}));
+}
+
+/** Голос договорил или режим выключен — показать ответ целиком. */
+export function ungateTai() {
+  useTaiStore.setState((state) => ({ messages: state.messages.map((m) => (m.role === 'tai' && m.gate ? { ...m, gate: null } : m)) }));
 }
 let counter = 0;
 const nextId = () => `${Date.now().toString(36)}-${(counter += 1)}`;
@@ -133,7 +145,19 @@ export const useTaiStore = create<TaiState>((set, get) => ({
 
     haptic.light();
     const userMessage: TaiUserMessage = { id: nextId(), role: 'user', text: options.display ?? text };
-    const reply: TaiReply = { id: nextId(), role: 'tai', text: '', blocks: [], status: 'Думаю…', suggestions: [], streaming: true, voice: !!options.voice };
+    const reply: TaiReply = {
+      id: nextId(),
+      role: 'tai',
+      text: '',
+      blocks: [],
+      status: 'Думаю…',
+      suggestions: [],
+      streaming: true,
+      voice: !!options.voice,
+      // Голосом — текст и блоки появляются вместе со звуком, а не раньше него.
+      gate: options.voice && audioListener ? { chars: 0, blocks: 0 } : null,
+    };
+    let heardAudio = false;
     const turns = [...history(get().messages), { role: 'user' as const, content: text }];
     set((state) => ({ messages: [...state.messages, userMessage, reply], busy: true }));
 
@@ -163,9 +187,12 @@ export const useTaiStore = create<TaiState>((set, get) => ({
             case 'error':
               patchReply(reply.id, () => ({ error: event.message }));
               break;
-            case 'audio':
-              audioListener?.(event);
+            case 'audio': {
+              heardAudio = true;
+              const blocks = (useTaiStore.getState().messages.find((m) => m.id === reply.id) as TaiReply | undefined)?.blocks.length ?? 0;
+              audioListener?.({ ...event, replyId: reply.id, blocks });
               break;
+            }
           }
         },
         current.signal,
@@ -177,7 +204,8 @@ export const useTaiStore = create<TaiState>((set, get) => ({
       if (isTaiLocked(error)) set({ locked: true });
       patchReply(reply.id, () => ({ error: taiErrorText(error) }));
     } finally {
-      patchReply(reply.id, (m) => ({ streaming: false, status: null, text: m.text.trim() }));
+      // Звука не пришло (синтез не удался) — показываем ответ сразу, без субтитров.
+      patchReply(reply.id, (m) => ({ streaming: false, status: null, text: m.text.trimEnd(), ...(heardAudio ? {} : { gate: null }) }));
       if (controller === current) controller = null;
       set({ busy: false });
     }

@@ -43,6 +43,7 @@ import { runTai, taiErrorMessage } from './tai/engine.js'
 import { createApiCaller, forwardedHeaders } from './tai/internal.js'
 import { POLZA_BASE, resolveApiKey } from './tai/llm.js'
 import { synthesize } from './tai/speech.js'
+import { getTaiSettings, normalizeTaiSettings, saveTaiSettings, TAI_SPEEDS, TAI_VOICES } from './tai/settings.js'
 import { getBusinessDayStartHour } from '../../lib/appSettings.js'
 
 // Действия Tai, доступные только владельцу (зарплаты, расходы).
@@ -633,9 +634,21 @@ aiRouter.post('/assistant/actions/:id/dismiss', async (c) => {
   return c.json({ action: card })
 })
 
-// Озвучить короткую фразу (итог карточки после голосового «да» и т.п.) тем же голосом Tai.
-aiRouter.post('/assistant/speech', zValidator('json', z.object({ text: z.string().min(1).max(600) })), async (c) => {
-  const audio = await synthesize(await resolveApiKey(c.var.db), c.req.valid('json').text)
+// Настройки Tai: голос, скорость речи, манера. Читают все, меняет владелец.
+aiRouter.get('/settings', async (c) => {
+  return c.json({ settings: await getTaiSettings(c.var.db), voices: TAI_VOICES.map(({ id, label, hint, tunable }) => ({ id, label, hint, tunable })), speeds: TAI_SPEEDS })
+})
+aiRouter.put('/settings', requireRole('owner'), zValidator('json', z.object({ voice: z.string().max(40).optional(), speed: z.number().optional(), profanity: z.boolean().optional() })), async (c) => {
+  return c.json({ settings: await saveTaiSettings(c.var.db, c.req.valid('json')) })
+})
+
+// Озвучить короткую фразу тем же голосом Tai: итог карточки после голосового «да» и
+// пример голоса в настройках (voice/speed — чтобы послушать до сохранения).
+aiRouter.post('/assistant/speech', zValidator('json', z.object({ text: z.string().min(1).max(600), voice: z.string().max(40).optional(), speed: z.number().optional() })), async (c) => {
+  const body = c.req.valid('json')
+  const current = await getTaiSettings(c.var.db)
+  const voice = normalizeTaiSettings({ ...current, ...(body.voice ? { voice: body.voice } : {}), ...(body.speed ? { speed: body.speed } : {}) })
+  const audio = await synthesize(await resolveApiKey(c.var.db), body.text, voice)
   if (!audio) return c.json({ error: 'Не удалось озвучить' }, 502)
   return c.json(audio)
 })

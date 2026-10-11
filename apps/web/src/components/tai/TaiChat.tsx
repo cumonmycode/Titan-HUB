@@ -11,7 +11,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { Icon } from '@/components/Icon'
 import { TaiLogo } from '@/components/TaiLogo'
 import { speakTai, transcribeVoice, type TaiContext, type TaiRoute } from '@/lib/tai'
-import { setTaiAudioListener, taiHref, useTaiStore, type TaiMessage, type TaiReply } from '@/store/tai.store'
+import { revealTai, setTaiAudioListener, taiHref, ungateTai, useTaiStore, type TaiAudioClip, type TaiMessage, type TaiReply } from '@/store/tai.store'
 import { TaiBlockView } from './TaiBlocks'
 
 const STARTERS: Record<NonNullable<TaiContext['screen']>, { hint: string; items: { text: string; draft?: boolean }[] }> = {
@@ -47,7 +47,7 @@ function useWebVoice(onUtterance: (text: string) => Promise<void>) {
   const heard = useRef('')
   const lastAt = useRef(0)
   const conversation = useRef(false)
-  const queue = useRef<HTMLAudioElement[]>([])
+  const queue = useRef<{ audio: HTMLAudioElement; reveal?: { replyId: string; upTo: number; blocks: number } }[]>([])
   const playing = useRef<HTMLAudioElement | null>(null)
   const replyFinished = useRef(false)
 
@@ -129,35 +129,40 @@ function useWebVoice(onUtterance: (text: string) => Promise<void>) {
     playing.current?.pause()
     playing.current = null
     queue.current = []
+    ungateTai()
     setPhase('idle')
   }, [])
 
   // Ответ озвучивает сервер нейросетевым голосом: фразы приходят звуком в потоке.
   const afterSpeech = useCallback(() => {
     if (playing.current || queue.current.length || !replyFinished.current) return
+    ungateTai()
     if (conversation.current) setTimeout(() => conversation.current && void listen(), 300)
     else setPhase('idle')
   }, [listen])
   const playNextRef = useRef<() => void>(() => undefined)
   const playNext = useCallback(() => {
     if (playing.current) return
-    const audio = queue.current.shift()
-    if (!audio) { afterSpeech(); return }
+    const clip = queue.current.shift()
+    if (!clip) { afterSpeech(); return }
+    const audio = clip.audio
     playing.current = audio
     setPhase('speaking')
+    // Субтитры: текст фразы и блоки перед ней — вместе со звуком.
+    if (clip.reveal) revealTai(clip.reveal.replyId, clip.reveal.upTo, clip.reveal.blocks)
     const next = () => { if (playing.current === audio) playing.current = null; playNextRef.current() }
     audio.onended = next
     audio.onerror = next
     void audio.play().catch(next)
   }, [afterSpeech])
   useEffect(() => { playNextRef.current = playNext }, [playNext])
-  const enqueue = useCallback((format: 'mp3' | 'wav', data: string) => {
+  const enqueue = useCallback((format: 'mp3' | 'wav', data: string, reveal?: { replyId: string; upTo: number; blocks: number }) => {
     if (!conversation.current) return
-    queue.current.push(new Audio(`data:audio/${format === 'mp3' ? 'mpeg' : 'wav'};base64,${data}`))
+    queue.current.push({ audio: new Audio(`data:audio/${format === 'mp3' ? 'mpeg' : 'wav'};base64,${data}`), reveal })
     playNext()
   }, [playNext])
   useEffect(() => {
-    setTaiAudioListener((event) => enqueue(event.format, event.data))
+    setTaiAudioListener((clip: TaiAudioClip) => enqueue(clip.format, clip.data, { replyId: clip.replyId, upTo: clip.upTo, blocks: clip.blocks }))
     return () => setTaiAudioListener(null)
   }, [enqueue])
 
@@ -339,13 +344,17 @@ function Message({ message, open }: { message: TaiMessage; open: (to: TaiRoute) 
       </div>
     )
   }
+  // Голосом — только уже озвученное (как субтитры).
+  const text = message.gate ? message.text.slice(0, message.gate.chars).trim() : message.text
+  const blocks = message.gate ? message.blocks.slice(0, message.gate.blocks) : message.blocks
+  const status = message.gate && message.streaming && !message.status ? 'Tai отвечает…' : message.status
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-      {message.text && <RichText text={message.text} />}
-      {message.blocks.map((block, i) => <TaiBlockView key={i} block={block} open={open} />)}
-      {message.streaming && message.status && (
+      {text && <RichText text={text} />}
+      {blocks.map((block, i) => <TaiBlockView key={i} block={block} open={open} />)}
+      {(message.streaming || message.gate) && status && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: 'var(--on-surface-variant)', animation: 'tai-blink 1.4s ease-in-out infinite' }} aria-live="polite">
-          <TaiLogo size={18} thinking float={false} /> {message.status}
+          <TaiLogo size={18} thinking float={false} /> {status}
         </div>
       )}
       {message.error && <p style={{ margin: 0, fontSize: 14, color: '#F59E0B' }}>{message.error}</p>}

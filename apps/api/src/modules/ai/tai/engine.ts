@@ -14,6 +14,7 @@ import { mskTime, num, rub } from './format.js'
 import { createApiCaller, forwardedHeaders, InternalApiError, type ApiCaller } from './internal.js'
 import { LlmError, resolveApiKey, streamChat, type LlmMessage, type LlmToolCall } from './llm.js'
 import { SpeechStream } from './speech.js'
+import { getTaiSettings } from './settings.js'
 import { FOLLOW_UPS, llmTools, SCREEN_SUGGESTIONS, toolsFor } from './tools/index.js'
 import type { ToolContext, ToolResult } from './tools/types.js'
 
@@ -99,7 +100,7 @@ export async function runTai(c: Context<AppEnv>, request: TaiRequest, emit: Emit
   const isOwner = user.role === 'owner'
   const api = createApiCaller(forwardedHeaders(c))
   const tools = toolsFor(isOwner)
-  const [apiKey, dates, screen] = await Promise.all([resolveApiKey(db), businessDates(db), screenLine(api, request.context)])
+  const [apiKey, dates, screen, settings] = await Promise.all([resolveApiKey(db), businessDates(db), screenLine(api, request.context), getTaiSettings(db)])
 
   const ctx: ToolContext = {
     api,
@@ -114,7 +115,7 @@ export async function runTai(c: Context<AppEnv>, request: TaiRequest, emit: Emit
   }
 
   const messages: LlmMessage[] = [
-    { role: 'system', content: systemPrompt({ clubName: c.var.club?.name ?? 'Титан', nickname: user.nickname, isOwner, dates, screenLine: screen, voice: !!request.voice }) },
+    { role: 'system', content: systemPrompt({ clubName: c.var.club?.name ?? 'Титан', nickname: user.nickname, isOwner, dates, screenLine: screen, voice: !!request.voice, profanity: settings.profanity }) },
     ...history(request.messages),
   ]
 
@@ -123,7 +124,7 @@ export async function runTai(c: Context<AppEnv>, request: TaiRequest, emit: Emit
   const shown: TaiBlock[] = []
   let lastStatus = ''
   // Голосовой режим: фразы озвучиваются по ходу ответа и уходят звуком в том же потоке.
-  const speech = request.voice ? new SpeechStream(apiKey, (audio) => emit({ type: 'audio', ...audio }), signal) : null
+  const speech = request.voice ? new SpeechStream(apiKey, settings, (audio) => emit({ type: 'audio', ...audio }), signal) : null
 
   for (let round = 0; round < MAX_ROUNDS; round += 1) {
     // Последний круг — без инструментов: модель обязана ответить текстом.

@@ -86,6 +86,7 @@ const NAV: NavGroup[] = [
     icon: 'settings',
     items: [
       { href: '/manage/settings', label: 'Настройки',   icon: 'settings',    color: '#94A3B8', bg: 'rgba(148,163,184,0.15)', roles: ['owner'] },
+      { href: '/manage/tai',      label: 'Tai',         icon: 'auto_awesome', color: '#8B5CF6', bg: 'rgba(139,92,246,0.15)', roles: ['owner'] },
       { href: '/manage/polls',    label: 'Опросы',      icon: 'fact_check',  color: '#8B5CF6', bg: 'rgba(139,92,246,0.15)', roles: ['owner'] },
       { href: '/manage/about',    label: 'О системе',   icon: 'info',        color: '#94A3B8', bg: 'rgba(148,163,184,0.15)', roles: ['owner'] },
     ],

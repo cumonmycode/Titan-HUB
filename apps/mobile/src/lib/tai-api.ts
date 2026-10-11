@@ -59,7 +59,7 @@ export type TaiEvent =
   | { type: 'block'; block: TaiBlock }
   | { type: 'suggestions'; items: string[] }
   /** Голосовой режим: озвученная фраза ответа (base64), по порядку seq. */
-  | { type: 'audio'; seq: number; format: 'mp3' | 'wav'; data: string }
+  | { type: 'audio'; seq: number; format: 'mp3' | 'wav'; data: string; upTo: number }
   | { type: 'done'; memo: string }
   | { type: 'error'; message: string };
 
@@ -143,9 +143,18 @@ export async function confirmTaiAction(id: string): Promise<TaiActionCard> {
 }
 
 /** Озвучить короткую фразу голосом Tai (итог карточки после голосового «да»). */
-export async function speakTai(text: string): Promise<{ format: 'mp3' | 'wav'; data: string } | null> {
-  return api.post<{ format: 'mp3' | 'wav'; data: string }>('/ai/assistant/speech', { text }).catch(() => null);
+export async function speakTai(text: string, voice?: { voice?: string; speed?: number }): Promise<{ format: 'mp3' | 'wav'; data: string } | null> {
+  return api.post<{ format: 'mp3' | 'wav'; data: string }>('/ai/assistant/speech', { text, ...voice }).catch(() => null);
 }
+
+/* ─────────────────────────── Настройки ─────────────────────────── */
+
+export type TaiSettings = { voice: string; speed: number; profanity: boolean };
+export type TaiVoiceOption = { id: string; label: string; hint: string; tunable: boolean };
+export type TaiSettingsResponse = { settings: TaiSettings; voices: TaiVoiceOption[]; speeds: { value: number; label: string }[] };
+
+export const getTaiSettings = () => api.get<TaiSettingsResponse>('/ai/settings');
+export const saveTaiSettings = (patch: Partial<TaiSettings>) => api.put<{ settings: TaiSettings }>('/ai/settings', patch).then((r) => r.settings);
 
 export async function dismissTaiAction(id: string): Promise<void> {
   await api.post(`/ai/assistant/actions/${id}/dismiss`).catch(() => undefined);

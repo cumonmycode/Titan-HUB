@@ -25,6 +25,7 @@ export type ManageSectionKey =
   | 'salary'
   | 'expenses'
   | 'settings'
+  | 'tai'
   | 'about';
 
 export type ManageSection = {
@@ -74,6 +75,7 @@ export const MANAGE_GROUPS: { title: string; items: ManageSection[] }[] = [
     title: 'Клуб',
     items: [
       { key: 'settings', title: 'Настройки клуба', subtitle: 'Заведение, касса, оплата, бронь', icon: 'gearshape', color: '#8E8E93', roles: ['owner'] },
+      { key: 'tai', title: 'Tai', subtitle: 'Голос, скорость речи, манера', icon: 'sparkles', color: '#8B5CF6', roles: ['owner'] },
       { key: 'about', title: 'О системе', subtitle: 'Версия, подписка, модули', icon: 'info.circle', color: '#8E8E93', roles: ['owner'] },
     ],
   },

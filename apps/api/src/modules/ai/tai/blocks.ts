@@ -97,7 +97,7 @@ export type TaiEvent =
   | { type: 'block'; block: TaiBlock }
   | { type: 'suggestions'; items: string[] }
   /** Голосовой режим: озвученная фраза ответа, по порядку seq (base64). */
-  | { type: 'audio'; seq: number; format: 'mp3' | 'wav'; data: string }
+  | { type: 'audio'; seq: number; format: 'mp3' | 'wav'; data: string; upTo: number }
   | { type: 'done'; memo: string }
   | { type: 'error'; message: string }
 

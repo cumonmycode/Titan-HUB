@@ -6,7 +6,7 @@ import { Alert, Linking } from 'react-native';
 
 import { haptic } from './haptics';
 import { speakTai } from './tai-api';
-import { setTaiAudioListener } from './tai-store';
+import { revealTai, setTaiAudioListener, ungateTai, type TaiAudioClip } from './tai-store';
 
 /**
  * Голосовой режим Tai, как разговор с Siri: нажали микрофон — телефон слушает и сразу
@@ -22,7 +22,7 @@ const SILENCE_AFTER_SPEECH_MS = 1_300;
 const SILENCE_BEFORE_SPEECH_MS = 7_000;
 const RELISTEN_DELAY_MS = 350;
 
-type Clip = { file: File };
+type Clip = { file: File; reveal?: { replyId: string; upTo: number; blocks: number } };
 
 /** onUtterance отправляет фразу Tai; вернёт строку — её озвучим (ответа модели не было). */
 export function useTaiVoice(onUtterance: (text: string) => Promise<string | null>) {
@@ -81,6 +81,7 @@ export function useTaiVoice(onUtterance: (text: string) => Promise<string | null
   /** Всё сказано и ответ дописан — снова слушаем (или выходим, если разговор окончен). */
   const afterSpeech = useCallback(() => {
     if (playing.current || queue.current.length || !replyFinished.current) return;
+    ungateTai();
     if (conversation.current) setTimeout(() => conversation.current && void listen(), RELISTEN_DELAY_MS);
     else setPhase('idle');
   }, [listen]);
@@ -104,6 +105,8 @@ export function useTaiVoice(onUtterance: (text: string) => Promise<string | null
     const player = createAudioPlayer({ uri: clip.file.uri });
     playing.current = player;
     setPhase('speaking');
+    // Субтитры: текст этой фразы и блоки перед ней появляются вместе со звуком.
+    if (clip.reveal) revealTai(clip.reveal.replyId, clip.reveal.upTo, clip.reveal.blocks);
     const subscription = player.addListener('playbackStatusUpdate', (status) => {
       if (!status.didJustFinish) return;
       subscription.remove();
@@ -120,12 +123,12 @@ export function useTaiVoice(onUtterance: (text: string) => Promise<string | null
   }, [playNext]);
 
   const enqueue = useCallback(
-    (format: 'mp3' | 'wav', data: string) => {
+    (format: 'mp3' | 'wav', data: string, reveal?: Clip['reveal']) => {
       if (!conversation.current) return;
       try {
         const file = new File(Paths.cache, `tai-voice-${Date.now()}-${(clipCounter.current += 1)}.${format}`);
         file.write(data, { encoding: 'base64' });
-        queue.current.push({ file });
+        queue.current.push({ file, reveal });
         void playNext();
       } catch {
         // Не записали звук — фраза уже на экране, разговор продолжается.
@@ -136,7 +139,7 @@ export function useTaiVoice(onUtterance: (text: string) => Promise<string | null
 
   // Звук ответа приходит из потока Tai (стор диалога).
   useEffect(() => {
-    setTaiAudioListener((event) => enqueue(event.format, event.data));
+    setTaiAudioListener((clip: TaiAudioClip) => enqueue(clip.format, clip.data, { replyId: clip.replyId, upTo: clip.upTo, blocks: clip.blocks }));
     return () => setTaiAudioListener(null);
   }, [enqueue]);
 
@@ -167,6 +170,7 @@ export function useTaiVoice(onUtterance: (text: string) => Promise<string | null
     conversation.current = false;
     ExpoSpeechRecognitionModule.abort();
     stopPlayback();
+    ungateTai();
     setLevel(0);
     setPhase('idle');
   }, [stopPlayback]);
@@ -220,4 +224,30 @@ export function useTaiVoice(onUtterance: (text: string) => Promise<string | null
   );
 
   return { phase, transcript, level, active: phase !== 'idle', listen, finishListening, end };
+}
+
+/** Пример голоса в настройках: одна фраза, без голосового режима. */
+let samplePlayer: AudioPlayer | null = null;
+export async function playTaiSample(audio: { format: 'mp3' | 'wav'; data: string }): Promise<void> {
+  samplePlayer?.pause();
+  samplePlayer?.remove();
+  await setAudioModeAsync({
+    playsInSilentMode: true,
+    interruptionMode: 'duckOthers',
+    allowsRecording: false,
+    shouldPlayInBackground: false,
+    shouldRouteThroughEarpiece: false,
+  }).catch(() => undefined);
+  const file = new File(Paths.cache, `tai-sample-${Date.now()}.${audio.format}`);
+  file.write(audio.data, { encoding: 'base64' });
+  const player = createAudioPlayer({ uri: file.uri });
+  samplePlayer = player;
+  const subscription = player.addListener('playbackStatusUpdate', (status) => {
+    if (!status.didJustFinish) return;
+    subscription.remove();
+    player.remove();
+    file.delete();
+    if (samplePlayer === player) samplePlayer = null;
+  });
+  player.play();
 }
