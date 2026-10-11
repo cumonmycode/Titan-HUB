@@ -3,12 +3,13 @@ import { Image } from 'expo-image';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
 import { useEffect, useMemo, useState } from 'react';
-import { Alert, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, Platform, Pressable, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { KeyboardAvoidingView, useKeyboardState } from 'react-native-keyboard-controller';
 import Animated, { Keyframe, useAnimatedStyle, useSharedValue, withSequence, withSpring, withTiming } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { SFSymbol } from 'sf-symbols-typescript';
 
+import { Text, TextInput, textScaleProps } from '@/components/text';
 import { GlassView } from '@/components/glass';
 import { ClearButton } from '@/components/clear-button';
 import { CircleButton, GlassChip, sheetStyles } from '@/components/new-check-parts';
@@ -19,6 +20,7 @@ import { categoryHex, categorySymbol, isTariffCategory } from '@/lib/catalog-api
 import { haptic } from '@/lib/haptics';
 import { addItem, type MenuCategory, type MenuItem, useMenu } from '@/lib/pos-api';
 import { useCheck } from '@/lib/queries';
+import { effectiveTextScale, FONT_SCALE_MAX } from '@/lib/text-scale';
 import { colors, space, springs, type } from '@/lib/theme';
 import { useNow } from '@/lib/use-now';
 
@@ -30,6 +32,11 @@ import { useNow } from '@/lib/use-now';
 
 const ALL = 'all';
 const SEARCH_HEIGHT = 48;
+/**
+ * Самая узкая плитка позиции в единицах текста. Уже — сетка теряет колонку (но их не меньше
+ * двух): на «Увеличенном» виде и с крупным текстом три колонки рвали названия по буквам.
+ */
+const TILE_MIN_TEXT_WIDTH = 110;
 /**
  * На Android шторка с двумя высотами раскладывает содержимое на полную высоту и
  * просто сдвигает его вниз: на средней высоте нижний край — за экраном, и капсула
@@ -76,7 +83,9 @@ export default function MenuSheet() {
     return counts;
   }, [check.data]);
 
-  const columns = width >= 700 ? 5 : width >= 520 ? 4 : 3;
+  const { fontScale } = useWindowDimensions();
+  const maxColumns = width >= 700 ? 5 : width >= 520 ? 4 : 3;
+  const columns = Math.max(2, Math.min(maxColumns, Math.floor(width / (TILE_MIN_TEXT_WIDTH * effectiveTextScale(fontScale)))));
   const byId = useMemo(() => new Map(categories.map((c) => [c.id, c])), [categories]);
 
   const rows = useMemo<Row[]>(() => {
@@ -150,8 +159,10 @@ export default function MenuSheet() {
           <Text style={[type.title2, sheetStyles.label]}>Меню</Text>
           {check.data && (
             <GlassView style={styles.totalPill}>
-              <Text style={[type.caption1, sheetStyles.secondary]}>{closed ? 'чек закрыт' : 'в чеке'}</Text>
-              <RollingText text={formatMoney(total)} style={[type.subhead, type.amount, styles.totalText]} />
+              <Text style={[type.caption1, sheetStyles.secondary]} maxFontSizeMultiplier={FONT_SCALE_MAX.compact}>
+                {closed ? 'чек закрыт' : 'в чеке'}
+              </Text>
+              <RollingText text={formatMoney(total)} style={[type.subhead, type.amount, styles.totalText]} maxFontSizeMultiplier={FONT_SCALE_MAX.compact} />
             </GlassView>
           )}
           <View style={styles.flex} />
@@ -308,7 +319,7 @@ function MenuTile({
         </View>
         <InCheckBadge count={inCheck} color={color} />
         {bumps > 0 && (
-          <Animated.Text key={bumps} entering={bumpUp} pointerEvents="none" style={[styles.bump, { color }]}>
+          <Animated.Text key={bumps} entering={bumpUp} pointerEvents="none" style={[styles.bump, { color }]} {...textScaleProps(styles.bump, FONT_SCALE_MAX.compact)}>
             +1
           </Animated.Text>
         )}
@@ -329,7 +340,9 @@ function InCheckBadge({ count, color }: { count: number; color: string }) {
   if (count <= 0) return null;
   return (
     <Animated.View style={[styles.badge, { backgroundColor: color }, style]}>
-      <Text style={styles.badgeText}>{count}</Text>
+      <Text style={styles.badgeText} maxFontSizeMultiplier={FONT_SCALE_MAX.compact}>
+        {count}
+      </Text>
     </Animated.View>
   );
 }
@@ -341,7 +354,7 @@ const styles = StyleSheet.create({
   listContent: { paddingHorizontal: space.lg },
   floatingSearch: { position: 'absolute', left: space.lg, right: space.lg },
   titleRow: { flexDirection: 'row', alignItems: 'center', gap: space.md },
-  totalPill: { flexDirection: 'row', alignItems: 'center', gap: 6, height: 32, paddingHorizontal: space.md, borderRadius: 16 },
+  totalPill: { flexShrink: 1, flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 32, paddingVertical: 4, paddingHorizontal: space.md, borderRadius: 16 },
   totalText: { color: colors.label, fontWeight: '700' },
   search: { flexDirection: 'row', alignItems: 'center', gap: space.sm, height: SEARCH_HEIGHT, paddingHorizontal: space.lg, borderRadius: SEARCH_HEIGHT / 2 },
   searchInput: { flex: 1, color: colors.label, height: SEARCH_HEIGHT, paddingVertical: 0 },
@@ -362,7 +375,7 @@ const styles = StyleSheet.create({
     top: 10,
     right: 10,
     minWidth: 24,
-    height: 24,
+    minHeight: 24,
     paddingHorizontal: 7,
     borderRadius: 12,
     alignItems: 'center',

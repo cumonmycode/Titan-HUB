@@ -97,6 +97,23 @@ expensesRouter.get('/summary', requireRole('owner', 'staff'), async (c) => {
     .where(and(gte(expenses.expenseDate, from), lte(expenses.expenseDate, to), sql`${expenses.category} <> 'salary'`))
     .orderBy(desc(expenses.expenseDate), desc(expenses.createdAt))
 
+  // Приватность (как в salary.router): зарплаты и затраты по каждому сотруднику видит
+  // только владелец. Staff получает ту же форму ответа, но без зарплат/списаний/P&L
+  // (нули и пустые списки) — клиенты не падают на отсутствующих полях.
+  if (c.get('user').role !== 'owner') {
+    return c.json({
+      period: { from, to },
+      categories,
+      opexTotal,
+      salary: { total: 0, cash: 0, transfer: 0, byStaff: [] },
+      staffComp: { cost: 0, retail: 0, checksCount: 0, byStaff: [] },
+      byStaff: [],
+      pnlTotal: opexTotal,
+      staffTotal: 0,
+      expenses: rawExpenses,
+    })
+  }
+
   // 2. Зарплата по сотрудникам (нал/перевод) из salaryPayments за бизнес-окно.
   const salRows = await db
     .select({
@@ -209,7 +226,7 @@ expensesRouter.get('/catalog', requireRole('owner', 'staff'), async (c) => {
   return c.json({ items: rows.map(r => ({ name: r.name, unitPrice: r.unit_price != null ? parseFloat(String(r.unit_price)) : null, category: r.category })) })
 })
 
-expensesRouter.get('/:id', async (c) => {
+expensesRouter.get('/:id', requireRole('owner', 'staff'), async (c) => {
   const db = c.var.db
   const [expense] = await db.select().from(expenses).where(eq(expenses.id, c.req.param('id')))
   if (!expense) return c.json({ error: 'Not found' }, 404)

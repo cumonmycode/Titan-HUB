@@ -2,7 +2,7 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { api } from '@/lib/api'
+import { api, ApiError } from '@/lib/api'
 import { Icon } from '@/components/Icon'
 import { PageHeader } from '@/components/manage/DesignSystem'
 import { useToast } from '@/components/Toast'
@@ -91,9 +91,11 @@ function BackupSection() {
   const [restoreOpen, setRestoreOpen] = useState(false)
   const [pick, setPick] = useState<RestorePick | null>(null)
 
-  const { data: status } = useQuery({
+  const { data: status, error: statusError } = useQuery({
     queryKey: ['system', 'backup', 'status'],
     queryFn: () => api.get<{ last: BackupEntry | null; driveConfigured: boolean }>('/system/backup/status'),
+    // 403 = клуб-поддомен (бэкапы только на основном домене) — повторять бессмысленно.
+    retry: (n, e) => !(e instanceof ApiError && e.status === 403) && n < 2,
   })
   const { data: list, isLoading: listLoading } = useQuery({
     queryKey: ['system', 'backups'],
@@ -114,12 +116,16 @@ function BackupSection() {
   const restore = useMutation({
     mutationFn: async (p: RestorePick) => {
       if (p.kind === 'named') {
-        return api.post<{ ok: boolean; safetyBackup: string }>('/system/restore', { name: p.entry.name, source: p.entry.location })
+        // confirm: true — пользователь уже подтвердил в диалоге «Заменить текущую базу?»;
+        // без него API отвечает 400 (z.literal(true) в /system/restore).
+        return api.post<{ ok: boolean; safetyBackup: string }>('/system/restore', { name: p.entry.name, source: p.entry.location, confirm: true })
       }
       // upload — multipart, через сырой fetch (api-клиент шлёт только JSON)
       const token = useAuthStore.getState().token
       const base = process.env.NEXT_PUBLIC_API_URL ?? '/api'
-      const fd = new FormData(); fd.append('file', p.file)
+      // confirm=true — поле формы, без него /system/restore-upload отвечает 400
+      // (подтверждение пользователь уже дал в диалоге выше).
+      const fd = new FormData(); fd.append('file', p.file); fd.append('confirm', 'true')
       const res = await fetch(`${base}/system/restore-upload`, { method: 'POST', headers: token ? { Authorization: `Bearer ${token}` } : {}, body: fd })
       if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.error ?? 'Ошибка восстановления')
       return res.json()
@@ -131,6 +137,9 @@ function BackupSection() {
     },
     onError: (e: any) => { show(e?.message ?? 'Не удалось восстановить', 'error'); setPick(null) },
   })
+
+  // На клуб-поддомене бэкап/восстановление недоступны (API → 403) — блок не показываем.
+  if (statusError instanceof ApiError && statusError.status === 403) return null
 
   const driveOn = status?.driveConfigured ?? false
   const last = status?.last ?? null

@@ -63,6 +63,7 @@ cashopsRouter.post('/', requireRole('owner', 'staff'), zValidator('json', z.obje
     | { kind: 'ok'; op: typeof cashOperations.$inferSelect }
     | { kind: 'duplicate'; op: typeof cashOperations.$inferSelect }
     | { kind: 'insufficient'; available: number; requested: number }
+    | { kind: 'closed' }
     | { kind: 'failed' }
 
   const result: Outcome = await db.transaction(async (tx) => {
@@ -70,6 +71,11 @@ cashopsRouter.post('/', requireRole('owner', 'staff'), zValidator('json', z.obje
     // конца транзакции, поэтому второе изъятие подождёт коммита первого и увидит
     // уже уменьшенный остаток.
     await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${'cashops:' + shift.id}, 0))`)
+
+    // Смену перечитываем под FOR SHARE: закрытие держит FOR UPDATE, поэтому операция
+    // либо ляжет в смену ДО закрытия (и войдёт в сверку), либо увидит, что смена закрыта.
+    const [locked] = await tx.select({ status: shifts.status }).from(shifts).where(eq(shifts.id, shift.id)).for('share')
+    if (locked?.status !== 'open') return { kind: 'closed' }
 
     if (type === 'withdrawal' || type === 'salary') {
       const { expected } = await getShiftCashBalance(shift.id, tx)
@@ -104,6 +110,7 @@ cashopsRouter.post('/', requireRole('owner', 'staff'), zValidator('json', z.obje
       available: result.available,
     }, 400)
   }
+  if (result.kind === 'closed') return c.json({ error: 'Смена уже закрыта' }, 409)
   if (result.kind === 'duplicate') return c.json({ operation: result.op, duplicate: true })
   if (result.kind === 'failed') return c.json({ error: 'Не удалось сохранить операцию' }, 500)
 

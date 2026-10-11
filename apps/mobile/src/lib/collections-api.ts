@@ -50,7 +50,7 @@ export type RosterRow = {
   excludedForever: boolean;
   excludedUntil: string | null;
   paid: boolean;
-  /** Сколько доплатить с учётом прошлых месяцев. */
+  /** Сколько доплатить: долг прошлых месяцев или недобор разового сбора. */
   topUp: number;
   prepaid: number;
   prepaidMonths: number;
@@ -152,7 +152,11 @@ export async function setPeriodAmount(collectionId: string, periodId: string, am
   refreshCollection(collectionId);
 }
 
-/** Взнос за период. Депозит и долг меняют баланс клиента — обновляем и его. */
+/**
+ * Взнос за период. Депозит и долг меняют баланс клиента — обновляем и его.
+ * Если отметка за период уже есть, наличные/перевод/СБП сервер добавляет к ней (доплата);
+ * депозит и долг с отметкой не складываются — 409, отметку сначала снимают.
+ */
 export async function payContribution(
   collectionId: string,
   input: { periodId: string; playerId: string; amount: number; method: ContributionMethod },

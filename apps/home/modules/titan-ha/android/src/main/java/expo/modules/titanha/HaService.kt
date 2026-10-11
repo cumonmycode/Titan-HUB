@@ -40,6 +40,14 @@ object HaPrefs {
   fun clear(context: Context) {
     context.getSharedPreferences(NAME, Context.MODE_PRIVATE).edit().clear().commit()
   }
+
+  fun saveLastMode(context: Context, entityId: String, mode: String) {
+    val p = context.getSharedPreferences(NAME, Context.MODE_PRIVATE)
+    if (p.getString("mode:$entityId", null) != mode) p.edit().putString("mode:$entityId", mode).apply()
+  }
+
+  fun lastMode(context: Context, entityId: String): String? =
+    context.getSharedPreferences(NAME, Context.MODE_PRIVATE).getString("mode:$entityId", null)
 }
 
 /**
@@ -50,7 +58,13 @@ object HaPrefs {
  */
 class HaService : Service() {
   private val main = Handler(Looper.getMainLooper())
-  private val onChange: () -> Unit = { main.post { updateNotification() } }
+  private val listener = object : HaListener {
+    override fun onStatus(status: String, error: String?) {
+      main.post { updateNotification() }
+    }
+
+    override fun onEntities(json: String) = Unit
+  }
   private var wifiLock: WifiManager.WifiLock? = null
   private var wakeLock: PowerManager.WakeLock? = null
   private var shownStatus: String? = null
@@ -70,7 +84,7 @@ class HaService : Service() {
       // Система не дала стать foreground — соединение всё равно держим, пока жив процесс.
     }
     acquireLocks()
-    HaClient.addListener(onChange)
+    HaClient.addListener(listener)
   }
 
   override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -84,7 +98,7 @@ class HaService : Service() {
   }
 
   override fun onDestroy() {
-    HaClient.removeListener(onChange)
+    HaClient.removeListener(listener)
     wifiLock?.let { if (it.isHeld) it.release() }
     wakeLock?.let { if (it.isHeld) it.release() }
     super.onDestroy()

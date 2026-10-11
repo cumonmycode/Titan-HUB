@@ -1,7 +1,7 @@
 import * as Calendar from 'expo-calendar';
 import { Platform } from 'react-native';
 
-import { eventKind, eventTitle, fromDateTime, isUpcoming, STATUS_LOOK, type EventRow } from './events-api';
+import { eventKind, eventTitle, isUpcoming, STATUS_LOOK, type EventRow } from './events-api';
 import { formatMoney, toNumber } from './format';
 import { useSession } from './session';
 
@@ -31,17 +31,21 @@ const calendarTitle = () => `Titan HUB · ${useSession.getState().club?.name ?? 
 /** Длительность по умолчанию, если у мероприятия не указан конец. */
 const DEFAULT_HOURS = 4;
 
-/** Начало и конец мероприятия в местном времени устройства. */
+const HOUR_MS = 3_600_000;
+
+/**
+ * Момент «дата + время» клуба. Время мероприятий — московское (бизнес-время клуба),
+ * а не часовой пояс телефона: в поездке запись иначе съезжала бы на разницу поясов.
+ */
+const clubMoment = (date: string, time: string) => new Date(`${date}T${time.slice(0, 5)}:00+03:00`);
+
+/** Начало и конец мероприятия (абсолютные моменты; календарь сам покажет их в поясе телефона). */
 export function eventWindow(event: EventRow): { start: Date; end: Date } {
-  const start = fromDateTime(event.date, event.startTime);
-  if (!event.endTime) {
-    const end = new Date(start);
-    end.setHours(end.getHours() + (event.plannedHours ?? DEFAULT_HOURS));
-    return { start, end };
-  }
-  const end = fromDateTime(event.date, event.endTime);
+  const start = clubMoment(event.date, event.startTime);
+  if (!event.endTime) return { start, end: new Date(start.getTime() + (event.plannedHours ?? DEFAULT_HOURS) * HOUR_MS) };
+  let end = clubMoment(event.date, event.endTime);
   // Конец раньше начала — мероприятие уходит за полночь.
-  if (end <= start) end.setDate(end.getDate() + 1);
+  if (end <= start) end = new Date(end.getTime() + 24 * HOUR_MS);
   return { start, end };
 }
 
@@ -107,11 +111,23 @@ async function clubCalendar(): Promise<Calendar.ExpoCalendar | null> {
 type SyncResult = { added: number; updated: number; removed: number };
 
 /**
+ * Синхронизации идут строго по очереди: две параллельные (экран мероприятий + сохранение
+ * формы) обе не находили запись и обе её создавали — в календаре появлялся дубль.
+ */
+let syncQueue: Promise<unknown> = Promise.resolve();
+
+/**
  * Приводит календарь клуба в соответствие со списком мероприятий: добавляет новые,
  * обновляет изменившиеся и убирает отменённые. Безопасно вызывать часто — лишних
  * записей не создаёт, чужие не трогает.
  */
-export async function syncEventsToCalendar(events: EventRow[], options: { prune?: boolean } = {}): Promise<SyncResult | null> {
+export function syncEventsToCalendar(events: EventRow[], options: { prune?: boolean } = {}): Promise<SyncResult | null> {
+  const run = syncQueue.then(() => runSync(events, options));
+  syncQueue = run.catch(() => undefined);
+  return run;
+}
+
+async function runSync(events: EventRow[], options: { prune?: boolean }): Promise<SyncResult | null> {
   if (!(await ensureCalendarAccess())) return null;
   const calendar = await clubCalendar();
   if (!calendar) return null;
@@ -122,11 +138,21 @@ export async function syncEventsToCalendar(events: EventRow[], options: { prune?
   const to = new Date(now);
   to.setDate(to.getDate() + WINDOW_FORWARD_DAYS);
 
+  const result: SyncResult = { added: 0, updated: 0, removed: 0 };
+
   const existing = await calendar.listEvents(from, to);
   const byEventId = new Map<string, Calendar.ExpoCalendarEvent>();
   for (const entry of existing) {
     const id = markerOf(entry.notes);
-    if (id) byEventId.set(id, entry);
+    if (!id) continue;
+    // Дубли одного мероприятия (остались от прежних параллельных синхронизаций) —
+    // оставляем первую запись, лишние удаляем.
+    if (byEventId.has(id)) {
+      await entry.delete();
+      result.removed += 1;
+      continue;
+    }
+    byEventId.set(id, entry);
   }
 
   const wanted = events.filter((event) => {
@@ -134,8 +160,6 @@ export async function syncEventsToCalendar(events: EventRow[], options: { prune?
     const { start } = eventWindow(event);
     return start >= from && start <= to;
   });
-
-  const result: SyncResult = { added: 0, updated: 0, removed: 0 };
 
   for (const event of wanted) {
     const { start, end } = eventWindow(event);

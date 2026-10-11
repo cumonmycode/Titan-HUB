@@ -10,6 +10,7 @@ import { useToast } from '@/components/Toast'
 import { useAuthStore } from '@/store/auth.store'
 import { Icon } from '@/components/Icon'
 import { MyProfile, PinKeypad } from './MyProfile'
+import { DEFAULT_PERMISSIONS } from '@/lib/permissions'
 
 interface StaffMember {
   id: string
@@ -29,11 +30,6 @@ interface PasskeyRecord {
   createdAt: string
 }
 
-const DEFAULT_PERMISSIONS: Record<string, boolean> = {
-  menu: true, inventory: true, supplies: true, clients: true,
-  discounts: true, bonus: true, expenses: false, debtors: false,
-  staff: false, salary: false, about: true,
-}
 
 const PERMISSION_LABELS = [
   { key: 'menu',      label: 'Меню',                  icon: 'restaurant_menu' },

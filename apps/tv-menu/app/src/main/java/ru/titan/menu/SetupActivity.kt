@@ -1,6 +1,7 @@
 package ru.titan.menu
 
 import android.app.Activity
+import android.app.AlertDialog
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.net.Uri
@@ -15,56 +16,109 @@ import android.widget.RadioGroup
 import android.widget.TextView
 import android.widget.Toast
 
-/** Настройки с пульта: адрес клуба, как висит телевизор, автозапуск. */
+/**
+ * Настройки приставки с пульта. Содержимое экрана (что показывать, поворот, тема,
+ * слайды) задаётся в Titan HUB — здесь только подключение, автозапуск и выход.
+ */
 class SetupActivity : Activity() {
     private lateinit var prefs: Prefs
-    private lateinit var address: EditText
-    private lateinit var rotations: RadioGroup
+    private lateinit var connection: TextView
+    private lateinit var unpair: Button
+    private lateinit var legacyOff: Button
     private lateinit var autostart: TextView
     private lateinit var autostartButton: Button
+    private lateinit var manual: View
+    private lateinit var address: EditText
+    private lateinit var rotations: RadioGroup
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_setup)
         prefs = Prefs(this)
-        address = findViewById(R.id.address)
-        rotations = findViewById(R.id.rotation)
+        connection = findViewById(R.id.connection_status)
+        unpair = findViewById(R.id.unpair)
+        legacyOff = findViewById(R.id.legacy_off)
         autostart = findViewById(R.id.autostart_status)
         autostartButton = findViewById(R.id.autostart_button)
         findViewById<TextView>(R.id.version).text = getString(R.string.setup_version, BuildConfig.VERSION_NAME)
-
-        address.setText(prefs.address.ifBlank { Prefs.DEFAULT_ADDRESS })
+        manual = findViewById(R.id.manual)
+        address = findViewById(R.id.address)
+        rotations = findViewById(R.id.rotation)
+        address.setText(prefs.manualAddress.orEmpty().ifBlank { DEFAULT_ADDRESS })
         rotations.check(rotationButton(prefs.rotation))
         address.setOnEditorActionListener { _, actionId, _ ->
-            if (actionId == EditorInfo.IME_ACTION_DONE) start()
+            if (actionId == EditorInfo.IME_ACTION_DONE) saveManual()
             actionId == EditorInfo.IME_ACTION_DONE
         }
-        val startButton = findViewById<Button>(R.id.start)
-        startButton.setOnClickListener { start() }
+        findViewById<Button>(R.id.manual_save).setOnClickListener { saveManual() }
+
+        val back = findViewById<Button>(R.id.back)
+        back.setOnClickListener { finish() }
+        unpair.setOnClickListener { confirmUnpair() }
+        legacyOff.setOnClickListener {
+            prefs.clearLegacy()
+            finish()
+        }
         autostartButton.setOnClickListener { requestAutostart() }
         findViewById<Button>(R.id.home_button).setOnClickListener { openSettings(Settings.ACTION_HOME_SETTINGS) }
         findViewById<Button>(R.id.system_settings).setOnClickListener { openSettings(Settings.ACTION_SETTINGS) }
         findViewById<Button>(R.id.exit).setOnClickListener { finishAffinity() }
-        // Фокус пульта — на «Запустить меню», когда экран уже собран (иначе приставка ставит его куда придётся).
-        startButton.post { startButton.requestFocus() }
+        // Фокус пульта — на «Вернуться», когда экран уже собран (иначе приставка ставит его куда придётся).
+        back.post { back.requestFocus() }
     }
 
     override fun onResume() {
         super.onResume()
+        showConnection()
         showAutostart()
     }
 
-    private fun start() {
+    private fun showConnection() {
+        val legacy = prefs.legacyUrl
+        connection.text = when {
+            prefs.isPaired -> getString(R.string.setup_connection_paired, prefs.screenName.orEmpty(), Uri.parse(prefs.host).host.orEmpty())
+            legacy != null -> getString(R.string.setup_connection_legacy, Uri.parse(legacy).host.orEmpty(), prefs.pairCode)
+            else -> getString(R.string.setup_connection_unpaired, prefs.pairCode)
+        }
+        unpair.visibility = if (prefs.isPaired) View.VISIBLE else View.GONE
+        legacyOff.visibility = if (!prefs.isPaired && legacy != null) View.VISIBLE else View.GONE
+        // Подключённым экраном управляет Titan HUB — ручные поля прячем.
+        manual.visibility = if (prefs.isPaired) View.GONE else View.VISIBLE
+    }
+
+    private fun saveManual() {
         val raw = address.text.toString().trim()
         if (Prefs.menuUrl(raw) == null) {
             address.error = getString(R.string.setup_address_error)
             address.requestFocus()
             return
         }
-        prefs.address = raw
-        prefs.rotation = rotationOf(rotations.checkedRadioButtonId)
-        startActivity(Intent(this, MenuActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
+        prefs.saveManual(raw, rotationOf(rotations.checkedRadioButtonId))
         finish()
+    }
+
+    private fun rotationButton(rotation: Int) = when (rotation) {
+        90 -> R.id.rotate_90
+        270 -> R.id.rotate_270
+        else -> R.id.rotate_0
+    }
+
+    private fun rotationOf(buttonId: Int) = when (buttonId) {
+        R.id.rotate_90 -> 90
+        R.id.rotate_270 -> 270
+        else -> 0
+    }
+
+    private fun confirmUnpair() {
+        AlertDialog.Builder(this)
+            .setTitle(R.string.setup_unpair_confirm)
+            .setMessage(R.string.setup_unpair_message)
+            .setPositiveButton(R.string.setup_unpair) { _, _ ->
+                prefs.clearPairing()
+                finish()
+            }
+            .setNegativeButton(R.string.setup_cancel, null)
+            .show()
     }
 
     // С Android 10 приложение может открыть экран после загрузки только с разрешением «Поверх других приложений».
@@ -93,15 +147,7 @@ class SetupActivity : Activity() {
         false
     }
 
-    private fun rotationButton(rotation: Int) = when (rotation) {
-        0 -> R.id.rotate_0
-        270 -> R.id.rotate_270
-        else -> R.id.rotate_90
-    }
-
-    private fun rotationOf(buttonId: Int) = when (buttonId) {
-        R.id.rotate_0 -> 0
-        R.id.rotate_270 -> 270
-        else -> 90
+    private companion object {
+        const val DEFAULT_ADDRESS = "kbr.titanpos.ru"
     }
 }

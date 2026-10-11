@@ -1,8 +1,9 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
 import { useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, StyleSheet, View } from 'react-native';
 
+import { Text } from '@/components/text';
 import { GlassView } from '@/components/glass';
 import { AmountKeypad, Avatar, GlassCard, PrimaryButton, SheetHeader, sheetStyles } from '@/components/new-check-parts';
 import { RollingText } from '@/components/rolling-text';
@@ -15,6 +16,7 @@ import { colors, space, type } from '@/lib/theme';
 
 const METHOD_ORDER: ContributionMethod[] = ['cash', 'transfer', 'sbp', 'deposit', 'debt'];
 const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error));
+const isBalanceMethod = (method: ContributionMethod) => method === 'deposit' || method === 'debt';
 
 /**
  * Отметка взноса: сумма (по умолчанию — долг с прошлых месяцев или взнос периода) и способ.
@@ -54,9 +56,17 @@ function PayForm({
 
   const amount = parseAmount(text) ?? 0;
   const noDeposit = method === 'deposit' && row.balance + 0.004 < amount;
-  const canPay = amount > 0 && !noDeposit && !busy;
+  // Доплата к отметке периода: наличные, перевод и СБП сервер складывает с ней,
+  // депозит и долг — нет (снятие такой отметки вернуло бы на баланс не ту сумму).
+  const existing = row.contribution;
+  const mark = existing ? `«${CONTRIBUTION_METHODS[existing.method].label} · ${formatMoney(existing.amount, { kopecks: 'auto' })}»` : '';
+  const mergeBlocked = !!existing && (isBalanceMethod(existing.method) || isBalanceMethod(method));
+  const canPay = amount > 0 && !noDeposit && !mergeBlocked && !busy;
 
   const hint = (() => {
+    if (existing && isBalanceMethod(existing.method)) return `Отметка ${mark} не складывается с доплатой — сначала снимите её`;
+    if (existing && isBalanceMethod(method)) return `Депозит и долг не складываются с отметкой ${mark} — выберите наличные, перевод или СБП`;
+    if (existing) return `Добавится к отметке ${mark} — мимо кассы и баланса клиента`;
     if (method === 'deposit') return noDeposit ? `Депозита не хватает — на балансе ${formatMoney(Math.max(row.balance, 0), { kopecks: 'auto' })}. Выберите «Долг»` : 'Спишется с депозита клиента и попадёт в его историю';
     if (method === 'debt') return 'Запишется клиенту в долг и попадёт в его историю';
     return 'Деньги копятся в сборе — мимо кассы и баланса клиента';
@@ -123,7 +133,7 @@ function PayForm({
           );
         })}
       </View>
-      <Text style={[type.footnote, noDeposit ? styles.debt : sheetStyles.secondary, styles.hint]}>{hint}</Text>
+      <Text style={[type.footnote, noDeposit || mergeBlocked ? styles.debt : sheetStyles.secondary, styles.hint]}>{hint}</Text>
 
       <AmountKeypad value={text} onChange={setText} maxLength={8} />
 

@@ -10,7 +10,23 @@ import { recordPollPosted } from '../lib/pollState.js'
 // постит «созревшие» (isPollDue) и сохраняет lastPostedAt. НЕ бросает наружу.
 // database — БД клуба; дефолт = синглтон (одно-клубный режим).
 // ─────────────────────────────────────────────────────────────────────────────
+
+// БД клубов, по которым проход ещё идёт (как в cron/fiscalize.ts): тик раз в минуту,
+// а запрос в Telegram может висеть дольше — без защиты следующий тик видел тот же
+// «созревший» опрос (lastPostedAt ещё не записан) и постил его второй раз.
+const running = new WeakSet<Database>()
+
 export async function runPollsForDb(database: Database = db): Promise<void> {
+  if (running.has(database)) return
+  running.add(database)
+  try {
+    await runPolls(database)
+  } finally {
+    running.delete(database)
+  }
+}
+
+async function runPolls(database: Database): Promise<void> {
   let configs
   try {
     configs = await readPollConfigs(database)
@@ -29,12 +45,12 @@ export async function runPollsForDb(database: Database = db): Promise<void> {
     return
   }
 
-  let changed = false
+  // id опроса → момент успешной отправки.
+  const posted = new Map<string, string>()
   for (const cfg of due) {
     const r = await postPollConfig(token, cfg)
     if (r.ok) {
-      cfg.lastPostedAt = new Date().toISOString()
-      changed = true
+      posted.set(cfg.id, new Date().toISOString())
       // Запоминаем как «последний опрос» чата (для @tvari).
       if (r.pollId) {
         await recordPollPosted(database, cfg.chatId, r.pollId, r.messageId ?? 0, cfg.threadId, cfg.options).catch((e) =>
@@ -46,9 +62,19 @@ export async function runPollsForDb(database: Database = db): Promise<void> {
       console.error(`[polls] не удалось отправить «${cfg.title}» (${cfg.chatId}): ${r.error}`)
     }
   }
-  if (changed) {
+  if (posted.size) {
     try {
-      await writePollConfigs(database, configs)
+      // Перечитываем конфиги перед записью: пока шла отправка, владелец мог их поменять
+      // (выключить/удалить опрос) — пишем поверх свежих, проставляя только lastPostedAt
+      // отправленным, а не затираем его правки снимком начала тика. Пусто — не пишем
+      // (всё удалено, либо чтение не удалось: не затираем конфиги пустым списком).
+      const fresh = await readPollConfigs(database)
+      if (fresh.length) {
+        await writePollConfigs(database, fresh.map((c) => {
+          const at = posted.get(c.id)
+          return at ? { ...c, lastPostedAt: at } : c
+        }))
+      }
     } catch (e) {
       console.error('[polls] не удалось сохранить lastPostedAt', e)
     }

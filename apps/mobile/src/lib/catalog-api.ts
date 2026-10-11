@@ -9,9 +9,8 @@ import { useSession } from './session';
 import type { NumericString } from './types';
 
 /**
- * «Меню» и «Тарифы и аренда» (apps/api/src/modules/menu, pricing, spaces).
- * - Остаток из меню не меняется — только закупки, ревизии и списания.
- * - Себестоимость в карточке — средневзвешенная со склада: отправляем её, только если её поменяли.
+ * Справочники меню (категории, порядок) и «Тарифы и аренда» (apps/api/src/modules/menu,
+ * pricing, spaces). Сами позиции меню и склад правит раздел «Товары» — lib/goods-api.ts.
  * - Категория «Тарифы» и её позиции управляются тарифами, в меню их не показываем.
  * - `imageUrl` и `linkedSpaceId` на сервере не принимают null — пустые ключи опускаем.
  */
@@ -80,8 +79,7 @@ const LEGACY_COLORS: Record<string, string> = {
   cyan: '#06B6D4',
 };
 
-export const categoryHex = (value?: string | null) =>
-  value ? LEGACY_COLORS[value] || (/^#[0-9a-f]{6}$/i.test(value) ? value : '#8B5CF6') : '#8B5CF6';
+export const categoryHex = (value?: string | null) => (value ? LEGACY_COLORS[value] || (/^#[0-9a-f]{6}$/i.test(value) ? value : '#8B5CF6') : '#8B5CF6');
 export const categorySymbol = (icon?: string | null): SFSymbol => (icon && CATEGORY_SYMBOLS[icon]) || 'square.grid.2x2';
 export const isTariffCategory = (c: Pick<MenuCategory, 'name'>) => c.name.toLowerCase().includes('тариф');
 
@@ -133,6 +131,7 @@ export function useMenuAdmin() {
 
 function refreshMenu() {
   const club = host();
+  void queryClient.invalidateQueries({ queryKey: [club, 'goods'] });
   void queryClient.invalidateQueries({ queryKey: [club, 'menu'] });
   void queryClient.invalidateQueries({ queryKey: [club, 'inventory'] });
 }
@@ -168,52 +167,6 @@ export async function reorderItems(order: { id: string; sortOrder: number }[]): 
   } finally {
     refreshMenu();
   }
-}
-
-export type MenuItemInput = {
-  name: string;
-  price: number;
-  costPrice: number;
-  category: string | null;
-  isActive: boolean;
-  isTop: boolean;
-  isService: boolean;
-  trackStock: boolean;
-  isTabletVisible: boolean;
-  isScreenVisible: boolean;
-  searchTags: string[];
-  linkedSpaceId: string | null;
-};
-
-/** Себестоимость и привязка к зоне уходят, только если их задали или поменяли. */
-export async function saveMenuItem(original: AdminMenuItem | null, input: MenuItemInput): Promise<AdminMenuItem> {
-  const body: Record<string, unknown> = {
-    name: input.name.trim(),
-    price: input.price,
-    category: input.category,
-    isActive: input.isActive,
-    isTop: input.isTop,
-    isService: input.isService,
-    trackStock: input.trackStock,
-    isTabletVisible: input.isTabletVisible,
-    isScreenVisible: input.isScreenVisible,
-    searchTags: input.searchTags,
-  };
-  const costChanged = !original || Math.abs(Number(original.costPrice ?? 0) - input.costPrice) > 0.004;
-  if (costChanged) body.costPrice = input.costPrice;
-  if (input.linkedSpaceId && input.linkedSpaceId !== original?.linkedSpaceId) body.linkedSpaceId = input.linkedSpaceId;
-
-  const { item } = original
-    ? await api.patch<{ item: AdminMenuItem }>(`/menu/items/${original.id}`, body)
-    : await api.post<{ item: AdminMenuItem }>('/menu/items', body);
-  refreshMenu();
-  return item;
-}
-
-/** Только владелец. Мягкое удаление: чеки прошлого сохранят позицию. */
-export async function deleteMenuItem(itemId: string): Promise<void> {
-  await api.delete(`/menu/items/${itemId}`);
-  refreshMenu();
 }
 
 /* ─────────────────────────── Тарифы и аренда ─────────────────────────── */

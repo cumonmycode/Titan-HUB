@@ -97,7 +97,8 @@ export async function paySalary(input: {
     return { payment: r.payment, duplicate: !!r.duplicate };
   } finally {
     const club = useSession.getState().club?.host ?? 'none';
-    for (const key of [['salary'], ['shifts', 'cashops'], ['inventory', 'expenses'], ['pos', 'shift-summary']]) {
+    // Сводка «Расходов» — [club, 'expenses', from, to] (expenses-api.ts): в ней зарплата.
+    for (const key of [['salary'], ['shifts', 'cashops'], ['expenses'], ['pos', 'shift-summary']]) {
       void queryClient.invalidateQueries({ queryKey: [club, ...key] });
     }
   }

@@ -3,11 +3,12 @@ import { Stack, useFocusEffect, useLocalSearchParams, useRouter } from 'expo-rou
 import { HeaderHeightContext } from 'expo-router/react-navigation';
 import { SymbolView } from 'expo-symbols';
 import { type ComponentRef, useCallback, useContext, useEffect, useEffectEvent, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, useColorScheme, View } from 'react-native';
+import { ActivityIndicator, Alert, Platform, Pressable, ScrollView, StyleSheet, useColorScheme, useWindowDimensions, View } from 'react-native';
 import { KeyboardChatScrollView, KeyboardStickyView } from 'react-native-keyboard-controller';
 import Animated, { FadeIn, FadeInDown, FadeOut, ZoomIn, ZoomOut } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { Text, TextInput } from '@/components/text';
 import { AmbientBackdrop } from '@/components/ambient-backdrop';
 import { GlassView } from '@/components/glass';
 import { ToolbarButton } from '@/components/toolbar';
@@ -20,11 +21,20 @@ import { KEYBOARD_DISMISS, useHeaderClearance } from '@/lib/layout';
 import { useSpaces } from '@/lib/pos-api';
 import { queryClient } from '@/lib/query';
 import { markCheckNotificationsRead, useCheck, useClubKey } from '@/lib/queries';
+import { FONT_SCALE_MAX } from '@/lib/text-scale';
 import { colors, space, type } from '@/lib/theme';
 import { useNow } from '@/lib/use-now';
 
 /** Сервер присвоил отправленному свой id — пузырь сохраняет прежний ключ и не появляется заново. */
 const aliases = new Map<string, string>();
+
+/**
+ * Id неотправленного пузыря — уникален на всё время работы приложения: неотправленные
+ * («failed») живут в кэше и после повторного открытия чата, и счётчик экрана с нуля
+ * совпадал бы с ними (дубли ключей, замена чужого пузыря).
+ */
+let localSeq = 0;
+const nextLocalId = () => `local-${Date.now().toString(36)}-${++localSeq}`;
 
 /**
  * Чат с гостем в кабинке — полный экран, как мессенджер. Гость пишет с планшета
@@ -134,13 +144,11 @@ export default function ChatScreen() {
     },
   });
 
-  const counter = useRef(0);
   const submit = (value: string) => {
     const message = value.trim();
     if (!message) return;
     setText('');
-    counter.current += 1;
-    send.mutate({ message, localId: `local-${counter.current}-${message.length}` });
+    send.mutate({ message, localId: nextLocalId() });
   };
 
   const retry = (message: ChatMessage) => {
@@ -297,14 +305,20 @@ function openCheck(router: ReturnType<typeof useRouter>, checkId: string) {
   router.navigate({ pathname: '/pos/[checkId]', params: { checkId } });
 }
 
+const TITLE_MAX_WIDTH = 240;
+/** Кнопки шапки слева и справа с отступами. */
+const TITLE_SIDE_ROOM = 160;
+
 function ChatTitle({ title, subtitle }: { title: string; subtitle: string }) {
+  // Шапка оставляет заголовку ширину между кнопками: на «Увеличенном» виде (320 pt) это ~160.
+  const { width } = useWindowDimensions();
   return (
-    <View style={styles.title}>
-      <Text style={[type.headline, styles.label]} numberOfLines={1}>
+    <View style={[styles.title, { maxWidth: Math.min(TITLE_MAX_WIDTH, width - TITLE_SIDE_ROOM) }]}>
+      <Text style={[type.headline, styles.label]} numberOfLines={1} maxFontSizeMultiplier={FONT_SCALE_MAX.compact}>
         {title}
       </Text>
       {!!subtitle && (
-        <Text style={[type.caption1, styles.secondary]} numberOfLines={1}>
+        <Text style={[type.caption1, styles.secondary]} numberOfLines={1} maxFontSizeMultiplier={FONT_SCALE_MAX.compact}>
           {subtitle}
         </Text>
       )}
@@ -367,10 +381,15 @@ function Bubble({
         {message.text}
         {/* Место под подпись в последней строке, как в Telegram: пробелы шириной в цифру (U+2007)
             и неразрывные — они не «свисают» за край строки и видны не бывают. */}
-        <Text style={styles.metaText}>{mine ? META_SPACE_MINE : META_SPACE}</Text>
+        <Text style={styles.metaText} allowFontScaling={false}>
+          {mine ? META_SPACE_MINE : META_SPACE}
+        </Text>
       </Text>
       <View style={styles.meta}>
-        <Text style={[styles.metaText, metaColor]}>{time}</Text>
+        {/* Время и место под него — одного кегля без роста: иначе с крупным текстом время наезжало на текст. */}
+        <Text style={[styles.metaText, metaColor]} allowFontScaling={false}>
+          {time}
+        </Text>
         {mine && <Status message={message} />}
       </View>
     </View>
@@ -490,7 +509,7 @@ const styles = StyleSheet.create({
   label: { color: colors.label },
   secondary: { color: colors.secondaryLabel },
   centered: { textAlign: 'center' },
-  title: { alignItems: 'center', maxWidth: 240 },
+  title: { alignItems: 'center' },
   list: { flexGrow: 1, justifyContent: 'flex-end' },
   listEmpty: { justifyContent: 'center' },
   loading: { alignSelf: 'center', marginTop: space.xxxl },

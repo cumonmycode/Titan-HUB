@@ -25,7 +25,11 @@ interface NativeKiosk {
   setOrientation(mode: Orientation): Promise<void>;
   openSettings(kind: SettingsKind): Promise<boolean>;
   reboot(): Promise<boolean>;
+  setGestureExclusion(rects: number[][]): Promise<void>;
 }
+
+/** Прямоугольник в dp: [left, top, right, bottom]. */
+export type DpRect = [number, number, number, number];
 
 const native = requireOptionalNativeModule<NativeKiosk>('TitanKiosk');
 
@@ -44,4 +48,6 @@ export const Kiosk = {
   setOrientation: async (mode: Orientation) => native?.setOrientation(mode),
   openSettings: async (kind: SettingsKind): Promise<boolean> => (native ? native.openSettings(kind) : false),
   reboot: async (): Promise<boolean> => (native ? native.reboot() : false),
+  /** Здесь жест «Назад» от края не перехватывает касание; [] — снять. */
+  setGestureExclusion: async (rects: DpRect[]) => native?.setGestureExclusion?.(rects),
 };

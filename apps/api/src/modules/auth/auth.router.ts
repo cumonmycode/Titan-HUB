@@ -5,12 +5,14 @@ import { visitProgress } from '../../lib/loyalty.js'
 import { clientCollections } from '../resident/resident.router.js'
 import { getActiveSbpProvider, getProvider, resolveCreds, getPaymentTestMode } from '../pay/registry.js'
 import { getClubIntegration } from '../../lib/secrets.js'
+import { TG_API } from '../../lib/telegram.js'
 import { round2 } from '../../lib/money.js'
 // @ts-ignore
 import { passkeys } from '@titan/database'
 import { signToken, verifyPin, verifyPassword, hashPassword, hashPin, isPlaintext, verifyTelegramInitData } from '@titan/auth'
 import { LoginPinSchema, LoginPasswordSchema, LoginTelegramSchema, SetPinSchema } from '@titan/types'
 import { requireAuth, tokenHash } from '../../middleware/auth.js'
+import { findStaffByPin, isPinTaken, PIN_TAKEN_ERROR, type StaffProfile } from './staff-pin.js'
 import { getBoolSetting } from '../../lib/appSettings.js'
 import { getSharedRedis } from '../../lib/redis.js'
 import { clientIp } from '../../lib/clientIp.js'
@@ -58,12 +60,12 @@ function getRedis() {
 // @username бота My Titan для подсказки/диплинка на экране входа из браузера.
 // Из env (WALLET_BOT_USERNAME), иначе через getMe (кэшируем). Без '@'.
 let walletBotUsername: string | null = process.env['WALLET_BOT_USERNAME']?.replace(/^@/, '') ?? null
-async function getWalletBotUsername(): Promise<string | null> {
+export async function getWalletBotUsername(): Promise<string | null> {
   if (walletBotUsername) return walletBotUsername
   const token = process.env['WALLET_BOT_TOKEN']
   if (!token) return null
   try {
-    const r = await fetch(`https://api.telegram.org/bot${token}/getMe`)
+    const r = await fetch(`${TG_API}/bot${token}/getMe`)
     const j = (await r.json()) as { result?: { username?: string } }
     walletBotUsername = j?.result?.username ?? null
   } catch { /* недоступно — вернём null, экран покажет инструкцию без ссылки */ }
@@ -152,13 +154,13 @@ authRouter.post('/tablet-session', zValidator('json', z.object({
       .from(spaces).where(and(eq(spaces.id, spaceId), eq(spaces.isActive, true)))
     if (!space) return c.json({ error: 'Пространство не найдено' }, 404)
 
-    // PIN сверяется со ВСЕМИ staff/owner (fan-out, как /login/pin без userId).
-    const staffList = await db.select().from(profiles)
-      .where(and(isNull(profiles.deletedAt), inArray(profiles.role, ['owner', 'staff'])))
-    let staff: typeof staffList[number] | null = null
-    for (const p of staffList) {
-      if (p.pin && await verifyPin(pin, p.pin)) { staff = p; break }
+    // PIN сверяется со ВСЕМИ активными staff/owner (fan-out, как /login/pin без userId).
+    const matches = await findStaffByPin(db, pin)
+    // Один PIN у нескольких — не выбираем «первого» (вход под чужим именем).
+    if (matches.length > 1) {
+      return c.json({ error: 'Этот PIN совпадает у нескольких сотрудников — смените PIN в профиле' }, 409)
     }
+    const staff = matches[0] ?? null
     if (!staff) {
       await redis.incr(key); await redis.expire(key, PIN_WINDOW_SECONDS)
       await redis.incr(globalTabletKey); await redis.expire(globalTabletKey, PIN_WINDOW_SECONDS)
@@ -296,20 +298,26 @@ authRouter.post('/login/pin', zValidator('json', LoginPinSchema), async (c) => {
 
     // PIN-вход доступен только персоналу/владельцу (клиенты/планшеты входят иначе).
     // Без userId перебираем ТОЛЬКО staff/owner — не всех и не client/tablet.
-    const staffOnly = inArray(profiles.role, ['owner', 'staff'])
-    const where = userId
-      ? and(eq(profiles.id, userId), staffOnly)
-      : and(isNull(profiles.deletedAt), staffOnly)
-    const all = await db.select().from(profiles).where(where)
-    for (const profile of all) {
-      if (!profile.pin) continue
-      const ok = await verifyPin(pin, profile.pin)
-      if (ok) {
-        // Сбрасываем счётчик при успехе
-        await redis.del(key)
-        const token = await signToken({ sub: profile.id, role: profile.role, nickname: profile.nickname, clubId: c.var.club?.id ?? null })
-        return c.json({ token, user: { id: profile.id, nickname: profile.nickname, role: profile.role, photoUrl: profile.photoUrl } })
-      }
+    // Уволенные (deletedAt) не входят ни по userId, ни перебором.
+    let matched: StaffProfile[]
+    if (userId) {
+      const [one] = await db.select().from(profiles)
+        .where(and(eq(profiles.id, userId), isNull(profiles.deletedAt), inArray(profiles.role, ['owner', 'staff'])))
+      matched = one?.pin && await verifyPin(pin, one.pin) ? [one] : []
+    } else {
+      matched = await findStaffByPin(db, pin)
+    }
+    // Перебором нашлось несколько профилей с этим PIN — не выбираем «первого»
+    // (иначе вход под чужой учёткой, вплоть до владельца): только по паролю.
+    if (matched.length > 1) {
+      return c.json({ error: 'Этот PIN совпадает у нескольких сотрудников — войдите по паролю и смените PIN' }, 409)
+    }
+    const profile = matched[0]
+    if (profile) {
+      // Сбрасываем счётчик при успехе
+      await redis.del(key)
+      const token = await signToken({ sub: profile.id, role: profile.role, nickname: profile.nickname, clubId: c.var.club?.id ?? null })
+      return c.json({ token, user: { id: profile.id, nickname: profile.nickname, role: profile.role, photoUrl: profile.photoUrl } })
     }
 
     // Инкремент счётчика неудач + TTL (мягкий per-IP bucket).
@@ -352,7 +360,7 @@ authRouter.post('/login/password', zValidator('json', LoginPasswordSchema), asyn
       }, 429)
     }
 
-    const [profile] = await db.select().from(profiles).where(eq(profiles.nickname, nickname))
+    const [profile] = await db.select().from(profiles).where(and(eq(profiles.nickname, nickname), isNull(profiles.deletedAt)))
     if (!profile?.passwordHash) {
       await redis.incr(key)
       await redis.expire(key, PIN_WINDOW_SECONDS)
@@ -594,6 +602,20 @@ authRouter.post('/pin/set', requireAuth, zValidator('json', SetPinSchema), async
   const user = c.get('user')
   const db = c.var.db
   const { pin } = c.req.valid('json')
+  // Уникальность PIN нужна только персоналу (перебором входят лишь staff/owner).
+  // Ответ «занят» — оракул чужих PIN, поэтому смена PIN ограничена как вход по PIN.
+  if (user.role === 'owner' || user.role === 'staff') {
+    const redis = getSharedRedis()
+    const key = `${clubKeyPrefix(c)}:pin:set:${user.sub}`
+    // Redis недоступен — лимит пропускаем (fail-open), смену PIN не блокируем.
+    const attempts = await redis.incr(key).catch(() => 0)
+    if (attempts === 1) await redis.expire(key, PIN_WINDOW_SECONDS).catch(() => {})
+    if (attempts > PIN_MAX_ATTEMPTS) {
+      const ttl = await redis.ttl(key).catch(() => PIN_WINDOW_SECONDS)
+      return c.json({ error: `Слишком много попыток. Попробуйте через ${Math.ceil(Math.max(ttl, 0) / 60)} мин.` }, 429)
+    }
+    if (await isPinTaken(db, pin, user.sub)) return c.json({ error: PIN_TAKEN_ERROR }, 409)
+  }
   const hashed = await hashPin(pin)
   await db.update(profiles).set({ pin: hashed, needsPinSetup: false }).where(eq(profiles.id, user.sub))
   return c.json({ ok: true })

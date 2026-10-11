@@ -179,6 +179,15 @@ const CATALOG: Product[] = [
       { key: 'ha_token', label: 'Долгосрочный токен', type: 'password', placeholder: 'eyJhbGciOi…', hint: 'Home Assistant → профиль пользователя (слева внизу) → вкладка «Безопасность» → «Долгосрочные токены доступа» → «Создать токен». Токен показывается один раз — скопируйте его сюда.' },
     ],
   },
+  {
+    id: 'home_assistant_hub', name: 'Home Assistant · Titan HUB', icon: 'lightbulb', color: '#18BCF2', kind: 'keys',
+    blurb: 'Свет и кондиционеры всех помещений на кассе',
+    about: 'Кассир включает свет и кондиционеры в коридоре, кабинках, зале и туалете прямо с главной кассы приложения Titan HUB: шторка вытягивается сверху. Телефон или iPad подключается к Home Assistant сам, по Wi-Fi клуба. Помещения и их устройства настраиваются в приложении: «Управление» → «Настройки клуба» → «Интеграции» → «Home Assistant» — там же можно ввести адрес и токен. Токен отдельный от планшетов Titan Home: его можно отозвать, не трогая кабинки.',
+    fields: [
+      { key: 'hub_ha_url', label: 'Адрес', type: 'text', placeholder: 'http://192.168.1.50:8123', hint: 'Можно не заполнять, если адрес тот же, что у Home Assistant для Titan Home. Для работы вне клуба подойдёт внешний https-адрес (например, Nabu Casa).', optional: true },
+      { key: 'hub_ha_token', label: 'Долгосрочный токен', type: 'password', placeholder: 'eyJhbGciOi…', hint: 'Home Assistant → профиль пользователя → «Безопасность» → «Долгосрочные токены доступа» → «Создать токен». Лучше от отдельного пользователя без прав администратора.' },
+    ],
+  },
   // Прочее
   { id: 'music', name: 'Музыка для бизнеса', icon: 'campaign', color: '#EC4899', kind: 'keys', fields: [], comingSoon: true,
     blurb: 'Лицензионная фоновая музыка', about: 'Лицензионная фоновая музыка для зала (Звук Бизнес / Я.Музыка для бизнеса) — без рисков по авторским правам.' },
@@ -195,7 +204,8 @@ function statusOf(p: Product, items: IntegrationItem[], gm?: GmStatus): Status {
   const cfg = p.fields.map(f => items.find(i => i.key === f.key))
   const n = cfg.filter(i => i?.configured).length
   if (n === 0) return { installed: false, ok: false, partial: false, masked: null, detail: '' }
-  const full = n === p.fields.length
+  // Необязательные поля (адрес HA для HUB, СНО кассы) не делают настройку «неполной».
+  const full = p.fields.every((f, i) => f.optional || cfg[i]?.configured)
   const primary = cfg.find(i => i?.configured)
   return { installed: true, ok: full, partial: !full, masked: primary?.masked ?? '••••', detail: full ? '' : 'неполная настройка' }
 }

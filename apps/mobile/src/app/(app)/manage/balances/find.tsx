@@ -1,7 +1,8 @@
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 
+import { Text } from '@/components/text';
 import { SheetHeader, sheetStyles } from '@/components/new-check-parts';
 import { PlayerSearch } from '@/components/player-picker';
 import { haptic } from '@/lib/haptics';

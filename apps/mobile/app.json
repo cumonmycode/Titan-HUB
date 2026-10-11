@@ -2,14 +2,14 @@
   "expo": {
     "name": "Titan HUB",
     "slug": "titan-hub",
-    "version": "0.3.0",
+    "version": "0.6.0",
     "orientation": "default",
     "scheme": "titanhub",
     "userInterfaceStyle": "automatic",
     "ios": {
       "icon": "./assets/titan.icon",
       "bundleIdentifier": "ru.titan.hub",
-      "buildNumber": "11",
+      "buildNumber": "28",
       "appleTeamId": "G99YH9UK8C",
       "supportsTablet": true,
       "infoPlist": {
@@ -18,6 +18,10 @@
           "ru"
         ],
         "ITSAppUsesNonExemptEncryption": false,
+        "NSLocalNetworkUsageDescription": "Titan HUB подключается в локальной сети клуба к Home Assistant (свет и кондиционеры) и к ТВ-приставкам с Titan Menu.",
+        "NSAppTransportSecurity": {
+          "NSAllowsLocalNetworking": true
+        },
         "UISupportedInterfaceOrientations": [
           "UIInterfaceOrientationPortrait"
         ],
@@ -37,7 +41,7 @@
     },
     "android": {
       "package": "ru.titanpos.hub",
-      "versionCode": 1,
+      "versionCode": 25,
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/titan-android-foreground.png",
         "monochromeImage": "./assets/images/titan-android-monochrome.png",
@@ -68,7 +72,8 @@
           },
           "android": {
             "compileSdkVersion": 36,
-            "targetSdkVersion": 36
+            "targetSdkVersion": 36,
+            "usesCleartextTraffic": true
           }
         }
       ],
@@ -116,7 +121,23 @@
           "color": "#8B5CF6"
         }
       ],
-      "./plugins/with-staff-calls"
+      "./plugins/with-staff-calls",
+      [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "Микрофон нужен, чтобы говорить с Tai голосом: он слушает только после нажатия на кнопку микрофона.",
+          "speechRecognitionPermission": "Распознавание речи превращает ваши голосовые команды для Tai в текст.",
+          "androidSpeechServicePackages": [
+            "com.google.android.googlequicksearchbox"
+          ]
+        }
+      ],
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "Микрофон нужен, чтобы говорить с Tai голосом: он слушает только после нажатия на кнопку микрофона."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,

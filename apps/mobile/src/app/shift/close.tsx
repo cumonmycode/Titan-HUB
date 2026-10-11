@@ -1,4 +1,4 @@
-import { Form, Host, LabeledContent, ProgressView, Section, Text, TextField } from '@expo/ui/swift-ui';
+import { Form, Host, LabeledContent, ProgressView, Section, Text, TextField, useNativeState } from '@expo/ui/swift-ui';
 import { font, foregroundStyle, monospacedDigit } from '@expo/ui/swift-ui/modifiers';
 import { useMutation } from '@tanstack/react-query';
 import { Stack, useRouter } from 'expo-router';
@@ -22,6 +22,10 @@ export default function CloseShift() {
   const balance = useCashBalance();
   const [typed, setTyped] = useState<string | null>(null);
   const [reason, setReason] = useState('');
+  // Ключ поля суммы, замороженный при первом вводе. Пока пользователь ничего не набрал,
+  // поле перемонтируется с каждым новым предзаполнением (CashField читает initial один раз):
+  // иначе после перезапроса кэша поле показывало бы старую сумму, а отправлялась бы новая.
+  const [typedFieldKey, setTypedFieldKey] = useState<string | null>(null);
 
   const expected = balance.data?.expected ?? null;
   // Предзаполняем ожидаемой суммой; при совпадении отправим точный float сервера.
@@ -47,6 +51,9 @@ export default function CloseShift() {
       const summary = await api.get<{ shift: unknown }>('/pos/shift-summary').catch(() => null);
       if (summary && !summary.shift) return finish();
       haptic.error();
+      // Ожидаемый остаток на сервере мог измениться (оплата, возврат, изъятие) —
+      // перечитываем его, иначе экран считает, что всё сходится, и не просит причину.
+      await balance.refetch();
     },
   });
 
@@ -117,12 +124,23 @@ export default function CloseShift() {
           <Section
             title="Фактически в кассе"
             footer={<Text>{matches ? 'Всё сходится.' : needsReason ? (diff > 0 ? 'Излишек будет проведён внесением.' : 'Недостача будет проведена изъятием.') : 'Пересчитайте наличные.'}</Text>}>
-            {prefill === null ? <ProgressView /> : <CashField initial={prefill} onChange={setTyped} />}
+            {prefill === null ? (
+              <ProgressView />
+            ) : (
+              <CashField
+                key={typedFieldKey ?? prefill}
+                initial={prefill}
+                onChange={(text) => {
+                  setTypedFieldKey((key) => key ?? prefill);
+                  setTyped(text);
+                }}
+              />
+            )}
           </Section>
 
           {needsReason && (
             <Section title={diff > 0 ? `Излишек ${cashMoney(diff, true)}` : `Недостача ${cashMoney(-diff)}`}>
-              <TextField placeholder="Причина расхождения" onTextChange={setReason} />
+              <ReasonField value={reason} onChange={setReason} />
             </Section>
           )}
 
@@ -135,6 +153,15 @@ export default function CloseShift() {
       </Host>
     </>
   );
+}
+
+/**
+ * Поле причины привязано к состоянию: когда суммы сошлись, поле пропадает, а набранная причина
+ * остаётся; при новом расхождении поле появляется уже с ней — уходит ровно то, что видно.
+ */
+function ReasonField({ value, onChange }: { value: string; onChange: (text: string) => void }) {
+  const text = useNativeState(value);
+  return <TextField text={text} placeholder="Причина расхождения" onTextChange={onChange} />;
 }
 
 function closeErrorMessage(message: string): string {

@@ -25,8 +25,16 @@ Notifications.setNotificationHandler({
   },
 });
 
-type Registered = { host: string; push: string | null; voip: string | null };
+type Registered = { host: string; userId: string | null; push: string | null; voip: string | null };
 let registered: Registered | null = null;
+
+// Любой выход (в том числе по 401 и «Другой сотрудник») забывает регистрацию: следующий
+// сотрудник на этом телефоне заново привязывает к себе push и звонки (сервер переносит запись).
+useSession.subscribe((state, prev) => {
+  if (!prev.token || state.token) return;
+  registered = null;
+  StaffCalls?.stop?.(); // Android: связь с клубом под прежним токеном больше не нужна
+});
 
 async function apnsToken(ask: boolean): Promise<string | null> {
   if (Platform.OS !== 'ios' || !Device.isDevice) return null;
@@ -48,12 +56,21 @@ async function apnsToken(ask: boolean): Promise<string | null> {
  * разрешения на уведомления, обычные push — только с ним (спрашиваем один раз).
  */
 export async function registerStaffDevice(ask: boolean): Promise<void> {
-  const { club, token } = useSession.getState();
+  const { club, token, user } = useSession.getState();
   if (!club || !token || Platform.OS !== 'ios') return;
+  const userId = user?.id ?? null;
   const push = await apnsToken(ask);
   const voip = StaffCalls?.getVoipToken() ?? null;
   if (!push && !voip) return;
-  if (registered && registered.host === club.host && registered.push === push && registered.voip === voip) return;
+  if (
+    registered &&
+    registered.host === club.host &&
+    registered.userId === userId &&
+    registered.push === push &&
+    registered.voip === voip
+  ) {
+    return;
+  }
   await api.post('/notifications/devices', {
     platform: 'ios',
     pushToken: push,
@@ -61,7 +78,7 @@ export async function registerStaffDevice(ask: boolean): Promise<void> {
     deviceName: Device.deviceName ?? undefined,
     appVersion: Constants.expoConfig?.version,
   });
-  registered = { host: club.host, push, voip };
+  registered = { host: club.host, userId, push, voip };
 }
 
 /** Выключенные сотрудником типы уведомлений — Android-служба их не показывает. */

@@ -1,13 +1,12 @@
-import { Host, Picker, Text as SwiftText } from '@expo/ui/swift-ui';
-import { pickerStyle, tag } from '@expo/ui/swift-ui/modifiers';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
 import { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Keyboard, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, Keyboard, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { KeyboardAvoidingView, useKeyboardState } from 'react-native-keyboard-controller';
 import Animated, { FadeIn, FadeOut, LinearTransition } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { Text, TextInput, type TextInputRef } from '@/components/text';
 import { GlassView } from '@/components/glass';
 import { Avatar, BalanceChips, GlassCard, PrimaryButton, sheetStyles } from '@/components/new-check-parts';
 import { PaymentSuccess } from '@/components/payment-success';
@@ -39,6 +38,7 @@ import {
 import { usePosSelection } from '@/lib/pos-selection';
 import { useCheck } from '@/lib/queries';
 import { parseAmount } from '@/lib/shift-api';
+import { FONT_SCALE_MAX, useTextLayout } from '@/lib/text-scale';
 import { colors, space, type } from '@/lib/theme';
 import { useNow } from '@/lib/use-now';
 
@@ -46,7 +46,7 @@ const SHEET_DISMISS_MS = 420;
 const NO_PARTS: PaymentPart[] = [];
 const EPS = 0.01;
 
-/** Сетка способов — как в веб-кассе. Сертификат есть только у чеков мероприятий. */
+/** Сетка способов — как в веб-кассе (по три в ряд). Сертификат есть только у чеков мероприятий. */
 const METHOD_ROWS: TenderMethod[][] = [
   ['cash', 'card', 'transfer'],
   ['deposit', 'bonus', 'debt'],
@@ -69,10 +69,14 @@ function cashPresets(due: number): number[] {
 }
 
 /**
- * Оплата чека. Два режима:
- * - «Одним способом» — способ закрывает весь чек; для наличных — сколько дал гость и сдача;
- * - «Разделить» — несколько частей, сумма каждой правится прямо в строке, новый способ
- *   встаёт на остаток (а если остатка нет — забирает половину последней части).
+ * Оплата чека без переключателя режимов:
+ * - тап по способу закрывает весь чек (повторный тап снимает); для наличных — сколько дал
+ *   гость и сдача;
+ * - способ не покрыл чек (лимит бонусов, депозита, сертификата) — экран сам показывает
+ *   части, следующий тап доплачивает остаток;
+ * - «Разделить оплату» — несколько частей вручную: сумма каждой правится прямо в строке,
+ *   новый способ встаёт на остаток (а если остатка нет — забирает половину последней части).
+ * Состояние оплаты пишет сама кнопка внизу («Выберите способ», «Доплатить 300 ₽», «Провести»).
  * СБП — только на весь чек (QR-код), подтверждённая банком часть не меняется.
  */
 export default function PayScreen() {
@@ -80,6 +84,8 @@ export default function PayScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const keyboardOpen = useKeyboardState((state) => state.isVisible);
+  // Очень крупный текст: плитки способов — по две в ряд, в три подписи не помещались.
+  const { stacked } = useTextLayout();
   const check = useCheck(checkId);
   const now = useNow(15_000);
   const settings = usePaySettings();
@@ -93,12 +99,15 @@ export default function PayScreen() {
   const parts = ownDraft ? draftParts : NO_PARTS;
   const certificate = ownDraft ? draftCertificate : null;
   const notice = ownDraft ? draftNotice : null;
-  const [mode, setMode] = useState<Mode>('single');
-  const [hint, setHint] = useState<string | null>(null);
+  // Ручное разделение: включается кнопкой «Разделить оплату», сбрасывается, когда частей не осталось.
+  const [splitRequested, setSplitRequested] = useState(false);
   // Куда поставить курсор: seq растёт с каждым запросом, чтобы фокус срабатывал и на ту же часть.
   const [focus, setFocus] = useState<{ id: string; seq: number } | null>(null);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<PayResult | null>(null);
+  // Кнопка лежит поверх списка; столько же места оставляем под последним рядом плиток,
+  // чтобы его всегда можно было докрутить выше кнопки.
+  const [footerHeight, setFooterHeight] = useState(0);
 
   useEffect(() => {
     usePaymentDraft.getState().begin(checkId);
@@ -177,27 +186,27 @@ export default function PayScreen() {
       certificate: nextCertificate,
     });
   const ledger = ledgerFor(parts);
-  const methodRows = data.linkedEventId ? [...METHOD_ROWS, ['certificate' as const]] : METHOD_ROWS;
+  const perRow = stacked ? 2 : 3;
+  const methods = [...METHOD_ROWS.flat(), ...(data.linkedEventId ? (['certificate'] as const) : [])];
+  const methodRows = Array.from({ length: Math.ceil(methods.length / perRow) }, (_, i) => methods.slice(i * perRow, (i + 1) * perRow));
 
   // Подтверждённая банком часть (СБП) меняться не может — показываем её списком частей.
   const hasLocked = parts.some((p) => p.locked);
-  const view: Mode = hasLocked || parts.length > 1 ? 'split' : mode;
+  // Части видны, когда их несколько, когда способ не покрыл чек или разделение включено вручную.
+  const view: Mode =
+    hasLocked || parts.length > 1 || (parts.length === 1 && (splitRequested || ledger.remaining > EPS)) ? 'split' : 'single';
   const single = view === 'single' && parts.length === 1 ? parts[0] : null;
 
   const setParts = (next: PaymentPart[]) => usePaymentDraft.getState().setParts(next);
 
-  const switchMode = (next: Mode) => {
-    if (next === view) return;
+  /** «Разделить оплату»: выбранный способ становится первой частью, следующий тап отделит половину. */
+  const startSplit = () => {
+    if (!single) return;
     haptic.selection();
     Keyboard.dismiss();
-    setHint(null);
-    if (next === 'single') {
-      // В «одном способе» остаётся только часть, закрывающая весь чек.
-      const keep = parts.length === 1 && parts[0].amount >= totals.due - EPS ? parts : [];
-      setParts(keep);
-      if (!keep.length) usePaymentDraft.getState().setCertificate(null);
-    }
-    setMode(next);
+    // Наличные «с запасом» (гость дал 1000 на 600) делим от суммы чека, а не от купюры.
+    if (single.amount > totals.due + EPS) setParts([{ ...single, amount: totals.due }]);
+    setSplitRequested(true);
   };
 
   const openQr = (surcharge8: boolean) => {
@@ -225,15 +234,6 @@ export default function PayScreen() {
       { text: 'Отмена', style: 'cancel' },
     ]);
 
-  /** Способ не покрыл весь чек (лимит депозита, бонусов, сертификата) — сразу к разделению. */
-  const continueSplit = (next: PaymentPart[], method: TenderMethod) => {
-    const covered = next.reduce((a, p) => a + p.amount, 0);
-    if (covered < totals.due - EPS) {
-      setMode('split');
-      setHint(`${METHODS[method].title} покрывает ${money(covered)}. Выберите, чем доплатить ${money(round2(totals.due - covered))}.`);
-    }
-  };
-
   const askCertificate = (apply: (found: Certificate) => void) =>
     promptText(
       'Сертификат',
@@ -260,7 +260,10 @@ export default function PayScreen() {
       'default',
     );
 
-  /** «Одним способом»: способ встаёт на весь чек, повторное нажатие снимает выбор. */
+  /**
+   * Способ встаёт на весь чек, повторное нажатие снимает выбор. Если способ покрыл не всё
+   * (лимит депозита, бонусов, сертификата), часть остаётся, и экран сам переходит к частям.
+   */
   const pickSingle = (method: TenderMethod) => {
     if (method === 'transfer') return askQr();
     if (single?.method === method) {
@@ -269,11 +272,7 @@ export default function PayScreen() {
       return;
     }
     if (method === 'certificate' && !certificate) {
-      askCertificate((found) => {
-        const next = addTender([], 'certificate', ledgerFor([], found));
-        setParts(next);
-        continueSplit(next, 'certificate');
-      });
+      askCertificate((found) => setParts(addTender([], 'certificate', ledgerFor([], found))));
       return;
     }
     const next = addTender([], method, ledgerFor([]));
@@ -282,9 +281,7 @@ export default function PayScreen() {
       return;
     }
     haptic.selection();
-    setHint(null);
     setParts(next);
-    continueSplit(next, method);
   };
 
   /** Последняя редактируемая часть, от которой можно отделить половину. */
@@ -312,7 +309,6 @@ export default function PayScreen() {
       return;
     }
     haptic.selection();
-    setHint(null);
     setParts(next);
     // Курсор — в сумму добавленной (или пополненной) части: её обычно сразу правят.
     const added = next.find((p) => p.method === method && !p.locked);
@@ -327,6 +323,8 @@ export default function PayScreen() {
   const removePart = (part: PaymentPart) => {
     haptic.light();
     usePaymentDraft.getState().remove(part.id);
+    // Убрали последнюю часть — снова «тап = весь чек».
+    if (usePaymentDraft.getState().parts.length === 0) setSplitRequested(false);
   };
 
   /** Добить часть остатком чека (с учётом лимита способа). */
@@ -435,25 +433,19 @@ export default function PayScreen() {
     }
   };
 
-  const summary =
-    totals.due <= 0
-      ? {
-          text: totals.staffComp ? 'Списание на персонал — без оплаты' : 'Чек на 0 ₽',
-          color: colors.secondaryLabel,
-        }
+  // Кнопка сама говорит, чего не хватает: отдельная строка-итог над ней повторяла бы её.
+  // Сдача видна в блоке наличных и в строке части.
+  const submitTitle = busy
+    ? 'Проводим…'
+    : totals.due <= 0
+      ? totals.staffComp
+        ? 'Закрыть · списание на персонал'
+        : 'Закрыть чек · 0 ₽'
       : !parts.length
-        ? {
-            text: view === 'split' ? `Распределите ${money(totals.due)} по способам` : 'Выберите способ оплаты',
-            color: colors.secondaryLabel,
-          }
-        : ledger.remaining > 0
-          ? {
-              text: `Осталось распределить ${money(ledger.remaining)}`,
-              color: colors.orange,
-            }
-          : ledger.change > 0
-            ? { text: `Сдача ${money(ledger.change)}`, color: colors.green }
-            : { text: 'Сумма сходится', color: colors.green };
+        ? 'Выберите способ оплаты'
+        : ledger.remaining > EPS
+          ? `Доплатить ${money(ledger.remaining)}`
+          : `Провести ${money(totals.due)}`;
 
   const methodGrid = (
     <View style={styles.methodGrid}>
@@ -485,10 +477,20 @@ export default function PayScreen() {
                     >
                       <SymbolView name={look.symbol} size={20} weight="semibold" tintColor={selected ? 'white' : look.color} />
                     </View>
-                    <Text style={[type.footnote, styles.methodTitle]} numberOfLines={1}>
+                    <Text
+                      style={[type.footnote, styles.methodTitle]}
+                      numberOfLines={1}
+                      adjustsFontSizeToFit
+                      minimumFontScale={0.8}
+                      maxFontSizeMultiplier={FONT_SCALE_MAX.compact}>
                       {look.title}
                     </Text>
-                    <Text style={[type.caption2, sheetStyles.secondary]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85}>
+                    <Text
+                      style={[type.caption2, sheetStyles.secondary]}
+                      numberOfLines={1}
+                      adjustsFontSizeToFit
+                      minimumFontScale={0.85}
+                      maxFontSizeMultiplier={FONT_SCALE_MAX.compact}>
                       {caption}
                     </Text>
                     {selected && view === 'single' && (
@@ -501,7 +503,7 @@ export default function PayScreen() {
               </Pressable>
             );
           })}
-          {row.length < 3 && Array.from({ length: 3 - row.length }, (_, i) => <View key={i} style={styles.flex} />)}
+          {row.length < perRow && Array.from({ length: perRow - row.length }, (_, i) => <View key={i} style={styles.flex} />)}
         </View>
       ))}
     </View>
@@ -511,92 +513,93 @@ export default function PayScreen() {
     <>
       {toolbar}
       <KeyboardAvoidingView behavior="padding" style={styles.flex}>
-        <ScrollView
-          style={styles.flex}
-          contentInsetAdjustmentBehavior="automatic"
-          contentContainerStyle={styles.content}
-          keyboardShouldPersistTaps="handled"
-          keyboardDismissMode={KEYBOARD_DISMISS}
-        >
-          <View style={styles.hero}>
-            <Text style={[type.subhead, sheetStyles.secondary]} numberOfLines={1}>
-              {checkTitle(data)}
-            </Text>
-            <Text style={[styles.heroAmount, type.amount]} numberOfLines={1} adjustsFontSizeToFit>
-              {money(totals.due)}
-            </Text>
-            {breakdown.length > 0 && <Text style={[type.footnote, sheetStyles.secondary]}>{breakdown.join(' · ')}</Text>}
-            {totals.staffComp && (
-              <View style={styles.staffComp}>
-                <SymbolView name="person.badge.shield.checkmark" size={14} tintColor={colors.indigo} />
-                <Text style={[type.footnote, styles.staffCompText]}>Списание на персонал · бесплатно</Text>
-              </View>
-            )}
-          </View>
-
-          {hasPlayer && (
-            <GlassCard style={styles.payer}>
-              <Avatar name={player.data?.nickname ?? '··'} photoUrl={player.data?.photoUrl} size={40} />
-              <View style={styles.flex}>
-                <Text style={[type.headline, sheetStyles.label]} numberOfLines={1}>
-                  {player.data?.nickname ?? 'Клиент'}
+        {/* Отдельный слой без отступов: KeyboardAvoidingView поднимает клавиатуру нижним padding,
+            а абсолютная кнопка привязывается к краю этого слоя — и всегда стоит над клавиатурой. */}
+        {/* react-native-screens растягивает список шторки на всю её высоту, если находит его первым
+            потомком (по цепочке первых дочерних вью), — и низ списка уезжал под панель «Провести»
+            и за край экрана. Несхлопываемый слой и пустая вью первой в цепочке — список не найден,
+            его высоту задаёт раскладка. */}
+        <View style={styles.flex} collapsable={false}>
+          <View collapsable={false} />
+          <ScrollView
+            style={styles.flex}
+            contentInsetAdjustmentBehavior="automatic"
+            contentContainerStyle={[styles.content, { paddingBottom: footerHeight + space.lg }]}
+            scrollIndicatorInsets={{ bottom: footerHeight }}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode={KEYBOARD_DISMISS}
+          >
+            <View style={styles.hero}>
+              {/* С клиентом имя — в карточке плательщика ниже, второй раз не пишем. */}
+              {!hasPlayer && (
+                <Text style={[type.subhead, sheetStyles.secondary]} numberOfLines={1}>
+                  {checkTitle(data)}
                 </Text>
-                <Text style={[type.footnote, sheetStyles.secondary]}>Плательщик</Text>
-              </View>
-              {player.data && <BalanceChips balance={player.data.balance} bonusPoints={player.data.bonusPoints} />}
-            </GlassCard>
-          )}
-
-          {notice && (
-            <Animated.View entering={FadeIn}>
-              <GlassCard tint="rgba(52,199,89,0.22)" style={styles.notice}>
-                <SymbolView name="checkmark.seal.fill" size={18} tintColor={colors.green} />
-                <Text style={[type.footnote, styles.noticeText]}>{notice}</Text>
-              </GlassCard>
-            </Animated.View>
-          )}
-
-          {totals.due > 0 && !hasLocked && (
-            <Host matchContents={{ vertical: true }} style={styles.segment}>
-              <Picker selection={view} onSelectionChange={(value) => switchMode(value as Mode)} modifiers={[pickerStyle('segmented')]}>
-                <SwiftText modifiers={[tag('single')]}>Одним способом</SwiftText>
-                <SwiftText modifiers={[tag('split')]}>Разделить</SwiftText>
-              </Picker>
-            </Host>
-          )}
-
-          {totals.due > 0 && view === 'single' && (
-            <View style={styles.section}>
-              {methodGrid}
-              {single?.method === 'cash' && (
-                <Animated.View entering={FadeIn.duration(180)} exiting={FadeOut.duration(120)}>
-                  <CashGiven due={totals.due} given={single.amount} onChange={setCashGiven} />
-                </Animated.View>
+              )}
+              <Text style={[styles.heroAmount, type.amount]} numberOfLines={1} adjustsFontSizeToFit>
+                {money(totals.due)}
+              </Text>
+              {breakdown.length > 0 && <Text style={[type.footnote, sheetStyles.secondary]}>{breakdown.join(' · ')}</Text>}
+              {totals.staffComp && (
+                <View style={styles.staffComp}>
+                  <SymbolView name="person.badge.shield.checkmark" size={14} tintColor={colors.indigo} />
+                  <Text style={[type.footnote, styles.staffCompText]}>Списание на персонал · бесплатно</Text>
+                </View>
               )}
             </View>
-          )}
 
-          {totals.due > 0 && view === 'split' && (
-            <>
-              {hint && (
-                <Animated.View entering={FadeIn}>
-                  <GlassCard tint="rgba(255,149,0,0.18)" style={styles.notice}>
-                    <SymbolView name="arrow.triangle.branch" size={18} tintColor={colors.orange} />
-                    <Text style={[type.footnote, styles.noticeText]}>{hint}</Text>
-                  </GlassCard>
-                </Animated.View>
-              )}
+            {hasPlayer && (
+              <GlassCard style={styles.payer}>
+                <Avatar name={player.data?.nickname ?? '··'} photoUrl={player.data?.photoUrl} size={40} />
+                <View style={styles.flex}>
+                  <Text style={[type.headline, sheetStyles.label]} numberOfLines={1}>
+                    {player.data?.nickname ?? 'Клиент'}
+                  </Text>
+                  <Text style={[type.footnote, sheetStyles.secondary]}>Плательщик</Text>
+                </View>
+                {player.data && <BalanceChips balance={player.data.balance} bonusPoints={player.data.bonusPoints} />}
+              </GlassCard>
+            )}
 
+            {notice && (
+              <Animated.View entering={FadeIn}>
+                <GlassCard tint="rgba(52,199,89,0.22)" style={styles.notice}>
+                  <SymbolView name="checkmark.seal.fill" size={18} tintColor={colors.green} />
+                  <Text style={[type.footnote, styles.noticeText]}>{notice}</Text>
+                </GlassCard>
+              </Animated.View>
+            )}
+
+            {totals.due > 0 && view === 'single' && (
               <View style={styles.section}>
-                <Text style={[type.footnote, styles.sectionTitle]}>ЧАСТИ ОПЛАТЫ</Text>
-                {parts.length === 0 ? (
-                  <GlassCard style={styles.emptyParts}>
-                    <SymbolView name="square.split.2x1" size={22} tintColor={colors.secondaryLabel} />
-                    <Text style={[type.footnote, sheetStyles.secondary, styles.emptyText]}>
-                      Нажмите способ ниже — он встанет на остаток, сумму можно сразу поправить.
-                    </Text>
-                  </GlassCard>
-                ) : (
+                {methodGrid}
+                {single?.method === 'cash' && (
+                  <Animated.View entering={FadeIn.duration(180)} exiting={FadeOut.duration(120)}>
+                    <CashGiven due={totals.due} given={single.amount} onChange={setCashGiven} />
+                  </Animated.View>
+                )}
+                {single && (
+                  <Animated.View entering={FadeIn.duration(180)} exiting={FadeOut.duration(120)} style={styles.splitWrap}>
+                    <Pressable
+                      disabled={busy}
+                      onPress={startSplit}
+                      hitSlop={8}
+                      style={({ pressed }) => [styles.splitButton, pressed && styles.pressed]}
+                      accessibilityRole="button"
+                      accessibilityHint="Добавить второй способ оплаты"
+                    >
+                      <SymbolView name="square.split.2x1" size={15} weight="semibold" tintColor={colors.accent} />
+                      <Text style={[type.subhead, styles.splitText]}>Разделить оплату</Text>
+                    </Pressable>
+                  </Animated.View>
+                )}
+              </View>
+            )}
+
+            {totals.due > 0 && view === 'split' && (
+              <>
+                <View style={styles.section}>
+                  <Text style={[type.footnote, styles.sectionTitle]}>ЧАСТИ ОПЛАТЫ</Text>
                   <GlassCard>
                     {parts.map((part, index) => (
                       <Animated.View key={part.id} entering={FadeIn.duration(160)} exiting={FadeOut.duration(120)} layout={LinearTransition}>
@@ -614,66 +617,43 @@ export default function PayScreen() {
                       </Animated.View>
                     ))}
                   </GlassCard>
-                )}
-              </View>
-
-              {!hasLocked && (
-                <View style={styles.section}>
-                  <Text style={[type.footnote, styles.sectionTitle]}>{parts.length ? 'ДОБАВИТЬ СПОСОБ' : 'СПОСОБ ОПЛАТЫ'}</Text>
-                  {methodGrid}
                 </View>
-              )}
-            </>
-          )}
-        </ScrollView>
 
-        {/* Панель внизу — обычный блок под списком, а не поверх него: ничего не перекрывает и поднимается с клавиатурой. */}
-        <View
-          style={[
-            styles.footer,
-            {
-              paddingBottom: keyboardOpen ? space.sm : insets.bottom + space.sm,
-            },
-          ]}
-        >
-          <GlassCard style={styles.summaryCard}>
-            <View style={styles.summaryRow}>
-              <Text style={[type.subhead, styles.summary, { color: summary.color }]} numberOfLines={2}>
-                {summary.text}
-              </Text>
-              {keyboardOpen && (
-                <Pressable
-                  onPress={() => Keyboard.dismiss()}
-                  hitSlop={8}
-                  style={styles.doneKey}
-                  accessibilityRole="button"
-                  accessibilityLabel="Скрыть клавиатуру"
-                >
-                  <Text style={[type.subhead, styles.doneKeyText]}>Готово</Text>
-                </Pressable>
-              )}
-            </View>
-            {totals.due > 0 && (
-              <View style={styles.progressTrack}>
-                <Animated.View
-                  layout={LinearTransition.springify().damping(20)}
-                  style={[
-                    styles.progressFill,
-                    {
-                      width: `${Math.min(100, (ledger.paid / totals.due) * 100)}%`,
-                      backgroundColor: ledger.remaining > 0 ? colors.accent : colors.green,
-                    },
-                  ]}
-                />
-              </View>
+                {!hasLocked && (
+                  <View style={styles.section}>
+                    <Text style={[type.footnote, styles.sectionTitle]}>ДОБАВИТЬ СПОСОБ</Text>
+                    {methodGrid}
+                  </View>
+                )}
+              </>
             )}
-          </GlassCard>
-          <PrimaryButton
-            title={busy ? 'Проводим…' : totals.due <= 0 ? 'Закрыть чек · 0 ₽' : `Провести ${money(totals.due)}`}
-            busy={busy}
-            disabled={!canSubmit}
-            onPress={() => void submit()}
-          />
+          </ScrollView>
+
+          {/*
+            Одна кнопка поверх низа списка (как панель инструментов iOS 26), а не столбик из итога
+            и кнопки: под прежней панелью целиком прятался второй ряд плиток. Список получает
+            снизу отступ высотой с кнопку — последний ряд всегда докручивается выше неё.
+            Внутри KeyboardAvoidingView кнопка поднимается вместе с клавиатурой.
+          */}
+          <View
+            onLayout={(event) => setFooterHeight(Math.round(event.nativeEvent.layout.height))}
+            style={[styles.footer, { paddingBottom: keyboardOpen ? space.sm : insets.bottom + space.sm }]}
+          >
+            {keyboardOpen && (
+              <Pressable
+                onPress={() => Keyboard.dismiss()}
+                hitSlop={8}
+                style={styles.doneKey}
+                accessibilityRole="button"
+                accessibilityLabel="Скрыть клавиатуру"
+              >
+                <Text style={[type.subhead, styles.doneKeyText]}>Готово</Text>
+              </Pressable>
+            )}
+            <View style={styles.flex}>
+              <PrimaryButton title={submitTitle} busy={busy} disabled={!canSubmit} onPress={() => void submit()} />
+            </View>
+          </View>
         </View>
       </KeyboardAvoidingView>
     </>
@@ -704,7 +684,7 @@ function PartRow({
   const look = METHODS[part.method];
   const [text, setText] = useState(inputText(part.amount));
   const focused = useRef(false);
-  const input = useRef<TextInput>(null);
+  const input = useRef<TextInputRef>(null);
 
   // Сумму поменяли снаружи (остаток, лимит, деление пополам) — показываем её, если поле не в работе.
   useEffect(() => {
@@ -892,7 +872,17 @@ const styles = StyleSheet.create({
     padding: space.md,
   },
   noticeText: { flex: 1, color: colors.label },
-  segment: { alignSelf: 'stretch' },
+  splitWrap: { alignItems: 'center' },
+  splitButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: space.lg,
+    paddingVertical: 9,
+    borderRadius: 999,
+    backgroundColor: colors.fill,
+  },
+  splitText: { color: colors.accent, fontWeight: '600' },
 
   section: { gap: space.sm },
   sectionTitle: { color: colors.secondaryLabel, paddingHorizontal: space.xs },
@@ -936,13 +926,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
 
-  emptyParts: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: space.md,
-    padding: space.md,
-  },
-  emptyText: { flex: 1 },
   partRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -969,11 +952,15 @@ const styles = StyleSheet.create({
     backgroundColor: colors.fill,
   },
   restPillText: { color: colors.accent, fontWeight: '600' },
+  // Рамка по размеру суммы. У поля внутри НЕ должно быть flex: 1: рамка без своей ширины
+  // тогда забирала всю строку — подпись слева сжималась в ноль, а рамка вылезала за карточку.
   amountBox: {
+    flexShrink: 0,
+    maxWidth: '55%',
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'flex-end',
     gap: 4,
-    minWidth: 96,
     paddingHorizontal: space.md,
     paddingVertical: 8,
     borderRadius: 12,
@@ -981,7 +968,6 @@ const styles = StyleSheet.create({
     backgroundColor: colors.fill,
   },
   amountInput: {
-    flex: 1,
     minWidth: 56,
     padding: 0,
     textAlign: 'right',
@@ -989,8 +975,8 @@ const styles = StyleSheet.create({
   },
 
   cashCard: { padding: space.md, gap: space.md },
-  cashHead: { flexDirection: 'row', alignItems: 'center', gap: space.md },
-  cashLabel: { flex: 1, fontWeight: '600' },
+  cashHead: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: space.md },
+  cashLabel: { flexGrow: 1, flexShrink: 1, flexBasis: 120, fontWeight: '600' },
   presets: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm },
   preset: {
     paddingHorizontal: space.md,
@@ -1011,31 +997,25 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
 
-  footer: { paddingHorizontal: space.lg, paddingTop: space.sm, gap: space.sm },
-  summaryCard: {
-    paddingHorizontal: space.lg,
-    paddingVertical: space.md,
+  footer: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: space.sm,
+    paddingHorizontal: space.lg,
+    paddingTop: space.sm,
   },
-  summaryRow: { flexDirection: 'row', alignItems: 'center', gap: space.md },
-  summary: {
-    flex: 1,
-    textAlign: 'center',
-    fontWeight: '600',
-    fontVariant: ['tabular-nums'],
-  },
+  // Высота — как у основной кнопки рядом (54).
   doneKey: {
-    paddingHorizontal: space.md,
-    paddingVertical: 6,
-    borderRadius: 999,
+    height: 54,
+    justifyContent: 'center',
+    paddingHorizontal: space.lg,
+    borderRadius: 27,
+    borderCurve: 'continuous',
     backgroundColor: colors.fill,
   },
   doneKeyText: { color: colors.accent, fontWeight: '600' },
-  progressTrack: {
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: colors.fill,
-    overflow: 'hidden',
-  },
-  progressFill: { height: 4, borderRadius: 2 },
 });

@@ -4,8 +4,10 @@ import { zValidator } from '@hono/zod-validator'
 import { z } from 'zod'
 import { salaryPayments, shifts, checks, checkPayments, cashOperations, profiles, eq, and, desc, gte, lte, lt, sql } from '@titan/database'
 import { requireAuth, requireRole } from '../../middleware/auth.js'
-import { getCurrentShift } from '../shifts/shifts.service.js'
 import { getBusinessDayStartHour } from '../../lib/appSettings.js'
+
+// Смена закрылась между чтением и записью наличной выплаты — транзакцию откатываем.
+const SHIFT_CLOSED = 'SHIFT_CLOSED'
 
 // Период (YYYY-MM) кладётся в note первым токеном (см. фронт salary/page.tsx).
 // Достаём его в отдельное поле period, остаток оставляем как комментарий.
@@ -81,7 +83,8 @@ salaryRouter.get('/estimate', requireRole('owner', 'staff'), async (c) => {
   // ветки → при 2+ сотрудниках на смене КАЖДЫЙ получал % от ПОЛНОЙ выручки клуба.
   // Теперь ОБЕ ветки считают выручку ПЕРСОНАЛЬНО (eq(checks.staffId)) и в ОБЕИХ
   // вычитаем event_base_amount — оцениваемая и выплачиваемая база совпадают.
-  const personalRevenue = sql<string>`coalesce(sum(${checks.totalAmount}::numeric - coalesce(${checks.eventBaseAmount}, 0)::numeric), 0)`
+  // Возвраты по чеку вычитаем: полностью возвращённый чек не должен повышать зарплату.
+  const personalRevenue = sql<string>`coalesce(sum(${checks.totalAmount}::numeric - coalesce(${checks.eventBaseAmount}, 0)::numeric - coalesce((select sum(r.total_amount) from refunds r where r.check_id = ${checks.id}), 0)::numeric), 0)`
 
   const day = c.req.query('day')
   if (day && /^\d{4}-\d{2}-\d{2}$/.test(day)) {
@@ -176,7 +179,15 @@ salaryRouter.post('/pay', requireRole('owner'), zValidator('json', PaySalarySche
       // если смена закрылась между приёмом запроса и коммитом, cashOperation
       // не должна лечь на устаревший shiftId. Если открытой смены нет — выплату
       // фиксируем, но кассовую операцию не создаём (как и раньше при shift=null).
-      const shift = await getCurrentShift(db)
+      // Читаем через tx и блокируем строку смены FOR SHARE: закрытие смены держит
+      // FOR UPDATE, поэтому выплата либо ляжет в смену ДО закрытия (и войдёт в сверку),
+      // либо увидит, что смена уже закрыта, — тогда откатываем всё (409, повторить).
+      const [current] = await tx.select({ id: shifts.id }).from(shifts)
+        .where(eq(shifts.status, 'open')).orderBy(desc(shifts.openedAt)).limit(1)
+      const [shift] = current
+        ? await tx.select().from(shifts).where(eq(shifts.id, current.id)).for('share')
+        : []
+      if (shift && shift.status !== 'open') throw new Error(SHIFT_CLOSED)
       if (shift) {
         await tx.insert(cashOperations).values({
           type: 'salary',
@@ -194,7 +205,11 @@ salaryRouter.post('/pay', requireRole('owner'), zValidator('json', PaySalarySche
     // salaryPayments (см. /expenses/summary и netBreakdown). Это исключает задвоение.
 
     return { pay, duplicate: false as const }
+  }).catch((e: unknown) => {
+    if (e instanceof Error && e.message === SHIFT_CLOSED) return null
+    throw e
   })
+  if (!result) return c.json({ error: 'Смена закрылась во время выплаты — повторите' }, 409)
 
   // Дубль (ретрай/повторная выплата за период): отдаём существующую выплату, если
   // нашли, иначе 409 — но в кассу повторно НЕ списали (cashOp под тем же ключом).

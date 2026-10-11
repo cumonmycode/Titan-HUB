@@ -17,8 +17,10 @@ interface Tariff { hours: number; price: string }
 interface Config { enabled: boolean; clubName?: string; venueAddress?: string; hoursOpen?: string; hoursClose?: string; cabins?: Cabin[]; tariffs?: Tariff[] }
 interface MyBooking {
   id: string; status: string; event_status: string | null; location: string | null; address: string | null; zone_name: string | null
-  tariff_hours: number | null; guests: number | null; starts_at: string; name: string; phone: string; comment: string | null
+  tariff_hours: number | null; guests: number | null; starts_at: string; name?: string; phone?: string; comment?: string | null
 }
+// token = null — бронь найдена только по телефону (lookup): показываем без правок.
+interface MineItem { token: string | null; b: MyBooking }
 
 const TOKENS_KEY = 'titan_book_tokens'
 const VIOLET = '#8B5CF6'
@@ -69,7 +71,7 @@ const optCard = (active: boolean): React.CSSProperties => ({
 export default function BookPage() {
   const [cfg, setCfg] = useState<Config | null>(null)
   const [loading, setLoading] = useState(true)
-  const [mine, setMine] = useState<{ token: string; b: MyBooking }[]>([])
+  const [mine, setMine] = useState<MineItem[]>([])
   const [view, setView] = useState<'phone' | 'mine' | 'wizard'>('phone')
   const [entryPhone, setEntryPhone] = useState('')
 
@@ -93,23 +95,24 @@ export default function BookPage() {
   const date = dd.length === 2 && mm.length === 2 && yyyy.length === 4 ? `${yyyy}-${mm}-${dd}` : ''
   const time = hh.length === 2 && mi.length === 2 ? `${hh}:${mi}` : ''
 
-  // Узнавание клиента: по телефону (кросс-устройство, lookup) + по токенам localStorage
-  // (то же устройство). Возвращает объединённый список броней, сохраняет токены/телефон.
-  const recognize = async (rawPhone: string): Promise<{ token: string; b: MyBooking }[]> => {
-    const list: { token: string; b: MyBooking }[] = []
+  // Узнавание клиента: по токенам localStorage (то же устройство — бронь можно править)
+  // + по телефону (кросс-устройство, lookup). Lookup токен управления не отдаёт
+  // (безопасность: знание номера не даёт права менять чужую бронь), поэтому брони,
+  // найденные только по телефону, показываем без правок (token = null).
+  const recognize = async (rawPhone: string): Promise<MineItem[]> => {
+    const list: MineItem[] = []
     const seen = new Set<string>()
-    if (rawPhone.replace(/\D/g, '').length >= 10) {
-      try {
-        const r = await api.get<{ bookings: (MyBooking & { claim_token?: string })[] }>(`/bookings/public/lookup?phone=${encodeURIComponent(rawPhone)}`)
-        for (const b of r.bookings ?? []) if (b.claim_token && !seen.has(b.id)) { list.push({ token: b.claim_token, b }); seen.add(b.id) }
-      } catch { /* */ }
-    }
     for (const t of loadTokens()) {
-      if (list.some((x) => x.token === t)) continue
       const b = await api.get<{ booking: MyBooking }>(`/bookings/public/${t}`).then((r) => r.booking).catch(() => null)
       if (b && !seen.has(b.id)) { list.push({ token: t, b }); seen.add(b.id) }
     }
-    list.forEach((x) => saveToken(x.token))
+    if (rawPhone.replace(/\D/g, '').length >= 10) {
+      try {
+        const r = await api.get<{ bookings: MyBooking[] }>(`/bookings/public/lookup?phone=${encodeURIComponent(rawPhone)}`)
+        for (const b of r.bookings ?? []) if (!seen.has(b.id)) { list.push({ token: null, b }); seen.add(b.id) }
+      } catch { /* */ }
+    }
+    list.sort((x, y) => Date.parse(y.b.starts_at) - Date.parse(x.b.starts_at))
     if (rawPhone) savePhone(rawPhone)
     return list
   }
@@ -170,7 +173,7 @@ export default function BookPage() {
   const submit = async () => {
     setError(''); setSubmitting(true)
     try {
-      const r = await api.post<{ token: string }>('/bookings/public', {
+      const r = await api.post<{ token: string | null }>('/bookings/public', {
         location, title: title.trim() || undefined,
         address: location === 'exit' ? address.trim() : undefined,
         spaceId: location === 'titan' ? (cabinId || undefined) : undefined,
@@ -178,7 +181,8 @@ export default function BookPage() {
         guests: guests ? Number(guests) : undefined,
         date, time, name: name.trim(), phone: phone.trim(), comment: comment.trim() || undefined,
       })
-      saveToken(r.token)
+      // token = null — повторная отправка той же заявки (сервер вернул уже созданную).
+      if (r.token) saveToken(r.token)
       await refreshMine()
       resetWizard(); setView('mine')
     } catch (e: any) { setError(e?.message || 'Не удалось отправить заявку') } finally { setSubmitting(false) }
@@ -219,7 +223,7 @@ export default function BookPage() {
     <div style={wrap}><div style={shell}>
       <Header clubName={cfg.clubName} sub="Ваши брони" />
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 16 }}>
-        {mine.map(({ token, b }) => <MineCard key={token} token={token} b={b} cfg={cfg} onChanged={refreshMine} />)}
+        {mine.map(({ token, b }) => <MineCard key={b.id} token={token} b={b} cfg={cfg} onChanged={refreshMine} />)}
       </div>
       <button onClick={() => { resetWizard(); setView('wizard') }}
         style={{ ...cta(), marginTop: 16, background: 'rgba(139,92,246,0.16)', color: '#c4b5fd' }}>
@@ -476,7 +480,7 @@ function NumBox({ value, onChange, max, ph, w, hi }: { value: string; onChange: 
 }
 
 // ── карточка брони в «Мои брони» (статус + правки) ──
-function MineCard({ token, b, cfg, onChanged }: { token: string; b: MyBooking; cfg: Config; onChanged: () => void }) {
+function MineCard({ token, b, cfg, onChanged }: { token: string | null; b: MyBooking; cfg: Config; onChanged: () => void }) {
   const st = STATUS_META[effStatus(b)] ?? { label: b.status, color: '#94A3B8', icon: 'info' }
   const [edit, setEdit] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -486,7 +490,10 @@ function MineCard({ token, b, cfg, onChanged }: { token: string; b: MyBooking; c
   const [hours, setHours] = useState<number | null>(b.tariff_hours)
   const [comment, setComment] = useState(b.comment || '')
 
+  // Править/отменять можно только со своим токеном (бронь создана на этом устройстве).
+  const canManage = b.status === 'new' && !!token
   const patch = async (body: any) => {
+    if (!token) return
     setBusy(true)
     try { await api.patch(`/bookings/public/${token}`, body); await onChanged(); setEdit(false) } catch (e) { /* */ } finally { setBusy(false) }
   }
@@ -506,14 +513,20 @@ function MineCard({ token, b, cfg, onChanged }: { token: string; b: MyBooking; c
         {b.comment && <div style={{ color: 'var(--on-surface-variant)', fontSize: 13 }}>{b.comment}</div>}
       </div>
 
-      {b.status === 'new' && !edit && (
+      {b.status === 'new' && !token && (
+        <div style={{ marginTop: 10, fontSize: 12.5, color: 'var(--on-surface-variant)', lineHeight: 1.5 }}>
+          Изменить или отменить заявку можно на устройстве, с которого её отправили, или позвонив в заведение.
+        </div>
+      )}
+
+      {canManage && !edit && (
         <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
           <button onClick={() => setEdit(true)} style={{ flex: 1, padding: '9px 0', borderRadius: 11, border: '1px solid rgba(255,255,255,0.14)', background: 'transparent', color: 'var(--on-surface)', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>Изменить</button>
           <button disabled={busy} onClick={() => patch({ cancel: true })} style={{ flex: 1, padding: '9px 0', borderRadius: 11, border: 'none', background: 'rgba(248,113,113,0.14)', color: '#f87171', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>Отменить</button>
         </div>
       )}
 
-      {b.status === 'new' && edit && (
+      {canManage && edit && (
         <div style={{ marginTop: 12 }}>
           <div style={{ display: 'flex', gap: 10 }}>
             <div style={{ flex: 1 }}><label style={lbl}>Дата</label><input style={inp} type="date" value={date} min={mskToday()} onChange={(e) => setDate(e.target.value)} /></div>

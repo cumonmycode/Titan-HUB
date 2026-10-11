@@ -6,6 +6,9 @@ import { promisify } from 'node:util'
 import { exec as _exec } from 'node:child_process'
 import { mkdir, stat, readdir, unlink, writeFile } from 'node:fs/promises'
 import path from 'node:path'
+import { Readable } from 'node:stream'
+import { createGunzip } from 'node:zlib'
+import { createInterface } from 'node:readline'
 import { getSharedRedis } from './redis.js'
 
 const exec = promisify(_exec)
@@ -215,8 +218,57 @@ export async function restoreNamed(name: string, source: 'drive' | 'local'): Pro
   await restoreFromPath(file)
 }
 
+// ─── Проверка загруженного дампа на мета-команды psql ────────────────────────
+// Файл с устройства уходит в `gunzip | psql` с общими кредами: мета-команды psql
+// (\! — шелл, \c — чужая БД, \i/\o/\copy — файлы) выполнились бы на сервере.
+// pg_dump их не пишет, кроме \restrict/\unrestrict (16.10+, только сужают psql) и
+// терминатора COPY «\.». В данных COPY pg_dump экранирует лишь \\ \b \f \n \r \t \v
+// и пишет \N для NULL — любой другой «\» там тоже отбиваем (даже если «COPY» в файле
+// подделан строковым литералом, из этих букв опасной мета-команды не собрать).
+
+export class UnsafeDumpError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'UnsafeDumpError'
+  }
+}
+
+const COPY_START = /^COPY .+ FROM stdin;$/
+const PG_DUMP_RESTRICT_LINE = /^\\(un)?restrict [A-Za-z0-9]+$/
+const COPY_DATA_BAD_ESCAPE = /\\(?![Nbfnrtv])/
+
+async function assertNoPsqlMetaCommands(buf: Buffer): Promise<void> {
+  const gunzip = Readable.from([buf]).pipe(createGunzip())
+  const lines = createInterface({ input: gunzip, crlfDelay: Infinity })
+  let inCopy = false
+  let lineNo = 0
+  try {
+    for await (const line of lines) {
+      lineNo++
+      if (inCopy) {
+        if (line === '\\.') { inCopy = false; continue }
+        // Пары «\\» — экранированный обратный слеш; после них допустимы только \N \b \f \n \r \t \v.
+        if (COPY_DATA_BAD_ESCAPE.test(line.replace(/\\\\/g, ''))) {
+          throw new UnsafeDumpError(`Файл отклонён: недопустимая последовательность «\\» в строке ${lineNo}`)
+        }
+        continue
+      }
+      if (COPY_START.test(line)) { inCopy = true; continue }
+      if (!line.includes('\\') || line === '\\.' || PG_DUMP_RESTRICT_LINE.test(line)) continue
+      throw new UnsafeDumpError(`Файл отклонён: мета-команда psql в строке ${lineNo} — загрузите дамп, созданный кнопкой «Создать копию»`)
+    }
+  } catch (e) {
+    if (e instanceof UnsafeDumpError) throw e
+    throw new UnsafeDumpError('Файл не похож на копию .sql.gz')
+  } finally {
+    lines.close()
+    gunzip.destroy()
+  }
+}
+
 // Восстановление из загруженного с устройства файла (буфер .sql.gz).
 export async function restoreFromUpload(buf: Buffer): Promise<void> {
+  await assertNoPsqlMetaCommands(buf) // до записи и до psql — небезопасный файл не исполняем
   await mkdir(BACKUP_DIR, { recursive: true })
   const tmp = path.join(BACKUP_DIR, `upload_${Date.now()}.sql.gz`)
   await writeFile(tmp, buf)

@@ -3,7 +3,7 @@ import { Hono } from 'hono'
 import { zValidator } from '@hono/zod-validator'
 import { z } from 'zod'
 import { discounts, clientDiscountRules, eq, desc } from '@titan/database'
-import { requireAuth, requireRole } from '../../middleware/auth.js'
+import { requireAuth, requireRole, requirePermission } from '../../middleware/auth.js'
 
 export const discountsRouter = new Hono<AppEnv>()
 
@@ -19,9 +19,11 @@ discountsRouter.get('/', requireRole('owner', 'staff'), async (c) => {
 })
 
 // POST /api/discounts
+// Изменения скидок/правил — только с правом «Скидки» (GET нужны кассе — без него).
 discountsRouter.post(
   '/',
   requireRole('owner', 'staff'),
+  requirePermission('discounts'),
   zValidator('json', z.object({
     name: z.string().min(1),
     type: z.enum(['percent', 'fixed']),
@@ -106,6 +108,7 @@ discountsRouter.get('/tier-rules', requireRole('owner', 'staff'), async (c) => {
 discountsRouter.post(
   '/tier-rules',
   requireRole('owner', 'staff'),
+  requirePermission('discounts'),
   zValidator('json', z.object({
     name: z.string().min(1).optional(),
     clientTier: z.string().min(1),
@@ -137,6 +140,7 @@ discountsRouter.post(
 discountsRouter.patch(
   '/tier-rules/:id',
   requireRole('owner', 'staff'),
+  requirePermission('discounts'),
   zValidator('json', z.object({
     name: z.string().min(1).optional(),
     clientTier: z.string().min(1).optional(),
@@ -166,7 +170,7 @@ discountsRouter.patch(
 )
 
 // DELETE /api/discounts/tier-rules/:id — удалить правило.
-discountsRouter.delete('/tier-rules/:id', requireRole('owner', 'staff'), async (c) => {
+discountsRouter.delete('/tier-rules/:id', requireRole('owner', 'staff'), requirePermission('discounts'), async (c) => {
   const db = c.var.db
   const id = c.req.param('id')
   await db.delete(clientDiscountRules).where(eq(clientDiscountRules.id, id))
@@ -179,6 +183,7 @@ discountsRouter.delete('/tier-rules/:id', requireRole('owner', 'staff'), async (
 discountsRouter.patch(
   '/:id',
   requireRole('owner', 'staff'),
+  requirePermission('discounts'),
   zValidator('json', z.object({
     name: z.string().min(1).optional(),
     type: z.enum(['percent', 'fixed']).optional(),
@@ -209,6 +214,12 @@ discountsRouter.patch(
       if (effectiveType === 'percent' && body.value > 100) {
         return c.json({ error: 'Процентная скидка не может превышать 100%' }, 400)
       }
+    } else if (body.type === 'percent') {
+      // Меняется только тип: фиксированная 500 ₽ не должна стать скидкой 500%.
+      const [cur] = await db.select({ value: discounts.value }).from(discounts).where(eq(discounts.id, id))
+      if (cur && parseFloat(cur.value) > 100) {
+        return c.json({ error: 'Процентная скидка не может превышать 100% — укажите новое значение' }, 400)
+      }
     }
 
     const update: Record<string, unknown> = {}
@@ -228,7 +239,7 @@ discountsRouter.patch(
 )
 
 // DELETE /api/discounts/:id
-discountsRouter.delete('/:id', requireRole('owner', 'staff'), async (c) => {
+discountsRouter.delete('/:id', requireRole('owner', 'staff'), requirePermission('discounts'), async (c) => {
   const db = c.var.db
   const id = c.req.param('id')
   await db.delete(discounts).where(eq(discounts.id, id))

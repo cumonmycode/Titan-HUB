@@ -14,6 +14,8 @@ import { publishEvent } from '../../lib/realtime.js'
 import { getClubIntegration } from '../../lib/secrets.js'
 import { getClubDbById } from '../../lib/clubResolver.js'
 import { settleResidentPayment, notifyResidentPaid } from '../pay/residentSettle.js'
+import { isSecondPayment, notifySecondPayment, notifyEventCompleted } from '../pay/settle.js'
+import { completeLinkedEvent, type CompletedEvent } from '../events/eventLifecycle.js'
 // Control-БД (продление подписки клуба по платежу платформы) — относительный путь
 // к dist, как в clubResolver/superadmin (закрытый exports-map @titan/database).
 import {
@@ -268,6 +270,9 @@ plategaRouter.post('/webhook', async (c) => {
   }
 
   // db уже выбран выше: БД клуба (если payload нёс clubId) либо c.var.db (легаси/оператор).
+  // Realtime-канал — того же клуба: вебхук бьёт в основной домен (c.var.club = null),
+  // поэтому клуб берём из payload, а c.var.club — только для легаси-платежей.
+  const eventClubId = clubId ?? c.var.club?.id
 
   // Онлайн-платёж клиента из My Titan (payload = resident_payments.id):
   // погашение долга / депозит / Фонд клуба. Применяется идемпотентно, чек не трогаем.
@@ -288,18 +293,24 @@ plategaRouter.post('/webhook', async (c) => {
       console.error('[platega] resident webhook error:', err)
       return c.json({ error: 'internal error' }, 500)
     }
-    publishEvent(c.var.club?.id, 'resident:paid', { paymentId: checkId })
+    publishEvent(eventClubId, 'resident:paid', { paymentId: checkId })
     if (residentApplied) void notifyResidentPaid(db, checkId)
     return c.json({ ok: true })
   }
   let didClose = false
+  let secondPayment = false
+  let completedEvent: CompletedEvent | null = null
   try {
     await db.transaction(async (tx) => {
       const [check] = await tx.select().from(checks).where(eq(checks.id, checkId)).for('update')
       if (!check) throw new Error('CHECK_NOT_FOUND')
 
       // Идемпотентность: если чек уже не открыт — webhook уже обработан (или чек отменён).
-      if (check.status !== 'open') return
+      // Другая транзакция по такому чеку — второй платёж: персоналу сигнал (ниже).
+      if (check.status !== 'open') {
+        secondPayment = await isSecondPayment(tx, check, transactionId)
+        return
+      }
 
       // Авторитетная сумма считается тем же правилом, что и pos.router.ts /pay:
       // позиции + модификаторы − скидки + аренда зоны. totalAmount НЕ включает
@@ -323,7 +334,14 @@ plategaRouter.post('/webhook', async (c) => {
       // итог так же, как в pos.router.ts computeCheckGrandTotal. Раньше webhook её
       // не учитывал → QR-оплата event-чека падала с AMOUNT_MISMATCH.
       const eventBase = parseFloat(check.eventBaseAmount ?? '0') || 0
-      const total = round2(itemsTotal + rental + eventBase)
+      // Оплата по последнему QR: его сумма зафиксирована при выставлении (sbp_qr_*).
+      // Живая аренда к вебхуку могла «тикнуть» на новый час → пересчёт дал бы ложный
+      // AMOUNT_MISMATCH. Для ЭТОЙ транзакции итог = сумма QR, аренда — до момента QR.
+      const qrBase = check.sbpQrTxId === transactionId && check.sbpQrAmount != null
+        ? parseFloat(check.sbpQrAmount)
+        : NaN
+      const fromQr = Number.isFinite(qrBase)
+      const total = fromQr ? round2(qrBase) : round2(itemsTotal + rental + eventBase)
 
       // Чаевые, запрошенные при генерации QR (см. /checks/:id/qr). Гость платит
       // total + tip (опц. ×1.08 надбавка). Чаевые НЕ выручка: платёж/транзакция
@@ -378,13 +396,19 @@ plategaRouter.post('/webhook', async (c) => {
         tipAmount: String(tipPaid),
         // Кто оплатил эквайринг: >0 — клиент доплатил надбавку (не потеря владельца).
         acquiringSurcharge: String(acquiringSurcharge),
-        // Фиксируем конец аренды при закрытии (зеркало pos.router.ts close).
-        spaceEndAt: check.spaceEndAt ?? (check.spaceId ? new Date() : undefined),
+        // Фиксируем конец аренды при закрытии (зеркало pos.router.ts close); чек
+        // закрыт на сумму QR → аренда заканчивается в момент выставления QR.
+        spaceEndAt: check.spaceEndAt ?? (check.spaceId ? ((fromQr ? check.sbpQrAt : null) ?? new Date()) : undefined),
         closedAt: new Date(),
       }).where(eq(checks.id, checkId))
 
+      // Как pos.router.ts /pay: оплаченный чек мероприятия завершает событие (миникап —
+      // последний открытый чек участника). Без этого оплаченное по QR «Идёт» навсегда.
+      completedEvent = await completeLinkedEvent(tx, { id: checkId, linkedEventId: check.linkedEventId })
+
       // Начисление бонусов за QR/СБП-оплату (зеркально POS /pay; раньше его делал
       // фронтовый /pay, теперь чек закрывает webhook — иначе бонусы терялись).
+      let bonusAwarded = 0
       if (check.playerId) {
         const settingsRows = await tx.select().from(appSettings)
           .where(inArray(appSettings.key, ['bonus_enabled', 'bonus_accrual_rate', 'bonus_min_purchase']))
@@ -409,10 +433,13 @@ plategaRouter.post('/webhook', async (c) => {
               // Зеркало pos.router.ts /pay — иначе СБП-бонусы никогда не сгорают.
               const expiryDays = await getBonusExpiryDays(tx)
               await accrueBonusLot(tx, check.playerId, earned, expiryDays)
+              bonusAwarded = earned
             }
           }
         }
       }
+      // Фактически начисленное (0 — не начисляли) — база отката бонусов при возврате.
+      await tx.update(checks).set({ bonusAwarded: String(bonusAwarded) }).where(eq(checks.id, checkId))
 
       didClose = true
     })
@@ -430,8 +457,13 @@ plategaRouter.post('/webhook', async (c) => {
   }
 
   if (didClose) {
-    publishEvent(c.var.club?.id, 'platega:confirmed', { transactionId, checkId })
-    publishEvent(c.var.club?.id, 'check:closed', { checkId })
+    publishEvent(eventClubId, 'platega:confirmed', { transactionId, checkId })
+    publishEvent(eventClubId, 'check:closed', { checkId })
+    if (completedEvent) notifyEventCompleted(db, eventClubId, completedEvent, checkId)
+  }
+  // Деньги пришли за уже закрытый чек — Platega отвечаем 200, персоналу сигнал.
+  if (secondPayment) {
+    notifySecondPayment(db, eventClubId, { checkId, amount: verifiedAmount, transactionId, provider: 'Platega' })
   }
   return c.json({ ok: true })
 })

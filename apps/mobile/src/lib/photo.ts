@@ -1,30 +1,42 @@
+import { File } from 'expo-file-system';
+import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
 import * as ImagePicker from 'expo-image-picker';
 import { Alert, Linking } from 'react-native';
 
 import { api, ApiError } from './api';
 
 /**
- * Фото профилей: выбор из галереи или съёмка, затем загрузка в хранилище клуба.
- * Сервер принимает изображения до 2 МБ (`POST /upload/image`, multipart `file`)
- * и сверяет тип по байтам, поэтому отдаём то, что вернул системный выбор.
+ * Загрузка картинок в хранилище клуба (`POST /upload/image`, multipart `file`): фото
+ * профилей и картинки для ТВ. Сервер сверяет тип по байтам и держит лимит размера,
+ * поэтому картинку всегда уменьшаем и пересохраняем в JPEG: снимок с камеры весит 2–5 МБ.
  */
 
-/** Квадрат 1:1 и сжатие — иначе снимок с камеры не пролезет в лимит 2 МБ. */
+/** Предел сторон картинки в пикселях и качество JPEG. */
+export type ImageFit = { long: number; short: number; quality: number };
+
+/** Фото профиля: квадрат, на аватаре больше 1080 px не видно. */
+const AVATAR_FIT: ImageFit = { long: 1080, short: 1080, quality: 0.8 };
+
+/** Обрезка в квадрат 1:1, сжатие делает `uploadImage`. */
 const PICK_OPTIONS: ImagePicker.ImagePickerOptions = {
   mediaTypes: ['images'],
   allowsEditing: true,
   aspect: [1, 1],
-  quality: 0.5,
+  quality: 1,
 };
 
-export async function uploadImage(asset: ImagePicker.ImagePickerAsset): Promise<string> {
-  const type = asset.mimeType ?? 'image/jpeg';
+export async function uploadImage(asset: ImagePicker.ImagePickerAsset, fit: ImageFit): Promise<string> {
+  const w = asset.width ?? 0;
+  const h = asset.height ?? 0;
+  const scale = w && h ? Math.min(1, fit.long / Math.max(w, h), fit.short / Math.min(w, h)) : 1;
+  const context = ImageManipulator.manipulate(asset.uri);
+  if (scale < 1) context.resize({ width: Math.round(w * scale) });
+  const image = await context.renderAsync();
+  const saved = await image.saveAsync({ compress: fit.quality, format: SaveFormat.JPEG });
   const form = new FormData();
-  form.append('file', {
-    uri: asset.uri,
-    name: asset.fileName ?? `photo.${type.split('/')[1] ?? 'jpg'}`,
-    type,
-  } as unknown as Blob);
+  // Глобальный fetch в Expo 57 — expo/fetch: RN-объект `{ uri, name, type }` он не принимает
+  // («Unsupported FormDataPart implementation»), и запрос не уходил. Файл — только как File.
+  form.append('file', new File(saved.uri));
   const { url } = await api.post<{ url: string }>('/upload/image', form);
   return url;
 }
@@ -48,7 +60,7 @@ export function pickAndUploadPhoto(title: string, onDone: (url: string) => void,
     if (!asset) return;
     onBusy?.(true);
     try {
-      onDone(await uploadImage(asset));
+      onDone(await uploadImage(asset, AVATAR_FIT));
     } catch (error) {
       Alert.alert('Фото не загрузилось', error instanceof ApiError ? error.message : String(error));
     } finally {

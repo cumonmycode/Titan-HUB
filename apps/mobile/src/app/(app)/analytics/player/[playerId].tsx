@@ -10,7 +10,7 @@ import { analyticsErrorText, usePlayerCard } from '@/lib/analytics-api';
 import { balanceText, tierLook, useClientTiers } from '@/lib/clients-api';
 import { plural, toNumber } from '@/lib/format';
 import { haptic } from '@/lib/haptics';
-import { parseStockDate } from '@/lib/inventory-api';
+import { parseServerDate } from '@/lib/events-api';
 
 const dateFormat = new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Europe/Moscow' });
 const checkDate = new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Moscow' });
@@ -33,8 +33,8 @@ export default function PlayerAnalyticsScreen() {
     );
   }
 
-  const first = data.allTime.firstVisit ? parseStockDate(data.allTime.firstVisit) : null;
-  const last = data.allTime.lastVisit ? parseStockDate(data.allTime.lastVisit) : null;
+  const first = data.allTime.firstVisit ? parseServerDate(data.allTime.firstVisit) : null;
+  const last = data.allTime.lastVisit ? parseServerDate(data.allTime.lastVisit) : null;
   const tier = tierLook(data.profile.clientTier, tiers.data);
   const balance = balanceText(data.profile.balance);
   const bonus = Math.floor(toNumber(data.profile.bonusPoints));

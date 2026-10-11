@@ -1,9 +1,10 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
 import { useState } from 'react';
-import { Alert, Keyboard, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, Keyboard, Pressable, StyleSheet, View } from 'react-native';
 import Animated, { FadeInLeft, FadeInRight, FadeOut, LayoutAnimationConfig } from 'react-native-reanimated';
 
+import { Text, TextInput } from '@/components/text';
 import { GlassCard, PrimaryButton, SheetHeader, sheetStyles } from '@/components/new-check-parts';
 import { PlayerCard, PlayerSearch, TariffGrid, useTariffChoice } from '@/components/player-picker';
 import { haptic } from '@/lib/haptics';

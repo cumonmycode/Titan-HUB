@@ -18,9 +18,13 @@ import { bookingsPublicRouter, bookingsRouter } from './modules/bookings/booking
 import { geoRouter } from './modules/geo/geo.router.js'
 
 import { authRouter } from './modules/auth/auth.router.js'
+import { appLoginRouter } from './modules/auth/app-login.js'
 import { posRouter } from './modules/pos/pos.router.js'
+import { tabletRouter, tabletsRouter } from './modules/tablet/tablet.router.js'
+import { smartHomeRouter } from './modules/smart-home/smart-home.router.js'
 import { shiftsRouter } from './modules/shifts/shifts.router.js'
 import { menuRouter } from './modules/menu/menu.router.js'
+import { screensRouter } from './modules/screens/screens.router.js'
 import { clientsRouter } from './modules/clients/clients.router.js'
 import { collectionsRouter } from './modules/collections/collections.router.js'
 import { eventsRouter } from './modules/events/events.router.js'
@@ -40,6 +44,7 @@ import { staffRouter } from './modules/staff/staff.router.js'
 import { cashopsRouter } from './modules/cashops/cashops.router.js'
 import { discountsRouter } from './modules/discounts/discounts.router.js'
 import { inventoryRouter } from './modules/inventory/inventory.router.js'
+import { goodsRouter } from './modules/goods/goods.router.js'
 import { plategaRouter } from './modules/platega/platega.router.js'
 import { pricingRouter } from './modules/pricing/pricing.router.js'
 import { gomafiaRouter } from './modules/gomafia/gomafia.router.js'
@@ -106,7 +111,13 @@ app.use(
   })
 )
 app.use('*', prettyJSON())
-app.use('/api/*', bodyLimit({ maxSize: 1 * 1024 * 1024 }))
+// Общий предел тела 1 МБ. У загрузки картинок (/api/upload, фото анкеты /api/auth/app/photo)
+// свой — в роутере: файл до 8 МБ; у голоса Tai (/api/ai/assistant/transcribe) — тоже 8 МБ;
+// у восстановления из файла (/api/system/restore-upload) — тоже свой, в system.router.
+const defaultBodyLimit = bodyLimit({ maxSize: 1 * 1024 * 1024 })
+const hasOwnBodyLimit = (path: string): boolean =>
+  path.startsWith('/api/upload/') || path === '/api/auth/app/photo' || path === '/api/system/restore-upload' || path === '/api/ai/assistant/transcribe'
+app.use('/api/*', (c, next) => (hasOwnBodyLimit(c.req.path) ? next() : defaultBodyLimit(c, next)))
 app.use('/api/*', rateLimit)
 // Инжект БД клуба в контекст (Фаза 1). Wave 0: дефолтная БД = синглтон.
 app.use('/api/*', tenantContext)
@@ -181,14 +192,24 @@ app.use('/api/discounts/*', requireModule('discounts'))
 // fail-open на основном домене (оператор всегда видит).
 app.use('/api/analytics/*', requireModule('analytics'))
 
+// Вход в My Titan по номеру телефона + регистрация (подтверждение — в боте клуба).
+app.route('/api/auth/app', appLoginRouter)
 app.route('/api/auth', authRouter)
 // Клиентское приложение My Titan: сводка, лента, сборы, уведомления, push.
 app.route('/api/resident', residentRouter)
 // Рассылки клиентам из панели (лента приложения + push + бот My Titan).
 app.route('/api/client-broadcasts', broadcastRouter)
 app.route('/api/pos', posRouter)
+// Titan Home 2.0: состояние кабинки одним запросом, поток событий зоны, меню с версией.
+app.route('/api/tablet', tabletRouter)
+// HUB: статус планшетов Titan Home (Управление → Экраны).
+app.route('/api/tablets', tabletsRouter)
+// HUB: свет и кондиционеры помещений клуба (Home Assistant) — шторка на главной кассы.
+app.route('/api/smart-home', smartHomeRouter)
 app.route('/api/shifts', shiftsRouter)
 app.route('/api/menu', menuRouter)
+// «Экраны»: ТВ с приложением Titan Menu — настройки из HUB, привязка, показ.
+app.route('/api/screens', screensRouter)
 app.route('/api/clients', clientsRouter)
 app.route('/api/collections', collectionsRouter)
 app.route('/api/bookings', bookingsRouter)
@@ -209,6 +230,8 @@ app.route('/api/staff', staffRouter)
 app.route('/api/cashops', cashopsRouter)
 app.route('/api/discounts', discountsRouter)
 app.route('/api/inventory', inventoryRouter)
+// «Товары»: меню, остатки и операции склада одним разделом; сырьё и техкарты (070).
+app.route('/api/goods', goodsRouter)
 app.route('/api/pricing', pricingRouter)
 app.route('/api/gomafia', gomafiaRouter)
 // Суперадмин-контур платформы (control-plane): bootstrap/login + управление клубами.

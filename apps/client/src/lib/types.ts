@@ -118,16 +118,24 @@ export interface CreatedPayment {
 
 export type PaymentStatus = 'pending' | 'confirmed' | 'failed' | 'not_found';
 
-export interface LoginStart {
-  code: string;
-  ticket: string | null;
-  botUsername: string | null;
-  deepLink: string | null;
-  expiresAt: string;
+/** POST /auth/app/start — вход по номеру телефона. */
+export type LoginMode = 'login' | 'register';
+
+export type LoginStart =
+  | { status: 'register' }
+  | { status: 'pending'; mode: LoginMode; ticket: string; botUsername: string; deepLink: string; expiresAt: string };
+
+/** Анкета нового клиента (POST /auth/app/start, поле register). */
+export interface Registration {
+  nickname: string;
+  fullName: string;
+  /** YYYY-MM-DD */
+  birthday: string;
 }
 
+/** GET /auth/app/status — ждём подтверждения в Telegram. opened — бот уже открыт по ссылке. */
 export type LoginStatus =
-  | { status: 'pending' }
+  | { status: 'pending'; opened: boolean }
   | { status: 'expired' }
-  | { status: 'rejected' }
+  | { status: 'rejected'; note: string | null }
   | { status: 'ok'; token: string; user: { id: string; nickname: string; role: string; photoUrl: string | null } };

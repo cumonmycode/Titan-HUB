@@ -1,8 +1,9 @@
 import { SymbolView } from 'expo-symbols';
 import { useEffect, useEffectEvent, useRef } from 'react';
-import { Pressable, StyleSheet, Text } from 'react-native';
+import { Pressable, StyleSheet } from 'react-native';
 import Animated, { FadeIn, FadeInDown, ZoomIn } from 'react-native-reanimated';
 
+import { Text } from '@/components/text';
 import { GlassView } from '@/components/glass';
 import { formatMoney } from '@/lib/format';
 import { colors, space, type } from '@/lib/theme';

@@ -3,7 +3,7 @@ import { Hono } from 'hono'
 import { zValidator } from '@hono/zod-validator'
 import { z } from 'zod'
 import { certificates, eq, desc } from '@titan/database'
-import { requireAuth, requireRole } from '../../middleware/auth.js'
+import { requireAuth, requireRole, requirePermission } from '../../middleware/auth.js'
 import { randomInt } from 'crypto'
 
 function generateCode(): string {
@@ -35,7 +35,8 @@ certificatesRouter.get('/', requireRole('owner', 'staff'), async (c) => {
   return c.json({ certificates: out })
 })
 
-certificatesRouter.post('/', requireRole('owner', 'staff'), zValidator('json', CertSchema), async (c) => {
+// Выпуск сертификата — раздел «Лояльность», право «Скидки».
+certificatesRouter.post('/', requireRole('owner', 'staff'), requirePermission('discounts'), zValidator('json', CertSchema), async (c) => {
   const db = c.var.db
   const user = c.get('user')
   const { nominal } = c.req.valid('json')

@@ -40,7 +40,7 @@ shiftsRouter.post('/open', requireRole('owner', 'staff'), zValidator('json', Ope
   const user = c.get('user')
   const body = c.req.valid('json')
   try {
-    const shift = await openShift({ openedBy: user.sub, ...body }, db)
+    const shift = await openShift({ openedBy: user.sub, ...body }, db, c.var.club?.id ?? null)
     return c.json({ shift }, 201)
   } catch (e: any) {
     return c.json({ error: e.message }, 400)
@@ -54,7 +54,7 @@ shiftsRouter.post('/close', requireRole('owner', 'staff'), zValidator('json', Cl
   const current = await getCurrentShift(db)
   if (!current) return c.json({ error: 'No open shift' }, 400)
   try {
-    const shift = await closeShift(current.id, user.sub, cashEnd, adjustmentReason, db)
+    const shift = await closeShift(current.id, user.sub, cashEnd, adjustmentReason, db, c.var.club?.id ?? null)
     const analytics = await getShiftAnalytics(current.id, db)
     return c.json({ shift, analytics })
   } catch (e: any) {

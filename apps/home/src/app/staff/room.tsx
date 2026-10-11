@@ -1,21 +1,31 @@
 // Устройства кабинки: сотрудник выбирает в Home Assistant до двух групп света и
-// кондиционер и подписывает их для гостя. Сохраняется на сервере в зоне.
-// ?spaceId= — любая кабинка клуба (экран «Кабинки»), без него — кабинка этого планшета.
+// кондиционер и подписывает их для гостя. ?spaceId= — любая кабинка клуба
+// (из экрана «Кабинки»); для своей кабинки сохраняем через tablet-токен.
 import { useQuery } from '@tanstack/react-query';
 import { Redirect, useLocalSearchParams, useRouter } from 'expo-router';
+import { ArrowLeft, CircleCheck, Circle, Lightbulb, Save, Search, Snowflake, Square, SquareCheck } from 'lucide-react-native';
 import { useState } from 'react';
-import { ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ScrollView, StyleSheet, TextInput, View } from 'react-native';
 
-import { Button, Icon, IconButton, Loader, Tap } from '@/components/ui';
-import { api, errorText } from '@/lib/api';
-import { toast } from '@/lib/flow';
-import { haGetStates, type HaEntity, useHa } from '@/lib/home-assistant';
-import { invalidate, useHost, useSmartHome } from '@/lib/queries';
-import { LIGHT_DOMAINS } from '@/lib/room';
-import { useSession } from '@/lib/session';
-import { fetchBooths, saveBoothRoom, staffUnlocked, useStaff } from '@/lib/staff';
-import { colors, GUTTER, radius, space, type } from '@/lib/theme';
-import type { SmartDevice, SmartRoom } from '@/lib/types';
+import { api, errorText } from '@/data/api';
+import { invalidate, useHost } from '@/data/query';
+import { useSession } from '@/data/session';
+import { useSmartHome } from '@/data/smart-home';
+import type { SmartDevice, SmartRoom } from '@/data/types';
+import { haGetStates, type HaEntity, useHa } from '@/features/room/ha';
+import { LIGHT_DOMAINS } from '@/features/room/room';
+import { fetchBooths, saveBoothRoom, staffUnlocked, useStaff } from '@/features/staff/staff';
+import { Background } from '@/ui/background';
+import { Button } from '@/ui/button';
+import { Loader } from '@/ui/controls';
+import { Glass, glassStyle } from '@/ui/glass';
+import { Icon } from '@/ui/icon';
+import { Press } from '@/ui/press';
+import { useKeyboardHeight } from '@/ui/keyboard';
+import { ScreenHeader } from '@/ui/screen-header';
+import { T } from '@/ui/text';
+import { toast } from '@/ui/toast';
+import { color, font, GUTTER, radius } from '@/ui/tokens';
 
 const MAX_LIGHTS = 2;
 
@@ -29,31 +39,25 @@ export default function RoomSetupScreen() {
   const currentId = useSession((s) => s.space?.id ?? null);
   const spaceId = params.spaceId && params.spaceId !== currentId ? params.spaceId : null;
   const smart = useSmartHome();
-  const booths = useQuery({ queryKey: [host, 'booths'], queryFn: fetchBooths, enabled: !!spaceId, staleTime: 10_000, retry: false });
-  const booth = spaceId ? (booths.data ?? []).find((b) => b.id === spaceId) : null;
+  const booths = useQuery({ queryKey: [host, 'booths'], queryFn: fetchBooths, staleTime: 10_000, retry: false });
+  const booth = (booths.data ?? []).find((b) => b.id === (spaceId ?? currentId));
   const initial = spaceId ? booth?.room : smart.data?.room;
   const status = useHa((s) => s.status);
   const touch = useStaff((s) => s.touch);
-  const states = useQuery({
-    queryKey: ['ha-states', status],
-    queryFn: haGetStates,
-    enabled: status === 'connected',
-    staleTime: 30_000,
-  });
+  const states = useQuery({ queryKey: ['ha-states', status], queryFn: haGetStates, enabled: status === 'connected', staleTime: 30_000 });
 
   if (!staffUnlocked()) return <Redirect href="/staff" />;
 
+  const waiting = status === 'auth_failed'
+    ? 'Home Assistant не принял токен — проверьте его в Titan HUB → Интеграции'
+    : status === 'offline' ? 'Нет связи с Home Assistant — проверьте адрес и Wi-Fi планшета' : 'Подключаемся к Home Assistant…';
+
   return (
-    <View style={{ flex: 1 }}>
-      <View style={styles.header}>
-        <IconButton icon="arrow-left" label="Назад" onPress={() => router.back()} />
-        <View style={{ flex: 1 }}>
-          <Text style={type.title}>{booth ? `Устройства: ${booth.name}` : 'Устройства кабинки'}</Text>
-          <Text style={type.caption}>Что гость увидит в панели «Свет и климат»</Text>
-        </View>
-      </View>
+    <View style={styles.screen}>
+      <Background />
+      <ScreenHeader icon={ArrowLeft} label="Назад" onBack={() => router.back()} title={booth ? `Устройства: ${booth.name}` : 'Устройства кабинки'} caption="Что гость увидит в панели «Свет и климат»" />
       {status !== 'connected' ? (
-        <Loader label={status === 'auth_failed' ? 'Home Assistant не принял токен — проверьте его в Titan HUB → Интеграции' : status === 'offline' ? 'Нет связи с Home Assistant — проверьте адрес и Wi-Fi планшета' : 'Подключаемся к Home Assistant…'} />
+        <Loader label={waiting} />
       ) : spaceId && booths.isError ? (
         <Loader label={errorText(booths.error)} />
       ) : states.isLoading || !initial ? (
@@ -67,13 +71,7 @@ export default function RoomSetupScreen() {
   );
 }
 
-function Editor({
-  initial,
-  spaceId,
-  entities,
-  onTouch,
-  onSaved,
-}: {
+function Editor({ initial, spaceId, entities, onTouch, onSaved }: {
   initial: SmartRoom;
   /** Чужая кабинка (служебный токен сотрудника); null — кабинка этого планшета. */
   spaceId: string | null;
@@ -81,6 +79,7 @@ function Editor({
   onTouch: () => void;
   onSaved: () => void;
 }) {
+  const keyboard = useKeyboardHeight();
   const [lights, setLights] = useState<SmartDevice[]>(initial.lights);
   const [climate, setClimate] = useState<SmartDevice | null>(initial.climate);
   const [query, setQuery] = useState('');
@@ -88,8 +87,9 @@ function Editor({
 
   const q = query.trim().toLowerCase();
   const match = (e: HaEntity) => !q || friendly(e).toLowerCase().includes(q) || e.entity_id.includes(q);
-  const lightEntities = entities.filter((e) => LIGHT_DOMAINS.includes(domainOf(e.entity_id)) && match(e)).sort((a, b) => friendly(a).localeCompare(friendly(b), 'ru'));
-  const climateEntities = entities.filter((e) => domainOf(e.entity_id) === 'climate' && match(e)).sort((a, b) => friendly(a).localeCompare(friendly(b), 'ru'));
+  const byName = (a: HaEntity, b: HaEntity) => friendly(a).localeCompare(friendly(b), 'ru');
+  const lightEntities = entities.filter((e) => LIGHT_DOMAINS.includes(domainOf(e.entity_id)) && match(e)).sort(byName);
+  const climateEntities = entities.filter((e) => domainOf(e.entity_id) === 'climate' && match(e)).sort(byName);
 
   const toggleLight = (e: HaEntity) => {
     onTouch();
@@ -124,111 +124,77 @@ function Editor({
   };
 
   return (
-    <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled" onScrollBeginDrag={onTouch}>
-      <View style={styles.search}>
-        <Icon name="magnify" size={22} color={colors.textMuted} />
-        <TextInput value={query} onChangeText={setQuery} placeholder="Поиск устройства" placeholderTextColor={colors.textMuted} style={styles.searchInput} />
+    <ScrollView contentContainerStyle={[styles.body, { paddingBottom: GUTTER + keyboard }]} keyboardShouldPersistTaps="handled" onScrollBeginDrag={onTouch} showsVerticalScrollIndicator={false}>
+      <View style={[styles.search, glassStyle('control', radius.pill)]}>
+        <Icon as={Search} size={20} tone={color.textTertiary} />
+        <TextInput value={query} onChangeText={setQuery} placeholder="Поиск устройства" placeholderTextColor={color.textTertiary} style={styles.searchInput} />
       </View>
 
       <View style={styles.columns}>
         <View style={styles.column}>
-          <Text style={type.overline}>Свет · до {MAX_LIGHTS} групп, только вкл/выкл</Text>
+          <T variant="overline" tone="secondary">Свет · до {MAX_LIGHTS} групп, только вкл/выкл</T>
           {lights.map((l, i) => (
-            <View key={l.entityId} style={styles.selected}>
-              <Icon name="lightbulb-on" size={22} color={colors.amber} />
-              <TextInput
-                value={l.name}
-                onChangeText={(name) => setLights((cur) => cur.map((x, j) => (j === i ? { ...x, name } : x)))}
-                maxLength={40}
-                style={styles.nameInput}
-                placeholder="Подпись для гостя"
-                placeholderTextColor={colors.textMuted}
-              />
-              <Text style={styles.entityId} numberOfLines={1}>{l.entityId}</Text>
-            </View>
+            <NameRow key={l.entityId} icon={Lightbulb} tone={color.warm} device={l} onChange={(name) => setLights((cur) => cur.map((x, j) => (j === i ? { ...x, name } : x)))} />
           ))}
-          <View style={styles.list}>
+          <Glass kind="panel" radius={radius.card} style={{ overflow: 'hidden' }}>
             {lightEntities.map((e) => (
               <EntityRow key={e.entity_id} entity={e} selected={lights.some((l) => l.entityId === e.entity_id)} onPress={() => toggleLight(e)} />
             ))}
-            {!lightEntities.length ? <Text style={styles.none}>Нет света и выключателей</Text> : null}
-          </View>
+            {!lightEntities.length ? <T variant="caption" tone="tertiary" style={{ padding: 16 }}>Нет света и выключателей</T> : null}
+          </Glass>
         </View>
 
         <View style={styles.column}>
-          <Text style={type.overline}>Кондиционер</Text>
-          {climate ? (
-            <View style={styles.selected}>
-              <Icon name="air-conditioner" size={22} color={colors.cyan} />
-              <TextInput
-                value={climate.name}
-                onChangeText={(name) => setClimate((c) => (c ? { ...c, name } : c))}
-                maxLength={40}
-                style={styles.nameInput}
-                placeholder="Подпись для гостя"
-                placeholderTextColor={colors.textMuted}
-              />
-              <Text style={styles.entityId} numberOfLines={1}>{climate.entityId}</Text>
-            </View>
-          ) : null}
-          <View style={styles.list}>
+          <T variant="overline" tone="secondary">Кондиционер</T>
+          {climate ? <NameRow icon={Snowflake} tone={color.cool} device={climate} onChange={(name) => setClimate((c) => (c ? { ...c, name } : c))} /> : null}
+          <Glass kind="panel" radius={radius.card} style={{ overflow: 'hidden' }}>
             {climateEntities.map((e) => {
               const selected = climate?.entityId === e.entity_id;
               return (
-                <EntityRow
-                  key={e.entity_id}
-                  entity={e}
-                  selected={selected}
-                  radio
-                  onPress={() => { onTouch(); setClimate(selected ? null : { entityId: e.entity_id, name: 'Кондиционер' }); }}
-                />
+                <EntityRow key={e.entity_id} entity={e} selected={selected} radio onPress={() => { onTouch(); setClimate(selected ? null : { entityId: e.entity_id, name: 'Кондиционер' }); }} />
               );
             })}
-            {!climateEntities.length ? <Text style={styles.none}>Нет климат-устройств</Text> : null}
-          </View>
+            {!climateEntities.length ? <T variant="caption" tone="tertiary" style={{ padding: 16 }}>Нет климат-устройств</T> : null}
+          </Glass>
         </View>
       </View>
 
-      <Button title="Сохранить" icon="content-save-outline" variant="brand" size="xl" onPress={() => void save()} loading={saving} />
+      <Button title="Сохранить" icon={Save} variant="primary" size="lg" onPress={() => void save()} loading={saving} />
     </ScrollView>
   );
 }
 
-function EntityRow({ entity, selected, onPress, radio }: { entity: HaEntity; selected: boolean; onPress: () => void; radio?: boolean }) {
-  const icon = radio
-    ? selected ? 'radiobox-marked' : 'radiobox-blank'
-    : selected ? 'checkbox-marked' : 'checkbox-blank-outline';
+function NameRow({ icon, tone, device, onChange }: { icon: typeof Lightbulb; tone: string; device: SmartDevice; onChange: (name: string) => void }) {
   return (
-    <Tap style={[styles.row, selected && styles.rowOn]} onPress={onPress} scaleTo={0.98} accessibilityRole={radio ? 'radio' : 'checkbox'} accessibilityState={{ checked: selected }}>
-      <Icon name={icon} size={24} color={selected ? colors.violetLight : colors.textMuted} />
+    <Glass kind="accent" radius={22} style={[styles.selected, { backgroundColor: color.accentTint }]}>
+      <Icon as={icon} size={22} tone={tone} />
+      <TextInput value={device.name} onChangeText={onChange} maxLength={40} style={styles.nameInput} placeholder="Подпись для гостя" placeholderTextColor={color.textTertiary} />
+      <T variant="small" tone="secondary" numberOfLines={1} style={{ maxWidth: '40%' }}>{device.entityId}</T>
+    </Glass>
+  );
+}
+
+function EntityRow({ entity, selected, onPress, radio }: { entity: HaEntity; selected: boolean; onPress: () => void; radio?: boolean }) {
+  const mark = radio ? (selected ? CircleCheck : Circle) : selected ? SquareCheck : Square;
+  return (
+    <Press onPress={onPress} scaleTo={0.985} style={[styles.row, selected && { backgroundColor: 'rgba(139,92,246,0.10)' }]} accessibilityRole={radio ? 'radio' : 'checkbox'} accessibilityState={{ checked: selected }}>
+      <Icon as={mark} size={24} tone={selected ? color.accentSoft : color.textTertiary} />
       <View style={{ flex: 1, minWidth: 0 }}>
-        <Text style={styles.rowName} numberOfLines={1}>{friendly(entity)}</Text>
-        <Text style={styles.rowId} numberOfLines={1}>{entity.entity_id} · {entity.state}</Text>
+        <T variant="label" numberOfLines={1}>{friendly(entity)}</T>
+        <T variant="small" tone="secondary" numberOfLines={1}>{entity.entity_id} · {entity.state}</T>
       </View>
-    </Tap>
+    </Press>
   );
 }
 
 const styles = StyleSheet.create({
-  header: { flexDirection: 'row', alignItems: 'center', gap: space.lg, paddingHorizontal: GUTTER, paddingTop: space.xl, paddingBottom: space.md },
-  body: { padding: GUTTER, paddingTop: space.sm, gap: space.xl },
-  search: {
-    height: 52, borderRadius: 26, paddingHorizontal: space.lg, flexDirection: 'row', alignItems: 'center', gap: space.sm,
-    backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border,
-  },
-  searchInput: { flex: 1, fontSize: 16, color: colors.text, paddingVertical: 0 },
-  columns: { flexDirection: 'row', flexWrap: 'wrap', gap: space.xl },
-  column: { flexGrow: 1, flexBasis: 360, gap: space.md },
-  selected: {
-    flexDirection: 'row', alignItems: 'center', gap: space.md, padding: space.md, paddingLeft: space.lg, borderRadius: radius.tile,
-    backgroundColor: colors.violetTint, borderWidth: 1, borderColor: colors.borderViolet,
-  },
-  nameInput: { flex: 1, fontSize: 17, fontWeight: '700', color: colors.text, paddingVertical: 6 },
-  entityId: { maxWidth: '40%', fontSize: 12, color: colors.textSecondary },
-  list: { borderRadius: radius.card, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, overflow: 'hidden' },
-  row: { flexDirection: 'row', alignItems: 'center', gap: space.md, minHeight: 60, paddingHorizontal: space.lg, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
-  rowOn: { backgroundColor: 'rgba(139,92,246,0.08)' },
-  rowName: { fontSize: 16, fontWeight: '600', color: colors.text },
-  rowId: { fontSize: 12, color: colors.textSecondary, marginTop: 2 },
-  none: { padding: space.lg, color: colors.textMuted, fontSize: 15 },
+  screen: { flex: 1, paddingHorizontal: GUTTER, paddingTop: 20 },
+  body: { paddingTop: 16, paddingBottom: GUTTER, gap: 20 },
+  search: { height: 52, paddingHorizontal: 18, flexDirection: 'row', alignItems: 'center', gap: 10 },
+  searchInput: { flex: 1, fontSize: 16, fontFamily: font.regular, color: color.text, paddingVertical: 0 },
+  columns: { flexDirection: 'row', flexWrap: 'wrap', gap: 20 },
+  column: { flexGrow: 1, flexBasis: 360, gap: 12 },
+  selected: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 8, paddingHorizontal: 16 },
+  nameInput: { flex: 1, fontSize: 17, fontFamily: font.semibold, color: color.text, paddingVertical: 6 },
+  row: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 60, paddingHorizontal: 16, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: 'rgba(255,255,255,0.10)' },
 });

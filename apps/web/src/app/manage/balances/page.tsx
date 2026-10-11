@@ -19,6 +19,9 @@ const RED = '#F43F5E'  // долг
 
 type Tab = 'all' | 'deposits' | 'debts'
 type OpMode = null | 'deposit_add' | 'deposit_sub' | 'debt_repay' | 'debt_lend'
+// Чем прошли деньги: наличные сервер проводит через кассу смены. «В долг» — без денег.
+type PayMethod = 'cash' | 'transfer' | 'card'
+const METHODS: [PayMethod, string][] = [['cash', 'Наличные'], ['transfer', 'Перевод'], ['card', 'Карта']]
 
 function parseNum(v: unknown) { return parseFloat(String(v ?? 0)) || 0 }
 function fmt(n: number) { return n.toLocaleString('ru', { maximumFractionDigits: 0 }) }
@@ -48,6 +51,7 @@ export default function BalancesPage() {
   const [opMode, setOpMode] = useState<OpMode>(null)
   const [amount, setAmount] = useState('')
   const [reason, setReason] = useState('')
+  const [method, setMethod] = useState<PayMethod>('cash')
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
@@ -99,13 +103,20 @@ export default function BalancesPage() {
   }, [search, showAdd])
 
   const adjust = useMutation({
-    mutationFn: ({ id, amount, reason, idempotencyKey }: { id: string; amount: number; reason: string; idempotencyKey: string }) =>
-      api.post(`/clients/${id}/balance`, { amount, reason, idempotencyKey }),
-    onSuccess: (_r, vars: any) => {
+    mutationFn: ({ id, amount, reason, idempotencyKey, method }: { id: string; amount: number; reason: string; idempotencyKey: string; method?: PayMethod }) =>
+      api.post<{ balance: number; cashOperation?: { id: string } | null }>(`/clients/${id}/balance`, { amount, reason, idempotencyKey, method }),
+    onSuccess: (r, vars) => {
       qc.invalidateQueries({ queryKey: ['clients-balances'] })
       qc.invalidateQueries({ queryKey: ['client-tx', vars.id] })
       setSelected((s: any) => s ? { ...s, balance: parseNum(s.balance) + parseNum(vars.amount) } : s)
       setOpMode(null); setAmount(''); setReason('')
+      if (vars.method === 'cash') {
+        // Наличные изменили ожидаемый остаток кассы смены.
+        qc.invalidateQueries({ queryKey: ['cashops'] })
+        qc.invalidateQueries({ queryKey: ['shifts', 'cash-balance'] })
+        qc.invalidateQueries({ queryKey: ['pos', 'shift-summary'] })
+        if (!r?.cashOperation) { show('Баланс обновлён, но смена не открыта — наличные в кассу не записаны', 'warning'); return }
+      }
       show('Баланс обновлён', 'success')
     },
     onError: (e: any) => show(e?.message || 'Не удалось изменить баланс', 'error'),
@@ -113,7 +124,7 @@ export default function BalancesPage() {
 
   function openDetail(c: any) { setSelected(c); setOpMode(null); setAmount(''); setReason('') }
   function pickClient(c: any) { setShowAdd(false); setSearch(''); setResults([]); openDetail(c) }
-  function startOp(mode: Exclude<OpMode, null>) { setOpMode(mode); setAmount(''); setReason('') }
+  function startOp(mode: Exclude<OpMode, null>) { setOpMode(mode); setAmount(''); setReason(''); setMethod('cash') }
 
   function submitOp() {
     if (!selected || !opMode) return
@@ -129,7 +140,10 @@ export default function BalancesPage() {
     else if (opMode === 'debt_repay') signed = Math.min(v, debt)
     else signed = -v // debt_lend (серверный лимит долга)
     if (signed === 0) return
-    adjust.mutate({ id: selected.id, amount: signed, reason: reason.trim() || OPS[opMode].defaultReason, idempotencyKey: crypto.randomUUID() })
+    adjust.mutate({
+      id: selected.id, amount: signed, reason: reason.trim() || OPS[opMode].defaultReason, idempotencyKey: crypto.randomUUID(),
+      method: opMode === 'debt_lend' ? undefined : method,
+    })
   }
 
   const bal = selected ? parseNum(selected.balance) : 0
@@ -263,6 +277,19 @@ export default function BalancesPage() {
                   <p style={{ fontSize: 14, fontWeight: 700, margin: 0, color: OPS[opMode].accent }}>{OPS[opMode].title}</p>
                   <div><label style={LBL}>Сумма (₽)</label>
                     <input type="number" inputMode="decimal" min="0" autoFocus value={amount} onChange={e => setAmount(e.target.value)} placeholder="например 1000" style={INP} /></div>
+                  {opMode !== 'debt_lend' && (
+                    <div><label style={LBL}>Способ</label>
+                      <div style={{ display: 'flex', gap: 4, padding: 4, borderRadius: 14, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.06)' }}>
+                        {METHODS.map(([key, label]) => {
+                          const active = method === key
+                          return (
+                            <button key={key} type="button" onClick={() => setMethod(key)} style={{ flex: 1, padding: '10px 8px', borderRadius: 11, border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 700, transition: 'all 0.15s', background: active ? 'var(--primary-violet)' : 'transparent', color: active ? '#fff' : 'var(--on-surface-variant)' }}>
+                              {label}
+                            </button>
+                          )
+                        })}
+                      </div></div>
+                  )}
                   <div><label style={LBL}>Причина (необязательно)</label>
                     <input value={reason} onChange={e => setReason(e.target.value)} placeholder={OPS[opMode].defaultReason} style={INP} /></div>
                   <div style={{ display: 'flex', gap: 10, marginTop: 2 }}>

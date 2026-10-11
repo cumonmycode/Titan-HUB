@@ -113,8 +113,8 @@ export function notifUrl(n: { type: string; meta?: Record<string, unknown> }): s
   if (typeof meta['url'] === 'string' && meta['url']) return meta['url'] as string
   const checkId = typeof meta['checkId'] === 'string' ? (meta['checkId'] as string) : null
   switch (n.type) {
-    case 'low_stock': return '/manage/inventory'
-    case 'supply_received': return '/manage/supplies'
+    case 'low_stock': return typeof meta['itemId'] === 'string' ? `/manage/goods/item/${meta['itemId']}` : '/manage/goods?tab=warehouse'
+    case 'supply_received': return typeof meta['supplyId'] === 'string' ? `/manage/goods/doc?type=supply&id=${meta['supplyId']}` : '/manage/goods?tab=warehouse'
     case 'shift_open': case 'shift_close': case 'cash_discrepancy': return '/manage/shifts'
     case 'event_created': case 'event_completed': return '/events'
     case 'new_client': case 'birthday': return '/manage/clients'
@@ -122,8 +122,8 @@ export function notifUrl(n: { type: string; meta?: Record<string, unknown> }): s
     case 'guest_feedback': return '/dashboard?tab=feedback'
   }
   if (checkId) return `/pos/${checkId}`
-  if (typeof meta['itemId'] === 'string') return '/manage/inventory'
-  if (typeof meta['supplyId'] === 'string') return '/manage/supplies'
+  if (typeof meta['itemId'] === 'string') return `/manage/goods/item/${meta['itemId']}`
+  if (typeof meta['supplyId'] === 'string') return `/manage/goods/doc?type=supply&id=${meta['supplyId']}`
   if (typeof meta['eventId'] === 'string') return '/events'
   if (typeof meta['playerId'] === 'string') return '/manage/clients'
   if (typeof meta['spaceId'] === 'string') return '/pos'

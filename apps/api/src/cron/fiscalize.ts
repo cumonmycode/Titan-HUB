@@ -20,7 +20,21 @@ import { round2 } from '../lib/money.js'
 const MAX_ATTEMPTS = 5
 const BATCH = 30
 
+// БД клубов, по которым проход ещё идёт: тик раз в минуту, а пробитие у кассы
+// может быть дольше — без защиты следующий тик брал те же чеки и пробивал дважды.
+const running = new WeakSet<Database>()
+
 export async function fiscalizePendingForDb(db: Database): Promise<void> {
+  if (running.has(db)) return
+  running.add(db)
+  try {
+    await fiscalizePending(db)
+  } finally {
+    running.delete(db)
+  }
+}
+
+async function fiscalizePending(db: Database): Promise<void> {
   const providerId = await getActiveFiscalProvider(db)
   const provider = getFiscalProvider(providerId) // null для '' и 'yookassa' (встроенная)
   if (!provider) return
@@ -30,7 +44,8 @@ export async function fiscalizePendingForDb(db: Database): Promise<void> {
   const test = await getPaymentTestMode(db)
   const allowedMethods = await getFiscalMethods(db) // какие способы оплаты фискализируем
 
-  // Закрытые чеки за последний час без отправленного чека + ретраи failed(<5).
+  // Закрытые чеки за последний час без фискального чека + ретраи failed(<5) — ретраи
+  // НЕЗАВИСИМО от окна (иначе чек, упавший под конец часа, так и не пробивался).
   // Тянем чаевые и эквайринговую надбавку: фискальный чек обязан сойтись с
   // ФАКТИЧЕСКИ принятой по эквайрингу суммой (total + tip + surcharge), а не с
   // голой товарной суммой — иначе расхождение чека с поступлением (риск 54-ФЗ).
@@ -39,9 +54,11 @@ export async function fiscalizePendingForDb(db: Database): Promise<void> {
     FROM checks c
     LEFT JOIN fiscal_receipts fr ON fr.check_id = c.id
     WHERE c.status = 'closed'
-      AND c.closed_at > now() - interval '60 minutes'
       AND c.total_amount::numeric > 0
-      AND (fr.id IS NULL OR (fr.status = 'failed' AND fr.attempts < ${MAX_ATTEMPTS}))
+      AND (
+        (fr.id IS NULL AND c.closed_at > now() - interval '60 minutes')
+        OR (fr.status = 'failed' AND fr.attempts < ${MAX_ATTEMPTS})
+      )
     ORDER BY c.closed_at ASC
     LIMIT ${BATCH}
   `)
@@ -105,5 +122,7 @@ async function markStatus(
       attempts = fiscal_receipts.attempts + 1,
       last_error = ${error},
       updated_at = now()
+    -- Уже пробитый (sent) чек не перетираем ошибкой/повтором.
+    WHERE fiscal_receipts.status <> 'sent'
   `)
 }

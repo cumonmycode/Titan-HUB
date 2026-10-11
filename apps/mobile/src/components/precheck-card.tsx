@@ -1,9 +1,11 @@
 import { SymbolView } from 'expo-symbols';
 import { useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 import Animated, { cancelAnimation, Easing, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 
+import { Text } from '@/components/text';
 import { GlassView } from '@/components/glass';
+import { cardStyles } from '@/components/check-card';
 import { Avatar } from '@/components/new-check-parts';
 import { formatMoney, toNumber } from '@/lib/format';
 import { haptic } from '@/lib/haptics';
@@ -18,7 +20,7 @@ const TAI_TINT = 'rgba(139,92,246,0.30)';
  * Предчек Tai: игрок проголосовал «приду», чека у него ещё нет. Карточка — фиолетовое
  * интерактивное стекло; удержание открывает чек с тарифом по статусу.
  */
-export function PrecheckCard({ precheck, busy, onOpen, glassKey }: { precheck: Precheck; busy: boolean; onOpen: () => void; glassKey?: number }) {
+export function PrecheckCard({ precheck, busy, onOpen, glassKey, compact }: { precheck: Precheck; busy: boolean; onOpen: () => void; glassKey?: number; compact?: boolean }) {
   const [holding, setHolding] = useState(false);
   const progress = useSharedValue(0);
   const progressStyle = useAnimatedStyle(() => ({ width: `${progress.value * 100}%` }));
@@ -46,11 +48,11 @@ export function PrecheckCard({ precheck, busy, onOpen, glassKey }: { precheck: P
       }}
       accessibilityRole="button"
       accessibilityLabel={`Предчек: ${precheck.nickname}, ${precheck.tariffName ?? 'тариф'}. Удерживайте, чтобы открыть чек`}>
-      <GlassView isInteractive refreshKey={glassKey} glassEffectStyle="regular" tintColor={TAI_TINT} style={styles.card}>
-        <View style={styles.header}>
-          <Avatar name={precheck.nickname} photoUrl={precheck.photoUrl} size={34} />
+      <GlassView isInteractive refreshKey={glassKey} glassEffectStyle="regular" tintColor={TAI_TINT} style={[styles.card, compact && cardStyles.compactCard]}>
+        <View style={[styles.header, compact && cardStyles.compactHeader]}>
+          <Avatar name={precheck.nickname} photoUrl={precheck.photoUrl} size={compact ? 24 : 34} />
           <View style={styles.titles}>
-            <Text style={[type.headline, styles.label]} numberOfLines={1}>
+            <Text style={[type.headline, styles.label, compact && cardStyles.compactTitle]} numberOfLines={compact ? 2 : 1}>
               {precheck.nickname}
             </Text>
             <Text style={[type.footnote, styles.accent]} numberOfLines={1}>
@@ -66,9 +68,9 @@ export function PrecheckCard({ precheck, busy, onOpen, glassKey }: { precheck: P
           </Text>
         </View>
 
-        <View style={styles.footer}>
+        <View style={cardStyles.footer}>
           <Text style={[type.caption1, styles.accent]}>{busy ? 'Открываем…' : 'Удерживайте'}</Text>
-          <Text style={[type.title3, type.amount, styles.label]} numberOfLines={1} adjustsFontSizeToFit>
+          <Text style={[type.title3, type.amount, styles.label, cardStyles.amount]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
             {formatMoney(price)}
           </Text>
         </View>
@@ -96,6 +98,5 @@ const styles = StyleSheet.create({
   secondary: { color: colors.secondaryLabel },
   accent: { color: colors.accent, fontWeight: '600' },
   lines: { flex: 1 },
-  footer: { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between', gap: space.sm },
   progress: { position: 'absolute', left: 0, bottom: 0, height: 3, backgroundColor: colors.accent },
 });

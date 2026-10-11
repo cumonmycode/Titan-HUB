@@ -1,9 +1,10 @@
 import { SymbolView, type SFSymbol } from 'expo-symbols';
 import { useState } from 'react';
-import { Modal, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Modal, Platform, Pressable, StyleSheet, View } from 'react-native';
 import Animated, { Easing, SlideInDown } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { Text, TextInput } from '@/components/text';
 import { useDialogStore, type DialogButton, type DialogRequest } from '@/lib/dialog';
 import { haptic } from '@/lib/haptics';
 import { colors, radius, space, type, useAccentHex } from '@/lib/theme';
@@ -171,5 +172,5 @@ const styles = StyleSheet.create({
   iconTile: { width: 36, height: 36, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
   rowText: { flex: 1, color: colors.label, fontWeight: '500' },
   destructiveText: { color: DESTRUCTIVE },
-  cancel: { height: 56, borderRadius: 28, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.floating },
+  cancel: { minHeight: 56, paddingVertical: space.sm, borderRadius: 28, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.floating },
 });

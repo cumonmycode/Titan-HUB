@@ -8,7 +8,7 @@ import { analyticsErrorText, useSegmentMembers, type SegmentKey } from '@/lib/an
 import { tierLook, useClientTiers } from '@/lib/clients-api';
 import { plural } from '@/lib/format';
 import { haptic } from '@/lib/haptics';
-import { parseStockDate } from '@/lib/inventory-api';
+import { parseServerDate } from '@/lib/events-api';
 
 const TITLES: Record<SegmentKey, { title: string; caption: string }> = {
   new: { title: 'Новые', caption: 'Зарегистрированы, но ещё не приходили.' },
@@ -45,7 +45,7 @@ export default function SegmentScreen() {
             <Section title={`${list.length} ${plural(list.length, ['игрок', 'игрока', 'игроков'])}`} footer={<Text>{TITLES[key].caption}</Text>}>
               {list.map((item) => {
                 const look = tierLook(item.clientTier ?? 'guest', tiers.data);
-                const last = item.lastVisit ? parseStockDate(item.lastVisit) : null;
+                const last = item.lastVisit ? parseServerDate(item.lastVisit) : null;
                 return (
                   <Button
                     key={item.playerId}

@@ -1,9 +1,10 @@
 import { useMutation } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
-import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, Pressable, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { Text } from '@/components/text';
 import { PinDots, PinPad, type PinKey } from '@/components/pin-pad';
 import { api, ApiError } from '@/lib/api';
 import { haptic } from '@/lib/haptics';
@@ -93,6 +94,7 @@ const styles = StyleSheet.create({
   header: { alignItems: 'center', gap: space.md },
   club: { color: colors.secondaryLabel },
   title: { color: colors.label },
-  footer: { flexDirection: 'row', gap: space.xxxl },
+  // С крупным текстом две ссылки в ряд не помещаются — вторая переносится под первую.
+  footer: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', columnGap: space.xxxl, rowGap: space.md },
   link: { color: colors.accent },
 });

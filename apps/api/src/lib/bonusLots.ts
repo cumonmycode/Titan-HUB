@@ -15,7 +15,6 @@
  * можно было вызывать внутри существующей транзакции /pay.
  */
 import {
-  db,
   bonusLots,
   bonusHistory,
   profiles,
@@ -123,14 +122,16 @@ export async function spendBonusLots(
  *  - обнулить remaining у этих лотов,
  *  - записать строку bonusHistory { amount: -сгорело, balanceAfter, reason:'expired' }.
  * Каждый клиент обрабатывается в отдельной транзакции (сбой по одному не валит остальных).
+ * Транзакция — в БД клуба (database), а не в основной: иначе у клубов со своей
+ * базой профили не находились и бонусы не сгорали никогда.
  *
  * @returns число клиентов, у которых что-то сгорело.
  */
-export async function expireBonuses(exec: DbExecutor): Promise<number> {
+export async function expireBonuses(database: Database): Promise<number> {
   const now = new Date()
 
   // Сгруппировать просроченные лоты по клиенту одним запросом.
-  const groups = await exec
+  const groups = await database
     .select({
       profileId: bonusLots.profileId,
       sumRemaining: sql<string>`sum(${bonusLots.remaining})`,
@@ -145,7 +146,7 @@ export async function expireBonuses(exec: DbExecutor): Promise<number> {
     const sumRemaining = Number(g.sumRemaining) || 0
     if (sumRemaining <= 0) continue
     try {
-      const changed = await db.transaction(async (tx) => {
+      const changed = await database.transaction(async (tx) => {
         // Лочим профиль и пере-считываем просроченные лоты ВНУТРИ транзакции,
         // чтобы не сгореть с устаревшими данными (на случай гонки с /pay).
         const [p] = await tx

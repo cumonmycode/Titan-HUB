@@ -32,5 +32,8 @@ export type AppEnv = {
     // режиме = дефолтный синглтон (поведение идентично прежнему).
     db: Database
     club: ClubContext | null
+    // Права сотрудника (profiles.permissions), кладёт requireAuth; undefined —
+    // профиль не проверен (fail-open). Проверка — requirePermission.
+    permissions: Record<string, boolean> | undefined
   }
 }

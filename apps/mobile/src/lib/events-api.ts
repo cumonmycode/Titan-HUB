@@ -10,7 +10,8 @@ import type { NumericString } from './types';
 
 /**
  * Мероприятия: брони зала «Титан», выезды и миникапы. Контракт — mobile-api-events-analytics.md.
- * Сервер не проверяет переходы статусов и формат дат — клиент шлёт только корректные значения.
+ * Сервер не проверяет формат дат — клиент шлёт только корректные значения. Переходы статусов
+ * сервер ограничивает: создаётся только «Запланировано»/«Уточнить», завершённое не возвращается в работу (409).
  */
 
 export type EventType = 'titan' | 'exit';
@@ -38,6 +39,8 @@ export type EventRow = {
   manualAmount: NumericString | null;
   maxGuests: number | null;
   attendeesCount: number;
+  /** Игроков в составе миникапа (сервер отдаёт только для миникапов). */
+  playersCount?: number;
   format: EventFormat;
   participationFee: NumericString | null;
   prizeFund: NumericString | null;
@@ -168,6 +171,16 @@ export function parsePgTimestamp(value: string): Date {
   return new Date(iso);
 }
 
+/**
+ * Дата из сырого SQL («2026-09-17 09:12:34.123456+00») или ISO. Hermes не разбирает
+ * больше трёх знаков долей секунды — микросекунды Postgres режем. Мусор → null.
+ */
+export function parseServerDate(value: string | null): Date | null {
+  if (!value) return null;
+  const date = value.includes('T') ? new Date(value) : parsePgTimestamp(value.replace(/(\.\d{3})\d+/, '$1'));
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
 const mskDateTime = new Intl.DateTimeFormat('ru-RU', { timeZone: MSK, day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' });
 export const formatMskDateTime = (date: Date) => mskDateTime.format(date);
 
@@ -277,6 +290,44 @@ export function useCustomers(query: string) {
   });
 }
 
+/** Зона на время мероприятия: свободна или чем занята (GET /events/availability). */
+export type SpaceAvailability = {
+  id: string;
+  name: string;
+  hourlyRate: NumericString;
+  free: boolean;
+  conflict: { id: string; title: string | null; date: string; startTime: string; endTime: string | null } | null;
+};
+
+export type AvailabilityRequest = { date: string; startTime: string; endTime: string | null; plannedHours: number | null; excludeEventId?: string };
+
+/**
+ * Свободные и занятые зоны на выбранное время. Проверка та же, что при сохранении, —
+ * «свободна» значит, что сервер не ответит 409. Пока параметры меняются, показываем
+ * прошлый ответ, а не пустой список.
+ */
+export function useEventAvailability(request: AvailabilityRequest | null) {
+  const club = useClubKey();
+  const params = request
+    ? [
+        `date=${request.date}`,
+        `startTime=${encodeURIComponent(request.startTime)}`,
+        request.endTime ? `endTime=${encodeURIComponent(request.endTime)}` : null,
+        request.plannedHours ? `plannedHours=${request.plannedHours}` : null,
+        request.excludeEventId ? `excludeEventId=${request.excludeEventId}` : null,
+      ]
+        .filter(Boolean)
+        .join('&')
+    : '';
+  return useQuery({
+    queryKey: [club, 'event-availability', params],
+    queryFn: ({ signal }) => api.get<{ spaces: SpaceAvailability[] }>(`/events/availability?${params}`, { signal }).then((r) => r.spaces),
+    enabled: !!request,
+    placeholderData: (previous) => previous,
+    staleTime: 15_000,
+  });
+}
+
 /* ─────────────────────────── Изменения ─────────────────────────── */
 
 export type EventInput = {
@@ -290,7 +341,11 @@ export type EventInput = {
   paymentType: 'fixed';
   billingMode: EventBillingMode;
   fixedAmount: number | null;
+  /** Ручная сумма старых мероприятий перекрывает фикс; форма сбрасывает её в null, сумма — в fixedAmount. */
+  manualAmount?: number | null;
   plannedHours: number | null;
+  /** Сколько гостей ждут; null — не указано. */
+  maxGuests?: number | null;
   comment: string | null;
   responsibleStaffId: string | null;
   customerName: string | null;
@@ -321,6 +376,9 @@ export async function updateEvent(
 ): Promise<EventRow> {
   const { event } = await api.patch<{ event: EventRow }>(`/events/${eventId}`, input);
   applyEvent(event);
+  // Смена статуса открывает (старт) или отменяет (отмена) чеки мероприятия, правка
+  // идущего — меняет базу/зону его чека: касса должна увидеть это сразу.
+  if (input.status !== undefined || event.status === 'active') refreshLineup(eventId);
   return event;
 }
 
@@ -483,4 +541,43 @@ export function eventErrorMessage(message: string): string {
   if (message === 'Not found') return 'Мероприятие не найдено — возможно, его удалили.';
   if (message === 'Forbidden') return 'Это действие доступно только владельцу.';
   return message;
+}
+
+/* ─────────────────────────── Лента событий ─────────────────────────── */
+
+const weekdayShort = new Intl.DateTimeFormat('ru-RU', { weekday: 'short', timeZone: 'UTC' });
+const dayAndMonth = new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'long', timeZone: 'UTC' });
+
+/** Заголовок дня в ленте: «Сегодня», «Завтра», «Вчера» или «Пт, 10 октября» (другой год — с годом). */
+export function dayHeader(date: string): string {
+  const today = todayMsk();
+  if (date === today) return 'Сегодня';
+  if (date === todayMsk(1)) return 'Завтра';
+  if (date === todayMsk(-1)) return 'Вчера';
+  const day = utcDate(date);
+  const year = date.slice(0, 4) === today.slice(0, 4) ? '' : ` ${date.slice(0, 4)}`;
+  return `${capitalize(weekdayShort.format(day).replace('.', ''))}, ${dayAndMonth.format(day)}${year}`;
+}
+
+const minutesOf = (time: string) => {
+  const [h, m] = time.split(':').map(Number);
+  return (h ?? 0) * 60 + (m ?? 0);
+};
+
+/** Длительность в минутах: по началу и концу (через полночь — тоже), без конца — по пакету часов. */
+export function eventMinutes(event: Pick<EventRow, 'startTime' | 'endTime' | 'plannedHours'>): number | null {
+  if (event.endTime) {
+    const diff = minutesOf(event.endTime) - minutesOf(event.startTime);
+    if (diff === 0) return null;
+    return diff > 0 ? diff : diff + 24 * 60;
+  }
+  return event.plannedHours ? event.plannedHours * 60 : null;
+}
+
+/** «3 ч», «2 ч 30 мин», «45 мин». */
+export function durationText(minutes: number): string {
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  if (h === 0) return `${m} мин`;
+  return m === 0 ? `${h} ч` : `${h} ч ${m} мин`;
 }

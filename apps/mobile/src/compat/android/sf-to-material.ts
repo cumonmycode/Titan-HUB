@@ -104,6 +104,19 @@ const TABLE: Record<string, string> = {
   faceid: 'face',
   touchid: 'fingerprint',
 
+  // умный дом (шторка «Свет и климат» на кассе)
+  lightbulb: 'lightbulb',
+  snowflake: 'ac_unit',
+  fan: 'mode_fan',
+  power: 'power_settings_new',
+  'thermometer.medium': 'thermostat',
+  'door.left.hand.open': 'door_open',
+  sofa: 'weekend',
+  toilet: 'wc',
+  tree: 'park',
+  'dot.radiowaves.left.and.right': 'sensors',
+  'arrow.clockwise': 'refresh',
+
   // заведение и склад
   house: 'home',
   'building.2': 'apartment',

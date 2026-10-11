@@ -5,6 +5,7 @@ import {
   eq, and, inArray, isNull, desc, gt, sql, type Database,
 } from '@titan/database'
 import { notifChannel } from '../../lib/realtime.js'
+import { TG_API } from '../../lib/telegram.js'
 import { deliverStaffApns } from './staff-calls.js'
 
 // Переходный режим: пер-клубный db передаётся параметром, дефолт — модульный синглтон.
@@ -17,8 +18,8 @@ export function resolveNotifUrl(type: string, meta: Record<string, unknown> = {}
   if (typeof meta['url'] === 'string' && meta['url']) return meta['url'] as string
   const checkId = typeof meta['checkId'] === 'string' ? (meta['checkId'] as string) : null
   switch (type) {
-    case 'low_stock': return '/manage/inventory'
-    case 'supply_received': return '/manage/supplies'
+    case 'low_stock': return typeof meta['itemId'] === 'string' ? `/manage/goods/item/${meta['itemId']}` : '/manage/goods?tab=warehouse'
+    case 'supply_received': return typeof meta['supplyId'] === 'string' ? `/manage/goods/doc?type=supply&id=${meta['supplyId']}` : '/manage/goods?tab=warehouse'
     case 'shift_open': case 'shift_close': case 'cash_discrepancy': return '/shifts'
     case 'event_created': case 'event_completed': return '/events'
     case 'new_client': case 'birthday': return '/manage/clients'
@@ -26,8 +27,8 @@ export function resolveNotifUrl(type: string, meta: Record<string, unknown> = {}
     case 'guest_feedback': return '/dashboard?tab=feedback'
   }
   if (checkId) return `/pos/${checkId}`
-  if (typeof meta['itemId'] === 'string') return '/manage/inventory'
-  if (typeof meta['supplyId'] === 'string') return '/manage/supplies'
+  if (typeof meta['itemId'] === 'string') return `/manage/goods/item/${meta['itemId']}`
+  if (typeof meta['supplyId'] === 'string') return `/manage/goods/doc?type=supply&id=${meta['supplyId']}`
   if (typeof meta['eventId'] === 'string') return '/events'
   if (typeof meta['playerId'] === 'string') return '/manage/clients'
   if (typeof meta['spaceId'] === 'string') return '/pos'
@@ -114,7 +115,7 @@ const TG_TOKEN = process.env['ADMIN_BOT_TOKEN']
 async function sendTelegram(tgId: string, text: string): Promise<void> {
   if (!TG_TOKEN || !tgId) return
   try {
-    await fetch(`https://api.telegram.org/bot${TG_TOKEN}/sendMessage`, {
+    await fetch(`${TG_API}/bot${TG_TOKEN}/sendMessage`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ chat_id: tgId, text, disable_web_page_preview: true }),
@@ -214,6 +215,9 @@ async function sendWebPushToUser(
  *
  * notify НИКОГДА не бросает наверх — все ошибки логируются. Вызывать
  * fire-and-forget: `void notify(...).catch(() => {})`.
+ *
+ * clubId ОБЯЗАТЕЛЕН (c.var.club?.id ?? null; null — основной домен): без него
+ * событие клуба уходит в SSE-канал основного домена ('default'), а не клуба.
  */
 export async function notify(opts: {
   type: string
@@ -221,7 +225,7 @@ export async function notify(opts: {
   body: string
   meta?: Record<string, unknown>
   userId?: string | null
-}, database: DbLike, clubId?: string | null): Promise<string | null> {
+}, database: DbLike, clubId: string | null | undefined): Promise<string | null> {
   const targetUserId = opts.userId ?? null
   let notificationId: string | null = null
   try {
@@ -289,6 +293,9 @@ export async function notify(opts: {
             body: row.body,
             meta: row.meta,
             createdAt: row.createdAt,
+            // Адресат личного уведомления (null = всему персоналу) — SSE-стрим
+            // по нему отсеивает чужие личные уведомления.
+            userId: row.userId ?? null,
           }),
         )
       } catch (err) {
@@ -347,8 +354,9 @@ export async function notify(opts: {
     }
     await deliverStaffApns(database, enabledIds, { ...opts, notificationId })
 
-    // Telegram — по настройке telegram + наличию привязки.
-    const tgRecipients = recipientIds.filter(
+    // Telegram — только по включённым типам (как web push) + настройка telegram +
+    // наличие привязки.
+    const tgRecipients = enabledIds.filter(
       (uid) => isTelegramEnabledForUser(opts.type, settingsByUser.get(uid)) && tgByUser.get(uid),
     )
     await Promise.all(tgRecipients.map((uid) => sendTelegram(tgByUser.get(uid)!, tgText)))

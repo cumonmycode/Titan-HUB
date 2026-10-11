@@ -188,7 +188,8 @@ export async function saveDiscount(discountId: string | null, input: DiscountInp
     value: input.value,
     isActive: input.isActive,
     isAuto: input.isAuto,
-    ...(input.minQuantity ? { minQuantity: input.minQuantity } : {}),
+    // «Без порога» = 1 (умолчание сервера): иначе при правке порог нельзя было снять.
+    minQuantity: input.minQuantity ?? 1,
     itemId: input.itemId,
     clientId: input.clientId,
   };

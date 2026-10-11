@@ -2,9 +2,10 @@ import { Button, ContentUnavailableView, Host, Menu } from '@expo/ui/swift-ui';
 import { buttonStyle, controlSize } from '@expo/ui/swift-ui/modifiers';
 import { useRouter } from 'expo-router';
 import { useEffect } from 'react';
-import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import Animated, { withSpring, withTiming, type EntryExitAnimationFunction } from 'react-native-reanimated';
 
+import { Text } from '@/components/text';
 import { CheckView } from '@/components/check-view';
 import { checkTitle, checkTotals } from '@/lib/checks';
 import { formatMoney } from '@/lib/format';
@@ -90,6 +91,10 @@ function SelectedCheck({ checkId }: { checkId: string }) {
 
   const due = payTotals(data, now).due;
   const isOpen = data.status === 'open';
+  const isClosed = data.status === 'closed';
+  // Как на iPhone: в меню — только то, чего нет на экране (клиенты — тап по карточке,
+  // позиции, оплата и возврат — кнопками под чеком).
+  const hasMenu = isOpen || !!data.spaceId;
 
   return (
     <View style={styles.flex}>
@@ -97,27 +102,21 @@ function SelectedCheck({ checkId }: { checkId: string }) {
         <Text style={[type.title2, styles.title]} numberOfLines={1}>
           {checkTitle(data)}
         </Text>
-        <Host matchContents>
-          <Menu label="Действия" systemImage="ellipsis.circle">
-            {/* Чат идёт через планшет кабинки — у чека без зоны его нет. */}
-            {data.spaceId && <Button label="Чат с кабинкой" systemImage="bubble.left" onPress={() => router.push({ pathname: '/chat', params: { checkId } })} />}
-            {isOpen && (
-              <>
-                <Button label={data.playerId ? 'Клиенты чека' : 'Добавить клиента'} systemImage="person.crop.circle" onPress={actions.onOpenPlayer} />
-                <Button label="Скидка" systemImage="percent" onPress={actions.onAddDiscount} />
-                <Button label="Отменить чек" systemImage="xmark.circle" role="destructive" onPress={actions.onCancel} />
-              </>
-            )}
-            {data.status === 'closed' && (
-              <Button
-                label="Оформить возврат"
-                systemImage="arrow.uturn.backward"
-                role="destructive"
-                onPress={() => router.push({ pathname: '/pos/refund', params: { checkId } })}
-              />
-            )}
-          </Menu>
-        </Host>
+        {hasMenu && (
+          <Host matchContents>
+            <Menu label="Действия" systemImage="ellipsis.circle">
+              {/* Чат идёт через планшет кабинки — у чека без зоны его нет. */}
+              {data.spaceId && <Button label="Чат с кабинкой" systemImage="bubble.left" onPress={() => router.push({ pathname: '/chat', params: { checkId } })} />}
+              {isOpen && (
+                <>
+                  <Button label="Спросить Tai" systemImage="sparkles" onPress={() => router.push({ pathname: '/tai', params: { screen: 'check', checkId } })} />
+                  <Button label="Скидка" systemImage="percent" onPress={actions.onAddDiscount} />
+                  <Button label="Отменить чек" systemImage="xmark.circle" role="destructive" onPress={actions.onCancel} />
+                </>
+              )}
+            </Menu>
+          </Host>
+        )}
       </View>
 
       <CheckView
@@ -143,6 +142,23 @@ function SelectedCheck({ checkId }: { checkId: string }) {
                 router.push({ pathname: '/pay', params: { checkId } });
               }}
               modifiers={[buttonStyle('glassProminent'), controlSize('large')]}
+            />
+          </Host>
+        </View>
+      )}
+      {isClosed && (
+        <View style={styles.actions}>
+          <View style={styles.flex} />
+          <Host matchContents>
+            <Button
+              label="Возврат"
+              systemImage="arrow.uturn.backward"
+              role="destructive"
+              onPress={() => {
+                haptic.light();
+                router.push({ pathname: '/pos/refund', params: { checkId } });
+              }}
+              modifiers={[buttonStyle('glass'), controlSize('large')]}
             />
           </Host>
         </View>

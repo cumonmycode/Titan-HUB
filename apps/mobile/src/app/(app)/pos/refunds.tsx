@@ -3,9 +3,10 @@ import { pickerStyle, tag } from '@expo/ui/swift-ui/modifiers';
 import { Stack, useRouter } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
 import { useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import Animated, { FadeIn, LayoutAnimationConfig } from 'react-native-reanimated';
 
+import { Text } from '@/components/text';
 import { AppRefreshControl } from '@/components/refresh-control';
 import { AmbientBackdrop } from '@/components/ambient-backdrop';
 import { GlassCard, sheetStyles } from '@/components/new-check-parts';

@@ -5,6 +5,7 @@ import { formatMoney, toNumber } from './format';
 import { queryClient } from './query';
 import { useClubKey } from './queries';
 import { useSession } from './session';
+import { invalidateShift } from './shift-api';
 import type { NumericString } from './types';
 
 /**
@@ -413,11 +414,26 @@ export async function purgeClient(clientId: string): Promise<void> {
 /**
  * Депозит или долг: `amount` > 0 — пополнить/погасить, < 0 — снять/в долг.
  * Ключ идемпотентности создаётся один раз на намерение и повторяется при ретраях.
+ * `method` — чем прошли деньги; наличные сервер проводит через кассу открытой смены
+ * (`cashOperation: null` — смена не открыта). «В долг» без денег — без `method`.
  */
-export async function changeBalance(clientId: string, amount: number, reason: string, idempotencyKey: string): Promise<{ balance: number; duplicate: boolean }> {
-  const r = await api.post<{ balance: number; duplicate?: boolean }>(`/clients/${clientId}/balance`, { amount, reason, idempotencyKey });
+export async function changeBalance(
+  clientId: string,
+  amount: number,
+  reason: string,
+  idempotencyKey: string,
+  method?: BalanceMethod,
+): Promise<{ balance: number; duplicate: boolean; cashOperation: { id: string } | null }> {
+  const r = await api.post<{ balance: number; duplicate?: boolean; cashOperation?: { id: string } | null }>(`/clients/${clientId}/balance`, {
+    amount,
+    reason,
+    idempotencyKey,
+    method,
+  });
   patchCachedClient(clientId, { balance: String(Math.round(r.balance * 100) / 100) });
-  return { balance: r.balance, duplicate: !!r.duplicate };
+  // Наличные изменили ожидаемый остаток кассы смены.
+  if (method === 'cash') invalidateShift();
+  return { balance: r.balance, duplicate: !!r.duplicate, cashOperation: r.cashOperation ?? null };
 }
 
 /** Бонусы ±; без идемпотентности на сервере — кнопку блокируем до ответа. */
@@ -460,6 +476,10 @@ export async function fetchGomafiaFullName(gomafiaId: string): Promise<string | 
 /* ─────────────────────────── Депозиты и долги ─────────────────────────── */
 
 export type BalanceOp = 'deposit_add' | 'deposit_sub' | 'debt_repay' | 'debt_lend';
+
+/** Чем прошли деньги депозита/долга; «В долг» денег не двигает и способа не имеет. */
+export type BalanceMethod = 'cash' | 'transfer' | 'card';
+export const BALANCE_METHOD_LABEL: Record<BalanceMethod, string> = { cash: 'Наличные', transfer: 'Перевод', card: 'Карта' };
 
 export const BALANCE_OPS: Record<BalanceOp, { title: string; reason: string; symbol: 'plus.circle.fill' | 'minus.circle.fill' | 'checkmark.circle.fill' | 'creditcard.and.123'; color: string }> = {
   deposit_add: { title: 'Пополнить депозит', reason: 'Пополнение депозита', symbol: 'plus.circle.fill', color: '#06B6D4' },

@@ -3,11 +3,14 @@ import { Hono } from 'hono'
 import { zValidator } from '@hono/zod-validator'
 import { z } from 'zod'
 import { profiles, eq, and, isNull, desc, sql } from '@titan/database'
+import type { Database } from '@titan/database'
 // @ts-ignore
 import { passkeys } from '@titan/database'
-import { requireAuth, requireRole } from '../../middleware/auth.js'
+import { requireAuth, requireRole, invalidateProfileAuthCache } from '../../middleware/auth.js'
 import { hashPassword, hashPin } from '@titan/auth'
+import { isPinTaken, PIN_TAKEN_ERROR } from '../auth/staff-pin.js'
 import { createHmac } from 'node:crypto'
+import { TG_API } from '../../lib/telegram.js'
 
 // Username админ-бота для диплинка привязки. Если не задан в env — берём через
 // getMe (кэшируем). Токен админ-бота доступен API через env_file (.env).
@@ -17,7 +20,7 @@ async function getAdminBotUsername(): Promise<string | null> {
   const token = process.env['ADMIN_BOT_TOKEN']
   if (!token) return null
   try {
-    const r = await fetch(`https://api.telegram.org/bot${token}/getMe`)
+    const r = await fetch(`${TG_API}/bot${token}/getMe`)
     const j: any = await r.json()
     adminBotUsername = j?.result?.username ?? null
   } catch { /* ignore */ }
@@ -39,6 +42,18 @@ const UpdateStaffSchema = z.object({
   password: z.string().min(4).optional(),
   permissions: z.record(z.boolean()).optional(),
 })
+
+// Последнего активного владельца нельзя понизить или уволить — иначе клуб
+// остаётся без управления (назначить владельца из приложения уже некому).
+const LAST_OWNER_ERROR = 'Нельзя убрать последнего владельца клуба'
+async function isLastActiveOwner(db: Database, id: string): Promise<boolean> {
+  const [target] = await db.select({ role: profiles.role, deletedAt: profiles.deletedAt })
+    .from(profiles).where(eq(profiles.id, id))
+  if (!target || target.role !== 'owner' || target.deletedAt) return false
+  const [row] = await db.select({ n: sql<number>`count(*)::int` })
+    .from(profiles).where(and(eq(profiles.role, 'owner'), isNull(profiles.deletedAt)))
+  return (row?.n ?? 0) <= 1
+}
 
 export const staffRouter = new Hono<AppEnv>()
 staffRouter.use('*', requireAuth, requireRole('owner'))
@@ -110,6 +125,8 @@ staffRouter.post('/:id/telegram-link', async (c) => {
 staffRouter.post('/', zValidator('json', CreateStaffSchema), async (c) => {
   const db = c.var.db
   const data = c.req.valid('json')
+  // PIN уникален среди активного персонала (вход по PIN ищет профиль перебором).
+  if (data.pin && await isPinTaken(db, data.pin)) return c.json({ error: PIN_TAKEN_ERROR }, 409)
   const hashedPassword = await hashPassword(data.password)
 
   try {
@@ -146,6 +163,9 @@ staffRouter.patch('/:id', zValidator('json', UpdateStaffSchema), async (c) => {
   if (password) {
     setData.passwordHash = await hashPassword(password)
   }
+  if (rest.role && rest.role !== 'owner' && await isLastActiveOwner(db, c.req.param('id'))) {
+    return c.json({ error: LAST_OWNER_ERROR }, 409)
+  }
 
   try {
     const [updated] = await db
@@ -162,6 +182,9 @@ staffRouter.patch('/:id', zValidator('json', UpdateStaffSchema), async (c) => {
       })
 
     if (!updated) return c.json({ error: 'Not found' }, 404)
+    // Новая роль и права действуют сразу, а не после перелогина/истечения кэша
+    // (requireAuth берёт их из БД).
+    if (rest.role || rest.permissions) await invalidateProfileAuthCache(c.var.club?.id ?? null, updated.id)
     return c.json({ staff: updated })
   } catch (err: any) {
     if (err?.code === '23505') {
@@ -177,6 +200,9 @@ staffRouter.delete('/:id', async (c) => {
   if (user.sub === c.req.param('id')) {
     return c.json({ error: 'Cannot delete yourself' }, 400)
   }
+  if (await isLastActiveOwner(db, c.req.param('id'))) {
+    return c.json({ error: LAST_OWNER_ERROR }, 409)
+  }
 
   await db
     .update(profiles)
@@ -186,6 +212,8 @@ staffRouter.delete('/:id', async (c) => {
   // Уволенный сотрудник не должен входить по passkey — удаляем его ключи.
   // (Дополнительно auth-verify проверяет deletedAt, см. auth.router.ts.)
   await db.delete(passkeys).where(eq(passkeys.userId, c.req.param('id')))
+  // Его ещё живые JWT отбиваются requireAuth (deletedAt) — сразу, без ожидания кэша.
+  await invalidateProfileAuthCache(c.var.club?.id ?? null, c.req.param('id'))
 
   return c.json({ ok: true })
 })
@@ -193,6 +221,7 @@ staffRouter.delete('/:id', async (c) => {
 staffRouter.post('/:id/reset-pin', zValidator('json', z.object({ pin: z.string().length(4).regex(/^\d{4}$/) })), async (c) => {
   const db = c.var.db
   const { pin } = c.req.valid('json')
+  if (await isPinTaken(db, pin, c.req.param('id'))) return c.json({ error: PIN_TAKEN_ERROR }, 409)
   const hashedPin = await hashPin(pin)
   await db
     .update(profiles)

@@ -1,9 +1,10 @@
 import { useRouter } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
-import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, StyleSheet, View } from 'react-native';
 import Animated, { FadeIn, FadeOut, LayoutAnimationConfig, LinearTransition } from 'react-native-reanimated';
 import type { SFSymbol } from 'sf-symbols-typescript';
 
+import { Text } from '@/components/text';
 import { Avatar, GlassCard, sheetStyles } from '@/components/new-check-parts';
 import { SwipeToDelete } from '@/components/swipe-to-delete';
 import {

@@ -27,10 +27,15 @@ function getRedis() {
   return redisInstance
 }
 
+// SSE-стримы (долгие connections, не должны попадать в лимит) — строго известные
+// пути. Не по заголовку Accept: его ставит клиент, и им обходился бы любой лимит.
+const SSE_PATHS = new Set(['/api/system/update', '/api/notifications/stream', '/api/tablet/stream'])
+const CHECK_EVENTS_PATH = /^\/api\/pos\/checks\/[^/]+\/events$/
+const isSsePath = (path: string): boolean => SSE_PATHS.has(path) || CHECK_EVENTS_PATH.test(path)
+
 export const rateLimit = createMiddleware(async (c, next) => {
   // Пропускаем SSE-стримы (долгие connections, не должны попадать в лимит)
-  if (c.req.path.includes('/notifications/stream')) return next()
-  if (c.req.header('accept')?.includes('text/event-stream')) return next()
+  if (c.req.method === 'GET' && isSsePath(c.req.path)) return next()
   // Пропускаем health-check (liveness + readiness)
   if (c.req.path === '/health' || c.req.path === '/api/health' || c.req.path === '/api/health/ready') return next()
   // Вебхук Platega: внешние ретраи провайдера НЕ должны попадать под лимит, иначе

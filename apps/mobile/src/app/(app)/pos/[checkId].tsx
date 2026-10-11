@@ -1,11 +1,12 @@
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
 import { useEffect } from 'react';
-import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, View } from 'react-native';
 
+import { Text } from '@/components/text';
 import { AmbientBackdrop } from '@/components/ambient-backdrop';
 import { CheckView } from '@/components/check-view';
-import { ToolbarMenu, ToolbarMenuAction } from '@/components/toolbar';
+import { ToolbarButton, ToolbarMenu, ToolbarMenuAction } from '@/components/toolbar';
 import { checkTitle, checkTotals } from '@/lib/checks';
 import { usePosPlayer } from '@/lib/payment';
 import { markCheckNotificationsRead, useCheck } from '@/lib/queries';
@@ -39,11 +40,21 @@ export default function CheckScreen() {
     if (host && checkId) void markCheckNotificationsRead(host, { id: checkId, spaceId });
   }, [host, checkId, spaceId]);
 
+  // В меню — только то, чего нет на экране: клиенты открываются тапом по карточке клиента,
+  // позиции и возврат — кнопками в плашке над таб-баром.
+  const isOpen = data?.status === 'open';
+  const hasMenu = !!data && (isOpen || !!spaceId);
+
   return (
     <AmbientBackdrop style={styles.screen}>
       <Stack.Title>{data ? checkTitle(data) : 'Чек'}</Stack.Title>
-      {data && (
+      {(hasMenu || isOpen) && (
         <Stack.Toolbar placement="right">
+          {/* Tai знает этот чек: «добавь колу» — сюда. */}
+          {isOpen && (
+            <ToolbarButton icon="sparkles" accessibilityLabel="Спросить Tai" onPress={() => router.push({ pathname: '/tai', params: { screen: 'check', checkId } })} />
+          )}
+          {hasMenu && (
           <ToolbarMenu icon="ellipsis" accessibilityLabel="Действия с чеком">
             {/* Чат идёт через планшет кабинки — у чека без зоны его нет. */}
             {spaceId && (
@@ -51,25 +62,21 @@ export default function CheckScreen() {
                 Чат с кабинкой
               </ToolbarMenuAction>
             )}
-            {data.status === 'open' && (
-              <>
-                <ToolbarMenuAction icon="person.crop.circle" onPress={actions.onOpenPlayer}>
-                  {data.playerId ? 'Клиенты чека' : 'Добавить клиента'}
-                </ToolbarMenuAction>
-                <ToolbarMenuAction icon="percent" onPress={actions.onAddDiscount}>
-                  Скидка
-                </ToolbarMenuAction>
-                <ToolbarMenuAction icon="xmark.circle" destructive onPress={actions.onCancel}>
-                  Отменить чек
-                </ToolbarMenuAction>
-              </>
+            {/* Каждый пункт — прямым ребёнком, без фрагмента: на iOS expo-router берёт пункты
+                через Children.toArray с фильтром по типу, и фрагмент выпадает целиком —
+                меню оставалось пустым и не открывалось. */}
+            {isOpen && (
+              <ToolbarMenuAction icon="percent" onPress={actions.onAddDiscount}>
+                Скидка
+              </ToolbarMenuAction>
             )}
-            {data.status === 'closed' && (
-              <ToolbarMenuAction icon="arrow.uturn.backward" destructive onPress={() => router.push({ pathname: '/pos/refund', params: { checkId } })}>
-                Оформить возврат
+            {isOpen && (
+              <ToolbarMenuAction icon="xmark.circle" destructive onPress={actions.onCancel}>
+                Отменить чек
               </ToolbarMenuAction>
             )}
           </ToolbarMenu>
+          )}
         </Stack.Toolbar>
       )}
 

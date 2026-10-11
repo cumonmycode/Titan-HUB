@@ -3,11 +3,12 @@ import { pickerStyle, tag } from '@expo/ui/swift-ui/modifiers';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
 import { useState } from 'react';
-import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, ScrollView, StyleSheet, View } from 'react-native';
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import Animated, { FadeIn, FadeOut, LayoutAnimationConfig, LinearTransition } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { Text } from '@/components/text';
 import { FormSection } from '@/components/form-parts';
 import { Avatar, GlassCard, SheetHeader, sheetStyles } from '@/components/new-check-parts';
 import { PlayerSearch } from '@/components/player-picker';

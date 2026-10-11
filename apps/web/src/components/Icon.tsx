@@ -583,6 +583,33 @@ const ICONS: Record<string, React.ReactNode> = {
       <line x1="12" y1="17" x2="12" y2="21" />
     </>
   ),
+  slideshow: (
+    <>
+      <rect x="5" y="5" width="14" height="14" rx="2" />
+      <path d="M2 7v10M22 7v10" />
+      <path d="M10.5 9.5l4 2.5-4 2.5z" />
+    </>
+  ),
+  image: (
+    <>
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <circle cx="9" cy="9.5" r="1.75" />
+      <path d="M21 16l-5.5-5.5L5 20" />
+    </>
+  ),
+  rotate_right: (
+    <>
+      <path d="M20 12a8 8 0 1 1-2.34-5.66" />
+      <path d="M20 4v4h-4" />
+    </>
+  ),
+  link_off: (
+    <>
+      <path d="M9 17H7a5 5 0 0 1-1.6-9.74M15 7h2a5 5 0 0 1 3.5 8.57" />
+      <line x1="8" y1="12" x2="10" y2="12" />
+      <line x1="2" y1="2" x2="22" y2="22" />
+    </>
+  ),
   tv_off: (
     <>
       <path d="M8 4h12a2 2 0 0 1 2 2v9a2 2 0 0 1-1.2 1.83M16 17H4a2 2 0 0 1-2-2V6a2 2 0 0 1 1.38-1.9" />

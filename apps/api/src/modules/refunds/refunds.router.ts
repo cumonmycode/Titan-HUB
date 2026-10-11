@@ -3,7 +3,7 @@ import { Hono } from 'hono'
 import { zValidator } from '@hono/zod-validator'
 import { z } from 'zod'
 import { refunds, checks, inventory, checkItems, checkPayments, transactions, profiles, bonusHistory, certificates, appSettings, eq, and, like, inArray, desc, sql } from '@titan/database'
-import { recordMovement } from '../inventory/ledger.js'
+import { returnCheckPortions } from '../inventory/ledger.js'
 import { requireAuth, requireRole } from '../../middleware/auth.js'
 import { accrueBonusLot, spendBonusLots, getBonusExpiryDays } from '../../lib/bonusLots.js'
 import { round2 } from '../../lib/money.js'
@@ -26,6 +26,9 @@ const RefundSchema = z.object({
     itemId: z.string().uuid(),
     quantity: z.number().int().positive(),
   })).default([]),
+  // Ключ идемпотентности клиента: повтор того же возврата (после потерянного ответа)
+  // возвращает уже записанный возврат, а не проводит второй.
+  idempotencyKey: z.string().min(1).max(80).optional(),
 })
 
 function sumByMethod(rows: { method: string; amount: number | string }[]): Record<string, number> {
@@ -70,7 +73,7 @@ refundsRouter.post('/', requireRole('owner', 'staff'), zValidator('json', Refund
   const body = c.req.valid('json')
 
   try {
-    const refund = await db.transaction(async (tx) => {
+    const { refund, duplicate } = await db.transaction(async (tx) => {
       // СЕРИАЛИЗАЦИЯ ВОЗВРАТОВ ПО ЧЕКУ (P0). Возврат НЕ пишет в строку `checks`,
       // поэтому `checks ... FOR UPDATE` ниже сам по себе НЕ сериализует два
       // параллельных возврата по одному чеку: лимит «уже возвращено» (prevRefunds)
@@ -80,6 +83,16 @@ refundsRouter.post('/', requireRole('owner', 'staff'), zValidator('json', Refund
       // конкурентные возвраты по одному чеку выстраиваются в очередь и каждый видит
       // результат предыдущего. Лок снимается на коммите/откате (xact-scoped).
       await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${body.checkId}, 0))`)
+
+      // Идемпотентность: ПОД локом чека, поэтому повтор, пришедший пока первый запрос
+      // ещё в работе, дождётся его коммита и увидит записанный возврат.
+      if (body.idempotencyKey) {
+        const [existing] = await tx.select().from(refunds).where(eq(refunds.idempotencyKey, body.idempotencyKey))
+        if (existing) {
+          if (existing.checkId !== body.checkId) throw new Error('IDEMPOTENCY_KEY_REUSED')
+          return { refund: existing, duplicate: true }
+        }
+      }
 
       const [check] = await tx.select().from(checks).where(eq(checks.id, body.checkId)).for('update')
       if (!check) throw new Error('CHECK_NOT_FOUND')
@@ -112,6 +125,7 @@ refundsRouter.post('/', requireRole('owner', 'staff'), zValidator('json', Refund
         reason: body.reason,
         note: body.note,
         tenders: normTenders,
+        idempotencyKey: body.idempotencyKey ?? null,
         createdBy: user.sub,
       }).returning()
 
@@ -168,8 +182,12 @@ refundsRouter.post('/', requireRole('owner', 'staff'), zValidator('json', Refund
             .where(inArray(appSettings.key, ['bonus_accrual_rate']))
           const settings = Object.fromEntries(settingsRows.map(r => [r.key, r.value]))
           const accrualRate = parseFloat(settings['bonus_accrual_rate'] ?? '5') / 100
-          // Полная сумма начисления за чек (зеркало pos.router.ts /pay).
-          const accruedTotal = Math.floor(checkTotal * accrualRate)
+          // Полная сумма начисления за чек: фактически начисленное при закрытии
+          // (checks.bonus_awarded, 0 — не начисляли). Старые чеки (до 075, NULL) —
+          // прежняя оценка по текущей ставке (зеркало pos.router.ts /pay).
+          const accruedTotal = check.bonusAwarded != null
+            ? Math.floor(Number(check.bonusAwarded))
+            : Math.floor(checkTotal * accrualRate)
           if (accruedTotal > 0) {
             // Кумулятивно возвращено по чеку (включая текущий возврат).
             const refundedSoFar = prevRefunds.reduce((s, r) => s + (parseFloat(r.totalAmount) || 0), 0) + refundTotal
@@ -235,10 +253,12 @@ refundsRouter.post('/', requireRole('owner', 'staff'), zValidator('json', Refund
         const alreadyRestored = restoredByItem.get(item.itemId) ?? 0
         const qty = Math.max(0, Math.min(item.quantity, sold - alreadyRestored))
         if (qty <= 0) continue
-        // Возврат чека возвращает сток (return); requireTracked — только учётные товары.
-        await recordMovement(tx, {
-          itemId: item.itemId, type: 'return', delta: qty, requireTracked: true,
-          sourceType: 'refund', sourceId: r!.id, reason: `Возврат чека ${body.checkId}`, userId: user.sub,
+        // Возврат чека возвращает на склад то, что реально списано по чеку (журнал
+        // исходного чека), а не по текущей техкарте/флагу учёта. Прошлые возвраты
+        // в журнал чека не пишутся — их порции передаём как alreadyReturned.
+        await returnCheckPortions(tx, {
+          checkId: body.checkId, itemId: item.itemId, quantity: qty, alreadyReturned: alreadyRestored,
+          sourceType: 'refund', sourceId: r!.id, reason: 'Возврат чека', userId: user.sub,
         })
         // Фиксируем фактически восстановленное количество (в т.ч. для не-учётных
         // товаров — чтобы лимит sold−alreadyRestored не сбрасывался повторными
@@ -250,8 +270,11 @@ refundsRouter.post('/', requireRole('owner', 'staff'), zValidator('json', Refund
         await tx.update(refunds).set({ restoredItems: restoredNow }).where(eq(refunds.id, r!.id))
       }
 
-      return r
+      return { refund: r, duplicate: false }
     })
+
+    // Повтор по ключу идемпотентности: возврат уже записан и уведомление ушло.
+    if (duplicate) return c.json({ refund, duplicate: true }, 201)
 
     // Уведомление вне денежной транзакции (fire-and-forget, не блокирует ответ).
     const refundAmt = parseFloat(String(refund?.totalAmount ?? 0)) || 0
@@ -274,6 +297,7 @@ refundsRouter.post('/', requireRole('owner', 'staff'), zValidator('json', Refund
       NOTHING_TO_REFUND: ['По чеку нет оплат для возврата', 400],
       REFUND_NO_PLAYER: ['Для возврата на баланс/бонусы нужен клиент чека', 400],
       REFUND_NO_CERT: ['У чека нет сертификата для возврата', 400],
+      IDEMPOTENCY_KEY_REUSED: ['Ключ повтора уже использован для другого чека', 400],
     }
     const mapped = err?.message ? map[err.message] : undefined
     if (mapped) return c.json({ error: mapped[0] }, mapped[1])

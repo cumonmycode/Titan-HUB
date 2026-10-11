@@ -2,10 +2,11 @@ import { usePathname, useRouter } from 'expo-router';
 import { Tabs } from 'expo-router/tabs';
 import { NativeTabs } from 'expo-router/unstable-native-tabs';
 import type { ReactNode } from 'react';
-import { Platform } from 'react-native';
+import { Platform, useWindowDimensions } from 'react-native';
 
 import { CheckAccessory } from '@/components/check-accessory';
 import { FloatingTabBar } from '@/components/floating-tab-bar';
+import { HomeShadeHost } from '@/components/home/home-shade';
 import { ShiftAccessory } from '@/components/shift-accessory';
 import { useChrome } from '@/lib/chrome';
 import { haptic } from '@/lib/haptics';
@@ -13,6 +14,12 @@ import { colors } from '@/lib/theme';
 
 const IS_PAD = Platform.OS === 'ios' && Platform.isPad;
 const CHECK_PATH = /^\/pos\/([0-9a-f-]{36})$/i;
+/**
+ * «Увеличенный» вид iPhone (14 Pro — 320 pt в ширину): пять подписей системным кеглем 10 pt
+ * слипаются («АналитикаУправление»). На узком экране подписи на пункт мельче.
+ */
+const NARROW_TAB_BAR = 360;
+const narrowLabelStyle = { fontSize: 9 };
 
 /**
  * «Новый» всегда в акценте. Иконка — системный символ, поэтому iOS выравнивает её
@@ -30,6 +37,9 @@ const newTabNativeProps = {
 
 /**
  * Системный таб-бар (UITabBarController): Liquid Glass на iOS 26, на iPad — боковая панель.
+ * Подписи короткие и почти равной длины («Отчёты», «Меню» — как в веб-кассе): iOS 26
+ * ставит пункты по ширине подписей (itemPositioning не помогает), и длинные «Аналитика» /
+ * «Управление» сдвигали значки — ряд выглядел прижатым влево.
  *
  * «Новый» на iPhone — кнопка, а не экран: вкладка `disabled` (выбрать нельзя, но нажатие
  * приходит событием) открывает шторку создания чека. На iPad вкладки нет: кнопка
@@ -43,6 +53,7 @@ export default function AppLayout() {
   const pathname = usePathname();
   const accessoryVisible = useChrome((s) => s.accessoryVisible);
   const openCheckId = IS_PAD ? undefined : CHECK_PATH.exec(pathname)?.[1];
+  const { width } = useWindowDimensions();
 
   // Android прячет плашку смены при прокрутке сам (плавающая панель на RN — это дёшево).
   // На iOS плашку не снимаем: каждое снятие перестраивало таб-бар UIKit (~60 мс) прямо
@@ -53,11 +64,12 @@ export default function AppLayout() {
   if (pathname === '/pos' && (IS_PAD || !hiddenByScroll)) accessory = <ShiftAccessory />;
   else if (openCheckId) accessory = <CheckAccessory checkId={openCheckId} />;
 
-  if (Platform.OS === 'android') return <AndroidTabs accessory={accessory} />;
+  if (Platform.OS === 'android') return <AndroidTabs accessory={accessory} homeShade={pathname === '/pos'} />;
 
   return (
     <NativeTabs
       tintColor={colors.accent}
+      labelStyle={!IS_PAD && width < NARROW_TAB_BAR ? narrowLabelStyle : undefined}
       sidebarAdaptable
       minimizeBehavior="onScrollDown"
       screenListeners={({ route }) => ({
@@ -86,12 +98,12 @@ export default function AppLayout() {
 
       <NativeTabs.Trigger name="analytics">
         <NativeTabs.Trigger.Icon sf={{ default: 'chart.bar', selected: 'chart.bar.fill' }} md="bar_chart" />
-        <NativeTabs.Trigger.Label>Аналитика</NativeTabs.Trigger.Label>
+        <NativeTabs.Trigger.Label>Отчёты</NativeTabs.Trigger.Label>
       </NativeTabs.Trigger>
 
       <NativeTabs.Trigger name="manage">
         <NativeTabs.Trigger.Icon sf={{ default: 'gearshape', selected: 'gearshape.fill' }} md="settings" />
-        <NativeTabs.Trigger.Label>Управление</NativeTabs.Trigger.Label>
+        <NativeTabs.Trigger.Label>Меню</NativeTabs.Trigger.Label>
       </NativeTabs.Trigger>
 
       {accessory && <NativeTabs.BottomAccessory>{accessory}</NativeTabs.BottomAccessory>}
@@ -104,15 +116,22 @@ export default function AppLayout() {
  * iPhone (components/floating-tab-bar.tsx). Плашка смены или чека едет в той же стопке
  * над капсулой: раньше её клали отдельным слоем на расчётную высоту, и она наезжала на
  * панель. Экраны занимают всю высоту и прокручиваются под капсулой, как на iOS.
+ *
+ * Шторка «Свет и климат» на кассе — последним слоем поверх вкладок: так она и свёрнутая, и
+ * раскрытая лежит над капсулой, а касания мимо неё проходят к экрану (Modal бы их забрал).
  */
-function AndroidTabs({ accessory }: { accessory: ReactNode }) {
+function AndroidTabs({ accessory, homeShade }: { accessory: ReactNode; homeShade: boolean }) {
   return (
-    <Tabs screenOptions={{ headerShown: false }} tabBar={(props) => <FloatingTabBar {...props} accessory={accessory} />}>
-      <Tabs.Screen name="pos" />
-      <Tabs.Screen name="events" />
-      <Tabs.Screen name="new/index" />
-      <Tabs.Screen name="analytics" />
-      <Tabs.Screen name="manage" />
-    </Tabs>
+    <>
+      <Tabs screenOptions={{ headerShown: false }} tabBar={(props) => <FloatingTabBar {...props} accessory={accessory} />}>
+        <Tabs.Screen name="pos" />
+        <Tabs.Screen name="events" />
+        <Tabs.Screen name="new/index" />
+        <Tabs.Screen name="analytics" />
+        <Tabs.Screen name="manage" />
+      </Tabs>
+      {/* Шторка «Свет и климат» — над капсулой вкладок, пока на экране касса (components/home/home-shade.tsx). */}
+      {homeShade && <HomeShadeHost />}
+    </>
   );
 }

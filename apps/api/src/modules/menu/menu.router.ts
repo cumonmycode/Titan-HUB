@@ -2,8 +2,9 @@ import type { AppEnv } from '../../types.js'
 import { Hono } from 'hono'
 import { zValidator } from '@hono/zod-validator'
 import { z } from 'zod'
-import { menuCategories, inventory, modifiers, spaces, appSettings, screenSlides, eq, and, asc, desc, isNull, inArray } from '@titan/database'
+import { menuCategories, inventory, modifiers, screenSlides, eq, and, asc, desc, isNull } from '@titan/database'
 import { requireAuth, requireRole } from '../../middleware/auth.js'
+import { defaultMenuScreen, screenPayload } from '../screens/screen-content.js'
 
 const CategorySchema = z.object({
   name: z.string().min(1),
@@ -92,121 +93,15 @@ menuRouter.delete('/categories/:id', requireAuth, requireRole('owner'), async (c
   return c.json({ ok: true })
 })
 
-// Темы экрана меню (public/tv-menu.html); выбирает владелец в «Настройках» → menu_screen_theme.
-const SCREEN_THEMES = ['night', 'neon', 'deco', 'synth', 'avant', 'dossier', 'halloween']
-
-// QR для карточек рекламы: SVG по ссылке, с небольшим кэшем (экраны опрашивают меню
-// раз в 20 с — пересобирать один и тот же QR незачем).
-const qrCache = new Map<string, string>()
-async function qrSvg(url: string): Promise<string | null> {
-  const hit = qrCache.get(url)
-  if (hit) return hit
-  try {
-    const QRCode = await import('qrcode')
-    const svg = await QRCode.toString(url, { type: 'svg', margin: 1, errorCorrectionLevel: 'M', color: { dark: '#111111', light: '#ffffff' } })
-    if (qrCache.size > 100) qrCache.clear()
-    qrCache.set(url, svg)
-    return svg
-  } catch {
-    return null
-  }
-}
-
-// Публичное меню для экранов (/menu — AbleSign/ТВ), без авторизации, клуб по Host.
-// Гостю — простые названия и понятный порядок: сначала «Игровой вечер» (тарифы) и
-// «Кабинки» (почасовая аренда зон) по возрастанию цены, затем разделы меню в порядке
-// владельца, позиции внутри — по алфавиту (варианты одного напитка стоят рядом).
-// Только включённые и отмеченные «на экране ТВ» позиции/зоны с ценой > 0 (тариф без
-// цены ещё не настроен); без себестоимости и остатков.
+// Старая ссылка /menu (AbleSign, Titan Menu 1.0): показывает «Экран меню» из раздела
+// «Экраны» (первый экран-меню). Экраны из раздела открываются по /screen/<id>.
 menuRouter.get('/public', async (c) => {
   const db = c.var.db
-  const [cats, rows, spaceRows, settingRows] = await Promise.all([
-    db.select({ id: menuCategories.id, name: menuCategories.name, icon: menuCategories.icon })
-      .from(menuCategories).where(eq(menuCategories.isActive, true)).orderBy(asc(menuCategories.sortOrder)),
-    db.select({ name: inventory.name, category: inventory.category, price: inventory.price })
-      .from(inventory)
-      .where(and(eq(inventory.isActive, true), eq(inventory.isScreenVisible, true), isNull(inventory.deletedAt))),
-    db.select({ name: spaces.name, type: spaces.type, hourlyRate: spaces.hourlyRate })
-      .from(spaces).where(and(eq(spaces.isActive, true), eq(spaces.isScreenVisible, true))),
-    db.select({ key: appSettings.key, value: appSettings.value }).from(appSettings)
-      .where(inArray(appSettings.key, ['venue_name', 'menu_screen_theme', 'menu_screen_band_sec'])),
-  ])
-  const setting = (key: string) => settingRows.find((r) => r.key === key)?.value || null
-
-  type Item = { name: string; price: number; perHour?: boolean }
-  type Section = { title: string; icon: string; featured: boolean; items: Item[] }
-  const byName = (a: Item, b: Item) => a.name.localeCompare(b.name, 'ru', { numeric: true, sensitivity: 'base' })
-  const byPrice = (a: Item, b: Item) => a.price - b.price || byName(a, b)
-
-  const items = rows
-    .map((r) => ({ name: r.name.trim(), category: r.category, price: Number(r.price) }))
-    .filter((r) => r.name && r.price > 0)
-  const pick = (category: string | null) => items
-    .filter((i) => i.category === category)
-    .map(({ name, price }) => ({ name, price }))
-
-  const isTariffCat = (name: string) => name.toLowerCase().includes('тариф')
-  const tariffItems: Item[] = []
-  const menuSections: Section[] = []
-  for (const cat of cats) {
-    const own = pick(cat.id)
-    if (own.length === 0) continue
-    if (isTariffCat(cat.name)) tariffItems.push(...own)
-    else menuSections.push({ title: cat.name.trim(), icon: cat.icon, featured: false, items: own.sort(byName) })
-  }
-  const uncategorized = pick(null)
-  if (uncategorized.length) menuSections.push({ title: 'Другое', icon: 'other', featured: false, items: uncategorized.sort(byName) })
-
-  // Аренда зон — цена за час. Зона, заведённая ещё и позицией меню, не дублируется.
-  const itemNames = new Set(items.map((i) => i.name.toLowerCase()))
-  const rentable = spaceRows
-    .map((s) => ({ name: s.name.trim(), type: s.type, price: Number(s.hourlyRate) }))
-    .filter((s) => s.name && s.price > 0 && !itemNames.has(s.name.toLowerCase()))
-
-  const sections: Section[] = []
-  if (tariffItems.length) {
-    sections.push({ title: 'Игровой вечер', icon: 'tariffs', featured: true, items: tariffItems.sort(byPrice) })
-  }
-  if (rentable.length) {
-    sections.push({
-      title: rentable.every((s) => s.type.endsWith('_booth')) ? 'Кабинки' : 'Аренда',
-      icon: 'rental',
-      featured: true,
-      items: rentable.map(({ name, price }) => ({ name, price, perHour: true })).sort(byPrice),
-    })
-  }
-  sections.push(...menuSections)
-
-  const theme = setting('menu_screen_theme')
-  const bandSec = Math.min(300, Math.max(5, Number(setting('menu_screen_band_sec')) || 20))
-
-  // Реклама в области ленты: включённые слайды по порядку, у карточек со ссылкой — QR.
-  const slideRows = await db.select().from(screenSlides)
-    .where(eq(screenSlides.isActive, true)).orderBy(asc(screenSlides.sortOrder), asc(screenSlides.createdAt))
-  const slides = []
-  for (const sl of slideRows) {
-    if (sl.kind === 'image' && !sl.imageUrl) continue
-    if (sl.kind === 'card' && !sl.title && !sl.body && !sl.linkUrl) continue
-    slides.push({
-      kind: sl.kind,
-      imageUrl: sl.kind === 'image' ? sl.imageUrl : null,
-      title: sl.kind === 'card' ? sl.title : null,
-      body: sl.kind === 'card' ? sl.body : null,
-      qrSvg: sl.kind === 'card' && sl.linkUrl ? await qrSvg(sl.linkUrl) : null,
-      durationSec: sl.durationSec,
-    })
-  }
-
-  return c.json({
-    clubName: setting('venue_name'),
-    theme: theme && SCREEN_THEMES.includes(theme) ? theme : 'night',
-    bandSec,
-    slides,
-    sections,
-  })
+  return c.json(await screenPayload(db, await defaultMenuScreen(db)))
 })
 
-// ── Реклама на экране меню: слайды (правит владелец в «Настройках» HUB) ─────
+// ── Реклама «Экрана меню» — прежний API (веб и приложение HUB до раздела «Экраны»).
+// Слайды теперь принадлежат экрану; новые клиенты ходят в /screens/:id/slides.
 const httpUrl = z.string().trim().max(1000).url().refine((u) => /^https?:\/\//i.test(u), 'Нужна ссылка http(s)')
 const SlideSchema = z.object({
   kind: z.enum(['image', 'card']),
@@ -220,7 +115,12 @@ const SlideSchema = z.object({
 
 menuRouter.get('/slides', requireAuth, requireRole('owner', 'staff'), async (c) => {
   const db = c.var.db
-  const slides = await db.select().from(screenSlides).orderBy(asc(screenSlides.sortOrder), asc(screenSlides.createdAt))
+  const screen = await defaultMenuScreen(db)
+  if (!screen) return c.json({ slides: [] })
+  // Только реклама ленты: элементы показа (миграция 069) старые сборки не знают.
+  const slides = await db.select().from(screenSlides)
+    .where(and(eq(screenSlides.screenId, screen.id), eq(screenSlides.placement, 'band')))
+    .orderBy(asc(screenSlides.sortOrder), asc(screenSlides.createdAt))
   return c.json({ slides })
 })
 
@@ -228,8 +128,13 @@ menuRouter.post('/slides', requireAuth, requireRole('owner'), zValidator('json',
   const db = c.var.db
   const body = c.req.valid('json')
   if (body.kind === 'image' && !body.imageUrl) return c.json({ error: 'Нужна картинка' }, 400)
-  const [last] = await db.select({ sortOrder: screenSlides.sortOrder }).from(screenSlides).orderBy(desc(screenSlides.sortOrder)).limit(1)
-  const [slide] = await db.insert(screenSlides).values({ ...body, sortOrder: (last?.sortOrder ?? -1) + 1 }).returning()
+  const screen = await defaultMenuScreen(db)
+  if (!screen) return c.json({ error: 'Нет экрана меню — добавьте его в «Экранах»' }, 404)
+  const [last] = await db.select({ sortOrder: screenSlides.sortOrder }).from(screenSlides)
+    .where(and(eq(screenSlides.screenId, screen.id), eq(screenSlides.placement, 'band')))
+    .orderBy(desc(screenSlides.sortOrder)).limit(1)
+  const [slide] = await db.insert(screenSlides)
+    .values({ ...body, screenId: screen.id, placement: 'band', sortOrder: (last?.sortOrder ?? -1) + 1 }).returning()
   return c.json({ slide }, 201)
 })
 
@@ -266,7 +171,8 @@ menuRouter.get('/items', async (c) => {
   const db = c.var.db
   const categoryId = c.req.query('categoryId')
   const tabletVisible = c.req.query('tabletVisible') === 'true'
-  const baseFilter = and(eq(inventory.isActive, true), isNull(inventory.deletedAt))
+  // Сырьё (kind='ingredient') — не позиция меню: в кассе и у гостей его нет.
+  const baseFilter = and(eq(inventory.isActive, true), isNull(inventory.deletedAt), eq(inventory.kind, 'goods'))
   const catFilter = categoryId ? and(baseFilter, eq(inventory.category, categoryId)) : baseFilter
   const where = tabletVisible ? and(catFilter, eq(inventory.isTabletVisible, true)) : catFilter
   const rows = await db
@@ -284,7 +190,7 @@ menuRouter.get('/items/all', requireAuth, async (c) => {
   const items = await db
     .select()
     .from(inventory)
-    .where(isNull(inventory.deletedAt))
+    .where(and(isNull(inventory.deletedAt), eq(inventory.kind, 'goods')))
     .orderBy(asc(inventory.sortOrder), asc(inventory.name))
   return c.json({ items })
 })

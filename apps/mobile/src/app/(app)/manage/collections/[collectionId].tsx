@@ -332,8 +332,13 @@ function MemberRow({
       <Spacer />
       {busy ? (
         <ProgressView />
+      ) : contribution && state === 'topUp' ? (
+        // Недобор при отметке за период: доплата наличными/переводом/СБП складывается с ней.
+        <HStack spacing={6}>
+          <Button label="Снять" onPress={onUnmark} modifiers={[buttonStyle('bordered'), controlSize('small')]} />
+          <Button label="Доплатить" onPress={onPay} modifiers={[buttonStyle('borderedProminent'), controlSize('small')]} />
+        </HStack>
       ) : contribution ? (
-        // Взнос уникален на период: доплата — это «снять и отметить полную сумму».
         <Button label="Снять" onPress={onUnmark} modifiers={[buttonStyle('bordered'), controlSize('small')]} />
       ) : state === 'prepaid' ? (
         <Text modifiers={[font({ textStyle: 'caption' }), foregroundStyle(colors.green)]}>аванс</Text>

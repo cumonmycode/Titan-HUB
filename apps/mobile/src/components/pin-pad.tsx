@@ -1,6 +1,6 @@
 import { SymbolView } from 'expo-symbols';
 import { useEffect } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
 import Animated, {
   useAnimatedStyle,
   useSharedValue,
@@ -9,14 +9,20 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 
+import { Text } from '@/components/text';
 import { GlassView } from '@/components/glass';
 import { haptic } from '@/lib/haptics';
-import { colors, springs } from '@/lib/theme';
+import { FONT_SCALE_MAX } from '@/lib/text-scale';
+import { colors, space, springs } from '@/lib/theme';
 
 const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '', '0', 'delete'] as const;
 export type PinKey = (typeof KEYS)[number];
 
 const KEY_SIZE = 78;
+/** Клавиши на невысоком экране: «Увеличенный» вид 14 Pro (320×693), iPhone SE. */
+const KEY_SIZE_SHORT = 68;
+const SHORT_SCREEN = 740;
+const GAP_X = 28;
 
 /** Точки PIN: заполняются пружиной, при ошибке экран встряхивается. */
 export function PinDots({ length, filled, shakeKey }: { length: number; filled: number; shakeKey: number }) {
@@ -60,15 +66,22 @@ function Dot({ active }: { active: boolean }) {
 
 /** Цифровая клавиатура из стеклянных клавиш iOS 26. */
 export function PinPad({ onKey, disabled, canDelete }: { onKey: (key: PinKey) => void; disabled?: boolean; canDelete: boolean }) {
+  // Клавиатура по размеру экрана: на «Увеличенном» виде (320×693) клавиши 78 pt не помещались
+  // по ширине и вместе с шапкой и кнопками выталкивали экран блокировки за край.
+  const { width, height } = useWindowDimensions();
+  const short = height < SHORT_SCREEN;
+  const size = Math.min(short ? KEY_SIZE_SHORT : KEY_SIZE, Math.floor((width - 2 * space.xl - 2 * GAP_X) / 3));
+  const cellSize = { width: size, height: size };
+  const keyShape = { width: size, height: size, borderRadius: size / 2 };
   return (
-    <View style={styles.pad}>
+    <View style={[styles.pad, { width: size * 3 + GAP_X * 2, rowGap: short ? 12 : 16 }]}>
       {KEYS.map((key, index) => {
-        if (key === '') return <View key={index} style={styles.cell} />;
+        if (key === '') return <View key={index} style={[styles.cell, cellSize]} />;
         if (key === 'delete') {
           return (
             <Pressable
               key={index}
-              style={styles.cell}
+              style={[styles.cell, cellSize]}
               disabled={disabled || !canDelete}
               onPress={() => {
                 haptic.selection();
@@ -81,8 +94,8 @@ export function PinPad({ onKey, disabled, canDelete }: { onKey: (key: PinKey) =>
           );
         }
         return (
-          <View key={index} style={styles.cell}>
-            <GlassView isInteractive style={styles.key}>
+          <View key={index} style={[styles.cell, cellSize]}>
+            <GlassView isInteractive style={[styles.key, keyShape]}>
               <Pressable
                 style={styles.keyPress}
                 disabled={disabled}
@@ -92,7 +105,10 @@ export function PinPad({ onKey, disabled, canDelete }: { onKey: (key: PinKey) =>
                 }}
                 accessibilityRole="button"
                 accessibilityLabel={key}>
-                <Text style={styles.digit}>{key}</Text>
+                {/* Цифра в круге фиксированного размера растёт чуть-чуть, как у системной клавиатуры. */}
+                <Text style={styles.digit} maxFontSizeMultiplier={FONT_SCALE_MAX.display}>
+                  {key}
+                </Text>
               </Pressable>
             </GlassView>
           </View>
@@ -113,15 +129,13 @@ const styles = StyleSheet.create({
   },
   dotActive: { backgroundColor: colors.label },
   pad: {
-    width: KEY_SIZE * 3 + 28 * 2,
     flexDirection: 'row',
     flexWrap: 'wrap',
-    rowGap: 16,
-    columnGap: 28,
+    columnGap: GAP_X,
     alignSelf: 'center',
   },
-  cell: { width: KEY_SIZE, height: KEY_SIZE, alignItems: 'center', justifyContent: 'center' },
-  key: { width: KEY_SIZE, height: KEY_SIZE, borderRadius: KEY_SIZE / 2, overflow: 'hidden' },
+  cell: { alignItems: 'center', justifyContent: 'center' },
+  key: { overflow: 'hidden' },
   keyPress: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   digit: { fontSize: 34, fontWeight: '400', color: colors.label, fontVariant: ['tabular-nums'] },
 });

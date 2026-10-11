@@ -17,6 +17,7 @@ import { signToken } from '@titan/auth'
 import { requireAuth } from '../../middleware/auth.js'
 import { visitProgress } from '../../lib/loyalty.js'
 import { round2 } from '../../lib/money.js'
+import { excusedMonthKeys, recurringOwed } from '../../lib/collectionDues.js'
 import { getActiveSbpProvider, getProvider, resolveCreds } from '../pay/registry.js'
 import { getClubIntegration } from '../../lib/secrets.js'
 import type { AppEnv } from '../../types.js'
@@ -96,14 +97,15 @@ export async function clientCollections(db: Database, profileId: string, tier: s
   const ids = list.map((c) => c.id)
   const curKey = currentPeriodKey()
 
-  const [members, periods, contribs] = await Promise.all([
+  const [members, periods, contribs, [self]] = await Promise.all([
     db.select().from(collectionMembers)
       .where(and(inArray(collectionMembers.collectionId, ids), eq(collectionMembers.playerId, profileId))),
     db.select().from(collectionPeriods).where(inArray(collectionPeriods.collectionId, ids)),
     db.select().from(collectionContributions)
       .where(and(inArray(collectionContributions.collectionId, ids), eq(collectionContributions.playerId, profileId))),
+    db.select({ createdAt: profiles.createdAt }).from(profiles).where(eq(profiles.id, profileId)).limit(1),
   ])
-  const now = mskNow()
+  const now = new Date()
 
   return list.map((coll): ClientCollection => {
     const m = members.find((x) => x.collectionId === coll.id)
@@ -124,10 +126,13 @@ export async function clientCollections(db: Database, profileId: string, tier: s
       if (isRecurring) {
         // Периоды до текущего включительно (текущий может быть ещё не создан).
         const upTo = collPeriods.filter((p) => p.periodKey < curKey)
-        const periodsCount = upTo.length + 1
         const pids = new Set([...upTo.map((p) => p.id), ...(period ? [period.id] : [])])
         const pool = contribs.filter((x) => pids.has(x.periodId)).reduce((s, x) => s + num(x.amount), 0)
-        const credit = round2(pool - periodsCount * due)
+        const owed = recurringOwed(
+          [...upTo.map((p) => ({ periodKey: p.periodKey, amount: num(p.amount) })), { periodKey: curKey, amount: periodAmount }],
+          { override: m?.amountOverride != null ? num(m.amountOverride) : null, memberSince: self?.createdAt ?? null, excused: excusedMonthKeys(m, now) },
+        )
+        const credit = round2(pool - owed)
         paid = credit >= -0.005
         if (credit < -0.005) topUp = round2(-credit)
         else if (credit > 0.005) {
@@ -431,6 +436,8 @@ residentRouter.post('/session/refresh', async (c) => {
   if (user.role !== 'client') return c.json({ error: 'Forbidden' }, 403)
   const [p] = await db.select().from(profiles).where(eq(profiles.id, user.sub))
   if (!p || p.deletedAt) return c.json({ error: 'Not found' }, 404)
-  const token = await signToken({ sub: p.id, role: p.role, nickname: p.nickname, clubId: c.var.club?.id ?? null }, '30d')
+  // Год, как при входе (APP_TOKEN_TTL в auth/app-login.ts): клиент входит один раз,
+  // а приложение раз в несколько дней меняет токен на свежий.
+  const token = await signToken({ sub: p.id, role: p.role, nickname: p.nickname, clubId: c.var.club?.id ?? null }, '365d')
   return c.json({ token })
 })

@@ -112,7 +112,12 @@ export type ResolvedModifiers = {
   hideScrollBackground?: boolean;
   lineLimit?: number;
   labelsHidden?: boolean;
+  /** frame(maxWidth: .infinity): вью занимает всю ширину, соседи в ряду делят её поровну. */
+  fill?: boolean;
 };
+
+/** maxWidth от этого значения — это `.infinity` SwiftUI (экраны пишут 10_000). */
+const INFINITE_WIDTH = 10_000;
 
 /**
  * SwiftUI принимает в foregroundStyle и имена цветов ('red'), и иерархию
@@ -192,7 +197,11 @@ export function resolve(modifiers?: ViewModifier[] | null): ResolvedModifiers {
       }
       case 'frame': {
         const spec = m.spec as Record<string, number>;
+        // Раньше maxWidth: .infinity становился просто ограничением ширины: плитки показателей
+        // и кнопки «Внести / Изъять» не растягивались и жались к левому краю.
+        if (spec?.maxWidth != null && spec.maxWidth >= INFINITE_WIDTH) out.fill = true;
         for (const key of ['width', 'height', 'minWidth', 'maxWidth', 'minHeight', 'maxHeight'] as const) {
+          if (key === 'maxWidth' && out.fill) continue;
           if (spec?.[key] != null) (out.style as Record<string, unknown>)[key] = spec[key];
         }
         break;

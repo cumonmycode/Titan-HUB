@@ -1,5 +1,6 @@
 import { createAsyncStoragePersister } from '@tanstack/query-async-storage-persister';
 import { QueryClient, focusManager, onlineManager } from '@tanstack/react-query';
+import Constants from 'expo-constants';
 import * as Network from 'expo-network';
 import Storage from 'expo-sqlite/kv-store';
 import { AppState } from 'react-native';
@@ -34,6 +35,13 @@ export const queryPersister = createAsyncStoragePersister({
 
 /** Дольше суток кэш не показываем — вчерашние остатки хуже, чем честное «нет данных». */
 export const CACHE_MAX_AGE = 24 * 60 * 60_000;
+
+/**
+ * Новая сборка начинает с чистого кэша: данные, сохранённые прошлой версией, могут быть
+ * в старом формате (так 0.3.0 (14) падала на экранах, сохранённых сборкой 13).
+ */
+const config = Constants.expoConfig;
+export const CACHE_BUSTER = `${config?.version ?? '0'}-${config?.ios?.buildNumber ?? config?.android?.versionCode ?? '0'}`;
 
 /** Перезапрашивать данные при возвращении в приложение, как refetchOnWindowFocus в вебе. */
 export function subscribeAppFocus() {

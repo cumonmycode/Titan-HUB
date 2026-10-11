@@ -2,10 +2,12 @@ import { db, profiles, notifications, appSettings, bonusHistory, type Database }
 import { eq, and, isNull, inArray, sql } from 'drizzle-orm'
 import { accrueBonusLot, expireBonuses, getBonusExpiryDays } from '../lib/bonusLots.js'
 import { getWhatsAppConfig, sendWhatsAppTemplate } from '../lib/whatsapp.js'
+import { notify } from '../modules/notifications/push.js'
 
 // database — БД клуба (пер-клубный cron). Дефолт = синглтон (одно-клубный режим /
 // основной клуб): поведение прежнее. Планировщик передаёт db каждого active-клуба.
-export async function checkBirthdays(database: Database = db) {
+// clubId — для SSE-канала уведомлений клуба (notify); null = основной домен.
+export async function checkBirthdays(database: Database = db, clubId: string | null = null) {
   // Ежедневный проход сгорания бонусов: список дней рождения мог быть пустым,
   // но сгорание должно отрабатывать каждый запуск. Изолируем от остального крона.
   try {
@@ -116,13 +118,15 @@ export async function checkBirthdays(database: Database = db) {
 
       if (existing.length > 0) continue
 
-      await database.insert(notifications).values({
+      // Через notify, а не прямой insert: иначе тип 'birthday' не доходил до push,
+      // iPhone-приложения, Telegram и SSE (только запись в ленте). notify не бросает.
+      await notify({
         type: 'birthday',
         title: '🎂 День рождения клиента',
         body,
         meta: { clientId: client.id, nickname: client.nickname, age },
         userId: owner.id,
-      })
+      }, database, clubId)
     }
   }
 

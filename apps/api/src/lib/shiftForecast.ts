@@ -11,10 +11,14 @@
  * «обычно оставляет N по M чекам».
  */
 import { checks, profiles, eq, and, inArray, gte, desc } from '@titan/database'
+import { getBusinessDayStartHour } from './appSettings.js'
 
 const RESIDENT_TIERS = ['resident', 'student', 'newbie']
 const num = (v: unknown) => parseFloat(String(v ?? 0)) || 0
-const mskWeekday = (d: Date) => new Date(d.getTime() + 3 * 3600 * 1000).getUTCDay()
+// День недели БИЗНЕС-ДНЯ по Москве: смена идёт за полночь, поэтому время до часа
+// начала бизнес-дня (по умолч. 9) относим к предыдущим суткам — в 01:00 воскресенья
+// субботняя смена берёт субботние средние, а не воскресные.
+const bizWeekday = (d: Date, startHour: number) => new Date(d.getTime() + (3 - startHour) * 3600 * 1000).getUTCDay()
 
 export interface PerCheckForecast {
   checkId: string
@@ -52,13 +56,14 @@ export async function computeShiftForecast(db: any, shiftId: string): Promise<Sh
         .orderBy(desc(checks.createdAt))
     : []
 
+  const startHour = await getBusinessDayStartHour(db)
   const byPlayer = new Map<string, { total: number; wd: number }[]>()
   for (const h of hist as any[]) {
     const arr = byPlayer.get(h.playerId) ?? []
-    if (arr.length < 40) arr.push({ total: num(h.total), wd: mskWeekday(new Date(h.createdAt)) })
+    if (arr.length < 40) arr.push({ total: num(h.total), wd: bizWeekday(new Date(h.createdAt), startHour) })
     byPlayer.set(h.playerId, arr)
   }
-  const todayWd = mskWeekday(new Date())
+  const todayWd = bizWeekday(new Date(), startHour)
 
   const perCheck: PerCheckForecast[] = (open as any[]).map((o) => {
     const current = num(o.total) + num(o.eventBase)

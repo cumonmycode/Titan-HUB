@@ -10,6 +10,7 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
+import android.graphics.Rect
 import android.os.BatteryManager
 import android.os.Build
 import android.provider.Settings
@@ -117,6 +118,11 @@ class TitanKioskModule : Module() {
   override fun definition() = ModuleDefinition {
     Name("TitanKiosk")
 
+    // Падение — не повод оставлять гостя на системном экране.
+    OnCreate {
+      appContext.reactContext?.let { CrashRestart.install(it) }
+    }
+
     Function("getStatus") {
       mapOf(
         "isDeviceOwner" to isDeviceOwner(),
@@ -190,6 +196,23 @@ class TitanKioskModule : Module() {
       }
       val intent = Intent(action).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
       runCatching { context.startActivity(intent) }.isSuccess
+    }.runOnQueue(Queues.MAIN)
+
+    /**
+     * Участки у края экрана, где жест «Назад» навигации жестами не перехватывает
+     * касание (язычок панели «Свет и климат»). Прямоугольники в dp:
+     * [left, top, right, bottom]; пустой список — снять. Android учитывает не
+     * больше 200 dp по высоте на каждый край.
+     */
+    AsyncFunction("setGestureExclusion") { rects: List<List<Double>> ->
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        withActivity { activity ->
+          val d = activity.resources.displayMetrics.density
+          activity.window.decorView.systemGestureExclusionRects = rects.filter { it.size == 4 }.map { (l, t, r, b) ->
+            Rect((l * d).toInt(), (t * d).toInt(), (r * d).toInt(), (b * d).toInt())
+          }
+        }
+      }
     }.runOnQueue(Queues.MAIN)
 
     /** Перезагрузка — только у владельца устройства. */

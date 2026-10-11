@@ -4,11 +4,9 @@ import { Link, useNavigation, useRouter } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
 import { makeImageFromView } from '@shopify/react-native-skia';
 import { useEffect, useEffectEvent, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Platform, Pressable, RefreshControl, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { ActivityIndicator, Alert, Platform, Pressable, RefreshControl, StyleSheet, useWindowDimensions, View } from 'react-native';
 import Animated, {
-  Easing,
   LayoutAnimationConfig,
-  LinearTransition,
   useAnimatedStyle,
   useSharedValue,
   withSpring,
@@ -17,12 +15,14 @@ import Animated, {
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { Text } from '@/components/text';
 import { GlassView } from '@/components/glass';
 import { AmbientBackdrop } from '@/components/ambient-backdrop';
 import { BirthdaysBanner } from '@/components/birthdays-banner';
 import { CheckCard, type CheckCardModel } from '@/components/check-card';
 import { CheckPanel } from '@/components/check-panel';
 import { Dissolve, type DissolveFrame } from '@/components/dissolve';
+import { HEM_RADIUS, HEM_SPACE, HomeShade, useHomeShade } from '@/components/home/home-shade';
 import { PrecheckCard } from '@/components/precheck-card';
 import { Unavailable } from '@/components/unavailable';
 import { cardLines, checkTitle, checkTotals, openedLabel } from '@/lib/checks';
@@ -30,6 +30,7 @@ import { createAccessoryScrollHandler } from '@/lib/chrome';
 import { plural } from '@/lib/format';
 import { haptic } from '@/lib/haptics';
 import { SPLIT_MIN_WIDTH, useSplitLayout } from '@/lib/layout';
+import { effectiveTextScale } from '@/lib/text-scale';
 import { useTabBarClearance } from '@/lib/tab-bar';
 import { checkNeedsAttention } from '@/lib/notifications';
 import { usePosSelection } from '@/lib/pos-selection';
@@ -50,10 +51,17 @@ const IS_PAD = Platform.OS === 'ios' && Platform.isPad;
 const GRID_PADDING = space.md - 2;
 /** Высота плашки смены над таб-баром (bottom accessory iOS 26). */
 const ACCESSORY_HEIGHT = 72;
+/**
+ * Самая узкая карточка чека в единицах текста (ширина / множитель шрифта). Уже — сетка
+ * теряет колонку: на «Увеличенном» виде с крупным текстом карточки встают по одной.
+ */
+const CARD_MIN_TEXT_WIDTH = 145;
+/** Карточка уже этого (в единицах текста) — плотная: меньше отступы, имя в две строки. */
+const CARD_COMPACT_TEXT_WIDTH = 175;
 
 /**
  * Новый чек появляется из точки. Закрытый рассыпается пылью, как удалённое сообщение
- * в Telegram (components/dissolve.tsx), а соседи быстро съезжают на его место.
+ * в Telegram (components/dissolve.tsx), а соседи встают на его место.
  */
 const cardEntering: EntryExitAnimationFunction = () => {
   'worklet';
@@ -77,12 +85,22 @@ const cardExiting: EntryExitAnimationFunction = () => {
   };
 };
 
-/** Раньше соседи переезжали пружиной почти секунду — теперь коротко и без раскачки. */
-const cardLayout = LinearTransition.duration(240).easing(Easing.out(Easing.cubic));
-
 /** Закрытая карточка: держим её в сетке, пока не сняли снимок для распыления. */
 type DyingCard = { model: CheckCardModel; index: number };
 type Ghost = { id: string; image: NonNullable<Awaited<ReturnType<typeof makeImageFromView>>>; frame: DissolveFrame };
+
+/** Ячейка сетки: открытый чек или предчек (предчеки — после чеков). */
+type GridItem = { kind: 'check'; key: string; model: CheckCardModel } | { kind: 'precheck'; key: string; precheck: Precheck };
+/** Рамка ячейки внутри её ряда и номер ряда: пыль ложится по ним в координатах сетки. */
+type CellFrame = DissolveFrame & { row: number };
+/** Какие ячейки были в прошлой раскладке — анимацию появления получают только новые. */
+type GridIds = { key: string; ids: ReadonlySet<string>; fresh: ReadonlySet<string> };
+
+function chunk<T>(items: T[], size: number): T[][] {
+  const rows: T[][] = [];
+  for (let i = 0; i < items.length; i += size) rows.push(items.slice(i, i + size));
+  return rows;
+}
 
 type TransitionEvents = {
   addListener: (type: 'transitionStart' | 'transitionEnd', callback: (e: { data: { closing: boolean } }) => void) => () => void;
@@ -128,19 +146,26 @@ export default function PosScreen() {
   // Android: сетка прокручивается под плавающей панелью с плашкой смены.
   const tabBarClearance = useTabBarClearance(true);
   const topBlur = useSharedValue(0);
+  // Свет и климат (Home Assistant): подол свёрнутой шторки лежит поверх кассы под строкой
+  // состояния, шапка (и панель чека на iPad) опускается только на его видимую часть.
+  const home = useHomeShade();
+  const topSpace = insets.top + (home.ready ? HEM_SPACE : 0);
 
   const wide = screenWidth === 0 ? window.width : screenWidth;
   const split = useSplitLayout() && wide >= SPLIT_MIN_WIDTH;
   // Как в веб-кассе: узкая колонка не должна ломать карточки (iPad Slide Over, боковая панель).
-  const columns = listWidth >= 980 ? 4 : listWidth >= 620 ? 3 : listWidth >= 280 ? 2 : 1;
+  // Колонки считаются в единицах текста: «Увеличенный» вид и крупный текст оставляют карточке
+  // меньше места под имя и сумму, и сетка переходит на одну колонку.
+  const textScale = effectiveTextScale(window.fontScale);
+  const maxColumns = listWidth >= 980 ? 4 : listWidth >= 620 ? 3 : 2;
+  const fitColumns = Math.floor((listWidth - GRID_PADDING * 2) / (CARD_MIN_TEXT_WIDTH * textScale));
+  const columns = Math.max(1, Math.min(maxColumns, fitColumns));
   const cellWidth = Math.floor((listWidth - GRID_PADDING * 2) / columns);
+  const compactCards = cellWidth / textScale < CARD_COMPACT_TEXT_WIDTH;
   const unreadCount = (notifications.data ?? []).filter((n) => !n.isRead).length;
   const count = checks.data?.length ?? 0;
 
-  const liveData = useMemo(
-    () => (checks.data ?? []).map((c) => toModel(c, notifications.data, now)),
-    [checks.data, notifications.data, now],
-  );
+  const liveData = useMemo(() => (checks.data ?? []).map((c) => toModel(c, notifications.data, now)), [checks.data, notifications.data, now]);
 
   // Пока поверх кассы открыт чек, сетку не меняем: при закрытии чек должен свернуться
   // зумом обратно в свою карточку. Оплаченная карточка растворяется уже после возврата.
@@ -187,16 +212,25 @@ export default function PosScreen() {
     return out;
   }, [data, dying]);
   const ghostIds = new Set(ghosts.map((g) => g.id));
+  const dyingIds = new Set(dying.map((d) => d.model.id));
 
   const cellNodes = useRef(new Map<string, View>());
-  const cellFrames = useRef(new Map<string, DissolveFrame>());
+  const cellFrames = useRef(new Map<string, CellFrame>());
+  // Верх каждого ряда в сетке: ячейка знает своё место только внутри ряда.
+  const rowTops = useRef(new Map<number, number>());
   const snapping = useRef(new Set<string>());
   useEffect(() => {
+    const frameInGrid = (id: string): DissolveFrame | null => {
+      const cell = cellFrames.current.get(id);
+      const rowTop = cell ? rowTops.current.get(cell.row) : undefined;
+      if (!cell || rowTop === undefined) return null;
+      return { x: cell.x, y: rowTop + cell.y, width: cell.width, height: cell.height };
+    };
     const vanish = async (id: string) => {
       // Первый кадр отдаём сетке: карточка должна успеть отрисоваться на своём месте.
       await new Promise((r) => requestAnimationFrame(r));
       const node = cellNodes.current.get(id);
-      const frame = cellFrames.current.get(id);
+      const frame = frameInGrid(id);
       let image: Ghost['image'] | null = null;
       if (node && frame) image = await makeImageFromView({ current: node }).catch(() => null);
       if (image && frame) {
@@ -236,16 +270,49 @@ export default function PosScreen() {
 
   const precheckList = prechecks.data ?? [];
 
+  // Сетка — явными рядами по `columns`: высоту ряда задаёт самая высокая карточка, а верх
+  // следующего ряда — обычная раскладка. Анимации переезда (layout) нет: из-за неё ряды
+  // оставались на старых местах, и подросшая карточка уходила под соседний ряд.
+  const gridItems: GridItem[] = [
+    ...shown.map((model) => ({ kind: 'check' as const, key: model.id, model })),
+    ...precheckList.map((precheck) => ({ kind: 'precheck' as const, key: `pre-${precheck.playerId}`, precheck })),
+  ];
+  const gridRows = chunk(gridItems, columns);
+  // Переехавшая в другой ряд карточка монтируется заново — появляется она без анимации,
+  // «из точки» встают только новые чеки и предчеки.
+  const gridKey = gridItems.map((item) => item.key).join('\n');
+  const [gridIds, setGridIds] = useState<GridIds>({ key: '', ids: new Set(), fresh: new Set() });
+  if (gridIds.key !== gridKey) {
+    const ids = new Set(gridItems.map((item) => item.key));
+    setGridIds({ key: gridKey, ids, fresh: new Set([...ids].filter((id) => !gridIds.ids.has(id))) });
+  }
+
   const header = (
     <View style={styles.header}>
       <View style={styles.titles}>
         <Text style={[type.largeTitle, styles.title]}>Касса</Text>
         <Text style={[type.subhead, styles.subtitle]}>
-          {checks.isLoading ? 'Загружаем чеки…' : count === 0 ? 'Открытых чеков нет' : `${count} ${plural(count, ['открытый чек', 'открытых чека', 'открытых чеков'])}`}
+          {checks.isLoading
+            ? 'Загружаем чеки…'
+            : count === 0
+              ? 'Открытых чеков нет'
+              : `${count} ${plural(count, ['открытый чек', 'открытых чека', 'открытых чеков'])}`}
         </Text>
       </View>
       {/* Соседние стеклянные кнопки — в контейнере: при сближении система сливает их, как в iOS 26. */}
       <GlassContainer spacing={18} style={styles.headerActions}>
+        <GlassView isInteractive style={styles.bell}>
+          <Pressable
+            style={styles.bellPress}
+            onPress={() => {
+              haptic.light();
+              router.push({ pathname: '/tai', params: { screen: 'pos' } });
+            }}
+            accessibilityRole="button"
+            accessibilityLabel="Спросить Tai">
+            <SymbolView name="sparkles" size={19} weight="medium" tintColor={colors.accent} />
+          </Pressable>
+        </GlassView>
         <GlassView isInteractive style={styles.bell}>
           <Pressable
             style={styles.bellPress}
@@ -281,6 +348,7 @@ export default function PosScreen() {
           <CheckCard
             model={item}
             glassKey={glassKey}
+            compact={compactCards}
             onPress={() => {
               haptic.selection();
               setSelectedId(item.id);
@@ -296,6 +364,7 @@ export default function PosScreen() {
         <CheckCard
           model={item}
           glassKey={glassKey}
+          compact={compactCards}
           onPress={() => {
             haptic.selection();
             router.push({ pathname: '/pos/[checkId]', params: { checkId: item.id } });
@@ -319,7 +388,7 @@ export default function PosScreen() {
       <Link href={{ pathname: '/pos/[checkId]', params: { checkId: item.id } }} asChild>
         {/* Чек раскрывается из карточки и сворачивается обратно в неё (зум iOS 18+). */}
         <Link.Trigger withAppleZoom>
-          <CheckCard model={item} glassKey={glassKey} />
+          <CheckCard model={item} glassKey={glassKey} compact={compactCards} />
         </Link.Trigger>
         <Link.Preview />
         <Link.Menu>
@@ -346,7 +415,7 @@ export default function PosScreen() {
         contentInsetAdjustmentBehavior="never"
         contentContainerStyle={[
           styles.content,
-          { paddingTop: insets.top, paddingLeft: GRID_PADDING + insets.left, paddingRight: GRID_PADDING + insets.right },
+          { paddingTop: topSpace, paddingLeft: GRID_PADDING + insets.left, paddingRight: GRID_PADDING + insets.right },
           tabBarClearance > 0 && { paddingBottom: tabBarClearance + space.lg },
         ]}
         scrollEventThrottle={32}
@@ -360,9 +429,7 @@ export default function PosScreen() {
             topBlur.set(withTiming(blurred ? 1 : 0, { duration: 160 }));
           }
         }}
-        refreshControl={
-          <RefreshControl tintColor={colors.accent} progressViewOffset={insets.top} refreshing={pulling} onRefresh={refresh} />
-        }>
+        refreshControl={<RefreshControl tintColor={colors.accent} progressViewOffset={topSpace} refreshing={pulling} onRefresh={refresh} />}>
         {header}
 
         <BirthdaysBanner />
@@ -376,9 +443,7 @@ export default function PosScreen() {
             <Unavailable
               title={checks.isError ? 'Нет связи с кассой' : 'Нет открытых чеков'}
               systemImage={checks.isError ? 'wifi.exclamationmark' : 'rublesign.circle'}
-              description={
-                checks.isError ? checks.error.message : IS_PAD ? 'Новый чек — кнопка в плашке смены внизу.' : 'Новый чек — кнопка «Новый» внизу.'
-              }
+              description={checks.isError ? checks.error.message : IS_PAD ? 'Новый чек — кнопка в плашке смены внизу.' : 'Новый чек — кнопка «Новый» внизу.'}
             />
           </View>
         ) : null}
@@ -386,38 +451,42 @@ export default function PosScreen() {
         {/* Первую загрузку не анимируем; дальше новые и закрытые чеки появляются и растворяются. */}
         {listWidth > 0 && !checks.isLoading && (
           <LayoutAnimationConfig skipEntering>
-            <View style={styles.grid}>
-              {shown.map((item) => (
-                <Animated.View
-                  key={item.id}
-                  ref={(node: View | null) => {
-                    if (node) cellNodes.current.set(item.id, node);
-                    else cellNodes.current.delete(item.id);
-                  }}
-                  collapsable={false}
-                  onLayout={(e) => cellFrames.current.set(item.id, e.nativeEvent.layout)}
-                  layout={cardLayout}
-                  entering={cardEntering}
-                  // Рассыпавшуюся карточку прячет пыль поверх неё; без снимка — короткое растворение.
-                  exiting={ghostIds.has(item.id) ? undefined : cardExiting}
-                  style={[styles.cell, { width: cellWidth }]}>
-                  {renderCard(item)}
-                </Animated.View>
-              ))}
-              {precheckList.map((precheck) => (
-                <Animated.View
-                  key={`pre-${precheck.playerId}`}
-                  layout={cardLayout}
-                  entering={cardEntering}
-                  exiting={cardExiting}
-                  style={[styles.cell, { width: cellWidth }]}>
-                  <PrecheckCard
-                    precheck={precheck}
-                    glassKey={glassKey}
-                    busy={openingPrecheck === precheck.playerId}
-                    onOpen={() => void onOpenPrecheck(precheck)}
-                  />
-                </Animated.View>
+            <View>
+              {gridRows.map((row, rowIndex) => (
+                <View key={rowIndex} style={styles.row} onLayout={(e) => rowTops.current.set(rowIndex, e.nativeEvent.layout.y)}>
+                  {row.map((item) =>
+                    item.kind === 'check' ? (
+                      <Animated.View
+                        key={item.key}
+                        ref={(node: View | null) => {
+                          if (node) cellNodes.current.set(item.key, node);
+                          else cellNodes.current.delete(item.key);
+                        }}
+                        collapsable={false}
+                        onLayout={(e) => cellFrames.current.set(item.key, { ...e.nativeEvent.layout, row: rowIndex })}
+                        entering={gridIds.fresh.has(item.key) ? cardEntering : undefined}
+                        // Чек уходит из сетки только через «умирание»: рассыпавшуюся карточку прячет
+                        // пыль поверх неё, без снимка — короткое растворение.
+                        exiting={dyingIds.has(item.key) && !ghostIds.has(item.key) ? cardExiting : undefined}
+                        style={[styles.cell, { width: cellWidth }]}>
+                        {renderCard(item.model)}
+                      </Animated.View>
+                    ) : (
+                      <Animated.View
+                        key={item.key}
+                        entering={gridIds.fresh.has(item.key) ? cardEntering : undefined}
+                        style={[styles.cell, { width: cellWidth }]}>
+                        <PrecheckCard
+                          precheck={item.precheck}
+                          glassKey={glassKey}
+                          compact={compactCards}
+                          busy={openingPrecheck === item.precheck.playerId}
+                          onOpen={() => void onOpenPrecheck(item.precheck)}
+                        />
+                      </Animated.View>
+                    ),
+                  )}
+                </View>
               ))}
               {ghosts.length > 0 && (
                 <View pointerEvents="none" style={styles.dust}>
@@ -439,8 +508,10 @@ export default function PosScreen() {
         )}
       </Animated.ScrollView>
 
-      {/* Размытие под статус-баром, когда карточки уезжают под него. */}
-      <Animated.View pointerEvents="none" style={[styles.topBlur, { height: insets.top }, topBlurStyle]}>
+      {/* Размытие под статус-баром, когда карточки уезжают под него; с краем шторки — его формы. */}
+      <Animated.View
+        pointerEvents="none"
+        style={[styles.topBlur, home.ready && styles.topBlurHem, { height: topSpace + (home.ready ? HEM_RADIUS : 0) }, topBlurStyle]}>
         <BlurView intensity={80} tint={BLUR_TINT} style={styles.blurFill} />
       </Animated.View>
     </View>
@@ -450,6 +521,7 @@ export default function PosScreen() {
     return (
       <AmbientBackdrop style={styles.screen} onLayout={(e) => setScreenWidth(e.nativeEvent.layout.width)}>
         {list}
+        {home.ready && <HomeShade home={home} />}
       </AmbientBackdrop>
     );
   }
@@ -457,16 +529,18 @@ export default function PosScreen() {
   const selectedExists = !!selectedId && (checks.data ?? []).some((c) => c.id === selectedId);
   // Под панелью парит плашка смены (bottom accessory). Если система не учла её в safe area,
   // добавляем высоту плашки сами — иначе «Добавить» и «Оплатить» оказываются под ней.
-  const panelBottom =
-    tabBarClearance > 0 ? tabBarClearance + space.md : (insets.bottom >= 60 ? insets.bottom : insets.bottom + ACCESSORY_HEIGHT) + space.md;
+  const panelBottom = tabBarClearance > 0 ? tabBarClearance + space.md : (insets.bottom >= 60 ? insets.bottom : insets.bottom + ACCESSORY_HEIGHT) + space.md;
 
   return (
     <AmbientBackdrop style={[styles.screen, styles.splitRow]} onLayout={(e) => setScreenWidth(e.nativeEvent.layout.width)}>
       {list}
+      {/* Шторка — во всю ширину кассы, поверх окна (слой окна на iOS). Место в ряду — то же,
+          что без сплита: при повороте iPad шторка и связь с домом не пересоздаются. */}
+      {home.ready && <HomeShade home={home} />}
       <View
         style={[
           styles.panelWrap,
-          { paddingTop: insets.top + space.sm, paddingRight: space.md + insets.right, paddingBottom: panelBottom, width: Math.min(480, wide * 0.42) },
+          { paddingTop: topSpace + space.sm, paddingRight: space.md + insets.right, paddingBottom: panelBottom, width: Math.min(480, wide * 0.42) },
         ]}>
         <CheckPanel checkId={selectedExists ? selectedId : null} />
       </View>
@@ -495,7 +569,7 @@ const styles = StyleSheet.create({
   bellPress: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   content: { paddingHorizontal: GRID_PADDING, paddingBottom: 140 },
   // Карточки одного ряда тянутся до самой высокой — сетка ровная.
-  grid: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'stretch' },
+  row: { flexDirection: 'row', alignItems: 'stretch' },
   cell: { padding: 6 },
   // Слой пыли над сеткой: пылинки разлетаются за края карточки, поэтому без обрезки.
   dust: { position: 'absolute', top: 0, left: 0, width: 0, height: 0, overflow: 'visible', zIndex: 10, elevation: 10 },
@@ -503,6 +577,8 @@ const styles = StyleSheet.create({
   center: { paddingTop: 120, alignItems: 'center' },
   empty: { height: 420 },
   topBlur: { position: 'absolute', top: 0, left: 0, right: 0 },
+  // Как край шторки (home-hem.tsx): выше экрана на радиус, скруглённый низ.
+  topBlurHem: { top: -HEM_RADIUS, borderRadius: HEM_RADIUS, borderCurve: 'continuous', overflow: 'hidden' },
   blurFill: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
   panelWrap: { paddingRight: space.md, paddingBottom: space.md },
 });

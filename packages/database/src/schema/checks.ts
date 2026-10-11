@@ -61,7 +61,8 @@ export const checks = pgTable('checks', {
   eventBaseAmount: numeric('event_base_amount', { precision: 12, scale: 2 }),
   // Заранее «внесённая» часть (напр. предоплата участия в миникапе): на экране
   // оплаты вычитается из остатка, но входит в пробиваемый итог (при закрытии
-  // авто-пробивается наличными). Выручка считается один раз по полному total.
+  // пишется отдельным платежом «перевод» — в кассу смены эти деньги не поступали).
+  // Выручка считается один раз по полному total.
   prepaidAmount: numeric('prepaid_amount', { precision: 12, scale: 2 }).notNull().default('0'),
   // Чаевые по QR/СБП (поверх суммы товаров). Хранятся на чеке для валидации в
   // webhook'е Platega и фиксации фактически уплаченных чаевых. См. 028_*.sql.
@@ -72,6 +73,15 @@ export const checks = pgTable('checks', {
   // «Добавить комиссию 8%?»). >0 ⇒ комиссию закрыл покупатель — потерей владельца НЕ
   // считается; 0 ⇒ 8% удержал банк из выручки владельца (потеря). См. 047_*.sql.
   acquiringSurcharge: numeric('acquiring_surcharge', { precision: 12, scale: 2 }).notNull().default('0'),
+  // Последний СБП-QR: товарная сумма (без чаевых/надбавки), момент выставления и id
+  // транзакции эквайера. Вебхук по этой транзакции закрывает чек на сумму QR, а
+  // аренду завершает в момент QR (живая аренда не «тикает» до оплаты). См. 073_*.sql.
+  sbpQrAmount: numeric('sbp_qr_amount', { precision: 12, scale: 2 }),
+  sbpQrAt: timestamp('sbp_qr_at', { withTimezone: true }),
+  sbpQrTxId: text('sbp_qr_tx_id'),
+  // Фактически начисленные бонусы при закрытии чека (0 — не начислялись). По нему
+  // возврат откатывает начисление; NULL — старые чеки (прежняя формула). См. 075_*.sql.
+  bonusAwarded: numeric('bonus_awarded', { precision: 12, scale: 2 }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   closedAt: timestamp('closed_at', { withTimezone: true }),
 })

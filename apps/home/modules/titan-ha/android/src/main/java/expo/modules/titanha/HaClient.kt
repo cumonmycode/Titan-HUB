@@ -18,6 +18,12 @@ import java.util.concurrent.TimeUnit
 /** Подключение к Home Assistant: адрес и долгосрочный токен из Titan HUB, устройства кабинки. */
 data class HaConfig(val url: String, val token: String, val entityIds: List<String>)
 
+/** Подписчик на изменения: статус связи и изменившиеся устройства (JSON id → сущность|null). */
+interface HaListener {
+  fun onStatus(status: String, error: String?)
+  fun onEntities(json: String)
+}
+
 /**
  * Постоянное соединение планшета с Home Assistant по локальной сети (WebSocket API).
  *
@@ -26,6 +32,10 @@ data class HaConfig(val url: String, val token: String, val entityIds: List<Stri
  * перекладываются. Состояния устройств — подписка subscribe_entities; обрыв —
  * переподключение с паузой 1→30 с, а при появлении сети — сразу; неверный токен —
  * без повторов (нужно исправить токен в Titan HUB).
+ *
+ * Экрану отдаём только изменения: изменившиеся устройства копятся 100 мс и уходят
+ * одним событием. Команды, пришедшие во время переподключения, ждут в очереди
+ * до своего тайм-аута и уходят, как только связь вернётся.
  */
 object HaClient {
   private val thread = HandlerThread("titan-ha").apply { start() }
@@ -41,6 +51,7 @@ object HaClient {
   private val retrySteps = longArrayOf(1_000, 2_000, 5_000, 10_000, 20_000, 30_000)
 
   private class Pending(val callback: (Any?, String?) -> Unit, val timeout: Runnable)
+  private class Queued(val payload: JSONObject, val callback: (Any?, String?) -> Unit, val timeout: Runnable)
 
   private var config: HaConfig? = null
   private var socket: WebSocket? = null
@@ -51,8 +62,11 @@ object HaClient {
   private var retry = 0
   private val entities = LinkedHashMap<String, JSONObject>()
   private val pending = HashMap<Int, Pending>()
-  private val listeners = CopyOnWriteArraySet<() -> Unit>()
+  private val queue = ArrayList<Queued>()
+  private val dirty = LinkedHashSet<String>()
+  private val listeners = CopyOnWriteArraySet<HaListener>()
   private var networkCallback: ConnectivityManager.NetworkCallback? = null
+  private var appContext: Context? = null
 
   @Volatile var status = "idle"
     private set
@@ -60,6 +74,7 @@ object HaClient {
   @Volatile private var snapshotJson = """{"status":"idle","error":null,"entities":{}}"""
 
   private val reconnectRunnable = Runnable { open() }
+  private val flushRunnable = Runnable { flushEntities() }
   private val pongTimeout = Runnable { socket?.cancel() }
   private val pingRunnable: Runnable = object : Runnable {
     override fun run() {
@@ -76,6 +91,7 @@ object HaClient {
   /** Подключиться; повторный вызов с той же конфигурацией ничего не рвёт. */
   fun start(context: Context, cfg: HaConfig) {
     handler.post {
+      appContext = context.applicationContext
       registerNetwork(context.applicationContext)
       val same = cfg == config
       if (same && (status == "connected" || status == "connecting")) return@post
@@ -91,7 +107,11 @@ object HaClient {
       config = null
       handler.removeCallbacks(reconnectRunnable)
       closeSocket()
+      failQueue("Умный дом отключён")
+      val removed = entities.keys.toList()
       entities.clear()
+      dirty.addAll(removed)
+      flushEntities()
       setStatus("idle", null, force = true)
     }
   }
@@ -107,29 +127,73 @@ object HaClient {
 
   fun snapshot(): String = snapshotJson
 
-  fun addListener(listener: () -> Unit) {
+  fun addListener(listener: HaListener) {
     listeners.add(listener)
   }
 
-  fun removeListener(listener: () -> Unit) {
+  fun removeListener(listener: HaListener) {
     listeners.remove(listener)
   }
 
-  /** Команда в HA (call_service, get_states). Ответ — result или текст ошибки. */
+  /**
+   * Команда в HA (call_service, get_states). Ответ — result или текст ошибки.
+   * Связь переподнимается — команда ждёт в очереди (не дольше timeoutMs).
+   */
   fun request(payload: JSONObject, timeoutMs: Long, callback: (Any?, String?) -> Unit) {
     handler.post {
-      if (socket == null || status != "connected") {
-        callback(null, "Нет связи с Home Assistant")
+      if (config == null) {
+        callback(null, "Умный дом не настроен")
         return@post
       }
-      val id = seq++
-      payload.put("id", id)
-      val timeout = Runnable {
-        pending.remove(id)?.callback?.invoke(null, "Home Assistant не ответил")
+      if (socket != null && status == "connected") {
+        dispatch(payload, timeoutMs, callback)
+        return@post
       }
-      pending[id] = Pending(callback, timeout)
+      lateinit var queued: Queued
+      val timeout = Runnable {
+        if (queue.remove(queued)) queued.callback(null, "Нет связи с Home Assistant")
+      }
+      queued = Queued(payload, callback, timeout)
+      queue.add(queued)
       handler.postDelayed(timeout, timeoutMs)
-      send(payload)
+      // Ждём паузы перед повтором — не ждём, подключаемся сейчас. Идущее
+      // подключение не трогаем: команда уйдёт, как только оно завершится.
+      if (status == "offline") {
+        retry = 0
+        reconnect()
+      }
+    }
+  }
+
+  private fun dispatch(payload: JSONObject, timeoutMs: Long, callback: (Any?, String?) -> Unit) {
+    val id = seq++
+    payload.put("id", id)
+    val timeout = Runnable {
+      pending.remove(id)?.callback?.invoke(null, "Home Assistant не ответил")
+    }
+    pending[id] = Pending(callback, timeout)
+    handler.postDelayed(timeout, timeoutMs)
+    send(payload)
+  }
+
+  /** Связь вернулась — отправляем накопленные команды (их тайм-аут уже идёт). */
+  private fun flushQueue() {
+    if (queue.isEmpty()) return
+    val all = queue.toList()
+    queue.clear()
+    for (q in all) {
+      handler.removeCallbacks(q.timeout)
+      dispatch(q.payload, COMMAND_TIMEOUT_MS, q.callback)
+    }
+  }
+
+  private fun failQueue(message: String) {
+    if (queue.isEmpty()) return
+    val all = queue.toList()
+    queue.clear()
+    for (q in all) {
+      handler.removeCallbacks(q.timeout)
+      q.callback(null, message)
     }
   }
 
@@ -262,10 +326,12 @@ object HaClient {
         setStatus("connected", null)
         subscribe()
         startPing()
+        flushQueue()
       }
       "auth_invalid" -> {
         setStatus("auth_failed", "Home Assistant не принял токен")
         closeSocket()
+        failQueue("Home Assistant не принял токен")
       }
       "result" -> {
         val p = pending.remove(msg.optInt("id", -1)) ?: return
@@ -301,6 +367,7 @@ object HaClient {
           .put("entity_id", id)
           .put("state", s.optString("s", "unknown"))
           .put("attributes", s.optJSONObject("a") ?: JSONObject())
+        dirty.add(id)
       }
     }
     event.optJSONObject("c")?.let { changed ->
@@ -315,12 +382,40 @@ object HaClient {
         diff.optJSONObject("-")?.optJSONArray("a")?.let { removed ->
           for (i in 0 until removed.length()) attrs.remove(removed.optString(i))
         }
+        dirty.add(id)
       }
     }
     event.optJSONArray("r")?.let { removed ->
-      for (i in 0 until removed.length()) entities.remove(removed.optString(i))
+      for (i in 0 until removed.length()) {
+        val id = removed.optString(i)
+        entities.remove(id)
+        dirty.add(id)
+      }
     }
-    publish()
+    rememberModes()
+    handler.removeCallbacks(flushRunnable)
+    handler.postDelayed(flushRunnable, FLUSH_DELAY_MS)
+  }
+
+  /** Последний рабочий режим кондиционеров — «включить» вернёт его даже после перезапуска. */
+  private fun rememberModes() {
+    val ctx = appContext ?: return
+    for (id in dirty) {
+      if (!id.startsWith("climate.")) continue
+      val mode = entities[id]?.optString("state") ?: continue
+      if (mode.isNotEmpty() && mode != "off" && mode != "unavailable" && mode != "unknown") HaPrefs.saveLastMode(ctx, id, mode)
+    }
+  }
+
+  private fun flushEntities() {
+    handler.removeCallbacks(flushRunnable)
+    if (dirty.isEmpty()) return
+    val patch = JSONObject()
+    for (id in dirty) patch.put(id, entities[id] ?: JSONObject.NULL)
+    dirty.clear()
+    rebuildSnapshot()
+    val json = patch.toString()
+    for (l in listeners) l.onEntities(json)
   }
 
   // ───────────────────────────── Состояние ─────────────────────────────
@@ -329,10 +424,11 @@ object HaClient {
     if (!force && next == status && err == error) return
     status = next
     error = err
-    publish()
+    rebuildSnapshot()
+    for (l in listeners) l.onStatus(next, err)
   }
 
-  private fun publish() {
+  private fun rebuildSnapshot() {
     val all = JSONObject()
     for ((id, e) in entities) all.put(id, e)
     snapshotJson = JSONObject()
@@ -340,6 +436,8 @@ object HaClient {
       .put("error", error ?: JSONObject.NULL)
       .put("entities", all)
       .toString()
-    for (l in listeners) l()
   }
+
+  private const val FLUSH_DELAY_MS = 100L
+  const val COMMAND_TIMEOUT_MS = 10_000L
 }

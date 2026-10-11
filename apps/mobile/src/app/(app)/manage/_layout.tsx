@@ -29,11 +29,18 @@ export default function ManageLayout() {
       {/* Корень — нативная форма, как «Настройки» iOS: крупный заголовок в шапке Liquid Glass. */}
       <Stack.Screen name="index" options={formHeader({ title: 'Управление', headerLargeTitle: true })} />
 
-      <Stack.Screen name="menu/index" options={formHeader({ title: 'Меню' })} />
-      <Stack.Screen name="menu/[categoryId]" options={formHeader()} />
-      <Stack.Screen name="menu/item" options={editorModal} />
-      <Stack.Screen name="menu/category" options={editorModal} />
-      <Stack.Screen name="menu/reorder" options={editorModal} />
+      {/* «Товары»: меню, остатки и операции склада (2026-10-08 вместо «Меню» и «Склада»). */}
+      <Stack.Screen name="goods/index" options={formHeader({ title: 'Товары' })} />
+      <Stack.Screen name="goods/[itemId]" options={formHeader()} />
+      <Stack.Screen name="goods/edit" options={editorModal} />
+      <Stack.Screen name="goods/pick" options={editorModal} />
+      <Stack.Screen name="goods/categories" options={formHeader({ title: 'Категории' })} />
+      <Stack.Screen name="goods/category" options={editorModal} />
+      <Stack.Screen name="goods/reorder" options={editorModal} />
+      <Stack.Screen name="goods/supply" options={formHeader()} />
+      <Stack.Screen name="goods/write-off" options={formHeader()} />
+      <Stack.Screen name="goods/revision" options={formHeader()} />
+      <Stack.Screen name="goods/doc" options={formHeader()} />
 
       <Stack.Screen name="pricing/index" options={formHeader({ title: 'Тарифы и аренда' })} />
       <Stack.Screen name="pricing/tariff" options={editorModal} />
@@ -41,16 +48,9 @@ export default function ManageLayout() {
       <Stack.Screen name="pricing/space" options={editorModal} />
       <Stack.Screen name="pricing/rate" options={editorModal} />
 
-      <Stack.Screen name="inventory/index" options={formHeader({ title: 'Склад' })} />
-      <Stack.Screen name="inventory/[itemId]" options={formHeader()} />
-      <Stack.Screen name="inventory/stock-action" options={compactSheet} />
-      <Stack.Screen name="inventory/supply/[supplyId]" options={formHeader()} />
-      <Stack.Screen name="inventory/supply-editor" options={formHeader()} />
-      <Stack.Screen name="inventory/revision/[revisionId]" options={formHeader()} />
-      <Stack.Screen name="inventory/revision-editor" options={formHeader()} />
-      <Stack.Screen name="inventory/expense-new" options={editorModal} />
-
       <Stack.Screen name="salary/index" options={formHeader({ title: 'Зарплата' })} />
+      <Stack.Screen name="expenses/index" options={formHeader({ title: 'Расходы' })} />
+      <Stack.Screen name="expenses/new" options={editorModal} />
 
       <Stack.Screen name="shifts/index" options={formHeader({ title: 'Смены' })} />
       <Stack.Screen name="shifts/[shiftId]" options={formHeader({ title: 'Отчёт смены' })} />
@@ -94,11 +94,22 @@ export default function ManageLayout() {
       <Stack.Screen name="settings/booking" options={formHeader({ title: 'Онлайн-бронирование' })} />
       <Stack.Screen name="settings/reviews" options={formHeader({ title: 'Отзывы гостей' })} />
       <Stack.Screen name="settings/integrations" options={formHeader({ title: 'Интеграции' })} />
-      <Stack.Screen name="settings/screen" options={formHeader({ title: 'Titan Menu' })} />
-      <Stack.Screen name="settings/screen-slide" options={editorModal} />
+      {/* Home Assistant для HUB: подключение и помещения шторки «Свет и климат» на кассе. */}
+      <Stack.Screen name="settings/home/index" options={formHeader({ title: 'Home Assistant' })} />
+      <Stack.Screen name="settings/home/zone" options={formHeader()} />
+      <Stack.Screen name="settings/home/devices" options={editorModal} />
+      <Stack.Screen name="settings/home/reorder" options={editorModal} />
+
+      <Stack.Screen name="screens/index" options={formHeader({ title: 'Экраны' })} />
+      <Stack.Screen name="screens/[screenId]" options={formHeader()} />
+      <Stack.Screen name="screens/connect" options={formHeader({ title: 'Подключить ТВ' })} />
+      <Stack.Screen name="screens/new" options={editorModal} />
+      <Stack.Screen name="screens/slide" options={editorModal} />
 
       <Stack.Screen name="polls/index" options={formHeader({ title: 'Опросы' })} />
       <Stack.Screen name="polls/edit" options={editorModal} />
+
+      <Stack.Screen name="tai/index" options={formHeader({ title: 'Tai' })} />
 
       <Stack.Screen name="about/index" options={formHeader({ title: 'О системе' })} />
     </Stack>

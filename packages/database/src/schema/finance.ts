@@ -102,17 +102,20 @@ export const supplies = pgTable('supplies', {
   // (рабочее состояние в draftData, остатки/WAC не тронуты). Миграция 046.
   status: text('status').notNull().default('posted'),
   draftData: jsonb('draft_data').$type<{
-    note?: string; supplier?: string
-    items: { itemId?: string | null; name?: string; unit?: string; quantity: number; costPerUnit: number }[]
+    note?: string; supplier?: string; paymentMethod?: 'cash' | 'card' | 'transfer'; fromRegister?: boolean
+    items: { itemId?: string | null; name?: string; unit?: string; quantity: number; costPerUnit: number; packs?: number | null }[]
   }>(),
   note: text('note'),
   supplier: text('supplier'),
   totalCost: numeric('total_cost', { precision: 12, scale: 2 }).notNull().default('0'),
   paymentMethod: paymentMethodEnum('payment_method').notNull().default('cash'),
+  // Оплачено наличными из кассы смены — выдача из кассы (cash_operations, миграция 070).
+  cashOperationId: uuid('cash_operation_id'),
   createdBy: uuid('created_by')
     .notNull()
     .references(() => profiles.id),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }),
 })
 
 export const supplyItems = pgTable('supply_items', {
@@ -125,7 +128,9 @@ export const supplyItems = pgTable('supply_items', {
   name: text('name'),
   unit: text('unit').notNull().default('шт'),
   quantity: numeric('quantity', { precision: 10, scale: 2 }).notNull(),
-  costPerUnit: numeric('cost_per_unit', { precision: 10, scale: 2 }).notNull(),
+  costPerUnit: numeric('cost_per_unit', { precision: 12, scale: 4 }).notNull(),
+  // Сколько упаковок пришло (фасовка ингредиента, миграция 071).
+  packs: numeric('packs', { precision: 10, scale: 2 }),
 })
 
 // Корректировки проведённых закупок — аудит с обязательной причиной. Каждая правка
@@ -168,7 +173,9 @@ export const stockMovements = pgTable('stock_movements', {
   // Остаток ПОСЛЕ движения (штучный учёт — целое).
   qtyAfter: integer('qty_after').notNull(),
   // Себестоимость единицы в движении: цена прихода либо WAC на момент списания.
-  unitCost: numeric('unit_cost', { precision: 12, scale: 2 }),
+  unitCost: numeric('unit_cost', { precision: 12, scale: 4 }),
+  // Позиция меню, ради продажи которой списан ингредиент по техкарте (миграция 070).
+  soldItemId: uuid('sold_item_id'),
   // Ссылка на документ-источник (связь движение → документ в UI), не ключ идемпотентности.
   sourceType: text('source_type'),
   sourceId: uuid('source_id'),
@@ -229,6 +236,9 @@ export const refunds = pgTable('refunds', {
   // Нужно, чтобы повторные частичные возвраты не восстанавливали сток сверх
   // проданного (cap = sold − alreadyRestored по всем предыдущим возвратам чека).
   restoredItems: jsonb('restored_items').$type<{ itemId: string; quantity: number }[]>().default([]),
+  // Ключ идемпотентности клиента (миграция 074): повтор того же возврата после
+  // потерянного ответа возвращает уже записанный возврат, а не проводит второй.
+  idempotencyKey: text('idempotency_key'),
   createdBy: uuid('created_by')
     .notNull()
     .references(() => profiles.id),
@@ -303,6 +313,34 @@ export const revisionItems = pgTable('revision_items', {
   name: text('name').notNull(),
   expected: integer('expected').notNull(),
   actual: integer('actual').notNull(),
-  costPrice: numeric('cost_price', { precision: 12, scale: 2 }).notNull().default('0'),
+  costPrice: numeric('cost_price', { precision: 12, scale: 4 }).notNull().default('0'),
   sortOrder: integer('sort_order').notNull().default(0),
 })
+
+// ─── Списания (бой, порча, угощение) документом на несколько позиций ─────────
+// 'posted' — проведено (есть write_off_items + движения write_off); 'draft' — черновик
+// в draft_data, остатки не тронуты. Миграция 070.
+export const writeOffs = pgTable('write_offs', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  idempotencyKey: text('idempotency_key'),
+  status: text('status').$type<'draft' | 'posted'>().notNull().default('posted'),
+  reason: text('reason').notNull().default(''),
+  note: text('note'),
+  draftData: jsonb('draft_data').$type<{ reason?: string; note?: string; items: { itemId: string; quantity: number }[] }>(),
+  totalCost: numeric('total_cost', { precision: 12, scale: 2 }).notNull().default('0'),
+  createdBy: uuid('created_by').references(() => profiles.id),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }),
+})
+
+export const writeOffItems = pgTable('write_off_items', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  writeOffId: uuid('write_off_id').notNull().references(() => writeOffs.id, { onDelete: 'cascade' }),
+  itemId: uuid('item_id').notNull().references(() => inventory.id),
+  name: text('name').notNull(),
+  quantity: integer('quantity').notNull(),
+  unitCost: numeric('unit_cost', { precision: 12, scale: 4 }).notNull().default('0'),
+  sortOrder: integer('sort_order').notNull().default(0),
+})
+
+export type WriteOff = typeof writeOffs.$inferSelect

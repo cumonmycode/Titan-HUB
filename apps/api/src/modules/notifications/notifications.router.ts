@@ -43,6 +43,7 @@ notificationsRouter.get('/stream', requireRole('owner', 'staff'), async (c) => {
   // Канал уведомлений персонала — пер-клубный: суффикс по c.var.club?.id (на
   // основном домене → 'default'). Тот же канал, что использует notify() при publish.
   const channel = notifChannel(c.var.club?.id)
+  const me = c.get('user').sub
   return streamSSE(c, async (stream) => {
     const redis = new Redis(process.env['REDIS_URL'] ?? 'redis://redis:6379')
     let closed = false
@@ -56,7 +57,12 @@ notificationsRouter.get('/stream', requireRole('owner', 'staff'), async (c) => {
         // слушают только безымянные и не примут его за уведомление.
         const signal = message.startsWith('{"__event"') ? (JSON.parse(message) as { __event: string; data: unknown }) : null
         if (signal) await stream.writeSSE({ event: signal.__event, data: JSON.stringify(signal.data) })
-        else await stream.writeSSE({ data: message })
+        else {
+          // Личное уведомление (userId задан) — только его адресату.
+          const target = (JSON.parse(message) as { userId?: string | null }).userId
+          if (target && target !== me) return
+          await stream.writeSSE({ data: message })
+        }
       } catch {}
     })
 

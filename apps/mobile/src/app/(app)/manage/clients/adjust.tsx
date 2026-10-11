@@ -3,11 +3,13 @@ import { pickerStyle, tag } from '@expo/ui/swift-ui/modifiers';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
 import { useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, StyleSheet, View } from 'react-native';
 
+import { Text } from '@/components/text';
 import { AmountKeypad, Avatar, GlassCard, GlassChip, PrimaryButton, SheetHeader, sheetStyles } from '@/components/new-check-parts';
 import { RollingText } from '@/components/rolling-text';
 import {
+  BALANCE_METHOD_LABEL,
   BALANCE_OPS,
   balanceDelta,
   balanceText,
@@ -15,6 +17,7 @@ import {
   changeBonus,
   clientPhoto,
   useClient,
+  type BalanceMethod,
   type BalanceOp,
 } from '@/lib/clients-api';
 import { formatMoney, toNumber } from '@/lib/format';
@@ -44,6 +47,8 @@ export default function AdjustSheet() {
   const mode: Mode = params.mode === 'bonus' ? 'bonus' : 'balance';
   const [balanceOp, setBalanceOp] = useState<BalanceOp>(params.op && params.op in BALANCE_OPS ? (params.op as BalanceOp) : 'deposit_add');
   const [bonusOp, setBonusOp] = useState<BonusOp>(params.op === 'minus' ? 'minus' : 'plus');
+  // Чем прошли деньги: наличные сервер проводит через кассу смены. «В долг» — без денег.
+  const [method, setMethod] = useState<BalanceMethod>('cash');
   const [text, setText] = useState('');
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);
@@ -64,6 +69,7 @@ export default function AdjustSheet() {
   const value = parseAmount(text) ?? 0;
   const defaultReason = mode === 'balance' ? BALANCE_OPS[balanceOp].reason : '';
   const effectiveReason = reason.trim() || defaultReason;
+  const movesMoney = mode === 'balance' && balanceOp !== 'debt_lend';
 
   const delta = mode === 'balance' ? balanceDelta(balanceOp, value, balance) : bonusOp === 'plus' ? value : -Math.min(value, bonus);
   const clamped = value > 0 && Math.abs(Math.abs(delta) - value) > 0.004;
@@ -128,7 +134,11 @@ export default function AdjustSheet() {
         const signature = `${data.id}|${delta}|${reasonText}`;
         const key = idempotency?.signature === signature ? idempotency.key : newIdempotencyKey();
         setIdempotency({ signature, key });
-        await changeBalance(data.id, delta, reasonText, key);
+        const paidWith = movesMoney ? method : undefined;
+        const result = await changeBalance(data.id, delta, reasonText, key, paidWith);
+        if (paidWith === 'cash' && !result.duplicate && !result.cashOperation) {
+          Alert.alert('Смена не открыта', 'Баланс изменён, но наличные не записаны в кассу.');
+        }
       } else {
         await changeBonus(data.id, delta, reasonText);
       }
@@ -212,6 +222,24 @@ export default function AdjustSheet() {
       </View>
 
       <AmountKeypad value={text} onChange={setText} allowDecimal={mode === 'balance'} maxLength={mode === 'balance' ? 8 : 6} />
+
+      {movesMoney && (
+        <Host matchContents={{ vertical: true }} style={styles.stretch}>
+          <Picker
+            selection={method}
+            onSelectionChange={(next) => {
+              haptic.selection();
+              setMethod(next as BalanceMethod);
+            }}
+            modifiers={[pickerStyle('segmented')]}>
+            {(Object.keys(BALANCE_METHOD_LABEL) as BalanceMethod[]).map((option) => (
+              <SwiftText key={option} modifiers={[tag(option)]}>
+                {BALANCE_METHOD_LABEL[option]}
+              </SwiftText>
+            ))}
+          </Picker>
+        </Host>
+      )}
 
       {mode === 'bonus' && (
         <View style={styles.quickRow}>

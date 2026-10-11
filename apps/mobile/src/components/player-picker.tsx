@@ -1,8 +1,9 @@
 import { SymbolView } from 'expo-symbols';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import Animated, { FadeIn } from 'react-native-reanimated';
 
+import { Text, TextInput } from '@/components/text';
 import { GlassView } from '@/components/glass';
 import { ClearButton } from '@/components/clear-button';
 import { Avatar, BalanceChips, GlassCard, sheetStyles } from '@/components/new-check-parts';
@@ -10,6 +11,7 @@ import { useAutoFocus } from '@/lib/auto-focus';
 import { formatMoney } from '@/lib/format';
 import { haptic } from '@/lib/haptics';
 import { preselectTariff, sortTariffs, TIER_LABEL, usePlayerSearch, useTariffs, type PlayerSearchItem, type Tariff } from '@/lib/pos-api';
+import { FONT_SCALE_MAX } from '@/lib/text-scale';
 import { colors, space, type } from '@/lib/theme';
 
 /** Поиск игрока и выбор тарифа — общие для «Нового чека» и смены клиента в открытом чеке. */
@@ -200,6 +202,9 @@ function tariffRows(list: Tariff[]): Cell[][] {
   return rows;
 }
 
+/** Название тарифа в плитке: в одну строку, на узкой плитке ужимается, а не режется до «Рези…». */
+const TILE_NAME_FIT = { numberOfLines: 1, adjustsFontSizeToFit: true, minimumFontScale: 0.75, maxFontSizeMultiplier: FONT_SCALE_MAX.compact } as const;
+
 export function TariffGrid({
   choice,
   noTariffCaption = 'Открыть счёт без добавления позиции',
@@ -228,7 +233,7 @@ export function TariffGrid({
                   accessibilityLabel="Без тарифа"
                   accessibilityHint={noTariffCaption}>
                   <GlassView isInteractive tintColor={isSelected ? 'rgba(142,142,147,0.35)' : undefined} style={styles.tariffTile}>
-                    <Text style={[type.subhead, styles.tariffName]} numberOfLines={1}>
+                    <Text style={[type.subhead, styles.tariffName]} {...TILE_NAME_FIT}>
                       Без тарифа
                     </Text>
                     <Text style={[type.caption2, sheetStyles.secondary, styles.noTariffCaption]} numberOfLines={2}>
@@ -254,10 +259,15 @@ export function TariffGrid({
                 accessibilityState={{ selected: isSelected }}
                 accessibilityLabel={`${tariff.name}, ${formatMoney(tariff.price)}`}>
                 <GlassView isInteractive tintColor={isSelected ? `${color}59` : undefined} style={styles.tariffTile}>
-                  <Text style={[type.subhead, styles.tariffName]} numberOfLines={1}>
+                  <Text style={[type.subhead, styles.tariffName]} {...TILE_NAME_FIT}>
                     {tariff.name}
                   </Text>
-                  <Text style={[type.headline, type.amount, isSelected ? styles.label : { color }]} numberOfLines={1} adjustsFontSizeToFit>
+                  <Text
+                    style={[type.headline, type.amount, isSelected ? styles.label : { color }]}
+                    numberOfLines={1}
+                    adjustsFontSizeToFit
+                    minimumFontScale={0.75}
+                    maxFontSizeMultiplier={FONT_SCALE_MAX.compact}>
                     {formatMoney(tariff.price)}
                   </Text>
                   {isSelected && (
@@ -287,14 +297,15 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: space.sm,
-    height: 46,
+    minHeight: 46,
     paddingHorizontal: space.lg,
     borderRadius: 23,
   },
-  searchInput: { flex: 1, color: colors.label, height: 44 },
-  resultState: { flexDirection: 'row', alignItems: 'center', gap: space.sm, paddingHorizontal: space.lg, height: 52 },
+  searchInput: { flex: 1, color: colors.label, minHeight: 44 },
+  resultState: { flexDirection: 'row', alignItems: 'center', gap: space.sm, paddingHorizontal: space.lg, paddingVertical: space.sm, minHeight: 52 },
   createText: { flex: 1, color: colors.accent, fontWeight: '600' },
-  resultRow: { flexDirection: 'row', alignItems: 'center', gap: space.md, paddingHorizontal: space.md, height: RESULT_ROW_HEIGHT },
+  // Высоты строк — минимальные: с крупным текстом строки растут, а не обрезают ник и баланс.
+  resultRow: { flexDirection: 'row', alignItems: 'center', gap: space.md, paddingHorizontal: space.md, paddingVertical: space.sm, minHeight: RESULT_ROW_HEIGHT },
   resultSeparator: { marginLeft: 64 },
   // В шторке «по содержимому» ScrollView не должен сжиматься: его высота входит в высоту шторки.
   results: { maxHeight: RESULT_ROW_HEIGHT * 3.5, flexShrink: 0 },

@@ -4,9 +4,10 @@ import { useLocalSearchParams, useNavigation, useRouter } from 'expo-router';
 import { usePreventRemove } from 'expo-router/react-navigation';
 import { SymbolView } from 'expo-symbols';
 import { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, ScrollView, Share, StyleSheet, View } from 'react-native';
 import Animated, { FadeIn, ZoomIn } from 'react-native-reanimated';
 
+import { Text } from '@/components/text';
 import { GlassView } from '@/components/glass';
 import { PrimaryButton, sheetStyles } from '@/components/new-check-parts';
 import { PaymentSuccess } from '@/components/payment-success';
@@ -234,9 +235,11 @@ export default function SbpScreen() {
 const styles = StyleSheet.create({
   content: { padding: space.xl, gap: space.lg, alignItems: 'center' },
   pressed: { opacity: 0.6 },
+  // По ширине экрана, но не больше 288: на «Увеличенном» виде (320 pt) места только 280.
   qrCard: {
-    width: 288,
-    height: 288,
+    width: '100%',
+    maxWidth: 288,
+    aspectRatio: 1,
     borderRadius: 28,
     borderCurve: 'continuous',
     backgroundColor: 'white',
@@ -247,7 +250,7 @@ const styles = StyleSheet.create({
     shadowRadius: 24,
     shadowOffset: { width: 0, height: 8 },
   },
-  qrImage: { width: 248, height: 248 },
+  qrImage: { width: '86%', aspectRatio: 1 },
   noQr: { alignItems: 'center', gap: space.md, paddingHorizontal: space.xxl },
   noQrText: { color: '#4B5563', textAlign: 'center' },
   confirmedOverlay: {
@@ -277,5 +280,5 @@ const styles = StyleSheet.create({
   problem: { alignSelf: 'stretch', alignItems: 'center', gap: space.md, paddingTop: space.xxxl },
   problemText: { textAlign: 'center' },
   problemActions: { alignSelf: 'stretch', gap: space.sm, marginTop: space.lg },
-  secondaryButton: { height: 48, alignItems: 'center', justifyContent: 'center' },
+  secondaryButton: { minHeight: 48, paddingVertical: space.sm, alignItems: 'center', justifyContent: 'center' },
 });

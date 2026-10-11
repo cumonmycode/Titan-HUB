@@ -87,6 +87,22 @@ export function normalizePhone(raw: string): string {
   return '+' + d.slice(0, 11);
 }
 
+/** Маска поля телефона по мере ввода: «+7 999 123-45-67» (разделители — только перед цифрами). */
+export function maskPhone(raw: string): string {
+  const full = normalizePhone(raw);
+  if (!full) return '';
+  const d = full.slice(2);
+  let out = '+7';
+  if (d.length) out += ` ${d.slice(0, 3)}`;
+  if (d.length > 3) out += ` ${d.slice(3, 6)}`;
+  if (d.length > 6) out += `-${d.slice(6, 8)}`;
+  if (d.length > 8) out += `-${d.slice(8, 10)}`;
+  return out;
+}
+
+/** Номер набран полностью: +7 и 10 цифр. */
+export const isFullPhone = (value: string) => value.replace(/\D/g, '').length === 11;
+
 /** ДД.ММ.ГГГГ ↔ YYYY-MM-DD для поля дня рождения. */
 export function birthdayToInput(iso: string | null | undefined): string {
   if (!iso) return '';

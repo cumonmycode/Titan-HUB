@@ -1,12 +1,12 @@
 import { Button, Form, Host, LabeledContent, Picker, Section, Text } from '@expo/ui/swift-ui';
 import { font, foregroundStyle, monospacedDigit, pickerStyle, refreshable, tag } from '@expo/ui/swift-ui/modifiers';
-import { Stack, useRouter } from 'expo-router';
+import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useState } from 'react';
 
 import { PeriodMenu, PeriodSection, RankRow, StateSection } from '@/components/analytics/native';
 import { methodLook, money } from '@/components/analytics/parts';
 import { ActionRow, primary, secondary } from '@/components/native-form';
-import { useAnalyticsChecks, useAnalyticsPeriod, type AnalyticsCheck, type NetBreakdown } from '@/lib/analytics-api';
+import { daysBetween, formatDay, useAnalyticsChecks, useAnalyticsPeriod, type AnalyticsCheck, type NetBreakdown } from '@/lib/analytics-api';
 import { plural } from '@/lib/format';
 import { haptic } from '@/lib/haptics';
 import { useSession } from '@/lib/session';
@@ -18,21 +18,30 @@ const dayTime = new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'short
 type Sort = 'time' | 'amount';
 const PAGE = 100;
 
+const DATE_KEY = /^\d{4}-\d{2}-\d{2}$/;
+/** Час открытия чека по МСК — как в графике «По часам». */
+const mskHour = (iso: string) => (new Date(iso).getUTCHours() + 3) % 24;
+
 /**
  * Чеки периода: итог «от валовой выручки к чистой прибыли» (себестоимость и расходы — только
  * владельцу), фильтр по способу оплаты, сортировка и список закрытых чеков порциями;
- * тап открывает состав чека.
+ * тап открывает состав чека. Из графиков и Tai экран открывается сразу на нужном дне,
+ * часе или способе оплаты (параметры from, to, hour, method) — общий период не меняется.
  */
 export default function AnalyticsChecksScreen() {
   const router = useRouter();
   const isOwner = useSession((s) => s.user?.role === 'owner');
-  const period = useAnalyticsPeriod();
+  const params = useLocalSearchParams<{ from?: string; to?: string; hour?: string; method?: string }>();
+  const store = useAnalyticsPeriod();
+  const fixed = DATE_KEY.test(params.from ?? '') && DATE_KEY.test(params.to ?? '');
+  const period = fixed ? { ...store, from: params.from!, to: params.to!, days: daysBetween(params.from!, params.to!) } : store;
+  const hour = params.hour !== undefined && /^\d{1,2}$/.test(params.hour) ? Number(params.hour) : null;
   const checks = useAnalyticsChecks(period.from, period.to);
-  const [method, setMethod] = useState<string>('all');
+  const [method, setMethod] = useState<string>(params.method || 'all');
   const [sort, setSort] = useState<Sort>('time');
   const [limit, setLimit] = useState(PAGE);
 
-  const all = checks.data?.checks ?? [];
+  const all = (checks.data?.checks ?? []).filter((c) => hour === null || mskHour(c.createdAt) === hour);
   const methods = [...new Set(all.flatMap((c) => c.payments.map((p) => p.method)))];
   const filtered = (method === 'all' ? all : method === 'event' ? all.filter((c) => c.linkedEventId) : all.filter((c) => c.payments.some((p) => p.method === method)))
     .slice()
@@ -43,10 +52,23 @@ export default function AnalyticsChecksScreen() {
   return (
     <>
       <Stack.Title>Чеки</Stack.Title>
-      <PeriodMenu period={period} />
+      {!fixed && <PeriodMenu period={period} />}
       <Host style={{ flex: 1 }} useViewportSizeMeasurement>
         <Form modifiers={[refreshable(async () => void (await checks.refetch()))]}>
-          <PeriodSection period={period} />
+          {fixed ? (
+            <Section>
+              <Text modifiers={[font({ textStyle: 'headline' }), primary]}>
+                {[
+                  period.from === period.to ? formatDay(period.from, true) : `${formatDay(period.from)} — ${formatDay(period.to)}`,
+                  hour !== null ? `с ${String(hour).padStart(2, '0')}:00 до ${String((hour + 1) % 24).padStart(2, '0')}:00` : null,
+                ]
+                  .filter(Boolean)
+                  .join(' · ')}
+              </Text>
+            </Section>
+          ) : (
+            <PeriodSection period={period} />
+          )}
           {!checks.data ? (
             <StateSection error={checks.error} />
           ) : (

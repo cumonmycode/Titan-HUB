@@ -4,12 +4,15 @@ import { api, ApiError } from './api';
 import { queryClient } from './query';
 import { useClubKey } from './queries';
 import { useSession } from './session';
+import { newIdempotencyKey } from './shift-api';
 import type { NumericString } from './types';
 
 /**
  * Возвраты по закрытым чекам. Контракт — mobile-api-refunds.md. Правила денег:
- * - идемпотентности на сервере нет: запрос отправляется ровно один раз на подтверждение,
- *   без автоповторов; после неясного исхода результат сверяется по `refundedTotal`;
+ * - запрос отправляется ровно один раз на подтверждение, без автоповторов, с ключом
+ *   идемпотентности (миграция 074): повтор того же возврата уходит с тем же ключом, и
+ *   сервер не проведёт его дважды; после неясного исхода результат сверяется по
+ *   `refundedTotal` — не сразу, а после паузы (сервер мог ещё держать возврат за локом чека);
  * - суммы — только из свежего `availableByMethod`, в копейках, по одному тендеру на способ;
  * - товары на склад схлопываются по `itemId` и ограничиваются непроданным остатком.
  */
@@ -130,8 +133,20 @@ export type RefundResult = { refund: RefundRow | null; verified: boolean };
 const isDefiniteFailure = (error: unknown) => error instanceof ApiError && error.status >= 400 && error.status < 500;
 
 /**
- * Оформляет возврат ровно одним запросом. Если ответ потерян, сверяет `refundedTotal`
- * чека: вырос на сумму запроса — возврат прошёл. Повторять запрос сама не будет никогда.
+ * Ключи идемпотентности по «намерению» возврата: тот же чек, те же суммы и товары, та же
+ * база «уже возвращено». Повтор после неясного исхода уходит с ТЕМ ЖЕ ключом — сервер
+ * вернёт уже записанный возврат, а не проведёт второй. Ключ забывается, когда исход ясен.
+ */
+const intentKeys = new Map<string, string>();
+
+/** Паузы перед сверкой после неясного исхода: сервер мог ещё обрабатывать возврат. */
+const RECHECK_DELAYS_MS = [2_000, 5_000];
+const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Оформляет возврат ровно одним запросом. Если ответ потерян, после паузы сверяет
+ * `refundedTotal` чека: вырос на сумму запроса — возврат прошёл. Повторять запрос сама
+ * не будет никогда.
  */
 export async function createRefund(input: RefundInput, refundedBeforeKopecks: number): Promise<RefundResult> {
   const totalKopecks = input.tenders.reduce((sum, t) => sum + t.kopecks, 0);
@@ -143,23 +158,37 @@ export async function createRefund(input: RefundInput, refundedBeforeKopecks: nu
     ...(input.note.trim() ? { note: input.note.trim() } : {}),
     itemsToRestore: input.items.filter((i) => i.quantity > 0),
   };
+  const intent = JSON.stringify([body, refundedBeforeKopecks]);
+  const idempotencyKey = intentKeys.get(intent) ?? newIdempotencyKey();
+  intentKeys.set(intent, idempotencyKey);
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 25_000);
   try {
-    const { refund } = await api.post<{ refund: RefundRow }>('/refunds', body, { signal: controller.signal });
+    const { refund } = await api.post<{ refund: RefundRow }>('/refunds', { ...body, idempotencyKey }, { signal: controller.signal });
+    intentKeys.delete(intent);
     return { refund, verified: false };
   } catch (error) {
-    if (isDefiniteFailure(error)) throw error;
-    // Исход неизвестен: смотрим, записался ли возврат.
-    let after: RefundPrepare;
-    try {
-      after = await fetchRefundPrepare(input.checkId);
-    } catch {
-      throw new Error('Связь прервалась, и проверить результат не удалось. Не оформляйте возврат повторно — сначала откройте историю возвратов.');
+    if (isDefiniteFailure(error)) {
+      intentKeys.delete(intent);
+      throw error;
     }
-    if (toKopecks(after.refundedTotal) - refundedBeforeKopecks >= totalKopecks - 1) return { refund: null, verified: true };
-    throw new Error('Сервер не ответил, но возврат не записан — деньги не изменились. Можно оформить ещё раз.');
+    // Исход неизвестен: сервер мог ещё держать возврат за локом чека — сверяемся не
+    // сразу, а после паузы, и не один раз.
+    for (const delay of RECHECK_DELAYS_MS) {
+      await wait(delay);
+      let after: RefundPrepare;
+      try {
+        after = await fetchRefundPrepare(input.checkId);
+      } catch {
+        throw new Error('Связь прервалась, и проверить результат не удалось. Не оформляйте возврат повторно — сначала откройте историю возвратов.');
+      }
+      if (toKopecks(after.refundedTotal) - refundedBeforeKopecks >= totalKopecks - 1) {
+        intentKeys.delete(intent);
+        return { refund: null, verified: true };
+      }
+    }
+    throw new Error('Сервер не ответил, и возврат в чеке пока не появился. Повтор безопасен: тот же возврат уйдёт с тем же ключом, и сервер не проведёт его дважды.');
   } finally {
     clearTimeout(timer);
     invalidateAfterRefund();

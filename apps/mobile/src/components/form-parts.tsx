@@ -1,8 +1,9 @@
 import { SymbolView } from 'expo-symbols';
 import type { ReactNode } from 'react';
-import { StyleSheet, Text, TextInput, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import type { SFSymbol } from 'sf-symbols-typescript';
 
+import { Text, TextInput } from '@/components/text';
 import { sheetStyles } from '@/components/new-check-parts';
 import { useAutoFocus } from '@/lib/auto-focus';
 import { colors, space, type } from '@/lib/theme';

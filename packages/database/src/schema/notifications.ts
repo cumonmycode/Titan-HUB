@@ -72,7 +72,22 @@ export const walletLoginCodes = pgTable('wallet_login_codes', {
   deepCode: text('deep_code'),
   deviceName: text('device_name'),
   platform: text('platform'),
+  // Вход по номеру телефона (миграция 076): mode 'login' | 'register', NULL —
+  // прежний вход по коду. Бот подтверждает строку от Telegram-аккаунта tg_id.
+  phone: text('phone'),
+  mode: text('mode'),
+  regData: jsonb('reg_data').$type<AppRegistration>(),
+  tgId: text('tg_id'),
+  note: text('note'),
 })
+
+/** Анкета нового клиента из приложения My Titan (wallet_login_codes.reg_data). */
+export interface AppRegistration {
+  nickname: string
+  fullName: string
+  birthday: string
+  photoUrl?: string | null
+}
 
 // Онлайн-платежи клиента из My Titan (СБП через эквайер клуба): погашение
 // долга / пополнение депозита (→ profiles.balance + transaction) или взнос в Фонд

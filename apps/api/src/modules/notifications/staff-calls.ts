@@ -37,9 +37,13 @@ const NOTIFY_TYPE: Record<AlertKind, string> = { chat: 'chat_message', staff_cal
 
 /** https://<клуб> из запроса — туда телефон подтвердит ответ на звонок. */
 export function requestOrigin(c: { req: { header: (name: string) => string | undefined; url: string } }): string {
-  const host = c.req.header('x-forwarded-host') ?? c.req.header('host') ?? new URL(c.req.url).host
+  // Только Host (его выставляет nginx, по нему же выбран клуб). X-Forwarded-Host nginx
+  // не перезаписывает — гостевой планшет подставил бы чужой хост, и телефон персонала
+  // отправил бы подтверждение звонка туда.
+  const host = c.req.header('host') ?? new URL(c.req.url).host
   const local = /^(localhost|127\.0\.0\.1|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+)(:\d+)?$/.test(host)
-  const proto = c.req.header('x-forwarded-proto') ?? (local ? 'http' : 'https')
+  const forwardedProto = c.req.header('x-forwarded-proto')
+  const proto = forwardedProto === 'http' || forwardedProto === 'https' ? forwardedProto : (local ? 'http' : 'https')
   return `${proto}://${host}`
 }
 

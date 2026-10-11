@@ -1,10 +1,11 @@
 import { useRouter } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
 import { useEffect, useEffectEvent, useMemo, useState } from 'react';
-import { PanResponder, Pressable, StyleSheet, Text, View } from 'react-native';
+import { PanResponder, Pressable, StyleSheet, View } from 'react-native';
 import Animated, { runOnJS, useAnimatedStyle, useSharedValue, withSpring, withTiming } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { Text } from '@/components/text';
 import { GlassView } from '@/components/glass';
 import { type Banner, useBanner } from '@/lib/banner';
 import { notificationLook } from '@/lib/notifications';

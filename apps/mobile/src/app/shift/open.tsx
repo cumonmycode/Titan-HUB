@@ -2,12 +2,13 @@ import { useMutation } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
 import { useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import Animated, { FadeIn, FadeOut, LinearTransition } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { SFSymbol } from 'sf-symbols-typescript';
 
+import { Text, TextInput } from '@/components/text';
 import { ClearButton } from '@/components/clear-button';
 import { AmountKeypad, GlassCard, GlassChip, PrimaryButton, SheetHeader, sheetStyles } from '@/components/new-check-parts';
 import { RollingText } from '@/components/rolling-text';
@@ -16,6 +17,7 @@ import { formatMoney } from '@/lib/format';
 import { haptic } from '@/lib/haptics';
 import { KEYBOARD_DISMISS } from '@/lib/layout';
 import { type EveningKey, invalidateShift, OPEN_SHIFT_EVENING_KEYS, parseAmount, useEveningTypes, useLastCashEnd } from '@/lib/shift-api';
+import { useTextLayout } from '@/lib/text-scale';
 import { colors, radius, space, type } from '@/lib/theme';
 
 const layout = LinearTransition.springify().damping(22).stiffness(220);
@@ -111,7 +113,9 @@ export default function OpenShift() {
   const errorText = open.error ? (open.error.message === 'Shift already open' ? 'Смена уже открыта' : open.error.message) : null;
 
   return (
-    <KeyboardAvoidingView behavior="padding" style={styles.screen}>
+    // collapsable={false}: иначе обёртка схлопывается, и react-native-screens растягивает список
+    // до низа шторки, под панель с кнопкой (см. app/pay/index.tsx). Первая в цепочке — шапка.
+    <KeyboardAvoidingView behavior="padding" style={styles.screen} collapsable={false}>
       <View style={styles.header}>
         <SheetHeader title="Открыть смену" onClose={() => router.back()} />
       </View>
@@ -281,10 +285,12 @@ function EveningTile({
   onPress: () => void;
   wide?: boolean;
 }) {
+  // Очень крупный текст: плитки вечеров по одной в ряд — в половину ширины название рвалось.
+  const { stacked } = useTextLayout();
   return (
     <Pressable
       onPress={onPress}
-      style={wide ? styles.tileWide : styles.tileCell}
+      style={wide || stacked ? styles.tileWide : styles.tileCell}
       accessibilityRole="radio"
       accessibilityState={{ selected: active }}
       accessibilityLabel={label}>

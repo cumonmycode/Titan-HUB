@@ -2,9 +2,10 @@ import { Host, Toggle } from '@expo/ui/swift-ui';
 import { disabled as disabledModifier, tint } from '@expo/ui/swift-ui/modifiers';
 import { SymbolView } from 'expo-symbols';
 import { Children, useMemo, useState, type ReactNode } from 'react';
-import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View, type ColorValue } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, StyleSheet, View, type ColorValue } from 'react-native';
 import type { SFSymbol } from 'sf-symbols-typescript';
 
+import { Text } from '@/components/text';
 import { GlassCard, sheetStyles } from '@/components/new-check-parts';
 import { Unavailable } from '@/components/unavailable';
 import { saveSettings, useSettings } from '@/lib/admin-api';

@@ -19,6 +19,7 @@ import type { ColorValue } from 'react-native';
 import type { SFSymbol } from 'sf-symbols-typescript';
 
 import { haptic } from '@/lib/haptics';
+import { useTextLayout } from '@/lib/text-scale';
 import { colors, useAccentHex } from '@/lib/theme';
 
 /**
@@ -59,12 +60,20 @@ export function RowIcon({ name, color }: { name: SFSymbol; color: ColorValue }) 
   );
 }
 
-/** Подпись строки с необязательной второй строкой. */
-function Titles({ title, subtitle, destructive }: { title: string; subtitle?: string; destructive?: boolean }) {
+/**
+ * Подпись строки с необязательной второй строкой. `value` — значение строки, когда оно
+ * стоит под подписью (очень крупный текст), а не справа.
+ */
+function Titles({ title, subtitle, destructive, value, valueColor }: { title: string; subtitle?: string; destructive?: boolean; value?: string; valueColor?: ColorValue }) {
+  // В обычной раскладке подпись в одну строку; на «Увеличенном» виде и с крупным текстом
+  // она переносится, а не обрезается до «Депозиты и д…».
+  const { layout } = useTextLayout();
+  const titleLines = layout === 'regular' ? 1 : 3;
   return (
     <VStack alignment="leading" spacing={1}>
-      <Text modifiers={[destructive ? foregroundStyle('red') : primary, lineLimit(1)]}>{title}</Text>
-      {subtitle ? <Text modifiers={[footnote, secondary, lineLimit(2)]}>{subtitle}</Text> : null}
+      <Text modifiers={[destructive ? foregroundStyle('red') : primary, lineLimit(titleLines)]}>{title}</Text>
+      {subtitle ? <Text modifiers={[footnote, secondary, lineLimit(titleLines + 1)]}>{subtitle}</Text> : null}
+      {value ? <Text modifiers={[valueColor ? foregroundStyle(valueColor as string) : secondary, lineLimit(2)]}>{value}</Text> : null}
     </VStack>
   );
 }
@@ -94,12 +103,14 @@ export function LinkRow({
   chevron?: boolean;
   onPress?: () => void;
 }) {
+  // Очень крупный текст: значение под подписью, как в «Настройках» iOS, — справа ему не хватит места.
+  const { stacked } = useTextLayout();
   const content = (
     <HStack spacing={12}>
       {icon ? <RowIcon name={icon} color={color ?? '#8E8E93'} /> : null}
-      <Titles title={title} subtitle={subtitle} destructive={destructive} />
+      <Titles title={title} subtitle={subtitle} destructive={destructive} value={stacked ? value : undefined} valueColor={valueColor} />
       <Spacer />
-      {value ? <Text modifiers={[valueColor ? foregroundStyle(valueColor as string) : secondary, lineLimit(1)]}>{value}</Text> : null}
+      {value && !stacked ? <Text modifiers={[valueColor ? foregroundStyle(valueColor as string) : secondary, lineLimit(1)]}>{value}</Text> : null}
       {onPress && chevron ? <Image systemName="chevron.right" size={13} modifiers={[tertiary, font({ weight: 'semibold' })]} /> : null}
     </HStack>
   );
@@ -111,6 +122,23 @@ export function LinkRow({
         onPress();
       }}>
       {content}
+    </Button>
+  );
+}
+
+/** Строка-раскрывашка «Дополнительно»: подпись, что внутри (второй строкой), и стрелка вниз/вверх. */
+export function DisclosureRow({ title, subtitle, open, onToggle }: { title: string; subtitle?: string; open: boolean; onToggle: () => void }) {
+  return (
+    <Button
+      onPress={() => {
+        haptic.selection();
+        onToggle();
+      }}>
+      <HStack spacing={12}>
+        <Titles title={title} subtitle={subtitle} />
+        <Spacer />
+        <Image systemName={open ? 'chevron.up' : 'chevron.down'} size={13} modifiers={[tertiary, font({ weight: 'semibold' })]} />
+      </HStack>
     </Button>
   );
 }
@@ -165,26 +193,39 @@ export function TextRow({
     setCommitted(next);
     onCommit(next);
   };
+  // Очень крупный текст: подпись над полем — в ряд поле сжалось бы до пары букв.
+  const { stacked } = useTextLayout();
+  const field = (
+    <TextField
+      text={text}
+      placeholder={placeholder}
+      maxLength={maxLength}
+      onTextChange={setDraft}
+      onFocusChange={(focused) => {
+        if (!focused) commit();
+      }}
+      modifiers={[
+        multilineTextAlignment(stacked ? 'leading' : 'trailing'),
+        keyboardTypeModifier(keyboard),
+        textInputAutocapitalization(capitalize),
+        submitLabel('done'),
+        onSubmit(commit),
+      ]}
+    />
+  );
+  if (stacked) {
+    return (
+      <VStack alignment="leading" spacing={6}>
+        <Text modifiers={[footnote, secondary]}>{label}</Text>
+        {field}
+      </VStack>
+    );
+  }
   return (
     <HStack spacing={12}>
       {/* Подпись в одну строку и в приоритете: поле значения ужимается, а не переносит подпись. */}
       <Text modifiers={[primary, lineLimit(1), layoutPriority(1)]}>{label}</Text>
-      <TextField
-        text={text}
-        placeholder={placeholder}
-        maxLength={maxLength}
-        onTextChange={setDraft}
-        onFocusChange={(focused) => {
-          if (!focused) commit();
-        }}
-        modifiers={[
-          multilineTextAlignment('trailing'),
-          keyboardTypeModifier(keyboard),
-          textInputAutocapitalization(capitalize),
-          submitLabel('done'),
-          onSubmit(commit),
-        ]}
-      />
+      {field}
     </HStack>
   );
 }
@@ -215,19 +256,35 @@ export function InputRow({
   onChange: (next: string) => void;
 }) {
   const text = useNativeState(value);
+  const { stacked } = useTextLayout();
+  const field = (
+    <TextField
+      text={text}
+      placeholder={placeholder}
+      maxLength={maxLength}
+      onTextChange={onChange}
+      modifiers={[multilineTextAlignment(stacked ? 'leading' : 'trailing'), keyboardTypeModifier(keyboard), submitLabel('done')]}
+    />
+  );
+  const titles = (
+    <VStack alignment="leading" spacing={1} modifiers={[layoutPriority(1)]}>
+      <Text modifiers={[primary, lineLimit(stacked ? 3 : 1)]}>{label}</Text>
+      {caption ? <Text modifiers={[footnote, captionColor ? foregroundStyle(captionColor as string) : secondary, lineLimit(2)]}>{caption}</Text> : null}
+    </VStack>
+  );
+  // Очень крупный текст: поле под подписью, во всю ширину строки.
+  if (stacked) {
+    return (
+      <VStack alignment="leading" spacing={6}>
+        {titles}
+        {field}
+      </VStack>
+    );
+  }
   return (
     <HStack spacing={12}>
-      <VStack alignment="leading" spacing={1} modifiers={[layoutPriority(1)]}>
-        <Text modifiers={[primary, lineLimit(1)]}>{label}</Text>
-        {caption ? <Text modifiers={[footnote, captionColor ? foregroundStyle(captionColor as string) : secondary, lineLimit(2)]}>{caption}</Text> : null}
-      </VStack>
-      <TextField
-        text={text}
-        placeholder={placeholder}
-        maxLength={maxLength}
-        onTextChange={onChange}
-        modifiers={[multilineTextAlignment('trailing'), keyboardTypeModifier(keyboard), submitLabel('done')]}
-      />
+      {titles}
+      {field}
     </HStack>
   );
 }

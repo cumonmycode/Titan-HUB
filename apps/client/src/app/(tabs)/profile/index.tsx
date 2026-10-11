@@ -4,7 +4,6 @@
 // на главной (нажатие на карту), здесь её нет.
 import { useQueryClient } from '@tanstack/react-query';
 import Constants from 'expo-constants';
-import * as ImagePicker from 'expo-image-picker';
 import { Stack, useRouter } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
 import { useState } from 'react';
@@ -19,6 +18,7 @@ import { Avatar, Skeleton, Surface, TierBadge } from '@/components/ui';
 import { api, API_URL, errorText } from '@/lib/api';
 import { longDate } from '@/lib/format';
 import { haptic } from '@/lib/haptics';
+import { photoFile, pickSquarePhoto } from '@/lib/photo';
 import { pushPermission, registerForPush, unregisterPush } from '@/lib/push';
 import { keys, useUpdatePrefs, useWallet } from '@/lib/queries';
 import { useSession } from '@/lib/session';
@@ -38,14 +38,13 @@ export default function ProfileScreen() {
   const edit = () => router.push('/profile-edit');
 
   async function changePhoto() {
-    if (demo) { Alert.alert('Демо-режим', 'Сменить фото можно после входа через Telegram.'); return; }
-    const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], allowsEditing: true, aspect: [1, 1], quality: 0.6 });
-    if (res.canceled || !res.assets[0]) return;
-    const asset = res.assets[0];
+    if (demo) { Alert.alert('Демо-режим', 'Сменить фото можно после входа.'); return; }
+    const asset = await pickSquarePhoto();
+    if (!asset) return;
     setUploading(true);
     try {
       const form = new FormData();
-      form.append('file', { uri: asset.uri, name: asset.fileName ?? 'avatar.jpg', type: asset.mimeType ?? 'image/jpeg' } as unknown as Blob);
+      form.append('file', photoFile(asset.uri));
       const up = await api.post<{ url: string }>('/upload/image', form, { timeoutMs: 45_000 });
       await api.patch('/auth/me', { photoUrl: up.url });
       await qc.invalidateQueries({ queryKey: keys.wallet });

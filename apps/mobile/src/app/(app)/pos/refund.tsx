@@ -1,11 +1,12 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
 import { useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import Animated, { FadeIn, ZoomIn } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { Text, TextInput } from '@/components/text';
 import { GlassView } from '@/components/glass';
 import { FormField, FormSection } from '@/components/form-parts';
 import { GlassCard, GlassChip, PrimaryButton, SheetHeader, sheetStyles } from '@/components/new-check-parts';
@@ -29,6 +30,7 @@ import {
   type RefundPrepare,
   type RefundReason,
 } from '@/lib/refunds-api';
+import { FONT_SCALE_MAX } from '@/lib/text-scale';
 import { colors, space, type } from '@/lib/theme';
 
 const rub = (kopecks: number) => formatMoney(fromKopecks(kopecks), { kopecks: 'auto' });
@@ -300,6 +302,7 @@ function RefundForm({ prepare, onRefetch, onClose }: { prepare: RefundPrepare; o
                           placeholderTextColor={colors.tertiaryLabel}
                           selectionColor={colors.accent}
                           style={[type.headline, type.amount, styles.amountInput, row.error && styles.amountError]}
+                          maxFontSizeMultiplier={FONT_SCALE_MAX.compact}
                           accessibilityLabel={`Сумма возврата: ${look.title}`}
                         />
                       </View>
@@ -411,7 +414,9 @@ function Stepper({ value, max, onChange }: { value: number; max: number; onChang
       <Pressable onPress={() => onChange(Math.max(0, value - 1))} disabled={value === 0} hitSlop={6} style={styles.stepButton} accessibilityRole="button" accessibilityLabel="Меньше">
         <SymbolView name="minus" size={14} weight="semibold" tintColor={value === 0 ? colors.tertiaryLabel : colors.label} />
       </Pressable>
-      <Text style={[type.headline, type.amount, sheetStyles.label, styles.stepValue]}>{value}</Text>
+      <Text style={[type.headline, type.amount, sheetStyles.label, styles.stepValue]} maxFontSizeMultiplier={FONT_SCALE_MAX.compact}>
+        {value}
+      </Text>
       <Pressable onPress={() => onChange(Math.min(max, value + 1))} disabled={value >= max} hitSlop={6} style={styles.stepButton} accessibilityRole="button" accessibilityLabel="Больше">
         <SymbolView name="plus" size={14} weight="semibold" tintColor={value >= max ? colors.tertiaryLabel : colors.label} />
       </Pressable>
@@ -438,13 +443,13 @@ const styles = StyleSheet.create({
   methodIcon: { width: 32, height: 32, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
   allButton: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999, backgroundColor: colors.fill },
   allText: { color: colors.accent, fontWeight: '600' },
-  amountInput: { width: 104, height: 42, borderRadius: 12, backgroundColor: colors.fill, color: colors.label, textAlign: 'right', paddingHorizontal: space.md },
+  amountInput: { width: 104, minHeight: 42, borderRadius: 12, backgroundColor: colors.fill, color: colors.label, textAlign: 'right', paddingHorizontal: space.md },
   amountError: { backgroundColor: 'rgba(255,59,48,0.16)' },
   fillAll: { alignSelf: 'center', paddingVertical: space.xs, paddingHorizontal: space.md },
   notice: { flexDirection: 'row', alignItems: 'center', gap: space.md, padding: space.lg },
   goodSeparator: { marginLeft: space.lg },
   goodRow: { flexDirection: 'row', alignItems: 'center', gap: space.md, paddingHorizontal: space.lg, minHeight: 60 },
-  stepper: { flexDirection: 'row', alignItems: 'center', borderRadius: 999, paddingHorizontal: 4, height: 36 },
+  stepper: { flexDirection: 'row', alignItems: 'center', borderRadius: 999, paddingHorizontal: 4, minHeight: 36 },
   stepButton: { width: 32, height: 32, alignItems: 'center', justifyContent: 'center' },
   stepValue: { minWidth: 24, textAlign: 'center' },
   noteCard: { paddingHorizontal: space.lg },

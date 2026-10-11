@@ -1,11 +1,13 @@
 'use client'
-// Поставки переехали во вкладку единого экрана «Склад». Роут сохранён как редирект
-// для старых ссылок/закладок.
+// Поставки — вкладка «Операции» раздела «Товары».
+// Роут сохранён для старых ссылок и закладок.
 import { useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 
 export default function SuppliesRedirect() {
   const router = useRouter()
-  useEffect(() => { router.replace('/manage/inventory?tab=supplies') }, [router])
+  useEffect(() => {
+    router.replace('/manage/goods?tab=warehouse')
+  }, [router])
   return null
 }

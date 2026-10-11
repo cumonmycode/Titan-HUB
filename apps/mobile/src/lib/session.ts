@@ -1,5 +1,6 @@
 import * as Linking from 'expo-linking';
 import * as SecureStore from 'expo-secure-store';
+import { AppState } from 'react-native';
 import { create } from 'zustand';
 
 /**
@@ -49,13 +50,58 @@ const CLUB_KEY = 'titan.club';
 /** Ключ SecureStore допускает только буквы, цифры, «.», «-», «_» — двоеточие порта заменяем. */
 const authKey = (host: string) => `titan.auth.${host.replace(/[^A-Za-z0-9._-]/g, '_')}`;
 
-async function readJson<T>(key: string): Promise<T | null> {
+/**
+ * Доступ к записям — после первой разблокировки: VoIP-push будит приложение и на
+ * заблокированном телефоне, а запись по умолчанию (WHEN_UNLOCKED) тогда не читается.
+ */
+const STORE_OPTIONS: SecureStore.SecureStoreOptions = { keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK };
+
+/** Запись с STORE_OPTIONS. Существующую запись Keychain при обновлении оставляет в старом
+ *  классе доступа, поэтому сначала удаляем. */
+async function writeSecure(key: string, value: string) {
+  await SecureStore.deleteItemAsync(key).catch(() => {});
+  await SecureStore.setItemAsync(key, value, STORE_OPTIONS);
+}
+
+/** `ok: false` — хранилище не прочиталось (телефон заблокирован), это не «пусто». */
+type ReadResult<T> = { ok: true; value: T | null; raw: string | null } | { ok: false };
+
+async function readJson<T>(key: string): Promise<ReadResult<T>> {
+  let raw: string | null;
   try {
-    const raw = await SecureStore.getItemAsync(key);
-    return raw ? (JSON.parse(raw) as T) : null;
+    raw = await SecureStore.getItemAsync(key);
   } catch {
-    return null;
+    return { ok: false };
   }
+  if (!raw) return { ok: true, value: null, raw: null };
+  try {
+    return { ok: true, value: JSON.parse(raw) as T, raw };
+  } catch {
+    return { ok: true, value: null, raw: null };
+  }
+}
+
+/** Прочитанную старую запись (WHEN_UNLOCKED) переписываем в новый класс доступа. */
+async function migrateEntry(key: string, read: ReadResult<unknown>) {
+  if (read.ok && read.raw) await writeSecure(key, read.raw).catch(() => {});
+}
+
+/** Сколько раз повторить чтение, если хранилище недоступно при активном приложении. */
+const HYDRATE_ACTIVE_RETRIES = 3;
+const HYDRATE_RETRY_MS = 1_000;
+let hydrateRetries = 0;
+let waitingForActive = false;
+
+/** Повторить hydrate, когда приложение станет активным (телефон разблокирован). */
+function retryHydrateWhenActive(hydrate: () => Promise<void>) {
+  if (waitingForActive) return;
+  waitingForActive = true;
+  const sub = AppState.addEventListener('change', (state) => {
+    if (state !== 'active') return;
+    sub.remove();
+    waitingForActive = false;
+    void hydrate();
+  });
 }
 
 export const useSession = create<SessionState>()((set, get) => ({
@@ -66,8 +112,27 @@ export const useSession = create<SessionState>()((set, get) => ({
   locked: false,
 
   hydrate: async () => {
-    const club = await readJson<Club>(CLUB_KEY);
-    const auth = club ? await readJson<StoredAuth>(authKey(club.host)) : null;
+    if (get().hydrated) return;
+    const clubRead = await readJson<Club>(CLUB_KEY);
+    const club = clubRead.ok ? clubRead.value : null;
+    const authRead: ReadResult<StoredAuth> = club ? await readJson<StoredAuth>(authKey(club.host)) : { ok: true, value: null, raw: null };
+    if (!clubRead.ok || !authRead.ok) {
+      // Хранилище закрыто (push разбудил приложение на заблокированном телефоне): не
+      // записываем «нет клуба и входа» — иначе пришлось бы заново выбирать клуб и входить.
+      if (AppState.currentState !== 'active') {
+        retryHydrateWhenActive(() => get().hydrate());
+        return;
+      }
+      if (hydrateRetries < HYDRATE_ACTIVE_RETRIES) {
+        hydrateRetries += 1;
+        setTimeout(() => void get().hydrate(), HYDRATE_RETRY_MS);
+        return;
+      }
+      // Хранилище так и не открылось при активном приложении — как раньше: ко входу.
+    }
+    await migrateEntry(CLUB_KEY, clubRead);
+    if (club) await migrateEntry(authKey(club.host), authRead);
+    const auth = authRead.ok ? authRead.value : null;
     set({
       hydrated: true,
       club,
@@ -79,15 +144,17 @@ export const useSession = create<SessionState>()((set, get) => ({
   },
 
   setClub: async (club) => {
-    await SecureStore.setItemAsync(CLUB_KEY, JSON.stringify(club));
-    const auth = await readJson<StoredAuth>(authKey(club.host));
+    await writeSecure(CLUB_KEY, JSON.stringify(club));
+    const authRead = await readJson<StoredAuth>(authKey(club.host));
+    await migrateEntry(authKey(club.host), authRead);
+    const auth = authRead.ok ? authRead.value : null;
     set({ club, token: auth?.token ?? null, user: auth?.user ?? null, locked: false });
   },
 
   signIn: async (token, user) => {
     const { club } = get();
     if (!club) return;
-    await SecureStore.setItemAsync(authKey(club.host), JSON.stringify({ token, user } satisfies StoredAuth));
+    await writeSecure(authKey(club.host), JSON.stringify({ token, user } satisfies StoredAuth));
     set({ token, user, locked: false });
   },
 

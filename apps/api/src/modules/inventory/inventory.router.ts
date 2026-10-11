@@ -16,13 +16,14 @@ inventoryRouter.use('*', requireAuth, requireRole('owner', 'staff'))
 // позиции (исключая только мягко удалённые deletedAt != null): скрытая из меню
 // позиция всё ещё нуждается в учёте остатков/ревизии. Порядок — как в меню
 // (sortOrder, затем имя). Эндпоинт за requireAuth (только персонал), поэтому
-// costPrice здесь допустим.
+// costPrice здесь допустим. Сырьё (070) прежние клиенты показали бы штуками —
+// оно живёт в разделе «Товары» (/api/goods), здесь только позиции меню.
 inventoryRouter.get('/', async (c) => {
   const db = c.var.db
   const rows = await db
     .select()
     .from(inventory)
-    .where(isNull(inventory.deletedAt))
+    .where(and(isNull(inventory.deletedAt), eq(inventory.kind, 'goods')))
     .orderBy(asc(inventory.sortOrder), asc(inventory.name))
   return c.json({ items: rows })
 })
@@ -105,10 +106,15 @@ inventoryRouter.post(
 /**
  * Условие «ревизия новее данной». Сравниваем в SQL: created_at хранится с микросекундами,
  * а Date из драйвера — с миллисекундами, и ревизия выходила «новее самой себя» — последнюю
- * нельзя было поправить ни в приложении, ни в вебе.
+ * нельзя было поправить ни в приложении, ни в вебе. Считаются только проведённые:
+ * незаконченный черновик не мешает поправить последнюю ревизию.
  */
 const newerThan = (revisionId: string) =>
-  and(ne(revisions.id, revisionId), sql`${revisions.createdAt} > (select r.created_at from revisions r where r.id = ${revisionId})`)
+  and(
+    ne(revisions.id, revisionId),
+    eq(revisions.status, 'applied'),
+    sql`${revisions.createdAt} > (select r.created_at from revisions r where r.id = ${revisionId})`,
+  )
 
 // GET /api/inventory/revisions/:id — детали ревизии с позициями (в порядке добавления).
 inventoryRouter.get('/revisions/:id', async (c) => {
@@ -116,7 +122,14 @@ inventoryRouter.get('/revisions/:id', async (c) => {
   const id = c.req.param('id')
   const [rev] = await db.select().from(revisions).where(eq(revisions.id, id))
   if (!rev) return c.json({ error: 'Not found' }, 404)
-  const items = await db.select().from(revisionItems).where(eq(revisionItems.revisionId, id)).orderBy(asc(revisionItems.sortOrder))
+  const rows = await db
+    .select({ line: revisionItems, unit: inventory.unit })
+    .from(revisionItems)
+    .leftJoin(inventory, eq(inventory.id, revisionItems.itemId))
+    .where(eq(revisionItems.revisionId, id))
+    .orderBy(asc(revisionItems.sortOrder))
+  // Единица учёта строки (шт/г/мл) — для сырья (070); прежние клиенты поле не читают.
+  const items = rows.map((r) => ({ ...r.line, unit: r.unit ?? 'pcs' }))
   let author: string | null = null
   if (rev.createdBy) {
     const [a] = await db.select({ nickname: profiles.nickname }).from(profiles).where(eq(profiles.id, rev.createdBy))
@@ -194,7 +207,9 @@ inventoryRouter.post('/revisions/:id/apply', requireRole('owner', 'staff'),
       if (!rev) return 'not_found' as const
       if (rev.status !== 'draft') return 'not_draft' as const
       await applyRevisionItems(tx, revId, items, user.sub)
-      await tx.update(revisions).set({ status: 'applied', draftData: null, updatedAt: new Date() }).where(eq(revisions.id, revId))
+      // Дата ревизии — момент проведения, а не создания черновика (как у прихода и
+      // списания): иначе поздно проведённый черновик не считался бы последней ревизией.
+      await tx.update(revisions).set({ status: 'applied', draftData: null, createdAt: new Date(), updatedAt: new Date() }).where(eq(revisions.id, revId))
       return 'ok' as const
     })
     if (res === 'not_found') return c.json({ error: 'Not found' }, 404)

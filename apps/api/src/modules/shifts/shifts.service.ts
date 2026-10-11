@@ -1,4 +1,4 @@
-import { db, shifts, checks, checkPayments, cashOperations, refunds, profiles, eq, and, isNull, sql, desc, sum, type Database } from '@titan/database'
+import { db, shifts, checks, checkPayments, cashOperations, refunds, profiles, eq, and, isNull, sql, desc, sum, gte, lt, type Database } from '@titan/database'
 import { notify } from '../notifications/push.js'
 
 // Переходный режим: пер-клубный db передаётся параметром, дефолт — модульный синглтон.
@@ -20,7 +20,7 @@ export async function openShift(data: {
   eveningType: string
   note?: string
   adjustmentReason?: string
-}, database: DbLike) {
+}, database: DbLike, clubId: string | null) {
   const existing = await getCurrentShift(database)
   if (existing) throw new Error('Shift already open')
 
@@ -79,12 +79,12 @@ export async function openShift(data: {
     type: 'shift_open',
     title: 'Смена открыта',
     body: `Касса на старте: ${expectedStart} ₽`,
-  }, database).catch(() => {})
+  }, database, clubId).catch(() => {})
 
   return shift
 }
 
-export async function closeShift(shiftId: string, closedBy: string, cashEnd: number, adjustmentReason: string | undefined, database: DbLike) {
+export async function closeShift(shiftId: string, closedBy: string, cashEnd: number, adjustmentReason: string | undefined, database: DbLike, clubId: string | null) {
   const counted = cashEnd
   // Всё в ОДНОЙ транзакции с блокировкой строки смены (FOR UPDATE): повторно
   // проверяем статус и отсутствие открытых чеков и считаем остаток ПОД блокировкой —
@@ -130,13 +130,13 @@ export async function closeShift(shiftId: string, closedBy: string, cashEnd: num
     type: 'shift_close',
     title: 'Смена закрыта',
     body: `Касса: ${counted} ₽`,
-  }, database).catch(() => {})
+  }, database, clubId).catch(() => {})
   if (diff !== 0) {
     void notify({
       type: 'cash_discrepancy',
       title: 'Расхождение в кассе',
       body: `${diff > 0 ? 'Излишек (внесение)' : 'Недостача (изъятие)'}: ${Math.abs(diff)} ₽`,
-    }, database).catch(() => {})
+    }, database, clubId).catch(() => {})
   }
 
   return updated
@@ -194,6 +194,10 @@ export async function getShiftCashBalance(shiftId: string, exec: any) {
   // Возвраты наличными: при возврате по способам оплаты берём «cash»-тендер
   // напрямую; для старых возвратов (tenders=NULL) — пропорционально наличной
   // доле оригинального чека.
+  // Возврат относится к смене, В КОТОРУЮ ОН СДЕЛАН (деньги ушли из кассы сейчас),
+  // а не к смене исходного чека: иначе сегодняшний возврат вчерашнего наличного
+  // чека не уменьшал сегодняшний ожидаемый остаток (ложная недостача при закрытии)
+  // и задним числом менял уже закрытую вчерашнюю смену.
   const refundRows = await exec
     .select({
       refundTotal: refunds.totalAmount,
@@ -201,8 +205,10 @@ export async function getShiftCashBalance(shiftId: string, exec: any) {
       tenders: refunds.tenders,
     })
     .from(refunds)
-    .innerJoin(checks, eq(checks.id, refunds.checkId))
-    .where(eq(checks.shiftId, shiftId))
+    .where(and(
+      gte(refunds.createdAt, shift.openedAt),
+      shift.closedAt ? lt(refunds.createdAt, shift.closedAt) : undefined,
+    ))
 
   let cashRefundTotal = 0
   for (const r of refundRows) {
@@ -255,7 +261,9 @@ export async function getLastShiftCashEnd(database: DbLike): Promise<number | nu
     .orderBy(desc(shifts.closedAt))
     .limit(1)
   if (!row || row.cashEnd === null) return null
-  return parseFloat(String(row.cashEnd)) || null
+  // 0 — валидный остаток (касса пустая), не «нет прошлой смены».
+  const n = parseFloat(String(row.cashEnd))
+  return Number.isFinite(n) ? n : null
 }
 
 export async function getShiftHistory(page = 1, limit = 20, database: DbLike) {

@@ -12,9 +12,8 @@ echo "🔄 Получение последних изменений..."
 git fetch origin main
 git reset --hard origin/main
 
-echo "📦 Установка зависимостей..."
-npm install -g pnpm@11 --quiet
-CI=true pnpm install --frozen-lockfile
+# Зависимости ставятся внутри Docker-сборки (.dockerignore исключает хостовые
+# node_modules), поэтому Node/pnpm на самом хосте не нужны.
 
 echo "🔐 Проверка .env..."
 if [ ! -f .env ]; then

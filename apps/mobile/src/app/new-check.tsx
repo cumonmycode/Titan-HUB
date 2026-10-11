@@ -4,17 +4,17 @@ import { useMutation } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
 import { useState } from 'react';
-import { ActivityIndicator, Alert, Keyboard, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, Keyboard, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import Animated, { FadeInLeft, FadeInRight, FadeOut, LayoutAnimationConfig } from 'react-native-reanimated';
 
+import { Text, TextInput } from '@/components/text';
 import { GlassCard, PrimaryButton, QuickTile, SheetHeader, sheetStyles } from '@/components/new-check-parts';
 import { PlayerCard, PlayerSearch, TariffGrid, useTariffChoice } from '@/components/player-picker';
-import { api } from '@/lib/api';
 import { useAutoFocus } from '@/lib/auto-focus';
 import { formatMoney } from '@/lib/format';
 import { haptic } from '@/lib/haptics';
 import { createCheckErrorMessage, openCreatedCheck } from '@/lib/new-check';
-import { createCheck, createClient, SPACE_TYPE_LABEL, useSpaces, type ClientTier, type PlayerSearchItem, type Tariff } from '@/lib/pos-api';
+import { addEntryTariff, createCheck, createClient, SPACE_TYPE_LABEL, useSpaces, type ClientTier, type PlayerSearchItem, type Tariff } from '@/lib/pos-api';
 import { useChecks } from '@/lib/queries';
 import { colors, space, type } from '@/lib/theme';
 
@@ -45,10 +45,9 @@ export default function NewCheckSheet() {
   const create = useMutation({
     mutationFn: async (input: CreateInput) => {
       const check = await createCheck({ playerId: input.playerId, spaceId: input.spaceId });
-      if (input.tariffItemId) {
-        // Как веб: тариф — это позиция меню; её ошибка не отменяет уже открытый чек.
-        await api.post(`/pos/checks/${check.id}/items`, { itemId: input.tariffItemId, quantity: 1 }).catch(() => {});
-      }
+      // Как веб: тариф — это позиция меню; её ошибка не отменяет уже открытый чек,
+      // но о ней показываем предупреждение (см. addEntryTariff).
+      if (input.tariffItemId) await addEntryTariff(check.id, input.tariffItemId);
       return check;
     },
     onSuccess: (check) => openCreatedCheck(router, check),
@@ -302,11 +301,12 @@ const styles = StyleSheet.create({
   quickRow: { flexDirection: 'row', gap: 10 },
 
   field: { paddingHorizontal: space.lg },
-  fieldInput: { color: colors.label, height: 48 },
+  fieldInput: { color: colors.label, minHeight: 48 },
   segment: { alignSelf: 'stretch' },
   error: { color: colors.red, paddingHorizontal: space.xs },
 
-  spaceRow: { flexDirection: 'row', alignItems: 'center', gap: space.md, paddingHorizontal: space.md, height: 64 },
+  // Высота — минимальная: с крупным текстом строка зоны растёт, а не обрезает подписи.
+  spaceRow: { flexDirection: 'row', alignItems: 'center', gap: space.md, paddingHorizontal: space.md, paddingVertical: space.sm, minHeight: 64 },
   spaceIcon: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center' },
   spaceSeparator: { marginLeft: 58 },
   // В шторке «по содержимому» ScrollView не должен сжиматься: его высота входит в высоту шторки.

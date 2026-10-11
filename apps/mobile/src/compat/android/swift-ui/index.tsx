@@ -10,11 +10,13 @@ import { NavigationContext } from 'expo-router/react-navigation';
 import { Children, cloneElement, createContext, Fragment, isValidElement, useContext, useEffect, useRef, useState, type ReactElement, type ReactNode } from 'react';
 import {
   ActivityIndicator, DynamicColorIOS, Modal, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, Switch,
-  Text as RNText, TextInput, useWindowDimensions, View,
+  useWindowDimensions, View,
   type ColorValue, type StyleProp, type TextStyle, type ViewStyle,
 } from 'react-native';
 
 import { SwipeToDelete } from '@/components/swipe-to-delete';
+import { Text as RNText, TextInput } from '@/components/text';
+import { FONT_SCALE_MAX, useScaledSize, useTextLayout } from '@/lib/text-scale';
 import { useAutoFocus } from '@/lib/auto-focus';
 import { haptic } from '@/lib/haptics';
 import { useTabBarClearance } from '@/lib/tab-bar';
@@ -115,6 +117,17 @@ const MenuCloseContext = createContext<(() => void) | null>(null);
 const FootnoteContext = createContext(false);
 
 /**
+ * Ось родительского стека — для frame(maxWidth: .infinity): в ряду (HStack) такие вью делят
+ * ширину поровну, в столбце (VStack, секция) — растягиваются на всю ширину.
+ */
+const AxisContext = createContext<'row' | 'column'>('column');
+function useFill(fill: boolean | undefined): ViewStyle | undefined {
+  const axis = useContext(AxisContext);
+  if (!fill) return undefined;
+  return axis === 'row' ? styles.fillRow : styles.fillColumn;
+}
+
+/**
  * Место в строке секции. В SwiftUI отступы строке даёт ячейка List/Form, а здесь их
  * добавляем сами: 'root' — строка собрана своим компонентом (LinkRow, TextRow, InputRow…),
  * и отступы ячейки берёт первый стек или текст внутри него; 'inside' — отступы уже есть,
@@ -161,15 +174,26 @@ export function Host({ style, children, seedColor, pointerEvents, modifiers }: H
 export function VStack({ children, spacing, alignment, modifiers, style }: Mods & WithChildren & { spacing?: number; alignment?: string; style?: StyleProp<ViewStyle> }) {
   const align = alignment === 'leading' ? 'flex-start' : alignment === 'trailing' ? 'flex-end' : 'center';
   const root = useCellRoot();
+  const m = resolve(modifiers);
+  // Столбец с растягивающимся рядом (ряд со Spacer) тоже растягивается, как в SwiftUI:
+  // иначе время в уведомлении стояло вплотную к заголовку, а не у правого края.
+  const fill = useFill(m.fill || Children.toArray(children).some(isGreedyRow));
   // flexShrink: в строке (HStack) столбец текста должен переноситься, а не вылезать за карточку.
-  const view = <View style={[root && styles.cell, { gap: spacing, alignItems: align, flexShrink: 1 }, resolve(modifiers).style, style]}>{children}</View>;
+  const view = (
+    <View style={[root && styles.cell, { gap: spacing, alignItems: align, flexShrink: 1 }, m.style, fill, style]}>
+      <AxisContext.Provider value="column">{children}</AxisContext.Provider>
+    </View>
+  );
   return root ? insideCell(view) : view;
 }
 
 export function HStack({ children, spacing, alignment, modifiers, style }: Mods & WithChildren & { spacing?: number; alignment?: string; style?: StyleProp<ViewStyle> }) {
   const align = alignment === 'top' ? 'flex-start' : alignment === 'bottom' ? 'flex-end' : 'center';
   const root = useCellRoot();
+  const parentAxis = useContext(AxisContext);
   // Как в SwiftUI: значение справа от Spacer не сжимается — сжимается и обрезается подпись слева.
+  // Но не больше 60 % строки: на «Увеличенном» виде и с крупным текстом длинное значение
+  // иначе вытесняло подпись целиком.
   const list = Children.toArray(children);
   const spacerAt = list.findIndex((child) => isValidElement(child) && child.type === Spacer);
   const items =
@@ -180,8 +204,22 @@ export function HStack({ children, spacing, alignment, modifiers, style }: Mods 
             ? cloneElement(child as ReactElement<{ style?: StyleProp<ViewStyle> }>, { style: [(child.props as { style?: StyleProp<ViewStyle> }).style, styles.noShrink] })
             : child,
         );
-  const view = <View style={[root && styles.cell, { flexDirection: 'row', gap: spacing, alignItems: align }, resolve(modifiers).style, style]}>{items}</View>;
+  const m = resolve(modifiers);
+  const fill = useFill(m.fill);
+  // Как в SwiftUI: ряд со Spacer занимает всю доступную ширину. Раньше он был шириной по
+  // содержимому, и время в уведомлениях уезжало за край строки.
+  const greedy = spacerAt >= 0 ? (parentAxis === 'row' ? styles.greedyRow : styles.fillColumn) : undefined;
+  const view = (
+    <View style={[root && styles.cell, { flexDirection: 'row', gap: spacing, alignItems: align }, greedy, m.style, fill, style]}>
+      <AxisContext.Provider value="row">{items}</AxisContext.Provider>
+    </View>
+  );
   return root ? insideCell(view) : view;
+}
+
+/** Ряд со Spacer — в SwiftUI он забирает всю ширину. */
+function isGreedyRow(child: ReactNode): boolean {
+  return isValidElement(child) && child.type === HStack && Children.toArray((child.props as WithChildren).children).some((c) => isValidElement(c) && c.type === Spacer);
 }
 
 export function Spacer({ modifiers }: Mods) {
@@ -199,7 +237,13 @@ export function Text({ children, modifiers, style }: Mods & WithChildren & { sty
   const m = resolve(modifiers);
   const footnote = useContext(FootnoteContext);
   const root = useCellRoot();
-  return <RNText numberOfLines={m.lineLimit} style={[styles.text, footnote && styles.footnote, root && styles.cellText, m.text, style]}>{children}</RNText>;
+  // В ряду текст переносится, как в SwiftUI, а не выталкивает соседей за край.
+  const inRow = useContext(AxisContext) === 'row';
+  return (
+    <RNText numberOfLines={m.lineLimit} style={[styles.text, inRow && styles.shrink, footnote && styles.footnote, root && styles.cellText, m.text, style]}>
+      {children}
+    </RNText>
+  );
 }
 
 /** SwiftUI Image(systemName:) — SF Symbol; на Android его рисует наш SymbolView. */
@@ -232,6 +276,7 @@ export function Label({ title, systemImage, modifiers }: Mods & { title?: string
 
 export function Button({ label, systemImage, onPress, modifiers, children, role }: Mods & WithChildren & { label?: string; systemImage?: string; onPress?: () => void; role?: string }) {
   const m = resolve(modifiers);
+  const fill = useFill(m.fill);
   const tint = useTint(m.tint);
   const closeMenu = useContext(MenuCloseContext);
   const destructive = role === 'destructive';
@@ -254,7 +299,7 @@ export function Button({ label, systemImage, onPress, modifiers, children, role 
           onPress?.();
         }}
         disabled={m.disabled}
-        style={({ pressed }) => [styles.rowButton, m.style, pressed && styles.rowPressed, m.disabled && styles.pressed]}>
+        style={({ pressed }) => [styles.rowButton, m.style, fill, pressed && styles.rowPressed, m.disabled && styles.pressed]}>
         <View style={styles.rowButtonContent}>{children}</View>
       </Pressable>,
     );
@@ -275,6 +320,7 @@ export function Button({ label, systemImage, onPress, modifiers, children, role 
         tonal && { backgroundColor: colors.fill },
         filled && { backgroundColor: tint as string },
         m.style,
+        fill,
         (pressed || m.disabled) && styles.pressed,
       ]}>
       {systemImage ? <SymbolView name={systemImage} size={large ? 19 : 17} tintColor={filled ? '#FFFFFF' : color} /> : null}
@@ -323,6 +369,9 @@ function IosSegmented({ labels, index, disabled, style, onSelect }: { labels: st
     width.set(withSpring(target.width, spring));
   }, [target, x, width, placed]);
   const thumb = useAnimatedStyle(() => ({ width: width.get(), transform: [{ translateX: x.get() }] }));
+  // Четыре сегмента («Остатки / Закупки / Ревизии / Расходы») на узком экране — поля уже.
+  const { layout } = useTextLayout();
+  const crowded = labels.length >= 4 || layout !== 'regular';
   return (
     <View style={[styles.iosSegments, disabled && styles.pressed, style]}>
       {target ? <Animated.View style={[styles.iosThumb, thumb]} /> : null}
@@ -340,10 +389,16 @@ function IosSegmented({ labels, index, disabled, style, onSelect }: { labels: st
               return next;
             });
           }}
-          style={styles.iosSegment}
+          style={[styles.iosSegment, crowded && styles.iosSegmentCrowded]}
           accessibilityRole="tab"
           accessibilityState={{ selected: i === index }}>
-          <RNText numberOfLines={1} style={[styles.iosSegmentText, i === index && styles.iosSegmentTextActive]}>
+          {/* Не влезают — подписи ужимаются, а не режутся до «Оста…» («Увеличенный» вид, крупный текст). */}
+          <RNText
+            numberOfLines={1}
+            adjustsFontSizeToFit
+            minimumFontScale={0.7}
+            maxFontSizeMultiplier={FONT_SCALE_MAX.compact}
+            style={[styles.iosSegmentText, i === index && styles.iosSegmentTextActive]}>
             {text}
           </RNText>
         </Pressable>
@@ -390,6 +445,8 @@ export function Picker({ selection, onSelectionChange, options, modifiers, child
   const { ref: popoverRef, anchor: popoverAnchor, open: openPopover, close: closePopover } = usePopover();
   // Сегмент — сама строка секции: как в SwiftUI-форме, с отступами ячейки, а не впритык к краям.
   const inCell = useContext(CellContext) === 'control';
+  // С очень крупным текстом значение встаёт под подпись — как в «Настройках» iOS.
+  const { stacked } = useTextLayout();
   // iOS: всплывающее меню выбора (RN) и сегмент iOS 26 на RN — без вставок SwiftUI.
   if (IOS && (m.pickerStyle === 'menu' || m.pickerStyle === 'wheel')) {
     const current = items.find((item) => item.value === selection);
@@ -399,11 +456,11 @@ export function Picker({ selection, onSelectionChange, options, modifiers, child
           ref={popoverRef}
           onPress={openPopover}
           disabled={m.disabled}
-          style={({ pressed }) => [styles.listRow, m.style, pressed && styles.rowPressed, m.disabled && styles.pressed]}
+          style={({ pressed }) => [styles.listRow, stacked && styles.listRowStacked, m.style, pressed && styles.rowPressed, m.disabled && styles.pressed]}
           accessibilityRole="button"
           accessibilityLabel={label}
           accessibilityValue={{ text: labelText(current?.label) }}>
-          {label ? <RNText style={[styles.text, styles.rowLabel]}>{label}</RNText> : <View style={styles.rowLabel} />}
+          {label ? <RNText style={[styles.text, stacked ? styles.stackedLabel : styles.rowLabel]}>{label}</RNText> : <View style={styles.rowLabel} />}
           <View style={styles.row}>
             <RNText style={[styles.text, { color: tint }]}>{current?.label ?? ''}</RNText>
             <SymbolView name="chevron.up.chevron.down" size={12} weight="semibold" tintColor={tint} />
@@ -482,7 +539,14 @@ export function Picker({ selection, onSelectionChange, options, modifiers, child
             disabled={m.disabled}
             onPress={() => change?.(item.value)}
             style={[styles.segment, active && styles.segmentActive]}>
-            <RNText numberOfLines={1} style={[styles.segmentText, active && { color: tint, fontWeight: '600' }]}>{item.label}</RNText>
+            <RNText
+              numberOfLines={1}
+              adjustsFontSizeToFit
+              minimumFontScale={0.7}
+              maxFontSizeMultiplier={FONT_SCALE_MAX.compact}
+              style={[styles.segmentText, active && { color: tint, fontWeight: '600' }]}>
+              {item.label}
+            </RNText>
           </Pressable>
         );
       })}
@@ -532,6 +596,7 @@ export function DatePicker({ title, selection, displayedComponents = 'date', onD
   const withTime = kinds.includes('hourAndMinute') || kinds.includes('dateAndTime');
   const value = selection ?? new Date();
   const [shownMonth, setShownMonth] = useState(() => new Date(value.getFullYear(), value.getMonth(), 1));
+  const { stacked } = useTextLayout();
   if (HAS_ISLANDS) {
     // iOS: плашки как у компактного DatePicker; нативный календарь или колесо создаются
     // только в открытой панели — вставка SwiftUI не стоит ничего при переходе на экран.
@@ -547,9 +612,9 @@ export function DatePicker({ title, selection, displayedComponents = 'date', onD
       </Pressable>
     );
     return (
-      <View style={[styles.listRow, m.style]}>
-        {title ? <RNText style={[styles.text, styles.rowLabel]}>{title}</RNText> : <View style={styles.rowLabel} />}
-        <View style={styles.row}>
+      <View style={[styles.listRow, stacked && styles.listRowStacked, m.style]}>
+        {title ? <RNText style={[styles.text, stacked ? styles.stackedLabel : styles.rowLabel]}>{title}</RNText> : <View style={styles.rowLabel} />}
+        <View style={[styles.row, styles.wrapRow]}>
           {components.includes('date') ? pill(value.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', year: 'numeric' }), 'дата') : null}
           {components.includes('hourAndMinute') ? pill(value.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }), 'время') : null}
         </View>
@@ -622,7 +687,9 @@ export function DatePicker({ title, selection, displayedComponents = 'date', onD
             </View>
             <View style={styles.calendarRow}>
               {WEEKDAYS.map((day) => (
-                <RNText key={day} style={styles.weekday}>{day}</RNText>
+                <RNText key={day} style={styles.weekday} maxFontSizeMultiplier={FONT_SCALE_MAX.compact}>
+                  {day}
+                </RNText>
               ))}
             </View>
             <View style={styles.calendarGrid}>
@@ -641,7 +708,7 @@ export function DatePicker({ title, selection, displayedComponents = 'date', onD
                     style={styles.dayCell}>
                     {/* Кружок фиксированного размера: у ячейки ширина в процентах, и фон растягивался в овал. */}
                     <View style={[styles.dayDot, chosen && { backgroundColor: tint }]}>
-                      <RNText style={[styles.text, styles.dayText, off && styles.dayTextOff, chosen && styles.dayTextChosen]}>
+                      <RNText maxFontSizeMultiplier={FONT_SCALE_MAX.compact} style={[styles.text, styles.dayText, off && styles.dayTextOff, chosen && styles.dayTextChosen]}>
                         {day ?? ''}
                       </RNText>
                     </View>
@@ -660,7 +727,7 @@ export function DatePicker({ title, selection, displayedComponents = 'date', onD
               contentOffset={{ x: 0, y: Math.max(0, (value.getHours() - 1) * TIME_CELL) }}>
               {Array.from({ length: 24 }, (_, hour) => (
                 <Pressable key={hour} style={styles.timeCell} onPress={() => pickTime(hour, value.getMinutes())}>
-                  <RNText style={[styles.timeText, hour === value.getHours() && { color: tint, fontWeight: '700' }]}>
+                  <RNText maxFontSizeMultiplier={FONT_SCALE_MAX.compact} style={[styles.timeText, hour === value.getHours() && { color: tint, fontWeight: '700' }]}>
                     {String(hour).padStart(2, '0')}
                   </RNText>
                 </Pressable>
@@ -673,7 +740,7 @@ export function DatePicker({ title, selection, displayedComponents = 'date', onD
               contentOffset={{ x: 0, y: Math.max(0, (minutes.indexOf(value.getMinutes()) - 1) * TIME_CELL) }}>
               {minutes.map((minute) => (
                 <Pressable key={minute} style={styles.timeCell} onPress={() => pickTime(value.getHours(), minute)}>
-                  <RNText style={[styles.timeText, minute === value.getMinutes() && { color: tint, fontWeight: '700' }]}>
+                  <RNText maxFontSizeMultiplier={FONT_SCALE_MAX.compact} style={[styles.timeText, minute === value.getMinutes() && { color: tint, fontWeight: '700' }]}>
                     {String(minute).padStart(2, '0')}
                   </RNText>
                 </Pressable>
@@ -967,9 +1034,10 @@ export const SwipeActions = Object.assign(SwipeActionsView, { Actions: SwipeActi
 
 export function LabeledContent({ label, children, modifiers }: Mods & WithChildren & { label?: string }) {
   const m = resolve(modifiers);
+  const { stacked } = useTextLayout();
   return (
-    <View style={[styles.listRow, m.style]}>
-      <RNText style={[styles.text, styles.rowLabel]}>{label}</RNText>
+    <View style={[styles.listRow, stacked && styles.listRowStacked, m.style]}>
+      <RNText style={[styles.text, stacked ? styles.stackedLabel : styles.rowLabel]}>{label}</RNText>
       <CellContext.Provider value="inside">
         <View style={styles.row}>{children}</View>
       </CellContext.Provider>
@@ -1226,15 +1294,18 @@ const popIn = new Keyframe({
  */
 function PopoverMenu({ anchor, items, checks, onClose }: { anchor: Anchor | null; items: PopoverItem[]; checks?: boolean; onClose: () => void }) {
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
+  // Меню растёт вместе с текстом: строки выше, само меню шире (но не шире экрана).
+  const rowHeight = useScaledSize(POPOVER_ROW, FONT_SCALE_MAX.text);
+  const menuWidth = Math.min(screenWidth - 24, useScaledSize(POPOVER_WIDTH));
   if (!anchor) return null;
-  const height = items.length * POPOVER_ROW;
+  const height = items.length * rowHeight;
   const below = anchor.y + anchor.height + 8 + height < screenHeight - 40;
   const top = below ? anchor.y + anchor.height + 6 : Math.max(56, anchor.y - height - 6);
-  const left = Math.min(Math.max(12, anchor.x + anchor.width - POPOVER_WIDTH), screenWidth - POPOVER_WIDTH - 12);
+  const left = Math.min(Math.max(12, anchor.x + anchor.width - menuWidth), screenWidth - menuWidth - 12);
   return (
     <Modal visible transparent animationType="none" onRequestClose={onClose} statusBarTranslucent>
       <Pressable style={StyleSheet.absoluteFill} onPress={onClose} accessibilityLabel="Закрыть меню" />
-      <Animated.View entering={popIn} style={[styles.popover, { top, left, width: POPOVER_WIDTH, transformOrigin: below ? 'top right' : 'bottom right' }]}>
+      <Animated.View entering={popIn} style={[styles.popover, { top, left, width: menuWidth, transformOrigin: below ? 'top right' : 'bottom right' }]}>
         <View style={styles.popoverClip}>
           {items.map((item, index) => (
             <Pressable
@@ -1243,11 +1314,11 @@ function PopoverMenu({ anchor, items, checks, onClose }: { anchor: Anchor | null
                 onClose();
                 item.onPress?.();
               }}
-              style={({ pressed }) => [styles.popoverRow, index > 0 && styles.popoverSeparator, pressed && styles.rowPressed]}
+              style={({ pressed }) => [styles.popoverRow, { minHeight: rowHeight }, index > 0 && styles.popoverSeparator, pressed && styles.rowPressed]}
               accessibilityRole={checks ? 'radio' : 'button'}
               accessibilityState={checks ? { selected: !!item.checked } : undefined}>
               {checks ? <View style={styles.popoverCheck}>{item.checked ? <SymbolView name="checkmark" size={15} weight="semibold" tintColor={colors.label} /> : null}</View> : null}
-              <RNText numberOfLines={1} style={[styles.popoverText, item.destructive && styles.destructiveText]}>
+              <RNText numberOfLines={2} style={[styles.popoverText, item.destructive && styles.destructiveText]}>
                 {item.label}
               </RNText>
               {item.systemImage ? <SymbolView name={item.systemImage} size={17} tintColor={item.destructive ? colors.red : colors.label} /> : null}
@@ -1313,7 +1384,11 @@ const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
   rowLabel: { flex: 1 },
   spacer: { flexGrow: 1 },
-  noShrink: { flexShrink: 0 },
+  noShrink: { flexShrink: 0, maxWidth: '60%' },
+  fillRow: { flexGrow: 1, flexShrink: 1, flexBasis: 0 },
+  fillColumn: { alignSelf: 'stretch' },
+  greedyRow: { flexGrow: 1, flexShrink: 1 },
+  shrink: { flexShrink: 1 },
 
   button: { flexDirection: 'row', alignItems: 'center', gap: space.sm, paddingVertical: space.sm, paddingHorizontal: space.md, borderRadius: radius.control },
   buttonLarge: { paddingVertical: space.md, justifyContent: 'center' },
@@ -1326,18 +1401,19 @@ const styles = StyleSheet.create({
 
   segments: { flexDirection: 'row', backgroundColor: colors.fill, borderRadius: 9, padding: 2 },
   segmentInCell: { marginHorizontal: space.lg, marginVertical: space.sm + 2 },
-  iosSegments: { flexDirection: 'row', height: 36, borderRadius: 18, padding: SEGMENT_PAD, backgroundColor: colors.fill },
+  iosSegments: { flexDirection: 'row', minHeight: 36, borderRadius: 18, padding: SEGMENT_PAD, backgroundColor: colors.fill },
   iosThumb: {
     position: 'absolute', top: SEGMENT_PAD, bottom: SEGMENT_PAD, left: 0, borderRadius: 15,
     backgroundColor: SEGMENT_THUMB, boxShadow: '0 2px 6px rgba(0,0,0,0.12)',
   },
   iosSegment: { flexGrow: 1, flexShrink: 1, flexBasis: 'auto', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 10 },
+  iosSegmentCrowded: { paddingHorizontal: 6 },
   iosSegmentText: { fontSize: 14, fontWeight: '500', color: colors.label },
   iosSegmentTextActive: { fontWeight: '600' },
   datePill: { backgroundColor: colors.fill, borderRadius: 8, borderCurve: 'continuous', paddingHorizontal: 11, paddingVertical: 6 },
   popover: { position: 'absolute', borderRadius: 20, borderCurve: 'continuous', backgroundColor: POPOVER_BG, boxShadow: '0 12px 36px rgba(0,0,0,0.22)' },
   popoverClip: { borderRadius: 20, borderCurve: 'continuous', overflow: 'hidden' },
-  popoverRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm + 2, height: POPOVER_ROW, paddingHorizontal: space.lg - 2 },
+  popoverRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm + 2, paddingVertical: space.sm, paddingHorizontal: space.lg - 2 },
   popoverSeparator: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.separator },
   popoverCheck: { width: 18, alignItems: 'center' },
   popoverText: { flex: 1, fontSize: 17, color: colors.label },
@@ -1375,11 +1451,17 @@ const styles = StyleSheet.create({
   separator: { height: StyleSheet.hairlineWidth, backgroundColor: colors.separator, marginLeft: space.lg, marginRight: IOS ? space.lg : 0 },
   separatorAfterIcon: { marginLeft: space.lg + 30 + 12 },
   listRow: { flexDirection: 'row', alignItems: 'center', gap: space.md, paddingHorizontal: space.lg, paddingVertical: space.md, minHeight: IOS ? 52 : 48 },
+  // Очень крупный текст: подпись сверху, значение под ней. У подписи в столбике свой стиль:
+  // `flex: 1` из rowLabel в колонке без высоты схлопнул бы её до нуля.
+  listRowStacked: { flexDirection: 'column', alignItems: 'flex-start', gap: space.xs },
+  stackedLabel: { alignSelf: 'stretch' },
+  wrapRow: { flexWrap: 'wrap' },
   list: { flex: 1 },
   listContent: { paddingVertical: space.md, gap: space.xl },
   listInset: { paddingHorizontal: space.lg },
 
-  input: { color: colors.label, fontSize: 17, paddingVertical: space.md, paddingHorizontal: space.lg, flex: 1 },
+  // alignSelf: в столбике (подпись над полем при крупном тексте) поле — во всю ширину, как в SwiftUI.
+  input: { color: colors.label, fontSize: 17, paddingVertical: space.md, paddingHorizontal: space.lg, flex: 1, alignSelf: 'stretch' },
   inputInRow: { paddingVertical: 0, paddingHorizontal: 0 },
   dateValue: { paddingVertical: space.xs },
 
@@ -1401,7 +1483,7 @@ const styles = StyleSheet.create({
   timeText: { color: colors.label, fontSize: 20, fontVariant: ['tabular-nums'] },
   timeColon: { color: colors.secondaryLabel, fontSize: 22, fontWeight: '600' },
   dayTextOff: { color: colors.tertiaryLabel },
-  sheetDone: { marginHorizontal: space.lg, marginTop: space.lg, height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center' },
+  sheetDone: { marginHorizontal: space.lg, marginTop: space.lg, minHeight: 48, paddingVertical: space.sm, borderRadius: 24, alignItems: 'center', justifyContent: 'center' },
   sheetDoneText: { color: '#FFFFFF', fontSize: 17, fontWeight: '600' },
   swatch: { width: 28, height: 28, borderRadius: 14 },
   swatchLarge: { width: 44, height: 44, borderRadius: 22 },

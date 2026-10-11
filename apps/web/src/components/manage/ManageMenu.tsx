@@ -10,6 +10,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useQuery } from '@tanstack/react-query'
 import { useAuthStore } from '@/store/auth.store'
+import { permissionOn } from '@/lib/permissions'
 import { api } from '@/lib/api'
 import { Icon } from '@/components/Icon'
 
@@ -23,11 +24,11 @@ interface NavItem {
   bg: string
   roles: string[]
   /**
-   * Ключ права доступа (см. staff/page.tsx permissions). Если задан и у
-   * сотрудника (role 'staff') permissions[perm] === false — раздел скрыт.
+   * Ключ права доступа (см. lib/permissions.ts). Если у сотрудника (role 'staff')
+   * право выключено — явно или по умолчанию — раздел скрыт.
    * Владельца права не ограничивают. Пункты без perm гейтятся только ролью.
    */
-  perm?: string
+  perm?: string | string[]
 }
 
 interface NavGroup {
@@ -44,10 +45,11 @@ const NAV: NavGroup[] = [
     title: 'Меню и склад',
     icon: 'inventory_2',
     items: [
-      { href: '/manage/menu',      label: 'Меню',      icon: 'restaurant_menu', color: '#F97316', bg: 'rgba(249,115,22,0.15)',  roles: ['owner','staff'], perm: 'menu' },
+      { href: '/manage/goods',     label: 'Товары',    icon: 'restaurant_menu', color: '#F97316', bg: 'rgba(249,115,22,0.15)',  roles: ['owner','staff'], perm: ['menu', 'inventory'] },
       // Единый экран «Склад»: остатки, поставки и ревизия — вкладки внутри одного раздела.
-      { href: '/manage/inventory', label: 'Склад',     icon: 'inventory_2',     color: '#3B82F6', bg: 'rgba(59,130,246,0.15)',  roles: ['owner','staff'], perm: 'inventory' },
       { href: '/manage/pricing',   label: 'Тарифы и аренда', icon: 'confirmation_number', color: '#8B5CF6', bg: 'rgba(139,92,246,0.15)', roles: ['owner','staff'] },
+      // Телевизоры с Titan Menu: меню или слайдшоу, у каждого свои настройки.
+      { href: '/manage/screens',   label: 'Экраны',    icon: 'tv',              color: '#A78BFA', bg: 'rgba(167,139,250,0.15)', roles: ['owner','staff'] },
     ],
   },
   {
@@ -59,7 +61,7 @@ const NAV: NavGroup[] = [
       // Единый экран «Депозиты и долги»: депозит и долг — один баланс, вкладки внутри.
       { href: '/manage/balances',  label: 'Депозиты и долги', icon: 'account_balance', color: '#06B6D4', bg: 'rgba(6,182,212,0.15)', roles: ['owner','staff'], perm: 'debtors' },
       // Единый экран «Лояльность»: Скидки · Бонусы · Сертификаты — вкладки внутри.
-      { href: '/manage/loyalty',   label: 'Лояльность', icon: 'loyalty', color: '#F59E0B', bg: 'rgba(245,158,11,0.15)', roles: ['owner','staff'] },
+      { href: '/manage/loyalty',   label: 'Лояльность', icon: 'loyalty', color: '#F59E0B', bg: 'rgba(245,158,11,0.15)', roles: ['owner','staff'], perm: ['discounts', 'bonus'] },
       // Сбор средств (Фонд клуба и разовые сборы) — взносы резидентов, мимо кассы.
       { href: '/manage/collections', label: 'Сбор средств', icon: 'savings', color: '#22C55E', bg: 'rgba(34,197,94,0.15)', roles: ['owner','staff'], perm: 'debtors' },
       // Рассылки клиентам: лента и push в приложении My Titan (+ бот My Titan).
@@ -76,6 +78,7 @@ const NAV: NavGroup[] = [
       // Смена и касса в одном экране (инкассация встроена).
       { href: '/manage/shifts', label: 'Смены',     icon: 'schedule', color: '#8B5CF6', bg: 'rgba(139,92,246,0.15)',  roles: ['owner','staff'] },
       { href: '/manage/salary', label: 'Зарплата',  icon: 'payments', color: '#10B981', bg: 'rgba(16,185,129,0.15)', roles: ['owner'], perm: 'salary' },
+      { href: '/manage/expenses', label: 'Расходы', icon: 'receipt_long', color: '#F59E0B', bg: 'rgba(245,158,11,0.15)', roles: ['owner','staff'], perm: 'expenses' },
     ],
   },
   {
@@ -83,6 +86,7 @@ const NAV: NavGroup[] = [
     icon: 'settings',
     items: [
       { href: '/manage/settings', label: 'Настройки',   icon: 'settings',    color: '#94A3B8', bg: 'rgba(148,163,184,0.15)', roles: ['owner'] },
+      { href: '/manage/tai',      label: 'Tai',         icon: 'auto_awesome', color: '#8B5CF6', bg: 'rgba(139,92,246,0.15)', roles: ['owner'] },
       { href: '/manage/polls',    label: 'Опросы',      icon: 'fact_check',  color: '#8B5CF6', bg: 'rgba(139,92,246,0.15)', roles: ['owner'] },
       { href: '/manage/about',    label: 'О системе',   icon: 'info',        color: '#94A3B8', bg: 'rgba(148,163,184,0.15)', roles: ['owner'] },
     ],
@@ -149,11 +153,11 @@ export function ManageMenu() {
   const permissions = me?.permissions ?? {}
 
   // Раздел разрешён, если: роль подходит И (нет perm-ключа ИЛИ это владелец
-  // ИЛИ право не выставлено в явный false).
+  // ИЛИ право включено — явно или по умолчанию, как на карточке сотрудника).
   function isAllowed(item: NavItem): boolean {
     if (!item.roles.includes(role)) return false
     if (role === 'owner') return true
-    if (item.perm && permissions[item.perm] === false) return false
+    if (item.perm && [item.perm].flat().every(p => !permissionOn(permissions, p))) return false
     return true
   }
 

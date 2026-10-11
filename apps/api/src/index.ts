@@ -13,6 +13,9 @@ import { listActiveClubDbNames, buildClubConnString } from './lib/clubResolver.j
 import { getSharedRedis } from './lib/redis.js'
 
 const port = Number(process.env['API_PORT'] ?? 3001)
+// CRON_DISABLED=1 — инстанс без фоновых задач: пробный запуск на копии БД при
+// переезде сервера (иначе дубли звонков персоналу, опросов, уведомлений о ДР).
+const CRON_DISABLED = process.env['CRON_DISABLED'] === '1'
 
 // Fail-fast: проверяем обязательные переменные окружения до запуска сервера.
 function assertEnv() {
@@ -135,11 +138,12 @@ function setupGracefulShutdown(server: { close: (cb?: () => void) => void }) {
 // Пер-клубный прогон фоновой задачи: по ВСЕМ активным клубам + основной БД (см.
 // getCronTargets — дедуп по db_name, фолбэк на основную). Падение по одному клубу
 // не прерывает остальных. Для одно-клубного прода = один проход на синглтоне.
-async function runForAllClubs(label: string, fn: (database: Database) => Promise<unknown>) {
+async function runForAllClubs(label: string, fn: (database: Database, clubId: string | null) => Promise<unknown>) {
   const targets = await getCronTargets()
   for (const t of targets) {
     try {
-      await fn(t.db)
+      // clubId — для SSE-канала уведомлений клуба (notify).
+      await fn(t.db, t.clubId)
     } catch (e) {
       console.error(`[cron:${label}] клуб «${t.name}» упал`, e)
     }
@@ -164,7 +168,8 @@ function scheduleBirthdayCron() {
   console.log(`🎂 Birthday cron scheduled (09:00 MSK), next run in ${Math.round(msUntil / 60000)} min`)
 }
 
-scheduleBirthdayCron()
+if (CRON_DISABLED) console.log('⏸  CRON_DISABLED=1 — фоновые задачи не запускаются')
+if (!CRON_DISABLED) scheduleBirthdayCron()
 
 // Ежедневная сверка целостности балансов клиентов в 05:00 по Москве (по всем клубам).
 // MSK = UTC+3 → 02:00 UTC. Раннее утро: тихий час, сверяем итог за прошлые сутки.
@@ -185,7 +190,7 @@ function scheduleBalanceAuditCron() {
   console.log(`🧾 Balance-audit cron scheduled (05:00 MSK), next run in ${Math.round(msUntil / 60000)} min`)
 }
 
-scheduleBalanceAuditCron()
+if (!CRON_DISABLED) scheduleBalanceAuditCron()
 
 // Ежедневная ретенция analytics_events в 03:00 по Москве (по всем клубам).
 // MSK = UTC+3 → 00:00 UTC. Тихий час. purgeOldAnalyticsEvents сама обёрнута в
@@ -205,7 +210,7 @@ function scheduleAnalyticsRetentionCron() {
   console.log(`🧹 Analytics-retention cron scheduled (03:00 MSK), next run in ${Math.round(msUntil / 60000)} min`)
 }
 
-scheduleAnalyticsRetentionCron()
+if (!CRON_DISABLED) scheduleAnalyticsRetentionCron()
 
 // Регулярные опросы Telegram: тик КАЖДУЮ МИНУТУ по всем клубам. Постинг
 // идемпотентен (isPollDue: один раз в слот по lastPostedAt), поэтому частый тик
@@ -217,7 +222,7 @@ function schedulePollsCron() {
   console.log('🗳️  Polls cron scheduled (тик раз в минуту, МСК)')
 }
 
-schedulePollsCron()
+if (!CRON_DISABLED) schedulePollsCron()
 
 // Фискализация 54-ФЗ: тик КАЖДУЮ МИНУТУ по всем клубам. Идемпотентно (один ряд
 // fiscal_receipts на чек), клубы без фискального провайдера пропускаются. НЕ трогает
@@ -229,7 +234,7 @@ function scheduleFiscalizeCron() {
   console.log('🧾 Fiscalize cron scheduled (тик раз в минуту)')
 }
 
-scheduleFiscalizeCron()
+if (!CRON_DISABLED) scheduleFiscalizeCron()
 
 // Эскалация вызовов из Titan Home: тик КАЖДЫЕ 5 СЕКУНД по всем клубам — гость написал
 // в чат или нажал «Позвать», через 30 с без прочтения звоним персоналу (VoIP), гасим
@@ -259,4 +264,4 @@ function scheduleStaffAlertsCron() {
   console.log('📞 Staff-alerts cron scheduled (тик раз в 5 с)')
 }
 
-scheduleStaffAlertsCron()
+if (!CRON_DISABLED) scheduleStaffAlertsCron()

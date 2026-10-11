@@ -23,8 +23,8 @@ export default function EventsLayout() {
       <Stack.Screen name="index" options={{ headerShown: false, title: 'События' }} />
       {/* Прозрачная шапка над фирменным фоном; открывается зумом из карточки. */}
       <Stack.Screen name="[eventId]" options={glassHeader()} />
+      {/* Одна форма для мероприятия в клубе, выезда и миникапа (format=minicap). */}
       <Stack.Screen name="edit" options={formSheet} />
-      <Stack.Screen name="minicap" options={formSheet} />
       <Stack.Screen name="participants" options={formSheet} />
     </Stack>
   );

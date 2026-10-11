@@ -51,10 +51,10 @@
             </LinearLayout>
 
             <Button
-                android:id="@+id/start"
+                android:id="@+id/back"
                 style="@style/Setup.Button.Primary"
                 android:focusedByDefault="true"
-                android:text="@string/setup_start" />
+                android:text="@string/setup_back" />
 
             <Button
                 android:id="@+id/system_settings"
@@ -85,58 +85,91 @@
 
                 <TextView
                     style="@style/Setup.Label"
-                    android:labelFor="@id/address"
-                    android:text="@string/setup_address" />
+                    android:text="@string/setup_connection" />
 
-                <EditText
-                    android:id="@+id/address"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:autofillHints=""
-                    android:background="@drawable/field_bg"
-                    android:imeOptions="actionDone"
-                    android:inputType="textUri"
-                    android:padding="16dp"
-                    android:selectAllOnFocus="true"
-                    android:singleLine="true"
-                    android:textColor="@color/white"
-                    android:textColorHint="@color/muted"
-                    android:textSize="22sp" />
+                <TextView
+                    android:id="@+id/connection_status"
+                    style="@style/Setup.Body" />
+
+                <Button
+                    android:id="@+id/unpair"
+                    style="@style/Setup.Button"
+                    android:layout_marginTop="14dp"
+                    android:text="@string/setup_unpair" />
+
+                <Button
+                    android:id="@+id/legacy_off"
+                    style="@style/Setup.Button"
+                    android:layout_marginTop="14dp"
+                    android:text="@string/setup_legacy_off" />
 
                 <TextView
                     style="@style/Setup.Note"
-                    android:text="@string/setup_address_note" />
+                    android:layout_marginTop="14dp"
+                    android:text="@string/setup_connection_note" />
 
-                <TextView
-                    style="@style/Setup.Label"
-                    android:layout_marginTop="26dp"
-                    android:text="@string/setup_rotation" />
-
-                <RadioGroup
-                    android:id="@+id/rotation"
+                <!-- Ручной режим: пока экран не подключён к Titan HUB. -->
+                <LinearLayout
+                    android:id="@+id/manual"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
+                    android:layout_marginTop="26dp"
                     android:orientation="vertical">
 
-                    <RadioButton
-                        android:id="@+id/rotate_90"
-                        style="@style/Setup.Choice"
-                        android:text="@string/setup_rotate_90" />
+                    <TextView
+                        style="@style/Setup.Label"
+                        android:labelFor="@id/address"
+                        android:text="@string/setup_manual" />
 
-                    <RadioButton
-                        android:id="@+id/rotate_270"
-                        style="@style/Setup.Choice"
-                        android:text="@string/setup_rotate_270" />
+                    <EditText
+                        android:id="@+id/address"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:autofillHints=""
+                        android:background="@drawable/field_bg"
+                        android:hint="@string/setup_address_hint"
+                        android:imeOptions="actionDone"
+                        android:inputType="textUri"
+                        android:padding="16dp"
+                        android:selectAllOnFocus="true"
+                        android:singleLine="true"
+                        android:textColor="@color/white"
+                        android:textColorHint="@color/muted"
+                        android:textSize="22sp" />
 
-                    <RadioButton
-                        android:id="@+id/rotate_0"
-                        style="@style/Setup.Choice"
-                        android:text="@string/setup_rotate_0" />
-                </RadioGroup>
+                    <RadioGroup
+                        android:id="@+id/rotation"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="10dp"
+                        android:orientation="vertical">
 
-                <TextView
-                    style="@style/Setup.Note"
-                    android:text="@string/setup_rotation_note" />
+                        <RadioButton
+                            android:id="@+id/rotate_90"
+                            style="@style/Setup.Choice"
+                            android:text="@string/setup_rotate_90" />
+
+                        <RadioButton
+                            android:id="@+id/rotate_270"
+                            style="@style/Setup.Choice"
+                            android:text="@string/setup_rotate_270" />
+
+                        <RadioButton
+                            android:id="@+id/rotate_0"
+                            style="@style/Setup.Choice"
+                            android:text="@string/setup_rotate_0" />
+                    </RadioGroup>
+
+                    <Button
+                        android:id="@+id/manual_save"
+                        style="@style/Setup.Button.Primary"
+                        android:layout_marginTop="12dp"
+                        android:text="@string/setup_manual_save" />
+
+                    <TextView
+                        style="@style/Setup.Note"
+                        android:text="@string/setup_manual_note" />
+                </LinearLayout>
             </LinearLayout>
 
             <LinearLayout

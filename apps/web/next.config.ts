@@ -17,7 +17,15 @@ const nextConfig: NextConfig = {
   // оболочки PWA: плееры вывесок открывают её во встроенном WebView, где приложение
   // на React падало («Application error»). Адрес для плеера остаётся /menu.
   async rewrites() {
-    return { beforeFiles: [{ source: '/menu', destination: '/tv-menu.html' }] }
+    return {
+      beforeFiles: [
+        { source: '/menu', destination: '/tv-menu.html' },
+        // Экран из раздела «Экраны» (приставка Titan Menu открывает /screen/<id>).
+        { source: '/screen/:id', destination: '/tv-menu.html' },
+        // Кнопка «Открыть приложение» из бота My Titan: https-страница → titanresident://.
+        { source: '/my-titan', destination: '/my-titan.html' },
+      ],
+    }
   },
 }
 

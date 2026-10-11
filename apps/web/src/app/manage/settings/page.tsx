@@ -4,7 +4,7 @@ import { useRouter } from 'next/navigation'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import { Icon } from '@/components/Icon'
-import { PageHeader, SaveButton, ToggleRow, INP, SEL, LBL } from '@/components/manage/DesignSystem'
+import { PageHeader, SaveButton, INP, SEL, LBL } from '@/components/manage/DesignSystem'
 import { TimeInput24 } from '@/components/TimeInput24'
 import { AddressAutocomplete } from '@/components/AddressAutocomplete'
 import { StateView } from '@/components/StateView'
@@ -15,8 +15,6 @@ import { WhatsAppConfig } from './WhatsAppConfig'
 import { TaiChatConfig } from './TaiChatConfig'
 import { ReviewsConfig } from './ReviewsConfig'
 import { BookingConfig } from './BookingConfig'
-import { ScreenThemeConfig } from './ScreenThemeConfig'
-import { ScreenAdsConfig } from './ScreenAdsConfig'
 
 function SectionCard({ title, icon, color, children }: { title: string; icon: string; color: string; children: React.ReactNode }) {
   return (
@@ -53,9 +51,6 @@ interface FormData {
   business_day_start_hour: string
   default_payment: string
   receipt_footer: string
-  auto_close_shift: boolean
-  telegram_notifications: boolean
-  low_stock_threshold: string
 }
 
 type Tab = 'venue' | 'behavior' | 'integrations'
@@ -80,8 +75,6 @@ export default function SettingsPage() {
     venue_name: '', venue_address: '', hours_open: '', hours_close: '',
     business_day_start_hour: '9',
     default_payment: 'cash', receipt_footer: '',
-    auto_close_shift: false, telegram_notifications: false,
-    low_stock_threshold: '5',
   })
 
   // Вкладка в URL (?tab=) — без next/navigation hooks, чтобы не требовать Suspense.
@@ -112,9 +105,6 @@ export default function SettingsPage() {
       business_day_start_hour: s.business_day_start_hour ?? '9',
       default_payment: s.default_payment ?? 'cash',
       receipt_footer: s.receipt_footer ?? '',
-      auto_close_shift: s.auto_close_shift === 'true',
-      telegram_notifications: s.telegram_notifications === 'true',
-      low_stock_threshold: s.low_stock_threshold ?? '5',
     })
   }, [data])
 
@@ -127,9 +117,6 @@ export default function SettingsPage() {
       business_day_start_hour: form.business_day_start_hour,
       default_payment: form.default_payment,
       receipt_footer: form.receipt_footer,
-      auto_close_shift: String(form.auto_close_shift),
-      telegram_notifications: String(form.telegram_notifications),
-      low_stock_threshold: form.low_stock_threshold,
     }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['settings'] })
@@ -212,38 +199,13 @@ export default function SettingsPage() {
                   {/* Онлайн-бронирование: публичная форма /book + QR. Свой API. */}
                   <BookingConfig />
 
-                  {/* Titan Menu — меню на экране ТВ (/menu, AbleSign): ссылка и выбор темы. */}
-                  <ScreenThemeConfig />
-
-                  {/* Реклама на экране ТВ: слайды вместо ленты тарифов (переворот панели). */}
-                  <ScreenAdsConfig />
                 </>
               )}
 
               {tab === 'behavior' && (
                 <>
-                  <SectionCard title="Смены" icon="tune" color="#8B5CF6">
-                    <ToggleRow
-                      label="Автозакрытие смены"
-                      subtitle="Закрывать смену по расписанию"
-                      value={form.auto_close_shift}
-                      onChange={v => set('auto_close_shift', v)}
-                    />
-                  </SectionCard>
-
-                  <SectionCard title="Уведомления" icon="notifications" color="#10B981">
-                    <ToggleRow
-                      label="Telegram-уведомления"
-                      subtitle="Получать оповещения в Telegram"
-                      value={form.telegram_notifications}
-                      onChange={v => set('telegram_notifications', v)}
-                    />
-                    <Field label="Порог низкого остатка (шт.)" icon="inventory_2">
-                      <input type="number" style={INP} value={form.low_stock_threshold} min={0} onChange={e => set('low_stock_threshold', e.target.value)} placeholder="5" />
-                    </Field>
-                  </SectionCard>
-
-                  <SaveButton onClick={() => save.mutate()} isPending={save.isPending} isSaved={saved} label="Сохранить изменения" />
+                  {/* Автозакрытие смены, тумблер Telegram и общий порог остатка убраны: сервер
+                      их не читал. Уведомления — у каждого сотрудника, порог — у позиции склада. */}
 
                   {/* WhatsApp-уведомления (поздравления с ДР и др.) — своя настройка. */}
                   <WhatsAppConfig />

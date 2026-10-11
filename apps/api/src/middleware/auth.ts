@@ -2,15 +2,67 @@ import { createMiddleware } from 'hono/factory'
 import { createHash } from 'crypto'
 import { verifyToken } from '@titan/auth'
 import type { JwtPayload } from '@titan/auth'
+import { profiles, eq } from '@titan/database'
+import type { Database } from '@titan/database'
 import type { ClubContext } from '../types.js'
 import { getSharedRedis } from '../lib/redis.js'
+import { permissionOn, PERMISSION_LABELS } from '../lib/permissions.js'
 
-// requireAuth читает не только user, но и club (его кладёт tenantContext ПЕРЕД
-// этим middleware) — чтобы сверить привязку токена/тикета к клубу поддомена.
-type Variables = { user: JwtPayload; club: ClubContext | null }
+// requireAuth читает не только user, но и club/db (их кладёт tenantContext ПЕРЕД
+// этим middleware) — чтобы сверить привязку токена/тикета к клубу поддомена и
+// актуальность профиля в БД клуба. permissions — права сотрудника из БД
+// (undefined — профиль не удалось проверить → requirePermission пропускает).
+type Variables = {
+  user: JwtPayload
+  club: ClubContext | null
+  db: Database
+  permissions: Record<string, boolean> | undefined
+}
 
 export function tokenHash(token: string): string {
   return createHash('sha256').update(token).digest('hex')
+}
+
+// ── Актуальность профиля за JWT ──────────────────────────────────────────────
+// JWT живёт до 7–30 дней и несёт роль. Уволенный (deletedAt) не должен входить с
+// ещё живым токеном, а смена роли владельцем — ждать перелогина. Сверяем профиль
+// с БД клуба не чаще раза в 30 с (кэш в общем Redis, ключ с префиксом клуба).
+const PROFILE_STATE_TTL_SEC = 30
+// Роли персонала: им роль берём из БД (повышение/понижение действует сразу).
+// У tablet-staff sub — профиль планшета, его роль в БД другая — не трогаем.
+const STAFF_ROLES = new Set(['owner', 'staff'])
+// permissions — права сотрудника (profiles.permissions); в старых записях кэша
+// поля нет → умолчания (запись живёт ≤ 30 с).
+type ProfileState = { deleted: boolean; role: string | null; permissions?: Record<string, boolean> | null }
+
+const profileStateKey = (clubId: string | null, sub: string): string => `${clubId ?? 'main'}:auth:profile:${sub}`
+
+async function loadProfileState(db: Database, clubId: string | null, sub: string): Promise<ProfileState | null> {
+  const key = profileStateKey(clubId, sub)
+  try {
+    const cached = await getSharedRedis().get(key)
+    if (cached) return JSON.parse(cached) as ProfileState
+  } catch { /* Redis недоступен — идём в БД */ }
+  try {
+    const [row] = await db.select({ role: profiles.role, deletedAt: profiles.deletedAt, permissions: profiles.permissions })
+      .from(profiles).where(eq(profiles.id, sub)).limit(1)
+    const state: ProfileState = {
+      deleted: !row || row.deletedAt != null,
+      role: row?.role ?? null,
+      permissions: row?.permissions ?? null,
+    }
+    try { await getSharedRedis().set(key, JSON.stringify(state), 'EX', PROFILE_STATE_TTL_SEC) } catch { /* без кэша */ }
+    return state
+  } catch (err) {
+    // БД недоступна — не роняем авторизацию (маршрут всё равно упадёт на своей БД).
+    console.warn(`[auth] Не удалось проверить профиль sub=${sub}:`, err)
+    return null
+  }
+}
+
+/** Сбросить кэш профиля (после увольнения/смены роли/прав) — изменение действует сразу. */
+export async function invalidateProfileAuthCache(clubId: string | null, sub: string): Promise<void> {
+  try { await getSharedRedis().del(profileStateKey(clubId, sub)) } catch { /* истечёт по TTL */ }
 }
 
 export const requireAuth = createMiddleware<{ Variables: Variables }>(async (c, next) => {
@@ -96,7 +148,16 @@ export const requireAuth = createMiddleware<{ Variables: Variables }>(async (c, 
     if (revoked) return c.json({ error: 'Token revoked' }, 401)
   } catch { /* fail-open */ }
 
+  // Профиль удалён (уволен/клиент удалён) → токен больше не действует; роль
+  // персонала — актуальная из БД, а не зашитая в JWT.
+  const state = await loadProfileState(c.var.db, domainClubId, user.sub)
+  if (state?.deleted) return c.json({ error: 'Token revoked' }, 401)
+  if (state?.role && STAFF_ROLES.has(user.role) && state.role !== user.role) {
+    user = { ...user, role: state.role }
+  }
+
   c.set('user', user)
+  c.set('permissions', state ? (state.permissions ?? {}) : undefined)
   await next()
 })
 
@@ -107,4 +168,20 @@ export const requireRole = (...roles: string[]) =>
       return c.json({ error: 'Forbidden' }, 403)
     }
     await next()
+  })
+
+/**
+ * Право сотрудника на управленческое действие (profiles.permissions, умолчания —
+ * lib/permissions.ts). Владелец проходит всегда; сотрудник — если право включено.
+ * Права не загрузились (БД недоступна, SSE-тикет) — пропускаем (fail-open, как
+ * проверка профиля в requireAuth). Ставить ПОСЛЕ requireAuth/requireRole.
+ */
+export const requirePermission = (key: string) =>
+  createMiddleware<{ Variables: Variables }>(async (c, next) => {
+    const user = c.get('user')
+    if (user.role === 'owner') return next()
+    const permissions = c.get('permissions')
+    if (user.role === 'staff' && (permissions === undefined || permissionOn(permissions, key))) return next()
+    const label = PERMISSION_LABELS[key] ?? key
+    return c.json({ error: `Нет доступа — попросите владельца включить право «${label}»` }, 403)
   })

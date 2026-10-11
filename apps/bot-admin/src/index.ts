@@ -22,6 +22,8 @@ const ENV_TOKEN = process.env['ADMIN_BOT_TOKEN']
 const ENV_ALLOWED = (process.env['ADMIN_TG_IDS'] ?? '').split(',').filter(Boolean)
 
 interface ClubCfg {
+  /** id клуба в control-БД (нет у старого API — тогда токен без привязки к клубу). */
+  id?: string
   slug: string
   subdomain: string | null
   dbName: string
@@ -78,6 +80,8 @@ async function main() {
         token,
         db: c.isDefault ? singletonDb : getClubDb(clubConn(c.dbName)),
         apiBase: c.isDefault ? API_URL : `https://${c.subdomain}/api`,
+        // Дефолтный бот ходит на основной домен API (клуб null), остальные — на поддомен клуба.
+        clubId: c.isDefault ? null : c.id,
         allowedTgIds: c.isDefault ? ENV_ALLOWED : [],
         label: c.slug,
       },
@@ -90,7 +94,7 @@ async function main() {
   if (!hasDefault && ENV_TOKEN && !startedTokens.has(ENV_TOKEN)) {
     startedTokens.add(ENV_TOKEN)
     toStart.push({
-      ctx: { token: ENV_TOKEN, db: singletonDb, apiBase: API_URL, allowedTgIds: ENV_ALLOWED, label: 'default(env)' },
+      ctx: { token: ENV_TOKEN, db: singletonDb, apiBase: API_URL, clubId: null, allowedTgIds: ENV_ALLOWED, label: 'default(env)' },
     })
   }
 

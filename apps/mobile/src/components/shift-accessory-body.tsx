@@ -1,10 +1,12 @@
 import { useRouter } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
-import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Platform, Pressable, StyleSheet, View } from 'react-native';
 
+import { Text } from '@/components/text';
 import { formatMoney, plural } from '@/lib/format';
 import { haptic } from '@/lib/haptics';
 import { useShiftSummary } from '@/lib/queries';
+import { FONT_SCALE_MAX } from '@/lib/text-scale';
 import { colors, space, type } from '@/lib/theme';
 
 /**
@@ -47,11 +49,12 @@ export function ShiftAccessoryBody({ placement }: { placement: 'inline' | 'regul
         tintColor={closed ? colors.secondaryLabel : colors.accent}
       />
       <View style={styles.texts}>
-        <Text style={[inline ? type.footnote : type.subhead, styles.title]} numberOfLines={1}>
+        {/* Высота системной плашки не растёт — текст в ней растёт умеренно. */}
+        <Text style={[inline ? type.footnote : type.subhead, styles.title]} numberOfLines={1} maxFontSizeMultiplier={FONT_SCALE_MAX.compact}>
           {title}
         </Text>
         {!inline && (
-          <Text style={[type.caption1, styles.detail]} numberOfLines={1}>
+          <Text style={[type.caption1, styles.detail]} numberOfLines={1} maxFontSizeMultiplier={FONT_SCALE_MAX.compact}>
             {detail}
           </Text>
         )}
@@ -64,7 +67,7 @@ export function ShiftAccessoryBody({ placement }: { placement: 'inline' | 'regul
             tintColor={colors.accent}
             animationSpec={{ effect: { type: 'pulse' }, repeating: true }}
           />
-          <Text style={[inline ? type.footnote : type.subhead, type.amount, styles.title]} numberOfLines={1}>
+          <Text style={[inline ? type.footnote : type.subhead, type.amount, styles.title]} numberOfLines={1} maxFontSizeMultiplier={FONT_SCALE_MAX.compact}>
             {forecast}
           </Text>
         </View>
@@ -79,7 +82,9 @@ export function ShiftAccessoryBody({ placement }: { placement: 'inline' | 'regul
           accessibilityRole="button"
           accessibilityLabel="Новый чек">
           <SymbolView name="plus" size={15} weight="semibold" tintColor="white" />
-          <Text style={[type.subhead, styles.newCheckText]}>Новый чек</Text>
+          <Text style={[type.subhead, styles.newCheckText]} maxFontSizeMultiplier={FONT_SCALE_MAX.compact}>
+            Новый чек
+          </Text>
         </Pressable>
       )}
     </Pressable>

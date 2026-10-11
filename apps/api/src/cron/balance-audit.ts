@@ -50,9 +50,9 @@ type OverLimit = {
   debt: number // |balance|
 }
 
-// database — БД клуба (пер-клубный cron). Дефолт = синглтон (основной клуб):
-// поведение прежнее. Планировщик передаёт db каждого active-клуба.
-export async function auditBalances(database: Database = db): Promise<void> {
+// database — БД клуба (пер-клубный cron). Планировщик передаёт db каждого
+// active-клуба и его id (clubId — SSE-канал уведомлений клуба; null — основной домен).
+export async function auditBalances(database: Database, clubId: string | null): Promise<void> {
   try {
     // ── 1. Реконструкция баланса из леджера ──────────────────────────────────
     // Считаем ожидаемый баланс по проводкам и сравниваем с profiles.balance.
@@ -182,7 +182,7 @@ export async function auditBalances(database: Database = db): Promise<void> {
         mismatches: mismatches.slice(0, 10),
         overLimit: overLimit.slice(0, 10),
       },
-    }, database)
+    }, database, clubId)
   } catch (e) {
     // Кран не должен ронять процесс/планировщик — логируем и выходим.
     console.error('[balance-audit] проход не выполнен', e)

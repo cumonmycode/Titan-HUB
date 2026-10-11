@@ -276,7 +276,11 @@ function CollectionDetail({ id, onBack }: { id: string; onBack: () => void }) {
                       {r.excluded ? null
                         : r.coveredByPrepay ? <span style={{ fontSize: 11, fontWeight: 800, color: '#22C55E', padding: '0 8px' }}>аванс</span>
                         : r.paid ? <button onClick={() => unmark(r)} style={ghostBtn('#F43F5E')}>Снять</button>
-                        : <button onClick={() => setPayTarget({ ...r, periodId: period.id })} style={ghostBtn(r.topUp > 0 && r.topUp < r.expected ? '#F59E0B' : '#22C55E')}>{r.topUp > 0 && r.topUp < r.expected ? 'Доплатить' : 'Оплатил'}</button>}
+                        : <>
+                          {/* Недобор при отметке за период: доплата складывается с ней, «Снять» — исправить ошибку */}
+                          {r.contribution && <button onClick={() => unmark(r)} style={ghostBtn('#F43F5E')}>Снять</button>}
+                          <button onClick={() => setPayTarget({ ...r, periodId: period.id })} style={ghostBtn(r.topUp > 0 && (r.topUp < r.expected || r.contribution) ? '#F59E0B' : '#22C55E')}>{r.topUp > 0 && (r.topUp < r.expected || r.contribution) ? 'Доплатить' : 'Оплатил'}</button>
+                        </>}
                       <button onClick={() => setMemberTarget(r)} aria-label="Настройки участника" style={{ width: 34, height: 34, borderRadius: 9, border: '1px solid rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.03)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, color: 'var(--on-surface-variant)' }}><Icon name="tune" size={16} /></button>
                     </div>
                   ))}
@@ -344,6 +348,16 @@ function PaySheet({ collectionId, target, onClose, onPaid }: { collectionId: str
   const [method, setMethod] = useState<Method>('cash')
   const amt = parseFloat(amount) || 0
   const insufficientDeposit = method === 'deposit' && target.balance < amt
+  // Доплата к отметке периода: наличные/перевод/СБП сервер складывает с ней,
+  // депозит и долг — нет (снятие такой отметки вернуло бы на баланс не ту сумму).
+  const existing = target.contribution as { amount: number; method: Method } | null
+  const isBalance = (m: Method) => m === 'deposit' || m === 'debt'
+  const mark = existing ? `«${methodMeta(existing.method).label} · ${formatMoney(existing.amount)}»` : ''
+  const mergeBlocked = !!existing && (isBalance(existing.method) || isBalance(method))
+  const mergeHint = !existing ? null
+    : isBalance(existing.method) ? `Отметка ${mark} не складывается с доплатой — сначала снимите её`
+    : isBalance(method) ? `Депозит и долг не складываются с отметкой ${mark} — выберите наличные, перевод или СБП`
+    : `Добавится к отметке ${mark}`
 
   const pay = useMutation({
     mutationFn: () => api.post(`/collections/${collectionId}/pay`, { periodId: target.periodId, playerId: target.playerId, amount: amt, method }),
@@ -375,10 +389,12 @@ function PaySheet({ collectionId, target, onClose, onPaid }: { collectionId: str
               )
             })}
           </div>
-          {method === 'deposit' && <p style={{ fontSize: 11, color: insufficientDeposit ? '#F43F5E' : 'var(--on-surface-variant)', margin: '8px 2px 0' }}>{insufficientDeposit ? 'Недостаточно депозита — выберите «Долг»' : 'Спишется с депозита клиента (попадёт в его транзакции)'}</p>}
-          {method === 'debt' && <p style={{ fontSize: 11, color: 'var(--on-surface-variant)', margin: '8px 2px 0' }}>Запишется в долг клиента (попадёт в его транзакции)</p>}
+          {mergeHint ? <p style={{ fontSize: 11, color: mergeBlocked ? '#F43F5E' : 'var(--on-surface-variant)', margin: '8px 2px 0' }}>{mergeHint}</p> : <>
+            {method === 'deposit' && <p style={{ fontSize: 11, color: insufficientDeposit ? '#F43F5E' : 'var(--on-surface-variant)', margin: '8px 2px 0' }}>{insufficientDeposit ? 'Недостаточно депозита — выберите «Долг»' : 'Спишется с депозита клиента (попадёт в его транзакции)'}</p>}
+            {method === 'debt' && <p style={{ fontSize: 11, color: 'var(--on-surface-variant)', margin: '8px 2px 0' }}>Запишется в долг клиента (попадёт в его транзакции)</p>}
+          </>}
         </div>
-        <Button variant="primary" fullWidth loading={pay.isPending} disabled={amt <= 0 || insufficientDeposit} onClick={() => pay.mutate()}>Отметить · {formatMoney(amt)}</Button>
+        <Button variant="primary" fullWidth loading={pay.isPending} disabled={amt <= 0 || insufficientDeposit || mergeBlocked} onClick={() => pay.mutate()}>Отметить · {formatMoney(amt)}</Button>
       </div>
     </Sheet>
   )

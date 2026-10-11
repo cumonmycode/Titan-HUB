@@ -1,9 +1,10 @@
 import { useQuery } from '@tanstack/react-query';
 import { SymbolView } from 'expo-symbols';
 import { useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
 
+import { Text } from '@/components/text';
 import { FormField } from '@/components/form-parts';
 import { sheetStyles } from '@/components/new-check-parts';
 import { useDebounced } from '@/components/player-picker';

@@ -81,8 +81,12 @@ export default function MyProfileScreen() {
         return;
       }
       await setCalendarSync(true);
-      const result = await syncEventsToCalendar(events.data ?? []).catch(() => null);
-      markCalendarSynced();
+      // Полная синхронизация удаляет записи мероприятий, которых нет в списке, — с пустым
+      // списком до загрузки она стёрла бы весь календарь. Не загружены — догружаем; не
+      // вышло — синхронизирует экран «Мероприятия», когда список придёт.
+      const rows = events.data ?? (await events.refetch().catch(() => null))?.data;
+      const result = rows ? await syncEventsToCalendar(rows).catch(() => null) : null;
+      if (rows) markCalendarSynced();
       haptic.success();
       Alert.alert(
         'Календарь подключён',

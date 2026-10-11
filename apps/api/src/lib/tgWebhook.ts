@@ -22,7 +22,9 @@ export function tgWebhookSecretValid(provided: string | undefined | null, clubId
 
 // Публичный URL приёмника вебхука. Основной домен платформы достаёт API через nginx;
 // clubId в пути резолвит клуба независимо от того, с какого домена настраивали.
+// TELEGRAM_WEBHOOK_HOST — хост шлюза (infra/telegram-relay): сервер в РФ Telegram
+// напрямую не достаёт, шлюз пересылает тот же путь на основной домен.
 export function tgWebhookUrl(clubId: string): string {
-  const root = (process.env['ROOT_DOMAIN'] || 'titanpos.ru').toLowerCase()
+  const root = (process.env['TELEGRAM_WEBHOOK_HOST'] || process.env['ROOT_DOMAIN'] || 'titanpos.ru').toLowerCase()
   return `https://${root}/api/tg/poll-webhook/${clubId}`
 }

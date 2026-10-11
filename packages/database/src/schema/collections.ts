@@ -68,6 +68,8 @@ export const collectionMembers = pgTable('collection_members', {
   // Исключение до даты (1/3 мес). NULL + excludedForever=false → не исключён.
   excludedUntil: timestamp('excluded_until', { withTimezone: true }),
   excludedForever: boolean('excluded_forever').notNull().default(false),
+  // Начало исключения: окно [excludedFrom, excludedUntil] не входит в долг и после возврата.
+  excludedFrom: timestamp('excluded_from', { withTimezone: true }),
   note: text('note'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }),

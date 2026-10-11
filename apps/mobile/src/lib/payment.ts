@@ -268,7 +268,9 @@ async function fetchCheck(checkId: string): Promise<CheckDetail> {
 
 export function invalidateAfterPayment(checkId: string) {
   const host = useSession.getState().club?.host ?? 'none';
-  for (const key of [['pos', 'checks'], ['pos', 'check', checkId], ['pos', 'shift-summary'], ['shifts']]) {
+  // Оплата чека мероприятия завершает событие (миникап — последним чеком участника):
+  // перечитываем и мероприятия, иначе лента ждёт своего опроса со статусом «Идёт».
+  for (const key of [['pos', 'checks'], ['pos', 'check', checkId], ['pos', 'shift-summary'], ['shifts'], ['events'], ['event']]) {
     void queryClient.invalidateQueries({ queryKey: [host, ...key] });
   }
 }

@@ -7,6 +7,7 @@ import { Alert } from 'react-native';
 
 import { ActionRow, primary, secondary } from '@/components/native-form';
 import { createBackup, useBackupStatus, useClubContext, useSystemInfo } from '@/lib/admin-api';
+import { ApiError } from '@/lib/api';
 import { haptic } from '@/lib/haptics';
 import { useSession } from '@/lib/session';
 
@@ -63,6 +64,8 @@ export default function AboutScreen() {
   const look = SUBSCRIPTION[subscription?.state ?? 'unknown'] ?? SUBSCRIPTION.unknown!;
   const modules = Object.entries(context.data?.modules ?? {}).filter(([, on]) => on);
   const last = backup.data?.last ?? null;
+  // Бэкап/восстановление — только на основном домене: на клуб-поддомене API отвечает 403.
+  const backupAvailable = !tenant && !(backup.error instanceof ApiError && backup.error.status === 403);
 
   const makeBackup = () =>
     Alert.alert('Сделать резервную копию?', 'Снимок базы клуба сохранится на сервере' + (backup.data?.driveConfigured ? ' и в Google Drive.' : '. Google Drive не подключён.'), [
@@ -157,7 +160,7 @@ export default function AboutScreen() {
             ) : null}
           </Section>
 
-          {isOwner && (
+          {isOwner && backupAvailable && (
             <Section title="Резервные копии" footer={<Text>Восстановление из копии делается только в веб-кассе — там это безопаснее.</Text>}>
               <LabeledContent label="Последняя копия">
                 <Value>{last ? `${whenText(last.at)} · ${last.location === 'drive' ? 'Google Drive' : 'сервер'} · ${sizeText(last.size)}` : 'копий пока нет'}</Value>

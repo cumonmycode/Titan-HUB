@@ -1,9 +1,10 @@
 import { SymbolView } from 'expo-symbols';
 import type { ReactNode } from 'react';
-import { Pressable, StyleSheet, Text } from 'react-native';
+import { Pressable, StyleSheet } from 'react-native';
 import ReanimatedSwipeable from 'react-native-gesture-handler/ReanimatedSwipeable';
 import Animated, { interpolate, useAnimatedStyle, type SharedValue } from 'react-native-reanimated';
 
+import { Text } from '@/components/text';
 import { haptic } from '@/lib/haptics';
 import { colors, space, type } from '@/lib/theme';
 

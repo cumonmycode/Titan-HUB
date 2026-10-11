@@ -2,8 +2,9 @@ import { DatePicker, Host, Toggle } from '@expo/ui/swift-ui';
 import { tint } from '@expo/ui/swift-ui/modifiers';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useState } from 'react';
-import { Alert, StyleSheet, Text, View } from 'react-native';
+import { Alert, StyleSheet, View } from 'react-native';
 
+import { Text } from '@/components/text';
 import { GlassCard, PrimaryButton, SheetHeader, sheetStyles } from '@/components/new-check-parts';
 import { computeRental } from '@/lib/checks';
 import { formatDuration, formatMoney } from '@/lib/format';

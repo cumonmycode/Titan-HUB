@@ -1,12 +1,14 @@
 import { Image } from 'expo-image';
 import { SymbolView } from 'expo-symbols';
 import { useState, type ReactNode } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, View, type ColorValue, type StyleProp, type ViewStyle } from 'react-native';
+import { ActivityIndicator, Pressable, StyleSheet, View, type ColorValue, type StyleProp, type ViewStyle } from 'react-native';
 import type { SFSymbol } from 'sf-symbols-typescript';
 
+import { Text } from '@/components/text';
 import { GlassView } from '@/components/glass';
 import { formatMoney, toNumber } from '@/lib/format';
 import { haptic } from '@/lib/haptics';
+import { FONT_SCALE_MAX } from '@/lib/text-scale';
 import { colors, radius, space, type } from '@/lib/theme';
 
 /**
@@ -77,7 +79,7 @@ export function QuickTile({
         <View style={[styles.quickIcon, { backgroundColor: tint }]}>
           {busy ? <ActivityIndicator color="white" /> : <SymbolView name={icon} size={19} weight="semibold" tintColor="white" />}
         </View>
-        <Text style={[type.footnote, styles.quickTitle]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
+        <Text style={[type.footnote, styles.quickTitle]} numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.8}>
           {title}
         </Text>
       </GlassView>
@@ -105,7 +107,7 @@ export function GlassChip({
     <Pressable onPress={onPress} style={style} accessibilityRole="button" accessibilityState={{ selected: active }}>
       <GlassView isInteractive tintColor={active ? tint : undefined} style={styles.chip}>
         {icon && <SymbolView name={icon} size={14} weight="semibold" tintColor={active ? 'white' : tint} />}
-        <Text style={[type.subhead, active ? styles.chipTextActive : styles.chipText]} numberOfLines={1}>
+        <Text style={[type.subhead, active ? styles.chipTextActive : styles.chipText]} numberOfLines={1} maxFontSizeMultiplier={FONT_SCALE_MAX.compact}>
           {label}
         </Text>
       </GlassView>
@@ -123,7 +125,10 @@ export function Avatar({ name, photoUrl, size }: { name: string; photoUrl?: stri
   }
   return (
     <View style={[styles.avatar, round]}>
-      <Text style={[styles.avatarText, { fontSize: Math.round(size * 0.38) }]}>{name.slice(0, 2).toUpperCase()}</Text>
+      {/* Инициалы вписаны в круг фиксированного размера — с крупным текстом они бы вылезли за него. */}
+      <Text allowFontScaling={false} style={[styles.avatarText, { fontSize: Math.round(size * 0.38) }]}>
+        {name.slice(0, 2).toUpperCase()}
+      </Text>
     </View>
   );
 }
@@ -144,7 +149,7 @@ export function BalanceChips({ balance, bonusPoints }: { balance: string | numbe
 function Badge({ color, text }: { color: string; text: string }) {
   return (
     <View style={[styles.badge, { backgroundColor: `${color}24` }]}>
-      <Text style={[type.caption1, styles.badgeText, { color }]} numberOfLines={1}>
+      <Text style={[type.caption1, styles.badgeText, { color }]} numberOfLines={1} maxFontSizeMultiplier={FONT_SCALE_MAX.compact}>
         {text}
       </Text>
     </View>
@@ -178,7 +183,7 @@ export function PrimaryButton({
         ) : (
           icon && <SymbolView name={icon} size={17} weight="semibold" tintColor={disabled ? colors.tertiaryLabel : 'white'} />
         )}
-        <Text style={[type.headline, disabled ? styles.primaryTextDisabled : styles.primaryText]}>{title}</Text>
+        <Text style={[type.headline, styles.primaryLabel, disabled ? styles.primaryTextDisabled : styles.primaryText]}>{title}</Text>
       </GlassView>
     </Pressable>
   );
@@ -228,7 +233,9 @@ export function AmountKeypad({ value, onChange, maxLength = 9, allowDecimal = tr
               {key === '⌫' ? (
                 <SymbolView name="delete.left" size={22} tintColor={colors.label} />
               ) : (
-                <Text style={[styles.keyText, type.amount]}>{key}</Text>
+                <Text style={[styles.keyText, type.amount]} maxFontSizeMultiplier={FONT_SCALE_MAX.compact}>
+                  {key}
+                </Text>
               )}
             </GlassView>
           </Pressable>
@@ -276,7 +283,9 @@ const styles = StyleSheet.create({
   headerRight: { alignItems: 'flex-end' },
   headerTitle: { flex: 1, textAlign: 'center', color: colors.label },
   circle: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
+  // flex: плитки одного ряда равной высоты, даже если подпись одной перенеслась на две строки.
   quickTile: {
+    flex: 1,
     alignItems: 'center',
     gap: space.sm,
     paddingTop: 14,
@@ -286,14 +295,15 @@ const styles = StyleSheet.create({
     borderCurve: 'continuous',
   },
   quickIcon: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
-  quickTitle: { color: colors.label, fontWeight: '600' },
+  quickTitle: { color: colors.label, fontWeight: '600', textAlign: 'center' },
   chip: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
-    height: 38,
+    minHeight: 38,
     paddingHorizontal: 14,
+    paddingVertical: 6,
     borderRadius: 19,
   },
   chipText: { color: colors.label, fontWeight: '600' },
@@ -314,8 +324,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: space.xl,
   },
   dangerText: { color: colors.red, fontWeight: '600' },
+  // Высота — минимальная: с крупным текстом кнопка растёт, а не обрезает подпись.
   primary: {
-    height: 54,
+    minHeight: 54,
+    paddingVertical: 10,
     borderRadius: 27,
     flexDirection: 'row',
     alignItems: 'center',
@@ -323,6 +335,7 @@ const styles = StyleSheet.create({
     gap: space.sm,
     paddingHorizontal: space.xl,
   },
+  primaryLabel: { flexShrink: 1, textAlign: 'center' },
   primaryText: { color: 'white' },
   primaryTextDisabled: { color: colors.tertiaryLabel },
   keypad: { flexDirection: 'row', flexWrap: 'wrap', rowGap: 10, justifyContent: 'space-between' },

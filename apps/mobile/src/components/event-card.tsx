@@ -1,120 +1,129 @@
 import { SymbolView } from 'expo-symbols';
-import { ActivityIndicator, Pressable, StyleSheet, Text, View, type PressableProps } from 'react-native';
+import { Pressable, StyleSheet, View, type PressableProps } from 'react-native';
 import type { SFSymbol } from 'sf-symbols-typescript';
 
 import { GlassView } from '@/components/glass';
-import { dayNumber, eventKind, eventTitle, monthShort, STATUS_LOOK, timeRange, type EventRow } from '@/lib/events-api';
+import { Text } from '@/components/text';
+import { dayNumber, durationText, eventMinutes, eventTitle, MINICAP_MAX_PLAYERS, monthShort, STATUS_LOOK, timeRange, type EventRow } from '@/lib/events-api';
 import { formatMoney, toNumber } from '@/lib/format';
+import { FONT_SCALE_MAX, useTextLayout } from '@/lib/text-scale';
 import { colors, radius, space, type } from '@/lib/theme';
 
-/**
- * Карточка мероприятия — интерактивное стекло. Props Pressable пробрасываются дальше:
- * так работают `<Link asChild>` и зум-переход в экран мероприятия.
- */
-export function EventCard({
-  event,
-  base,
-  place,
-  starting,
-  onStart,
-  ...pressable
-}: {
+/** Что стоит слева: время начала (лента предстоящих) или число и месяц (прошедшие). */
+export type EventCardLead = 'time' | 'date';
+
+type EventCardProps = {
   event: EventRow;
   base: number;
   /** Зона клуба или адрес выезда. */
   place: string | null;
-  starting?: boolean;
-  onStart?: () => void;
-} & PressableProps) {
+  lead?: EventCardLead;
+} & PressableProps;
+
+/**
+ * Карточка мероприятия в ленте — две строки и время слева. Первая: точка статуса, значок
+ * выезда или миникапа, название. Вторая: где, сколько длится и на какую сумму. Заказчик,
+ * комментарий и действия — на экране мероприятия. Props Pressable пробрасываются дальше:
+ * так работают `<Link asChild>` и зум-переход в экран мероприятия.
+ */
+export function EventCard({ event, base, place, lead = 'time', ...pressable }: EventCardProps) {
   const status = STATUS_LOOK[event.status];
-  const kind = eventKind(event);
-  const dimmed = event.status === 'cancelled';
-  const fee = toNumber(event.participationFee);
-  const amount = event.format === 'minicap' ? (fee > 0 ? `взнос ${formatMoney(fee)}` : null) : base > 0 ? formatMoney(base) : null;
+  // «Увеличенный» вид и крупный текст: название и подробности — в две строки, а не обрезаются.
+  const lines = useTextLayout().layout === 'regular' ? 1 : 2;
+  const title = eventTitle(event);
+  const icon = kindIcon(event);
+  const details = detailsLine(event, base, place, lead);
+  // Для VoiceOver — то, что видно слева; у прошедших время уже есть во второй строке.
+  const when = lead === 'time' ? timeRange(event) : `${dayNumber(event.date)} ${monthShort(event.date)}`;
 
   return (
-    <Pressable {...pressable} accessibilityRole="button" accessibilityLabel={`${eventTitle(event)}, ${status.label}`}>
-      <GlassView isInteractive style={[styles.card, dimmed && styles.dimmed]}>
-        <View style={styles.top}>
-          <View style={[styles.date, { backgroundColor: `${status.color}29` }]}>
-            <Text style={[styles.day, type.amount, { color: status.color }]}>{dayNumber(event.date)}</Text>
-            <Text style={[type.caption2, styles.month, { color: status.color }]}>{monthShort(event.date)}</Text>
-          </View>
-
-          <View style={styles.titles}>
-            <View style={styles.kind}>
-              <SymbolView name={kind.symbol} size={12} weight="semibold" tintColor={kind.color} />
-              <Text style={[type.caption1, styles.kindText, { color: kind.color }]}>{kind.label}</Text>
-            </View>
-            <Text style={[type.headline, styles.label]} numberOfLines={1}>
-              {eventTitle(event)}
-            </Text>
-            <Text style={[type.subhead, styles.secondary]} numberOfLines={1}>
-              {`${timeRange(event)}${event.billingMode === 'hourly' && event.plannedHours ? ` · ${event.plannedHours} ч` : ''}${event.billingMode === 'rental' ? ' · по ставке зоны' : amount ? ` · ${amount}` : ''}`}
+    <Pressable {...pressable} accessibilityRole="button" accessibilityLabel={[title, status.label, when, details].filter(Boolean).join(', ')}>
+      <GlassView isInteractive style={[styles.card, event.status === 'cancelled' && styles.dimmed]}>
+        <Lead event={event} lead={lead} />
+        <View style={styles.body}>
+          <View style={styles.titleRow}>
+            <View style={[styles.dot, { backgroundColor: status.color }]} />
+            {icon && <SymbolView name={icon} size={14} weight="semibold" tintColor={colors.secondaryLabel} />}
+            <Text style={[type.headline, styles.label, styles.flex]} numberOfLines={lines}>
+              {title}
             </Text>
           </View>
-
-          <View style={[styles.status, { backgroundColor: `${status.color}24` }]}>
-            <SymbolView name={status.symbol} size={11} weight="semibold" tintColor={status.color} />
-            <Text style={[type.caption1, styles.statusText, { color: status.color }]}>{status.label}</Text>
-          </View>
+          {details ? (
+            <Text style={[type.subhead, styles.secondary]} numberOfLines={lines}>
+              {details}
+            </Text>
+          ) : null}
         </View>
-
-        {place && <Detail icon={event.type === 'exit' ? 'mappin.and.ellipse' : 'square.split.bottomrightquarter'} text={place} />}
-        {(event.customerName || event.customerPhone) && (
-          <Detail icon="person" text={[event.customerName, event.customerPhone].filter(Boolean).join(' · ')} />
-        )}
-        {event.comment && <Detail icon="text.bubble" text={event.comment} />}
-
-        {event.status === 'planned' && onStart && (
-          <Pressable onPress={onStart} disabled={starting} style={({ pressed }) => [styles.start, pressed && styles.pressed]} accessibilityRole="button">
-            {starting ? <ActivityIndicator color="white" /> : <SymbolView name="play.fill" size={13} tintColor="white" />}
-            <Text style={[type.subhead, styles.startText]}>{starting ? 'Начинаем…' : 'Начать'}</Text>
-          </Pressable>
-        )}
       </GlassView>
     </Pressable>
   );
 }
 
-function Detail({ icon, text }: { icon: SFSymbol; text: string }) {
+/** Время начала крупно, под ним конец (или длительность, если конца нет); у прошедших — число и месяц. */
+function Lead({ event, lead }: { event: EventRow; lead: EventCardLead }) {
+  const minutes = eventMinutes(event);
+  const top = lead === 'time' ? event.startTime : dayNumber(event.date);
+  const bottom = lead === 'date' ? monthShort(event.date) : event.endTime ? `–${event.endTime}` : minutes ? durationText(minutes) : null;
   return (
-    <View style={styles.detail}>
-      <SymbolView name={icon} size={13} tintColor={colors.tertiaryLabel} />
-      <Text style={[type.footnote, styles.secondary, styles.flex]} numberOfLines={1}>
-        {text}
+    <View style={styles.lead}>
+      <Text style={[type.title3, type.amount, styles.label]} maxFontSizeMultiplier={FONT_SCALE_MAX.compact}>
+        {top}
       </Text>
+      {bottom ? (
+        <Text style={[type.footnote, styles.secondary, lead === 'date' && styles.month]} maxFontSizeMultiplier={FONT_SCALE_MAX.compact}>
+          {bottom}
+        </Text>
+      ) : null}
     </View>
   );
 }
 
+/** Значок вида: у мероприятия в клубе его нет — это вид по умолчанию. */
+function kindIcon(event: EventRow): SFSymbol | null {
+  if (event.format === 'minicap') return 'trophy';
+  if (event.type === 'exit') return 'car';
+  return null;
+}
+
+/**
+ * Вторая строка: место · длительность · сумма. Длительность — только когда слева конец, а
+ * не она сама; у прошедших слева дата, поэтому здесь время целиком.
+ */
+function detailsLine(event: EventRow, base: number, place: string | null, lead: EventCardLead): string {
+  const minutes = eventMinutes(event);
+  const when = lead === 'date' ? timeRange(event) : event.endTime && minutes ? durationText(minutes) : null;
+  const parts = [event.format === 'minicap' ? null : place, when, amountText(event, base)];
+  return parts.filter(Boolean).join(' · ');
+}
+
+function amountText(event: EventRow, base: number): string | null {
+  if (event.format === 'minicap') {
+    const fee = toNumber(event.participationFee);
+    const players = event.playersCount !== undefined ? `${event.playersCount}/${MINICAP_MAX_PLAYERS} игроков` : null;
+    return [players, fee > 0 ? `взнос ${formatMoney(fee)}` : null].filter(Boolean).join(' · ') || null;
+  }
+  if (event.billingMode === 'rental') return 'по ставке зоны';
+  return base > 0 ? formatMoney(base) : null;
+}
+
 const styles = StyleSheet.create({
   flex: { flex: 1 },
-  card: { borderRadius: radius.card, borderCurve: 'continuous', padding: space.lg, gap: space.sm },
-  dimmed: { opacity: 0.6 },
-  top: { flexDirection: 'row', alignItems: 'center', gap: space.md },
-  date: { width: 52, height: 56, borderRadius: 14, borderCurve: 'continuous', alignItems: 'center', justifyContent: 'center' },
-  day: { fontSize: 22, lineHeight: 26 },
-  month: { fontWeight: '600', textTransform: 'uppercase' },
-  titles: { flex: 1, gap: 1 },
-  kind: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  kindText: { fontWeight: '600' },
-  label: { color: colors.label },
-  secondary: { color: colors.secondaryLabel },
-  status: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 999, alignSelf: 'flex-start' },
-  statusText: { fontWeight: '600' },
-  detail: { flexDirection: 'row', alignItems: 'center', gap: space.sm, paddingLeft: 2 },
-  start: {
-    marginTop: space.xs,
-    alignSelf: 'flex-start',
+  card: {
+    borderRadius: radius.card,
+    borderCurve: 'continuous',
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: space.md,
+    paddingVertical: space.md,
     paddingHorizontal: space.lg,
-    paddingVertical: 8,
-    borderRadius: 999,
-    backgroundColor: '#10B981',
+    minHeight: 68,
   },
-  startText: { color: 'white', fontWeight: '600' },
-  pressed: { opacity: 0.7 },
+  dimmed: { opacity: 0.55 },
+  lead: { minWidth: 58, alignItems: 'flex-start' },
+  month: { textTransform: 'uppercase', fontWeight: '600' },
+  body: { flex: 1, gap: 2 },
+  titleRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  dot: { width: 8, height: 8, borderRadius: 4 },
+  label: { color: colors.label },
+  secondary: { color: colors.secondaryLabel },
 });

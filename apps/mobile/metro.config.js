@@ -26,7 +26,7 @@ const ANDROID_ALIASES = {
 // дата и графики остаются нативными вставками (swift-ui/islands.ios.tsx).
 const IOS_ALIASED = new Set(['@expo/ui/swift-ui', '@expo/ui/swift-ui/modifiers']);
 // Экраны, которым нужен настоящий SwiftUI целиком: перетаскивание строк List (editMode).
-const IOS_NATIVE_SCREENS = [path.join('src', 'app', '(app)', 'manage', 'menu', 'reorder.tsx')];
+const IOS_NATIVE_SCREENS = [path.join('src', 'app', '(app)', 'manage', 'goods', 'reorder.tsx')];
 
 config.resolver.resolveRequest = (context, moduleName, platform) => {
   const alias = ANDROID_ALIASES[moduleName];

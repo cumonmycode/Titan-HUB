@@ -2,11 +2,12 @@ import { useRouter } from 'expo-router';
 import type { BottomTabBarProps } from 'expo-router/tabs';
 import { SymbolView, type AndroidSymbol, type SFSymbol } from 'expo-symbols';
 import { useEffect, useState, type ReactNode } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 import { useKeyboardState } from 'react-native-keyboard-controller';
 import Animated, { FadeInDown, FadeOutDown, useAnimatedStyle, useSharedValue, withSpring, withTiming } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { Text } from '@/components/text';
 import { haptic } from '@/lib/haptics';
 import { SHEET_ROUTES, TAB_BAR_GAP, TAB_BAR_HEIGHT } from '@/lib/tab-bar';
 import { colors, space, springs, useAccentHex } from '@/lib/theme';
@@ -19,8 +20,8 @@ const ITEMS: Item[] = [
   { key: 'events', label: 'События', icon: { ios: 'calendar', android: 'calendar_month' } },
   // «Новый» — не вкладка, а кнопка: открывает шторку создания чека.
   { key: 'new', label: 'Новый', icon: { ios: 'plus.circle.fill', android: 'add_circle' }, action: true },
-  { key: 'analytics', label: 'Аналитика', icon: { ios: 'chart.bar', android: 'bar_chart' } },
-  { key: 'manage', label: 'Управление', icon: { ios: 'gearshape', android: 'settings' } },
+  { key: 'analytics', label: 'Отчёты', icon: { ios: 'chart.bar', android: 'bar_chart' } },
+  { key: 'manage', label: 'Меню', icon: { ios: 'gearshape', android: 'settings' } },
 ];
 
 const PAD = 6;

@@ -14,7 +14,7 @@ import { LocalTour } from '@/components/local-tour';
 import { NotificationBanner } from '@/components/notification-banner';
 import { OfflineBanner } from '@/components/offline-banner';
 import { SessionLock } from '@/components/session-lock';
-import { CACHE_MAX_AGE, queryClient, queryPersister, subscribeAppFocus, subscribeNetwork } from '@/lib/query';
+import { CACHE_BUSTER, CACHE_MAX_AGE, queryClient, queryPersister, subscribeAppFocus, subscribeNetwork } from '@/lib/query';
 import { NEEDS_WARMUP, SwiftUIWarmup } from '@/components/swiftui-warmup';
 import { useRealtime } from '@/lib/realtime';
 import { useStaffPush } from '@/lib/staff-push';
@@ -63,6 +63,20 @@ export default function RootLayout() {
   useEffect(() => subscribeAppFocus(), []);
   useEffect(() => subscribeNetwork(), []);
 
+  // Кэш запросов (и его копия на диске) — данные вошедшего сотрудника: ключи содержат
+  // клуб, но не сотрудника. Выход, 401, «Другой сотрудник», смена клуба — следующий не
+  // должен увидеть чужие me/роль и данные. Переход из «до hydrate» не считаем.
+  useEffect(() => {
+    if (!hydrated) return;
+    return useSession.subscribe((state, prev) => {
+      if ((state.user?.id ?? null) === (prev.user?.id ?? null)) return;
+      queryClient.clear();
+      void queryPersister.removeClient();
+    });
+  }, [hydrated]);
+  // Кэш на диске, сохранённый под другим сотрудником, при запуске не восстанавливаем.
+  const cacheOwner = useSession((s) => s.user?.id ?? 'none');
+
   if (!hydrated) return null;
 
   const base = scheme === 'dark' ? DarkTheme : DefaultTheme;
@@ -77,7 +91,7 @@ export default function RootLayout() {
     <SafeAreaProvider>
     <KeyboardProvider>
     <ThemeProvider value={theme}>
-      <PersistQueryClientProvider client={queryClient} persistOptions={{ persister: queryPersister, maxAge: CACHE_MAX_AGE }}>
+      <PersistQueryClientProvider client={queryClient} persistOptions={{ persister: queryPersister, maxAge: CACHE_MAX_AGE, buster: `${CACHE_BUSTER}:${cacheOwner}` }}>
         <Stack screenOptions={{ headerShown: false }} screenLayout={sheetLayout}>
           <Stack.Protected guard={!signedIn}>
             <Stack.Screen name="(auth)" />
@@ -120,8 +134,19 @@ export default function RootLayout() {
             />
             {/* Чат с кабинкой — полный экран мессенджера: стеклянная шапка, поле ввода у клавиатуры. */}
             <Stack.Screen name="chat" options={glassHeader({ headerShown: true, headerBackButtonDisplayMode: 'minimal', title: 'Чат' })} />
-            {/* Tai — свой заголовок и композер внизу, поэтому системная шапка не нужна. */}
-            <Stack.Screen name="tai" options={{ presentation: 'modal', headerShown: false }} />
+            {/* Tai — шторка поверх кассы, чека или аналитики: свой заголовок и поле ввода внизу.
+                Одна высота: поле ввода прижато к низу, на средней высоте оно ушло бы за экран. */}
+            <Stack.Screen
+              name="tai"
+              options={{
+                presentation: 'formSheet',
+                ...sheetOptions,
+                sheetAllowedDetents: [1],
+                sheetGrabberVisible: true,
+                headerShown: false,
+                contentStyle: { backgroundColor: colors.sheetBackground },
+              }}
+            />
           </Stack.Protected>
         </Stack>
         {!warm && <SwiftUIWarmup onDone={finishWarmup} />}

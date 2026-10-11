@@ -1,11 +1,13 @@
 'use client'
-// Ревизия переехала во вкладку единого экрана «Склад». Роут сохранён как редирект
-// для старых ссылок/закладок.
+// Ревизия — вкладка «Операции» раздела «Товары».
+// Роут сохранён для старых ссылок и закладок.
 import { useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 
 export default function RevisionRedirect() {
   const router = useRouter()
-  useEffect(() => { router.replace('/manage/inventory?tab=revision') }, [router])
+  useEffect(() => {
+    router.replace('/manage/goods?tab=warehouse')
+  }, [router])
   return null
 }

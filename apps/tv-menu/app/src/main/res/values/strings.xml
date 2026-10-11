@@ -2,41 +2,57 @@
 <resources>
     <string name="app_name">Titan Menu</string>
 
-    <!-- Экран меню -->
-    <string name="status_loading">Загружаем меню…</string>
+    <!-- Экран -->
+    <string name="status_loading">Загружаем экран…</string>
     <string name="status_connecting">Подключаемся…</string>
     <string name="status_retry">%1$s\nПовторим через %2$d с.</string>
     <string name="status_offline">Нет интернета. Проверьте Wi‑Fi или кабель приставки.</string>
-    <string name="status_dns">Адрес %1$s не найден. Проверьте адрес клуба в настройках.</string>
+    <string name="status_dns">Адрес %1$s не найден. Проверьте интернет на приставке.</string>
     <string name="status_timeout">Сервер не отвечает.</string>
     <string name="status_ssl">Ошибка защищённого соединения. Проверьте дату и время на приставке.</string>
-    <string name="status_error">Не удалось открыть меню (ошибка %1$d).</string>
+    <string name="status_error">Не удалось открыть экран (ошибка %1$d).</string>
     <string name="status_http">Сервер ответил ошибкой %1$d — скорее всего, он перезапускается.</string>
-    <string name="status_not_found">Меню не найдено. Проверьте адрес клуба в настройках.</string>
-    <string name="status_slow">Меню загружается слишком долго.</string>
+    <string name="status_not_found">Экран не найден в Titan HUB. Его могли удалить — подключите ТВ заново.</string>
+    <string name="status_slow">Экран загружается слишком долго.</string>
     <string name="hint_settings">Настройки — удерживайте OK на пульте</string>
+    <string name="hint_legacy">Код для Titan HUB: %1$s · настройки — удерживайте OK</string>
 
-    <!-- Настройки -->
-    <string name="setup_address">Адрес клуба</string>
-    <string name="setup_address_note">Меню откроется по адресу https://адрес/menu — цены, темы и реклама берутся из Titan HUB.</string>
-    <string name="setup_address_error">Введите адрес, например kbr.titanpos.ru</string>
-    <string name="setup_rotation">Как висит телевизор</string>
+    <!-- Привязка -->
+    <string name="pair_title">Подключите этот экран к Titan HUB</string>
+    <string name="pair_code_label">Код экрана</string>
+    <string name="pair_steps">На телефоне откройте Titan HUB → Управление → Экраны → «Подключить ТВ» и выберите этот код. Телефон и приставка должны быть в одной Wi‑Fi сети.\nНастроить вручную — удерживайте OK на пульте.</string>
+
+    <!-- Настройки приставки -->
+    <string name="setup_version">Экран клуба · версия %1$s</string>
+    <string name="setup_back">Вернуться к экрану</string>
+    <string name="setup_system_settings">Настройки Android</string>
+    <string name="setup_exit">Выйти</string>
+    <string name="setup_connection">Подключение</string>
+    <string name="setup_connection_paired">Показывает экран «%1$s»\n%2$s</string>
+    <string name="setup_connection_unpaired">Не подключён к Titan HUB. Код на экране: %1$s</string>
+    <string name="setup_connection_legacy">Ручной режим: показывает %1$s.\nКод для подключения к Titan HUB: %2$s</string>
+    <string name="setup_manual">Ручная настройка</string>
+    <string name="setup_address_hint">kbr.titanpos.ru</string>
+    <string name="setup_address_error">Введите адрес клуба, например kbr.titanpos.ru</string>
     <string name="setup_rotate_90">Вертикально, поворот по часовой</string>
     <string name="setup_rotate_270">Вертикально, поворот против часовой</string>
     <string name="setup_rotate_0">Горизонтально</string>
-    <string name="setup_rotation_note">Меню лежит на боку или вверх ногами — выберите другой вариант.</string>
+    <string name="setup_manual_save">Показывать это меню</string>
+    <string name="setup_manual_note">Пока экран не подключён к Titan HUB, он показывает меню клуба по этому адресу. После подключения с телефона всё настраивается в Titan HUB.</string>
+    <string name="setup_connection_note">Что показывать, как повернуть картинку, тема и слайды — всё задаётся в Titan HUB: Управление → Экраны.</string>
+    <string name="setup_unpair">Отвязать от Titan HUB</string>
+    <string name="setup_unpair_confirm">Отвязать приставку?</string>
+    <string name="setup_unpair_message">Экран перестанет показываться, на телевизоре появится код для нового подключения.</string>
+    <string name="setup_legacy_off">Выключить ручной режим</string>
+    <string name="setup_cancel">Отмена</string>
     <string name="setup_autostart">Автозапуск</string>
-    <string name="setup_autostart_on">Включён: меню откроется само после включения приставки.</string>
-    <string name="setup_autostart_off">Чтобы меню открывалось само после включения, разрешите Titan Menu «Поверх других приложений».</string>
+    <string name="setup_autostart_on">Включён: экран откроется сам после включения приставки.</string>
+    <string name="setup_autostart_off">Чтобы экран открывался сам после включения, разрешите Titan Menu «Поверх других приложений».</string>
     <string name="setup_autostart_adb">На этой приставке нет такого экрана. Разрешение выдаётся с компьютера: adb shell appops set %1$s SYSTEM_ALERT_WINDOW allow</string>
     <string name="setup_autostart_button">Разрешить автозапуск</string>
     <string name="setup_home_button">Сделать главным экраном</string>
-    <string name="setup_home_note">Главный экран: приставка сразу открывает меню, и кнопка «Домой» тоже ведёт в меню.</string>
+    <string name="setup_home_note">Главный экран: приставка сразу открывает Titan Menu, и кнопка «Домой» тоже ведёт сюда.</string>
     <string name="setup_remote">Пульт</string>
-    <string name="setup_remote_note">Настройки — удерживайте OK или нажмите «Меню». Кнопка «Назад» меню не закрывает.</string>
-    <string name="setup_start">Запустить меню</string>
-    <string name="setup_system_settings">Настройки Android</string>
-    <string name="setup_exit">Выйти</string>
+    <string name="setup_remote_note">Настройки — удерживайте OK. Кнопка «Назад» экран не закрывает.</string>
     <string name="setup_no_screen">На этой приставке нет такого экрана настроек</string>
-    <string name="setup_version">Меню клуба на экране телевизора · версия %1$s</string>
 </resources>

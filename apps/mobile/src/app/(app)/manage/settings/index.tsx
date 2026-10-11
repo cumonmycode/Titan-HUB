@@ -1,7 +1,6 @@
-import { ContentUnavailableView, Form, Host, Picker, ProgressView, Section, Text, Toggle } from '@expo/ui/swift-ui';
+import { ContentUnavailableView, Form, Host, Picker, ProgressView, Section, Text } from '@expo/ui/swift-ui';
 import { pickerStyle, refreshable, tag } from '@expo/ui/swift-ui/modifiers';
 import { Stack, useRouter } from 'expo-router';
-import { Alert } from 'react-native';
 
 import { LinkRow, TextRow, TimeRow } from '@/components/native-form';
 import { useSettingsEditor } from '@/components/settings-parts';
@@ -15,8 +14,8 @@ const HOURS = Array.from({ length: 24 }, (_, hour) => hour);
 const hourText = (hour: number) => `${String(hour).padStart(2, '0')}:00`;
 
 /**
- * Настройки клуба — как «Настройки» iOS: правка прямо в строке (название, адрес, время,
- * пороги), выбор из системного меню, переключатели; всё сохраняется сразу. Большие темы
+ * Настройки клуба — как «Настройки» iOS: правка прямо в строке (название, адрес, время),
+ * выбор из системного меню; всё сохраняется сразу. Большие темы
  * (оплата и чеки, онлайн-бронь, отзывы, интеграции) — отдельными экранами-переходами.
  * Раньше каждое поле открывало системный диалог, а оплата и бронь были только в вебе.
  */
@@ -95,32 +94,8 @@ export default function SettingsScreen() {
             </Picker>
           </Section>
 
-          <Section title="Смены и склад" footer={<Text>Автозакрытие закрывает смену по расписанию. Склад подсвечивает позиции, которых осталось меньше порога.</Text>}>
-            <Toggle
-              label="Автозакрытие смены"
-              isOn={settings.flag('auto_close_shift', false)}
-              onIsOnChange={(on) => settings.save({ auto_close_shift: String(on) })}
-            />
-            <TextRow
-              label="Порог низкого остатка, шт."
-              value={String(settings.number('low_stock_threshold', 5))}
-              keyboard="numeric"
-              onCommit={(next) => {
-                const value = Math.round(Number(next));
-                if (!Number.isInteger(value) || value < 0) return Alert.alert('Порог — целое число штук');
-                settings.save({ low_stock_threshold: String(value) });
-              }}
-            />
-          </Section>
-
-          <Section title="Уведомления" footer={<Text>Оповещения клуба приходят в Telegram.</Text>}>
-            <Toggle
-              label="Уведомления в Telegram"
-              isOn={settings.flag('telegram_notifications', false)}
-              onIsOnChange={(on) => settings.save({ telegram_notifications: String(on) })}
-            />
-          </Section>
-
+          {/* Автозакрытие смены, общий порог остатка и общий тумблер Telegram убраны: сервер
+              их не читал. Уведомления настраиваются у каждого сотрудника, порог — у позиции склада. */}
           <Section title="Гости и оплата">
             <LinkRow
               icon="creditcard"
@@ -139,11 +114,8 @@ export default function SettingsScreen() {
             <LinkRow icon="star.bubble" color="#FF9500" title="Отзывы гостей" subtitle="Яндекс Карты, 2ГИС" onPress={() => router.push('/manage/settings/reviews')} />
           </Section>
 
-          <Section title="Titan Menu" footer={<Text>Меню клуба на телевизоре: тема оформления и реклама вместо ленты тарифов.</Text>}>
-            <LinkRow icon="tv" color="#8B5CF6" title="Меню на экране ТВ" subtitle="Тема, реклама, ссылка для AbleSign" onPress={() => router.push('/manage/settings/screen')} />
-          </Section>
 
-          <Section footer={<Text>Ключи интеграций вводятся в веб-панели — там их безопаснее хранить и проверять.</Text>}>
+          <Section footer={<Text>Home Assistant (свет и климат на кассе) настраивается здесь; остальные ключи — в веб-панели.</Text>}>
             <LinkRow
               icon="puzzlepiece.extension"
               color="#5856D6"

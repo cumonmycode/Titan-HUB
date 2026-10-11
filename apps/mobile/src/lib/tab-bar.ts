@@ -30,18 +30,18 @@ export function useTabBarClearance(withAccessory = false): number {
  */
 export const SHEET_ROUTES: Record<string, ReadonlySet<string>> = {
   pos: new Set(['menu', 'chat', 'refund', 'player', 'discount', 'rental']),
-  events: new Set(['edit', 'minicap', 'participants']),
+  events: new Set(['edit', 'participants']),
   analytics: new Set(['check/[checkId]', 'period']),
   manage: new Set([
-    'menu/item',
-    'menu/category',
-    'menu/reorder',
+    'goods/edit',
+    'goods/pick',
+    'goods/category',
+    'goods/reorder',
     'pricing/tariff',
     'pricing/evening',
     'pricing/space',
     'pricing/rate',
-    'inventory/stock-action',
-    'inventory/expense-new',
+    'expenses/new',
     'clients/edit',
     'clients/adjust',
     'clients/telegram',
@@ -54,6 +54,8 @@ export const SHEET_ROUTES: Record<string, ReadonlySet<string>> = {
     'loyalty/discount',
     'loyalty/tier-rule',
     'staff/new',
+    'settings/home/devices',
+    'settings/home/reorder',
     'polls/edit',
   ]),
 };

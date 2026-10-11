@@ -47,11 +47,12 @@ internalRouter.get('/bot-clubs', async (c) => {
   const def = defaultDbName()
   const control = getControlDb()
   const rows = await control
-    .select({ slug: clubs.slug, subdomain: clubs.subdomain, dbName: clubs.dbName })
+    .select({ id: clubs.id, slug: clubs.slug, subdomain: clubs.subdomain, dbName: clubs.dbName })
     .from(clubs)
     .where(eq(clubs.status, 'active'))
 
   const out: Array<{
+    id: string
     slug: string
     subdomain: string | null
     dbName: string
@@ -66,6 +67,7 @@ internalRouter.get('/bot-clubs', async (c) => {
       const adminToken = await getClubIntegration(cdb, 'admin_bot_token')
       const walletToken = await getClubIntegration(cdb, 'wallet_bot_token')
       out.push({
+        id: r.id,
         slug: r.slug,
         subdomain: r.subdomain,
         dbName: r.dbName,

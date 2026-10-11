@@ -7,7 +7,9 @@ import { requireAuth, requireRole } from '../../middleware/auth.js'
 import { getCurrentShift } from '../shifts/shifts.service.js'
 import { Redis } from 'ioredis'
 import { updatesChannel } from '../../lib/realtime.js'
-import { createBackup, listBackups, lastBackup, restoreNamed, restoreFromUpload, rcloneConfigured, withBackupLock, BackupBusyError, setMaintenance } from '../../lib/backup.js'
+import { createMiddleware } from 'hono/factory'
+import { bodyLimit } from 'hono/body-limit'
+import { createBackup, listBackups, lastBackup, restoreNamed, restoreFromUpload, rcloneConfigured, withBackupLock, BackupBusyError, UnsafeDumpError, setMaintenance } from '../../lib/backup.js'
 import { encryptSecret, decryptSecret, maskSecret, getClubIntegration } from '../../lib/secrets.js'
 import { getActiveSbpProvider } from '../pay/registry.js'
 import { getActiveFiscalProvider } from '../pay/fiscal/registry.js'
@@ -144,8 +146,17 @@ systemRouter.get('/update', requireAuth, requireRole('owner', 'staff'), async (c
 
 // ─── Резервное копирование БД (кнопки в «О системе») ─────────────────────────
 
+// БЕЗОПАСНОСТЬ: lib/backup работает с ОСНОВНОЙ БД (DATABASE_URL) и общим каталогом
+// копий, а не с БД клуба. На клубном поддомене владелец клуба увидел бы копии
+// оператора и мог бы восстановить поверх основной БД — поэтому все маршруты
+// бэкапа/восстановления доступны только на основном домене (c.var.club === null).
+const operatorDomainOnly = createMiddleware<AppEnv>(async (c, next) => {
+  if (c.var.club) return c.json({ error: 'Резервное копирование доступно только на основном домене' }, 403)
+  await next()
+})
+
 // Статус: последняя копия + настроен ли Google Drive. owner/staff (для отображения).
-systemRouter.get('/backup/status', requireAuth, requireRole('owner', 'staff'), async (c) => {
+systemRouter.get('/backup/status', operatorDomainOnly, requireAuth, requireRole('owner', 'staff'), async (c) => {
   try {
     const [last, driveConfigured] = await Promise.all([lastBackup(), rcloneConfigured()])
     return c.json({ last, driveConfigured })
@@ -155,13 +166,13 @@ systemRouter.get('/backup/status', requireAuth, requireRole('owner', 'staff'), a
 })
 
 // Список доступных копий (Google Drive, иначе локальные). owner.
-systemRouter.get('/backups', requireAuth, requireRole('owner'), async (c) => {
+systemRouter.get('/backups', operatorDomainOnly, requireAuth, requireRole('owner'), async (c) => {
   return c.json(await listBackups())
 })
 
 // Создать полную копию БД сейчас + выгрузить в Google Drive (если настроен). owner.
 // Под общим mutex с restore: конкурентный запуск → 409 (две операции могут затоптать друг друга).
-systemRouter.post('/backup', requireAuth, requireRole('owner'), async (c) => {
+systemRouter.post('/backup', operatorDomainOnly, requireAuth, requireRole('owner'), async (c) => {
   try {
     const r = await withBackupLock(() => createBackup())
     return c.json({ ok: true, ...r })
@@ -175,7 +186,7 @@ systemRouter.post('/backup', requireAuth, requireRole('owner'), async (c) => {
 // БЕЗОПАСНОСТЬ: операция уровня owner; требует явного confirm:true; идёт под общим
 // mutex backup/restore (конкуренция → 409); на время restore клуб переводится в
 // maintenance (денежные эндпоинты отбивают запись); пишется audit-лог.
-systemRouter.post('/restore', requireAuth, requireRole('owner'), zValidator('json', z.object({
+systemRouter.post('/restore', operatorDomainOnly, requireAuth, requireRole('owner'), zValidator('json', z.object({
   name: z.string().min(1),
   source: z.enum(['drive', 'local']),
   confirm: z.literal(true), // явное подтверждение — без него restore не запускается
@@ -207,14 +218,19 @@ systemRouter.post('/restore', requireAuth, requireRole('owner'), zValidator('jso
 // Восстановить из загруженного с устройства файла (.sql.gz). СНАЧАЛА авто-бэкап.
 // БЕЗОПАСНОСТЬ: те же гарантии, что и у /restore — owner, явное confirm, mutex (409),
 // maintenance на время restore, audit-лог. confirm приходит полем multipart-формы.
-systemRouter.post('/restore-upload', requireAuth, requireRole('owner'), async (c) => {
+// Свой предел тела (общий 1 МБ для этого пути снят в app.ts) — как проверка size ниже.
+const RESTORE_UPLOAD_MAX_BYTES = 200 * 1024 * 1024
+systemRouter.post('/restore-upload', operatorDomainOnly, requireAuth, requireRole('owner'), bodyLimit({
+  maxSize: RESTORE_UPLOAD_MAX_BYTES,
+  onError: (c) => c.json({ error: 'Файл слишком большой (>200MB)' }, 413),
+}), async (c) => {
   const user = c.get('user')
   const clubId = c.var.club?.id ?? null
   try {
     const body = await c.req.parseBody()
     const f = body['file']
     if (!(f instanceof File)) return c.json({ error: 'Файл не передан' }, 400)
-    if (f.size > 200 * 1024 * 1024) return c.json({ error: 'Файл слишком большой (>200MB)' }, 413)
+    if (f.size > RESTORE_UPLOAD_MAX_BYTES) return c.json({ error: 'Файл слишком большой (>200MB)' }, 413)
     if (body['confirm'] !== 'true') return c.json({ error: 'Требуется явное подтверждение' }, 400)
     const buf = Buffer.from(await f.arrayBuffer())
     return await withBackupLock(async () => {
@@ -231,6 +247,10 @@ systemRouter.post('/restore-upload', requireAuth, requireRole('owner'), async (c
     })
   } catch (e: any) {
     if (e instanceof BackupBusyError) return c.json({ error: e.message }, 409)
+    if (e instanceof UnsafeDumpError) {
+      console.warn(`[audit][restore-upload] rejected user=${user.sub} club=${clubId ?? 'main'}: ${e.message}`)
+      return c.json({ error: e.message }, 400)
+    }
     console.error(`[audit][restore-upload] failed user=${user.sub} club=${clubId ?? 'main'}: ${e?.message}`)
     return c.json({ error: e?.message ?? 'Не удалось восстановить из файла' }, 500)
   }
@@ -281,6 +301,10 @@ const INTEGRATION_KEYS: Record<string, string> = {
   // Умный дом — Home Assistant в локальной сети клуба (свет и кондиционеры кабинок в Titan Home).
   ha_url: 'Home Assistant: адрес в локальной сети',
   ha_token: 'Home Assistant: долгосрочный токен',
+  // Тот же Home Assistant для приложения Titan HUB (шторка «Свет и климат» на кассе): свой
+  // токен, чтобы отзывать его отдельно от планшетов; адрес пустой — берётся ha_url.
+  hub_ha_url: 'Home Assistant для HUB: адрес',
+  hub_ha_token: 'Home Assistant для HUB: долгосрочный токен',
 }
 
 const isAllowedKey = (key: string): boolean =>
@@ -712,9 +736,16 @@ systemRouter.put(
     const { configs } = c.req.valid('json')
     const existing = await readPollConfigs(db)
     const lastById = new Map(existing.map((e) => [e.id, e.lastPostedAt]))
+    // Берём более позднюю отметку: фронт мог прислать устаревший lastPostedAt из кэша —
+    // тогда опрос, уже отправленный сегодня, ушёл бы повторно.
+    const later = (a: string | null | undefined, b: string | null | undefined): string | null => {
+      if (!a) return b ?? null
+      if (!b) return a
+      return new Date(a).getTime() >= new Date(b).getTime() ? a : b
+    }
     const merged: PollConfig[] = configs.map((cfg) => ({
       ...cfg,
-      lastPostedAt: cfg.lastPostedAt ?? lastById.get(cfg.id) ?? null,
+      lastPostedAt: later(cfg.lastPostedAt, lastById.get(cfg.id)),
     }))
     await writePollConfigs(db, merged)
     return c.json({ ok: true, configs: merged })

@@ -1,29 +1,33 @@
-// Панель сотрудника: вход PIN-ом (удержать логотип 2 секунды на любом экране гостя).
+// Панель сотрудника: вход PIN-ом (5 касаний логотипа на экране гостя).
 import * as Application from 'expo-application';
 import { useRouter } from 'expo-router';
+import {
+  Home, Info, Lock, LogOut, Pin, PinOff, Power, RefreshCw, RotateCw, Settings, ShieldCheck, ShieldOff, Sofa, Store, Tablet,
+  UserCheck, Wifi, X,
+} from 'lucide-react-native';
 import { useState } from 'react';
-import { Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, ScrollView, StyleSheet, View } from 'react-native';
 
-import { PinPad } from '@/components/pin-pad';
-import { ActionRow, InfoRow, Section, Segments, ToggleRow } from '@/components/staff-ui';
-import { Button, IconButton } from '@/components/ui';
-import { kickHa, useHa } from '@/lib/home-assistant';
+import { useSession } from '@/data/session';
+import { useSmartHome } from '@/data/smart-home';
+import { kickHa, useHa } from '@/features/room/ha';
+import { ActionRow, InfoRow, PinPad, Section, ToggleRow } from '@/features/staff/staff-ui';
+import { useStaff, verifyStaffPin } from '@/features/staff/staff';
 import { usePrefs } from '@/lib/prefs';
-import { queryClient, useSmartHome } from '@/lib/queries';
 import { forgetClubCompletely } from '@/lib/reset';
-import { useSession } from '@/lib/session';
-import { useStaff, verifyStaffPin } from '@/lib/staff';
-import { colors, GUTTER, space, type } from '@/lib/theme';
-import { useNow } from '@/lib/use-now';
+import { Background } from '@/ui/background';
+import { Button } from '@/ui/button';
+import { ScreenHeader } from '@/ui/screen-header';
+import { Segmented } from '@/ui/segmented';
+import { T } from '@/ui/text';
+import { color, GUTTER } from '@/ui/tokens';
 
-import { Kiosk, type KioskStatus } from '../../../modules/titan-kiosk';
+import { Kiosk, type KioskStatus, type Orientation } from '../../../modules/titan-kiosk';
 
 export default function StaffScreen() {
   const router = useRouter();
   const sp = useSession((s) => s.space);
-  const until = useStaff((s) => s.until);
-  const now = useNow(5_000);
-  const unlocked = until > now.getTime();
+  const unlocked = useStaff((s) => s.until > 0);
 
   const close = () => {
     useStaff.getState().lock();
@@ -31,20 +35,14 @@ export default function StaffScreen() {
   };
 
   return (
-    <View style={{ flex: 1 }}>
-      <View style={styles.header}>
-        <IconButton icon="close" label="Закрыть" onPress={close} />
-        <View style={{ flex: 1 }}>
-          <Text style={type.title}>Для сотрудника</Text>
-          <Text style={type.caption}>{sp?.name}</Text>
-        </View>
-        {unlocked ? <Button title="Готово" size="md" onPress={close} /> : null}
-      </View>
+    <View style={styles.screen}>
+      <Background />
+      <ScreenHeader icon={X} label="Закрыть" onBack={close} title="Для сотрудника" caption={sp?.name} right={unlocked ? <Button title="Готово" onPress={close} /> : null} />
       {unlocked ? (
         <Panel />
       ) : (
         <View style={styles.gate}>
-          <Text style={[type.body, { color: colors.textSecondary, marginBottom: space.xl }]}>Введите PIN — тот же, что для входа в кассу</Text>
+          <T variant="body" tone="secondary" style={{ marginBottom: 20 }}>Введите PIN — тот же, что для входа в кассу</T>
           <PinPad onSubmit={(pin) => verifyStaffPin(sp!.id, pin)} />
         </View>
       )}
@@ -53,11 +51,11 @@ export default function StaffScreen() {
 }
 
 const HA_STATUS: Record<string, { text: string; tone: string }> = {
-  connected: { text: 'Подключено', tone: colors.green },
-  connecting: { text: 'Подключаемся…', tone: colors.amber },
-  offline: { text: 'Нет связи', tone: colors.red },
-  auth_failed: { text: 'Неверный токен', tone: colors.red },
-  idle: { text: 'Не настроено', tone: colors.textMuted },
+  connected: { text: 'Подключено', tone: color.green },
+  connecting: { text: 'Подключаемся…', tone: color.amber },
+  offline: { text: 'Нет связи', tone: color.red },
+  auth_failed: { text: 'Неверный токен', tone: color.red },
+  idle: { text: 'Не настроено', tone: color.textTertiary },
 };
 
 function Panel() {
@@ -69,109 +67,99 @@ function Panel() {
   const smart = useSmartHome();
   const haStatus = useHa((s) => s.status);
   const [status, setStatus] = useState<KioskStatus>(() => Kiosk.getStatus());
-  const refresh = () => setStatus(Kiosk.getStatus());
 
   const act = async (fn: () => Promise<unknown>) => {
     touch();
     await fn();
-    refresh();
+    setStatus(Kiosk.getStatus());
   };
-
-  const lockLabel = status.lockTask === 'locked' ? 'Закреплён (киоск)' : status.lockTask === 'pinned' ? 'Закреплён' : 'Не закреплён';
-  const room = smart.data?.room;
-  const roomText = !smart.data?.connection
-    ? 'Home Assistant не подключён в Titan HUB'
-    : room && (room.lights.length || room.climate)
-      ? [...room.lights.map((l) => l.name), room.climate?.name].filter(Boolean).join(', ')
-      : 'Устройства не выбраны';
-  const ha = HA_STATUS[haStatus] ?? HA_STATUS.idle!;
-
   const confirm = (title: string, message: string, ok: string, onOk: () => void) =>
     Alert.alert(title, message, [{ text: 'Отмена', style: 'cancel' }, { text: ok, style: 'destructive', onPress: onOk }]);
-
   const openSystem = (kind: 'settings' | 'wifi' | 'home') =>
     act(async () => {
       await Kiosk.stopLockTask();
       await Kiosk.openSettings(kind);
     });
 
+  const lockLabel = status.lockTask === 'locked' ? 'Закреплён (киоск)' : status.lockTask === 'pinned' ? 'Закреплён' : 'Не закреплён';
+  const ha = HA_STATUS[haStatus] ?? HA_STATUS.idle!;
+  const room = smart.data?.room;
+  const devices = room ? [...room.lights.map((l) => l.name), room.climate?.name].filter(Boolean).join(', ') : '';
+
   return (
-    <ScrollView contentContainerStyle={styles.panel} onScrollBeginDrag={touch}>
+    <ScrollView contentContainerStyle={styles.panel} onScrollBeginDrag={touch} showsVerticalScrollIndicator={false}>
       <View style={styles.columns}>
         <View style={styles.column}>
           <Section title="Планшет">
-            <InfoRow icon="store-outline" label="Клуб" value={session.club?.name} />
+            <InfoRow icon={Store} label="Клуб" value={session.club?.name} />
             <ActionRow
-              icon="sofa-outline"
+              icon={Sofa}
               label={`Кабинка · ${session.space?.name ?? '—'}`}
-              hint="Перенести планшет в другую кабинку или настроить устройства любой из них"
+              hint={devices ? `Устройства: ${devices}` : 'Перенести планшет или выбрать устройства кабинок'}
               onPress={() => { touch(); router.push('/staff/booths'); }}
             />
-            <InfoRow icon="account-tie" label="Подтвердил" value={staff ?? session.staff} />
-            <InfoRow icon="tablet" label="Устройство" value={`${status.model} · Android ${status.androidVersion}`} />
-            <InfoRow icon="information-outline" label="Версия" value={`${Application.nativeApplicationVersion ?? '—'} (${Application.nativeBuildVersion ?? '—'})`} />
+            <InfoRow icon={UserCheck} label="Подтвердил" value={staff ?? session.staff} />
+            <InfoRow icon={Tablet} label="Устройство" value={`${status.model} · Android ${status.androidVersion}`} />
+            <InfoRow icon={Info} label="Версия" value={`${Application.nativeApplicationVersion ?? '—'} (${Application.nativeBuildVersion ?? '—'})`} />
           </Section>
 
           <Section
             title="Режим киоска"
             footer={status.isDeviceOwner
               ? 'Titan Home — владелец устройства: экран закрепляется сам, «Домой» ведёт в киоск, шторка и экран блокировки отключены.'
-              : 'Полный киоск без вопросов: один раз на сброшенном планшете выполните на компьютере\nadb shell dpm set-device-owner ru.titan.home/expo.modules.titankiosk.KioskAdminReceiver\nБез этого Android спросит подтверждение закрепления, а «Домой» нужно выбрать вручную.'}
+              : 'Полный киоск без вопросов: один раз на сброшенном планшете выполните на компьютере\nadb shell dpm set-device-owner ru.titan.home/expo.modules.titankiosk.KioskAdminReceiver'}
           >
-            <InfoRow icon="shield-lock-outline" label="Владелец устройства" value={status.isDeviceOwner ? 'Да' : 'Нет'} tone={status.isDeviceOwner ? colors.green : undefined} />
-            <InfoRow icon="lock-outline" label="Экран" value={lockLabel} tone={status.lockTask !== 'none' ? colors.green : colors.amber} />
-            <InfoRow icon="home-outline" label="Домашний экран" value={status.isDefaultHome ? 'Titan Home' : 'Другое приложение'} tone={status.isDefaultHome ? colors.green : colors.amber} />
+            <InfoRow icon={ShieldCheck} label="Владелец устройства" value={status.isDeviceOwner ? 'Да' : 'Нет'} tone={status.isDeviceOwner ? color.green : undefined} />
+            <InfoRow icon={Lock} label="Экран" value={lockLabel} tone={status.lockTask !== 'none' ? color.green : color.amber} />
+            <InfoRow icon={Home} label="Домашний экран" value={status.isDefaultHome ? 'Titan Home' : 'Другое приложение'} tone={status.isDefaultHome ? color.green : color.amber} />
             {status.lockTask === 'none' ? (
-              <ActionRow icon="pin-outline" label="Закрепить экран" hint="Гость не выйдет из Titan Home" onPress={() => void act(async () => { await prefs.update({ lockTask: true }); await Kiosk.startLockTask(); })} />
+              <ActionRow icon={Pin} label="Закрепить экран" hint="Гость не выйдет из Titan Home" onPress={() => void act(async () => { await prefs.update({ lockTask: true }); await Kiosk.startLockTask(); })} />
             ) : (
-              <ActionRow icon="pin-off-outline" label="Открепить экран" hint="Например, чтобы обновить приложение" onPress={() => void act(async () => { await prefs.update({ lockTask: false }); await Kiosk.stopLockTask(); })} />
+              <ActionRow icon={PinOff} label="Открепить экран" hint="Например, чтобы обновить приложение" onPress={() => void act(async () => { await prefs.update({ lockTask: false }); await Kiosk.stopLockTask(); })} />
             )}
-            {!status.isDefaultHome ? <ActionRow icon="home-import-outline" label="Сделать домашним экраном" hint="Выберите Titan Home в списке" onPress={() => void openSystem('home')} /> : null}
+            {!status.isDefaultHome ? <ActionRow icon={Home} label="Сделать домашним экраном" hint="Выберите Titan Home в списке" onPress={() => void openSystem('home')} /> : null}
           </Section>
 
-          <Section
-            title="Ориентация экрана"
-            footer="«Как планшет» — экран поворачивается вместе с планшетом; закрепите поворот в настройках Android. Альбомную или книжную фиксируйте, только если планшет так и стоит: иначе Android сузит экран полосой."
-          >
-            <Segments
-              value={prefs.orientation}
-              onChange={(o) => void act(async () => { await prefs.update({ orientation: o }); await Kiosk.setOrientation(o); })}
-              options={[
-                { key: 'auto', label: 'Как планшет', icon: 'screen-rotation' },
-                { key: 'landscape', label: 'Альбомная', icon: 'phone-rotate-landscape' },
-                { key: 'portrait', label: 'Книжная', icon: 'phone-rotate-portrait' },
-              ]}
-            />
+          <Section title="Ориентация экрана" footer="«Как планшет» — экран поворачивается вместе с планшетом. Альбомную или книжную фиксируйте, только если планшет так и стоит: иначе Android сузит экран полосой.">
+            <View style={{ padding: 12 }}>
+              <Segmented<Orientation>
+                value={prefs.orientation}
+                onChange={(o) => void act(async () => { await prefs.update({ orientation: o }); await Kiosk.setOrientation(o); })}
+                options={[
+                  { key: 'auto', label: 'Как планшет', icon: RotateCw },
+                  { key: 'landscape', label: 'Альбомная', icon: Tablet },
+                  { key: 'portrait', label: 'Книжная', icon: Tablet },
+                ]}
+              />
+            </View>
           </Section>
         </View>
 
         <View style={styles.column}>
-          <Section title="Свет и климат" footer="Адрес и долгосрочный токен Home Assistant вбиваются в Titan HUB: «Управление» → «Настройки» → «Интеграции». Планшет сам подключается к HA по локальной сети и держит связь постоянно — это делает фоновый сервис Android, даже когда экран свёрнут, и после перезагрузки. Здесь выбираются устройства этой кабинки.">
-            <InfoRow icon="home-automation" label="Home Assistant" value={smart.data?.connection ? ha.text : 'Не подключён'} tone={smart.data?.connection ? ha.tone : colors.textMuted} />
+          <Section title="Свет и климат" footer="Адрес и токен Home Assistant вбиваются в Titan HUB: «Управление» → «Настройки» → «Интеграции». Связь держит фоновый сервис Android — и когда экран свёрнут, и после перезагрузки. Устройства каждой кабинки выбираются в «Кабинке».">
+            <InfoRow icon={Power} label="Home Assistant" value={smart.data?.connection ? ha.text : 'Не подключён в Titan HUB'} tone={smart.data?.connection ? ha.tone : color.textTertiary} />
             {smart.data?.connection && haStatus !== 'connected' ? (
-              <ActionRow icon="refresh" label="Переподключить" hint="Не ждать следующей попытки" onPress={() => { touch(); kickHa(); }} />
+              <ActionRow icon={RefreshCw} label="Переподключить" hint="Не ждать следующей попытки" onPress={() => { touch(); kickHa(); }} />
             ) : null}
-            <ActionRow icon="lightbulb-group-outline" label="Устройства кабинки" hint={roomText} onPress={() => { touch(); router.push('/staff/room'); }} disabled={!smart.data?.connection} />
-            <ToggleRow icon="power-sleep" label="Выключать после счёта" hint="Когда счёт закрыт — погасить свет и выключить кондиционер" value={prefs.roomAutoOff} onChange={(v) => void act(() => prefs.update({ roomAutoOff: v }))} />
+            <ToggleRow icon={Power} label="Выключать после счёта" hint="Когда счёт закрыт — погасить свет и выключить кондиционер" value={prefs.roomAutoOff} onChange={(v) => void act(() => prefs.update({ roomAutoOff: v }))} />
           </Section>
 
           <Section title="Обслуживание">
-            <ActionRow icon="refresh" label="Обновить данные" hint="Меню, счёт, устройства" onPress={() => void act(() => queryClient.invalidateQueries())} />
-            <ActionRow icon="wifi-cog" label="Настройки Wi-Fi" onPress={() => void openSystem('wifi')} />
-            <ActionRow icon="cog-outline" label="Настройки Android" hint="Экран открепится; вернуться — кнопкой «Домой»" onPress={() => void openSystem('settings')} />
+            <ActionRow icon={Wifi} label="Настройки Wi-Fi" onPress={() => void openSystem('wifi')} />
+            <ActionRow icon={Settings} label="Настройки Android" hint="Экран открепится; вернуться — кнопкой «Домой»" onPress={() => void openSystem('settings')} />
             {status.isDeviceOwner ? (
-              <ActionRow icon="restart" label="Перезагрузить планшет" onPress={() => confirm('Перезагрузить планшет?', 'Titan Home откроется сам после включения.', 'Перезагрузить', () => void Kiosk.reboot())} />
+              <ActionRow icon={RotateCw} label="Перезагрузить планшет" onPress={() => confirm('Перезагрузить планшет?', 'Titan Home откроется сам после включения.', 'Перезагрузить', () => void Kiosk.reboot())} />
             ) : null}
           </Section>
 
           <Section title="Сброс">
-            <ActionRow icon="logout" label="Другой клуб" tone={colors.amber} onPress={() => confirm('Отключить от клуба?', 'Планшет забудет клуб и кабинку.', 'Отключить', () => void forgetClubCompletely())} />
+            <ActionRow icon={LogOut} label="Другой клуб" tone={color.amber} onPress={() => confirm('Отключить от клуба?', 'Планшет забудет клуб и кабинку.', 'Отключить', () => void forgetClubCompletely())} />
             {status.isDeviceOwner ? (
               <ActionRow
-                icon="shield-off-outline"
+                icon={ShieldOff}
                 label="Снять режим владельца устройства"
                 hint="Планшет станет обычным; удалить Titan Home можно будет только после этого"
-                tone={colors.red}
+                tone={color.red}
                 onPress={() => confirm('Снять режим киоска?', 'Закрепление, «Домой» и отключение шторки будут сняты.', 'Снять', () => void act(() => Kiosk.clearDeviceOwner()))}
               />
             ) : null}
@@ -183,9 +171,9 @@ function Panel() {
 }
 
 const styles = StyleSheet.create({
-  header: { flexDirection: 'row', alignItems: 'center', gap: space.lg, paddingHorizontal: GUTTER, paddingTop: space.xl, paddingBottom: space.md },
+  screen: { flex: 1, paddingHorizontal: GUTTER, paddingTop: 20 },
   gate: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingBottom: GUTTER },
-  panel: { padding: GUTTER, paddingTop: space.sm },
-  columns: { flexDirection: 'row', flexWrap: 'wrap', gap: space.xl },
-  column: { flexGrow: 1, flexBasis: 380, gap: space.xl },
+  panel: { paddingTop: 16, paddingBottom: GUTTER },
+  columns: { flexDirection: 'row', flexWrap: 'wrap', gap: 20 },
+  column: { flexGrow: 1, flexBasis: 380, gap: 20 },
 });
