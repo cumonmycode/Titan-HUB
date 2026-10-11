@@ -261,6 +261,7 @@ export async function demoRequest<T>(method: string, fullPath: string, body?: un
     return out({ ok: true });
   }
   if (method === 'POST' && path === '/auth/logout') return out({ ok: true });
+  if (method === 'POST' && path === '/resident/account/delete') return out({ ok: true });
   const err = new DemoError('В демо-режиме это недоступно');
   throw err;
 }
