@@ -17,6 +17,7 @@ import { accrueBonusLot, getBonusExpiryDays, spendBonusLots } from '../../lib/bo
 import { hashPassword } from '@titan/auth'
 import { notify, notifyClient } from '../notifications/push.js'
 import { visitProgress, maybePromoteToResident } from '../../lib/loyalty.js'
+import { REGISTRATION_APPROVED, REGISTRATION_PENDING, REGISTRATION_REJECTED } from '../../lib/registration.js'
 import { listRoster } from '../../lib/roster.js'
 import { readAliases, aliasesForProfile, addAlias, removeAlias, resolveProfileIdByAlias } from '../../lib/tgAliases.js'
 import { playerDetail as gomafiaPlayer } from '../../lib/gomafia.js'
@@ -260,6 +261,60 @@ clientsRouter.post('/', requireRole('owner', 'staff'), zValidator('json', Create
   }, db, c.var.club?.id ?? null).catch(() => {})
 
   return c.json({ client: safe }, 201)
+})
+
+// ── Регистрации из приложения My Titan, ждущие подтверждения ──────────────────
+// Клиент сам зарегистрировался в приложении (анкета + подтверждение в боте). До
+// подтверждения персоналом бонусы не начисляются и оплата в приложении закрыта.
+// Регистрируем ДО /:id, иначе «registrations» попало бы в параметр :id.
+clientsRouter.get('/registrations', requireRole('owner', 'staff'), async (c) => {
+  const db = c.var.db
+  const rows = await db.select({
+    id: profiles.id,
+    nickname: profiles.nickname,
+    fullName: profiles.fullName,
+    phone: profiles.phone,
+    birthday: profiles.birthday,
+    photoUrl: profiles.photoUrl,
+    tgUsername: profiles.tgUsername,
+    createdAt: profiles.createdAt,
+  }).from(profiles)
+    .where(and(eq(profiles.registrationStatus, REGISTRATION_PENDING), isNull(profiles.deletedAt)))
+    .orderBy(asc(profiles.createdAt))
+  return c.json({ registrations: rows })
+})
+
+// «Подтвердить» — бонусы и оплата в приложении открываются; «Отклонить» — профиль
+// в архив (приложение клиента выйдет на экран входа). Править данные — обычный PATCH.
+clientsRouter.post('/:id/registration', requireRole('owner', 'staff'), zValidator('json', z.object({
+  action: z.enum(['approve', 'reject']),
+})), async (c) => {
+  const db = c.var.db
+  const id = c.req.param('id')
+  const { action } = c.req.valid('json')
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) return c.json({ error: 'Bad id' }, 400)
+  const approve = action === 'approve'
+  const [updated] = await db.update(profiles)
+    .set(approve
+      ? { registrationStatus: REGISTRATION_APPROVED }
+      : { registrationStatus: REGISTRATION_REJECTED, deletedAt: new Date() })
+    .where(and(eq(profiles.id, id), eq(profiles.registrationStatus, REGISTRATION_PENDING), isNull(profiles.deletedAt)))
+    .returning({ id: profiles.id })
+  if (!updated) return c.json({ error: 'Регистрация уже рассмотрена' }, 409)
+  // Push и бот доходят и до архивного профиля — клиент узнает и об отказе.
+  void notifyClient(id, approve
+    ? {
+        kind: 'system',
+        title: 'Регистрация подтверждена',
+        body: 'Добро пожаловать в клуб! Теперь вам начисляются бонусы и доступна оплата в приложении.',
+        meta: { screen: 'home' },
+      }
+    : {
+        kind: 'system',
+        title: 'Регистрация отклонена',
+        body: 'Клуб не подтвердил регистрацию в My Titan. Если это ошибка — свяжитесь с администратором.',
+      }, db, c.var.club?.id ?? null)
+  return c.json({ ok: true, status: approve ? REGISTRATION_APPROVED : REGISTRATION_REJECTED })
 })
 
 // Ростер «увиденных» Telegram-пользователей чата (для сопоставления клиента с TG).

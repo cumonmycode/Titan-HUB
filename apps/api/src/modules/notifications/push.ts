@@ -22,7 +22,7 @@ export function resolveNotifUrl(type: string, meta: Record<string, unknown> = {}
     case 'supply_received': return typeof meta['supplyId'] === 'string' ? `/manage/goods/doc?type=supply&id=${meta['supplyId']}` : '/manage/goods?tab=warehouse'
     case 'shift_open': case 'shift_close': case 'cash_discrepancy': return '/shifts'
     case 'event_created': case 'event_completed': return '/events'
-    case 'new_client': case 'birthday': return '/manage/clients'
+    case 'new_client': case 'client_registration': case 'birthday': return '/manage/clients'
     case 'staff_call': return checkId ? `/pos/${checkId}` : '/pos'
     case 'guest_feedback': return '/dashboard?tab=feedback'
   }
@@ -96,6 +96,7 @@ export const NOTIFICATION_TYPES: NotificationTypeDef[] = [
   { key: 'event_created', label: 'Создано мероприятие', description: 'Создано новое мероприятие', defaultEnabled: true },
   { key: 'event_completed', label: 'Мероприятие завершено', description: 'Мероприятие завершено', defaultEnabled: false },
   { key: 'new_client', label: 'Новый клиент', description: 'Зарегистрирован новый клиент', defaultEnabled: false },
+  { key: 'client_registration', label: 'Регистрация в My Titan', description: 'Клиент зарегистрировался в приложении и ждёт подтверждения', defaultEnabled: true },
   { key: 'supply_received', label: 'Приход на склад', description: 'Оформлен приход товара на склад', defaultEnabled: true },
   { key: 'large_refund', label: 'Крупный возврат', description: 'Оформлен возврат на крупную сумму', defaultEnabled: true },
 ]

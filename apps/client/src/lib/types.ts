@@ -59,6 +59,8 @@ export interface Wallet {
   bonusExpiring: { amount: number; date: string } | null;
   visitProgress: VisitProgress;
   collections: Collection[];
+  /** 'pending' — регистрация из приложения ждёт подтверждения клуба: без бонусов и оплаты. */
+  registration?: 'pending' | null;
   pay: { online: boolean; surchargePercent: number };
   unreadNotifications: number;
   prefs: Prefs;

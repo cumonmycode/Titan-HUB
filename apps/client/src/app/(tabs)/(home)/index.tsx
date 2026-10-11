@@ -107,6 +107,7 @@ export default function HomeScreen() {
         />
       </Animated.View>
 
+      {w.registration === 'pending' ? <RegistrationPending /> : null}
       <DepositCard wallet={w} />
       <PushPrompt />
       <Dues wallet={w} />
@@ -128,6 +129,23 @@ export default function HomeScreen() {
         </Surface>
       </View>
     </TabScroll>
+  );
+}
+
+/** Регистрация ждёт подтверждения клуба: до него без бонусов и оплаты в приложении (кнопки скрыты — pay.online). */
+function RegistrationPending() {
+  return (
+    <Surface tone={colors.amber} style={[styles.card, styles.pending]}>
+      <View style={styles.row}>
+        <IconTile name="pending" color={colors.amber} />
+        <View style={styles.flex}>
+          <Text style={type.headline}>Регистрация на проверке</Text>
+          <Text style={[type.caption, styles.promptText]}>
+            Администратор клуба скоро её подтвердит. После этого начнут начисляться бонусы и откроется оплата в приложении.
+          </Text>
+        </View>
+      </View>
+    </Surface>
   );
 }
 
@@ -313,6 +331,7 @@ const styles = StyleSheet.create({
   track: { height: 8, borderRadius: 4, backgroundColor: 'rgba(255,255,255,0.12)', overflow: 'hidden', marginTop: space.md },
   fill: { height: '100%', borderRadius: 4, experimental_backgroundImage: 'linear-gradient(90deg, #8B5CF6, #4cd7f6)' },
   promptText: { marginTop: 2 },
+  pending: { marginTop: space.lg },
   promptActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: space.sm, marginTop: space.md },
   listLoading: { padding: space.lg, gap: space.md },
 });

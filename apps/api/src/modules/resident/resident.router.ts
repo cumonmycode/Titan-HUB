@@ -17,6 +17,7 @@ import { signToken } from '@titan/auth'
 import { requireAuth } from '../../middleware/auth.js'
 import { visitProgress } from '../../lib/loyalty.js'
 import { round2 } from '../../lib/money.js'
+import { isRegistrationPending } from '../../lib/registration.js'
 import { excusedMonthKeys, recurringOwed } from '../../lib/collectionDues.js'
 import { getActiveSbpProvider, getProvider, resolveCreds } from '../pay/registry.js'
 import { getClubIntegration } from '../../lib/secrets.js'
@@ -168,7 +169,9 @@ residentRouter.get('/wallet', async (c) => {
   const db = c.var.db
   const me = c.get('user').sub
   const [p] = await db.select().from(profiles).where(eq(profiles.id, me))
-  if (!p || p.deletedAt) return c.json({ error: 'Not found' }, 404)
+  // Профиль в архиве (в т.ч. отклонённая регистрация) — 401: приложение само выйдет на вход.
+  if (!p || p.deletedAt) return c.json({ error: 'Профиль недоступен' }, 401)
+  const pending = isRegistrationPending(p)
 
   // Статус = тариф с key (миграция 052); старая client_tiers — запасной источник подписи.
   const [tariffRow] = await db.select({ label: tariffs.name, color: tariffs.color }).from(tariffs)
@@ -227,7 +230,9 @@ residentRouter.get('/wallet', async (c) => {
       : null,
     visitProgress: progress,
     collections: colls,
-    pay: { online: ready, surchargePercent: ONLINE_SURCHARGE_PERCENT },
+    // Регистрация ждёт подтверждения клуба: оплата закрыта, бонусы не начисляются.
+    registration: pending ? 'pending' : null,
+    pay: { online: ready && !pending, surchargePercent: ONLINE_SURCHARGE_PERCENT },
     unreadNotifications: Number(unread?.n ?? 0),
     prefs: {
       push: p.clientPushEnabled !== false,

@@ -62,6 +62,10 @@ export const profiles = pgTable('profiles', {
   // Приложение My Titan: push на телефон и новости клуба (рассылки).
   clientPushEnabled: boolean('client_push_enabled').notNull().default(true),
   clientNewsEnabled: boolean('client_news_enabled').notNull().default(true),
+  // Регистрация из My Titan (миграция 077): 'pending' — ждёт подтверждения персонала
+  // (бонусы не начисляются, оплата в приложении закрыта), 'approved' / 'rejected';
+  // NULL — клиент заведён персоналом.
+  registrationStatus: text('registration_status'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   deletedAt: timestamp('deleted_at', { withTimezone: true }),
 })

@@ -16,6 +16,7 @@ import { findStaffByPin, isPinTaken, PIN_TAKEN_ERROR, type StaffProfile } from '
 import { getBoolSetting } from '../../lib/appSettings.js'
 import { getSharedRedis } from '../../lib/redis.js'
 import { clientIp } from '../../lib/clientIp.js'
+import { isRegistrationPending } from '../../lib/registration.js'
 import { Redis } from 'ioredis'
 import {
   generateRegistrationOptions,
@@ -769,6 +770,11 @@ authRouter.post('/me/payments', requireAuth, zValidator('json', z.object({
   const { purpose, amount } = c.req.valid('json')
   const amt = round2(amount)
   if (amt < 1) return c.json({ error: 'Минимальная сумма — 1 ₽' }, 400)
+  // Самостоятельная регистрация из приложения: платить можно после подтверждения клубом.
+  const [payer] = await db.select({ registrationStatus: profiles.registrationStatus }).from(profiles).where(eq(profiles.id, user.sub))
+  if (isRegistrationPending(payer)) {
+    return c.json({ error: 'Оплата в приложении станет доступна, когда клуб подтвердит вашу регистрацию' }, 403)
+  }
 
   // Для взноса — определяем сбор и проверяем, что клиент в нём участвует.
   let collectionId: string | null = null

@@ -73,6 +73,7 @@ export const NOTIF_ICONS: Record<string, string> = {
   event_created: 'event',
   event_completed: 'event',
   new_client: 'group',
+  client_registration: 'person_add',
   debt_created: 'account_balance_wallet',
   deposit_topup: 'account_balance_wallet',
   certificate_used: 'card_giftcard',
@@ -98,6 +99,7 @@ export const NOTIF_COLORS: Record<string, string> = {
   event_created: '#A78BFA',
   event_completed: '#A78BFA',
   new_client: '#60A5FA',
+  client_registration: '#8B5CF6',
   debt_created: '#F43F5E',
   deposit_topup: '#10B981',
   certificate_used: '#14B8A6',
@@ -117,7 +119,7 @@ export function notifUrl(n: { type: string; meta?: Record<string, unknown> }): s
     case 'supply_received': return typeof meta['supplyId'] === 'string' ? `/manage/goods/doc?type=supply&id=${meta['supplyId']}` : '/manage/goods?tab=warehouse'
     case 'shift_open': case 'shift_close': case 'cash_discrepancy': return '/manage/shifts'
     case 'event_created': case 'event_completed': return '/events'
-    case 'new_client': case 'birthday': return '/manage/clients'
+    case 'new_client': case 'client_registration': case 'birthday': return '/manage/clients'
     case 'staff_call': return checkId ? `/pos/${checkId}` : '/pos'
     case 'guest_feedback': return '/dashboard?tab=feedback'
   }

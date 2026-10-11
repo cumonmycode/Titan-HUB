@@ -7,6 +7,7 @@ import { formatDistanceToNow } from 'date-fns'
 import { ru } from 'date-fns/locale'
 import { PageHeader, Sheet, Button, IconButton, ConfirmDialog, Chip, INP, LBL } from '@/components/manage/DesignSystem'
 import { ClientNotifySheet } from '@/components/manage/ClientNotifySheet'
+import { PendingRegistrations } from '@/components/manage/PendingRegistrations'
 import { StateView } from '@/components/StateView'
 import { useToast } from '@/components/Toast'
 import { Icon } from '@/components/Icon'
@@ -402,20 +403,31 @@ export default function ClientsPage() {
   }
 
   // Перевод в режим редактирования: заполняем форму из выбранного клиента.
-  function startEdit() {
-    if (!selected) return
-    const tags: string[] = Array.isArray(selected.searchTags) ? selected.searchTags : []
+  function startEdit(client: any = selected) {
+    if (!client) return
+    const tags: string[] = Array.isArray(client.searchTags) ? client.searchTags : []
     setEditForm({
-      nickname: selected.nickname ?? '',
-      fullName: selected.fullName ?? '',
-      phone: selected.phone ?? '',
-      birthday: selected.birthday ? String(selected.birthday).slice(0, 10) : '',
-      clientTier: selected.clientTier ?? 'guest',
+      nickname: client.nickname ?? '',
+      fullName: client.fullName ?? '',
+      phone: client.phone ?? '',
+      birthday: client.birthday ? String(client.birthday).slice(0, 10) : '',
+      clientTier: client.clientTier ?? 'guest',
     })
     // Тег gomafia:* управляется отдельным блоком — в поле «Теги» его не показываем.
     setTagsInput(tags.filter(t => !MANAGED_TAG_RE.test(t)).join(', '))
     setTgQr(null)
     setMode('edit')
+  }
+
+  // «Изменить» из блока новых регистраций: карточка клиента сразу в режиме правки.
+  async function editRegistration(id: string) {
+    try {
+      const { client } = await api.get<{ client: any }>(`/clients/${id}`)
+      openDetail(client)
+      startEdit(client)
+    } catch {
+      show('Не удалось открыть клиента', 'error')
+    }
   }
 
   function saveEdit() {
@@ -477,6 +489,7 @@ export default function ClientsPage() {
       </div>
 
       <div style={{ padding: '16px 16px var(--bottom-nav-clear)', flex: 1, maxWidth: 'var(--content-narrow)', margin: '0 auto', width: '100%', boxSizing: 'border-box' }}>
+        {seg !== 'archive' ? <PendingRegistrations onEdit={(id) => void editRegistration(id)} /> : null}
         {clients.length === 0 ? (
           isLoading && !data
             ? <StateView state="loading" />
@@ -785,7 +798,7 @@ export default function ClientsPage() {
                     <p style={{ fontSize: 9, color: 'var(--on-surface-variant)', margin: 0, textTransform: 'uppercase', letterSpacing: '0.05em', fontFamily: "'JetBrains Mono',monospace" }}>{lbl}</p>
                   </div>
                 ))}
-                <button onClick={startEdit} style={{ padding: '10px 6px', borderRadius: 12, background: 'rgba(139,92,246,0.12)', border: '1px solid rgba(139,92,246,0.3)', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 4 }}>
+                <button onClick={() => startEdit()} style={{ padding: '10px 6px', borderRadius: 12, background: 'rgba(139,92,246,0.12)', border: '1px solid rgba(139,92,246,0.3)', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 4 }}>
                   <Icon name="edit" size={16} color="#a78bfa" />
                   <span style={{ fontSize: 9, color: '#a78bfa', textTransform: 'uppercase', letterSpacing: '0.05em', fontFamily: "'JetBrains Mono',monospace", fontWeight: 700 }}>Изменить</span>
                 </button>

@@ -9,6 +9,7 @@ import {
 } from '@titan/database'
 import type { Database } from '@titan/database'
 import { accrueBonusLot, getBonusExpiryDays } from '../../lib/bonusLots.js'
+import { isRegistrationPending } from '../../lib/registration.js'
 import { round2, computeRental, computeTotals } from '../../lib/money.js'
 import { publishEvent } from '../../lib/realtime.js'
 import { getClubIntegration } from '../../lib/secrets.js'
@@ -420,7 +421,8 @@ plategaRouter.post('/webhook', async (c) => {
           const earned = Math.floor(total * accrualRate)
           if (earned > 0) {
             const [p] = await tx.select().from(profiles).where(eq(profiles.id, check.playerId)).for('update')
-            if (p) {
+            // Неподтверждённая регистрация из приложения — без бонусов (как /pay).
+            if (p && !isRegistrationPending(p)) {
               const newBonus = round2(parseFloat(p.bonusPoints) + earned)
               await tx.update(profiles).set({ bonusPoints: String(newBonus) }).where(eq(profiles.id, check.playerId))
               await tx.insert(bonusHistory).values({

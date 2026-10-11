@@ -21,6 +21,7 @@ import { profileNameCondition, profileTagCondition } from '../../lib/searchVaria
 import { getPrecheckCandidates } from '../../lib/prechecks.js'
 import { getCheckSuggestions, learnFromCheckClose } from '../../lib/suggestions.js'
 import { accrueBonusLot, spendBonusLots, getBonusExpiryDays } from '../../lib/bonusLots.js'
+import { isRegistrationPending } from '../../lib/registration.js'
 import { getNumericSetting, LARGE_CHECK_KEY, DEFAULT_LARGE_CHECK, getBoolSetting, STAFF_DISCOUNT_KEY, STAFF_MAX_DISCOUNT_KEY, DEFAULT_STAFF_MAX_DISCOUNT } from '../../lib/appSettings.js'
 import { round2, computeRental, computeTotals } from '../../lib/money.js'
 import { publishEvent, updatesChannel } from '../../lib/realtime.js'
@@ -2018,9 +2019,10 @@ posRouter.post('/checks/:id/pay', requireRole('owner', 'staff'), zValidator('jso
       // Общий хелпер — тот же вызывают /comp и вебхуки СБП (eventLifecycle.ts).
       const completedEvent = await completeLinkedEvent(tx, { id: checkId, linkedEventId: check.linkedEventId })
 
-      // Начисление бонусов с учётом настроек app_settings (на полную сумму, включая аренду)
+      // Начисление бонусов с учётом настроек app_settings (на полную сумму, включая аренду).
+      // Регистрация из приложения, ещё не подтверждённая персоналом, — без бонусов.
       let bonusAwarded = 0
-      if (body.playerId && player) {
+      if (body.playerId && player && !isRegistrationPending(player)) {
         const settingsRows = await tx.select().from(appSettings)
           .where(inArray(appSettings.key, ['bonus_enabled', 'bonus_accrual_rate', 'bonus_min_purchase', 'bonus_accrual_on_debt']))
         const settings = Object.fromEntries(settingsRows.map(r => [r.key, r.value]))

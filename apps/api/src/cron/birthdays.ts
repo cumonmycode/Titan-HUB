@@ -1,6 +1,7 @@
 import { db, profiles, notifications, appSettings, bonusHistory, type Database } from '@titan/database'
 import { eq, and, isNull, inArray, sql } from 'drizzle-orm'
 import { accrueBonusLot, expireBonuses, getBonusExpiryDays } from '../lib/bonusLots.js'
+import { isRegistrationPending } from '../lib/registration.js'
 import { getWhatsAppConfig, sendWhatsAppTemplate } from '../lib/whatsapp.js'
 import { notify } from '../modules/notifications/push.js'
 
@@ -28,7 +29,7 @@ export async function checkBirthdays(database: Database = db, clubId: string | n
   // ::date (битая строка уронила бы весь запрос). Сравниваем MM-DD через substring
   // только для строк формата YYYY-MM-DD.
   const birthdayClients = await database
-    .select({ id: profiles.id, nickname: profiles.nickname, birthday: profiles.birthday, phone: profiles.phone })
+    .select({ id: profiles.id, nickname: profiles.nickname, birthday: profiles.birthday, phone: profiles.phone, registrationStatus: profiles.registrationStatus })
     .from(profiles)
     .where(and(
       eq(profiles.role, 'client'),
@@ -56,6 +57,8 @@ export async function checkBirthdays(database: Database = db, clubId: string | n
     // Срок сгорания на момент начисления (null = бессрочно).
     const expiryDays = await getBonusExpiryDays(database)
     for (const client of birthdayClients) {
+      // Регистрация ещё не подтверждена персоналом — подарочных бонусов нет.
+      if (isRegistrationPending(client)) continue
       try {
         const done = await database.transaction(async (tx) => {
           const already = await tx.select({ id: bonusHistory.id }).from(bonusHistory)

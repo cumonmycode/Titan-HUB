@@ -152,6 +152,36 @@ export function whenText(iso: string): string {
 
 /* ─────────────────────────── Запросы ─────────────────────────── */
 
+/** Регистрация из приложения My Titan, ждущая подтверждения: до него без бонусов и оплаты в приложении. */
+export type Registration = {
+  id: string;
+  nickname: string;
+  fullName: string | null;
+  phone: string | null;
+  /** YYYY-MM-DD. */
+  birthday: string | null;
+  photoUrl: string | null;
+  tgUsername: string | null;
+  createdAt: string;
+};
+
+export function useRegistrations() {
+  const club = useClubKey();
+  return useQuery({
+    queryKey: [club, 'clients', 'registrations'],
+    queryFn: () => api.get<{ registrations: Registration[] }>('/clients/registrations').then((r) => r.registrations),
+    staleTime: 30_000,
+  });
+}
+
+/** «Подтвердить» — бонусы и оплата в приложении открываются; «Отклонить» — профиль в архив. */
+export async function decideRegistration(clientId: string, action: 'approve' | 'reject'): Promise<void> {
+  await api.post(`/clients/${clientId}/registration`, { action });
+  const club = host();
+  void queryClient.invalidateQueries({ queryKey: [club, 'clients'] });
+  void queryClient.invalidateQueries({ queryKey: [club, 'client', clientId] });
+}
+
 export function useClientTiers() {
   const club = useClubKey();
   return useQuery({

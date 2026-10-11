@@ -194,12 +194,13 @@ appLoginRouter.get('/status', async (c) => {
   await drop()
   if (!profile || profile.deletedAt) return c.json({ status: 'expired' as const })
 
-  // Профиль создан этой регистрацией (а не найден готовым) — сообщаем персоналу.
+  // Профиль создан этой регистрацией (а не найден готовым) — персонал подтверждает
+  // его в «Клиентах»; до этого бонусы не начисляются и оплата в приложении закрыта.
   if (row.mode === 'register' && profile.createdAt >= row.createdAt) {
     void notify({
-      type: 'new_client',
-      title: 'Новый клиент',
-      body: `${profile.nickname} · регистрация в My Titan`,
+      type: 'client_registration',
+      title: 'Новая регистрация в My Titan',
+      body: `${profile.nickname}${profile.fullName ? ` · ${profile.fullName}` : ''} — подтвердите в «Клиентах»`,
       meta: { clientId: profile.id },
     }, db, c.var.club?.id ?? null).catch(() => {})
   }

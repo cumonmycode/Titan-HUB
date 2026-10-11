@@ -276,6 +276,8 @@ export function registerAppLogin(bot: Bot, deps: AppLoginDeps) {
         phone: row.phone,
         photoUrl: reg.photoUrl ?? null,
         role: 'client',
+        // Ждёт подтверждения персонала в HUB: до него без бонусов и оплаты в приложении.
+        registrationStatus: 'pending',
         tgId: tgHolder ? null : tgId,
         tgUsername: tgHolder ? null : tgUsername,
       }).returning()

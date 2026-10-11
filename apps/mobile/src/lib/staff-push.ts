@@ -141,8 +141,13 @@ export async function unregisterStaffDevice(): Promise<void> {
 
 type Target = { kind?: string; type?: string; checkId?: string | null };
 
-/** Чат кабинки — для сообщений (поверх её чека: «назад» ведёт в чек); счёт — для вызова; без счёта — касса. */
+/** Чат кабинки — для сообщений (поверх её чека: «назад» ведёт в чек); счёт — для вызова; без счёта — касса; регистрация — клиенты. */
 function openTarget(t: Target) {
+  // Новая регистрация из My Titan — в «Клиенты», там её подтверждают.
+  if (t.type === 'client_registration') {
+    router.push('/manage/clients');
+    return;
+  }
   const checkId = t.checkId || null;
   const chat = t.kind === 'chat' || t.type === 'chat_message';
   if (!checkId) {
