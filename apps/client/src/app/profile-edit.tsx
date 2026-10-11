@@ -2,9 +2,10 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
-import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, type TextInputProps, View } from 'react-native';
+import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { Field } from '@/components/field';
 import { Button, Icon, Tap } from '@/components/ui';
 import { api, errorText } from '@/lib/api';
 import { birthdayToInput, inputToBirthday, maskBirthday, normalizePhone } from '@/lib/format';
@@ -68,34 +69,9 @@ export default function ProfileEditScreen() {
   );
 }
 
-function Field({ label, hint, ...props }: TextInputProps & { label: string; hint?: string }) {
-  const [focused, setFocused] = useState(false);
-  return (
-    <View style={{ marginTop: space.lg }}>
-      <Text style={styles.label}>{label}</Text>
-      <TextInput
-        {...props}
-        onFocus={(e) => { setFocused(true); props.onFocus?.(e); }}
-        onBlur={(e) => { setFocused(false); props.onBlur?.(e); }}
-        placeholderTextColor={colors.textMuted}
-        selectionColor={colors.violet}
-        keyboardAppearance="dark"
-        style={[styles.input, focused && { borderColor: colors.violet }]}
-        accessibilityLabel={label}
-      />
-      {hint ? <Text style={[type.caption, { marginTop: 6, marginLeft: 2 }]}>{hint}</Text> : null}
-    </View>
-  );
-}
-
 const styles = StyleSheet.create({
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: GUTTER, marginBottom: space.sm },
   close: { width: 36, height: 36, borderRadius: 18, backgroundColor: colors.surfaceRaised, alignItems: 'center', justifyContent: 'center' },
   column: { width: '100%', maxWidth: MAX_WIDTH, alignSelf: 'center' },
-  label: { color: colors.textSecondary, fontSize: 12, fontWeight: '700', marginBottom: 6, marginLeft: 2 },
-  input: {
-    height: 50, borderRadius: 13, paddingHorizontal: 14, fontSize: 16, color: colors.text,
-    backgroundColor: 'rgba(255,255,255,0.04)', borderWidth: 1, borderColor: colors.border,
-  },
   error: { color: colors.red, fontSize: 13, marginTop: space.lg, textAlign: 'center' },
 });

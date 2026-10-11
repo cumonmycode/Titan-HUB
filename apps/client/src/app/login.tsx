@@ -1,87 +1,160 @@
-// Вход через Telegram-бота My Titan (@titanwalletrobot).
-// 1) Сервер выдаёт одноразовый вход (ticket + код + диплинк на бота).
-// 2) Приложение открывает Telegram: бот спрашивает «Войти на устройстве …?».
-// 3) Пока клиент подтверждает, приложение опрашивает статус и получает токен.
-// Запасной путь — отправить боту 4-значный код (Telegram на другом устройстве).
-import * as Clipboard from 'expo-clipboard';
-import * as Device from 'expo-device';
+// Вход в My Titan по номеру телефона с подтверждением в Telegram-боте клуба
+// (@titanwalletrobot). Входить нужно один раз — дальше приложение само продлевает сессию.
+// 1) Номер телефона. Есть в клубе → сразу шаг 3.
+// 2) Нет в клубе → анкета: фото, никнейм, имя, день рождения.
+// 3) Мини-инструкция и «Подтвердить в Telegram»: бот спрашивает «Да / Нет» и даёт
+//    кнопку «Открыть приложение»; экран тем временем опрашивает статус и входит.
 import { useEffect, useEffectEvent, useRef, useState } from 'react';
-import { ActivityIndicator, AppState, Linking, Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
-import Animated, { FadeIn, FadeInDown, FadeOut } from 'react-native-reanimated';
+import { AppState, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { HoloCard } from '@/components/holo-card';
-import { Button, Icon, type IconName, Tap } from '@/components/ui';
-import { api, errorText } from '@/lib/api';
+import { ConfirmStep, type ConfirmState } from '@/components/login/confirm-step';
+import { PhoneStep } from '@/components/login/phone-step';
+import { RegisterStep, type RegistrationDraft } from '@/components/login/register-step';
+import { errorText } from '@/lib/api';
 import { resetDemo } from '@/lib/demo';
+import { inputToBirthday, isFullPhone } from '@/lib/format';
 import { haptic } from '@/lib/haptics';
+import {
+  clearPending, loadPending, loginStatus, openTelegram, type PendingLogin, savePending, startLogin, uploadRegistrationPhoto,
+} from '@/lib/login-flow';
+import { pickSquarePhoto } from '@/lib/photo';
 import { useSession } from '@/lib/session';
-import { colors, GUTTER, MAX_WIDTH, space, type } from '@/lib/theme';
-import type { LoginStart, LoginStatus } from '@/lib/types';
+import { colors, GUTTER, MAX_WIDTH } from '@/lib/theme';
+import type { LoginStart } from '@/lib/types';
 
-type Phase = 'idle' | 'starting' | 'waiting' | 'rejected';
+type Step = 'restoring' | 'phone' | 'register' | 'confirm';
 
-const FEATURES: { icon: IconName; title: string; text: string }[] = [
-  { icon: 'star', title: 'Бонусы', text: 'Баланс, начисления и когда что сгорит' },
-  { icon: 'wallet', title: 'Депозит и долг', text: 'Пополнение и погашение через СБП' },
-  { icon: 'notifications', title: 'Уведомления', text: 'Каждая операция — сразу на телефон' },
-];
+const POLL_MS = 2000;
+const EMPTY_DRAFT: RegistrationDraft = { nickname: '', fullName: '', birthday: '', photoUri: null };
 
-/** Открыть бота в приложении Telegram (tg://), а без него — через t.me в браузере. */
-async function openTelegram(deepLink: string) {
-  try {
-    const url = new URL(deepLink);
-    const domain = url.pathname.replace(/^\//, '');
-    const start = url.searchParams.get('start');
-    await Linking.openURL(`tg://resolve?domain=${domain}${start ? `&start=${start}` : ''}`);
-  } catch {
-    await Linking.openURL(deepLink);
-  }
+/** Проверка анкеты до отправки; null — всё заполнено. */
+function draftError(draft: RegistrationDraft): string | null {
+  if (!draft.photoUri) return 'Добавьте фото';
+  if (draft.nickname.trim().length < 2) return 'Придумайте никнейм — от 2 символов';
+  if (draft.fullName.trim().length < 2) return 'Введите имя';
+  const birthday = inputToBirthday(draft.birthday);
+  if (!birthday || birthday === 'invalid') return 'День рождения — в формате ДД.ММ.ГГГГ';
+  return null;
 }
 
 export default function LoginScreen() {
   const insets = useSafeAreaInsets();
   const signIn = useSession((s) => s.signIn);
   const enterDemo = useSession((s) => s.enterDemo);
-  const [phase, setPhase] = useState<Phase>('idle');
-  const [login, setLogin] = useState<LoginStart | null>(null);
+  const [step, setStep] = useState<Step>('restoring');
+  const [phone, setPhone] = useState('');
+  const [draft, setDraft] = useState<RegistrationDraft>(EMPTY_DRAFT);
+  const [pending, setPending] = useState<PendingLogin | null>(null);
+  const [confirmState, setConfirmState] = useState<ConfirmState>('waiting');
+  const [botOpened, setBotOpened] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
   const polling = useRef(false);
 
-  async function begin(openBot: boolean) {
+  // Вход не закончен (система выгрузила приложение, пока клиент был в Telegram) — продолжаем.
+  useEffect(() => {
+    void loadPending().then((saved) => {
+      if (!saved) { setStep('phone'); return; }
+      setPending(saved);
+      setPhone(saved.phone);
+      setBotOpened(true);
+      setStep('confirm');
+    });
+  }, []);
+
+  async function toConfirm(r: Extract<LoginStart, { status: 'pending' }>) {
+    const next: PendingLogin = {
+      ticket: r.ticket, deepLink: r.deepLink, botUsername: r.botUsername, mode: r.mode, phone, expiresAt: r.expiresAt,
+    };
+    await savePending(next);
+    setPending(next);
+    setConfirmState('waiting');
+    setBotOpened(false);
+    setNote(null);
+    setStep('confirm');
+  }
+
+  async function submitPhone() {
+    if (!isFullPhone(phone)) { setError('Введите номер полностью'); return; }
+    setBusy(true);
     setError(null);
-    // Тихое обновление истёкшего кода не должно мигать экраном «Войти».
-    if (openBot) setPhase('starting');
     try {
-      const r = await api.post<LoginStart>('/auth/wallet-code/start', {
-        deviceName: Device.modelName ?? (Platform.OS === 'ios' ? 'iPhone' : 'Android'),
-        platform: Platform.OS === 'ios' ? 'ios' : 'android',
-      }, { auth: false });
-      setLogin(r);
-      setPhase('waiting');
-      if (openBot && r.deepLink) await openTelegram(r.deepLink);
+      const r = await startLogin(phone);
+      if (r.status === 'register') setStep('register');
+      else await toConfirm(r);
     } catch (e) {
-      setPhase('idle');
-      setError(errorText(e));
       haptic.error();
+      setError(errorText(e));
+    } finally {
+      setBusy(false);
     }
   }
 
+  async function submitRegistration() {
+    const invalid = draftError(draft);
+    if (invalid) { haptic.warning(); setError(invalid); return; }
+    setBusy(true);
+    setError(null);
+    try {
+      const r = await startLogin(phone, {
+        nickname: draft.nickname.trim(),
+        fullName: draft.fullName.trim(),
+        birthday: inputToBirthday(draft.birthday) as string,
+      });
+      if (r.status === 'register') throw new Error('Не удалось начать регистрацию. Попробуйте ещё раз.');
+      // Номер могли успеть добавить в клуб — тогда это обычный вход, анкета не нужна.
+      if (r.mode === 'register' && draft.photoUri) await uploadRegistrationPhoto(r.ticket, draft.photoUri);
+      await toConfirm(r);
+    } catch (e) {
+      haptic.error();
+      setError(errorText(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function pickPhoto() {
+    const asset = await pickSquarePhoto();
+    if (asset) setDraft((d) => ({ ...d, photoUri: asset.uri }));
+  }
+
+  function openBot() {
+    if (!pending) return;
+    setBotOpened(true);
+    void openTelegram(pending.deepLink);
+  }
+
+  function leaveConfirm(next: 'phone' | 'register') {
+    void clearPending();
+    setPending(null);
+    setError(null);
+    setStep(next);
+  }
+
+  // После отказа (например, «никнейм занят») — обратно к анкете, если она заполнялась.
+  const restart = () => leaveConfirm(pending?.mode === 'register' && draft.nickname ? 'register' : 'phone');
+
   const poll = useEffectEvent(async () => {
-    if (phase !== 'waiting' || !login?.ticket || polling.current) return;
+    if (step !== 'confirm' || confirmState !== 'waiting' || !pending || polling.current) return;
     polling.current = true;
     try {
-      const r = await api.get<LoginStatus>(`/auth/wallet-code/status?ticket=${encodeURIComponent(login.ticket)}`, { auth: false });
+      const r = await loginStatus(pending.ticket);
       if (r.status === 'ok') {
         haptic.success();
+        await clearPending();
         await signIn(r.token);
       } else if (r.status === 'rejected') {
         haptic.warning();
-        setPhase('rejected');
+        await clearPending();
+        setNote(r.note);
+        setConfirmState('rejected');
       } else if (r.status === 'expired') {
-        // Код живёт 5 минут — тихо берём новый, бота заново не открываем.
-        await begin(false);
+        await clearPending();
+        setConfirmState('expired');
+      } else if (r.opened) {
+        setBotOpened(true);
       }
     } catch { /* сеть моргнула — повторим на следующем тике */ } finally {
       polling.current = false;
@@ -89,140 +162,59 @@ export default function LoginScreen() {
   });
 
   useEffect(() => {
-    if (phase !== 'waiting') return;
-    const timer = setInterval(() => void poll(), 2000);
-    // Вернулись из Telegram — проверяем сразу, не дожидаясь таймера.
+    if (step !== 'confirm' || confirmState !== 'waiting') return;
+    const timer = setInterval(() => void poll(), POLL_MS);
+    // Вернулись из Telegram (кнопкой «Открыть приложение» или вручную) — проверяем сразу.
     const sub = AppState.addEventListener('change', (s) => { if (s === 'active') void poll(); });
     return () => { clearInterval(timer); sub.remove(); };
-  }, [phase]);
-
-  async function copyCode() {
-    if (!login) return;
-    await Clipboard.setStringAsync(login.code);
-    haptic.success();
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1800);
-  }
-
-  const bot = login?.botUsername ?? 'titanwalletrobot';
+  }, [step, confirmState]);
 
   return (
     <ScrollView
-      style={{ flex: 1, backgroundColor: colors.background }}
+      style={styles.screen}
       contentContainerStyle={[styles.container, { paddingTop: insets.top + 20, paddingBottom: insets.bottom + 24 }]}
       keyboardShouldPersistTaps="handled"
+      automaticallyAdjustKeyboardInsets
     >
       <View style={styles.column}>
-        <Animated.View entering={FadeInDown.duration(600).springify().damping(16)}>
-          <HoloCard nickname="titan" tierLabel="Резидент" tierColor={colors.violet} bonus={1240} bonusHidden={false} />
-        </Animated.View>
-
-        <Animated.View entering={FadeInDown.delay(120).duration(500)} style={{ marginTop: space.xxl }}>
-          <Text style={styles.kicker}>MY TITAN</Text>
-          <Text style={[type.title, { marginTop: 6 }]}>Кошелёк клуба{'\n'}в вашем телефоне</Text>
-        </Animated.View>
-
-        {phase === 'waiting' && login ? (
-          <Animated.View entering={FadeIn.duration(300)} exiting={FadeOut.duration(200)} style={styles.waitCard}>
-            <View style={styles.waitHead}>
-              <ActivityIndicator color={colors.telegram} />
-              <Text style={[type.headline, { flex: 1 }]}>Подтвердите вход в Telegram</Text>
-            </View>
-            <Text style={[type.callout, { color: colors.textSecondary, marginTop: 8 }]}>
-              Бот @{bot} прислал запрос «Вход в My Titan» — нажмите «Да, войти» и вернитесь сюда.
-            </Text>
-            <Button title="Открыть Telegram" variant="telegram" icon="paper-plane" size="md" style={{ marginTop: space.lg }}
-              onPress={() => login.deepLink && void openTelegram(login.deepLink)} />
-
-            <View style={styles.codeBlock}>
-              <Text style={[type.caption, { textAlign: 'center' }]}>Telegram на другом устройстве? Отправьте боту код:</Text>
-              <Tap onPress={copyCode} scaleTo={0.96} accessibilityRole="button" accessibilityLabel={`Код ${login.code.split('').join(' ')}. Скопировать`}>
-                <View style={styles.codeRow}>
-                  {login.code.split('').map((d, i) => (
-                    <View key={i} style={styles.codeDigit}><Text style={styles.codeText}>{d}</Text></View>
-                  ))}
-                </View>
-              </Tap>
-              <Text style={styles.copyHint}>{copied ? 'Скопировано ✓' : 'Нажмите, чтобы скопировать'}</Text>
-            </View>
-
-            <Button title="Отмена" variant="ghost" size="md" onPress={() => { setPhase('idle'); setLogin(null); }} />
-          </Animated.View>
-        ) : phase === 'rejected' ? (
-          <Animated.View entering={FadeIn.duration(300)} style={styles.waitCard}>
-            <View style={styles.waitHead}>
-              <Icon name="shield-checkmark" size={24} color={colors.amber} />
-              <Text style={[type.headline, { flex: 1 }]}>Вход отклонён</Text>
-            </View>
-            <Text style={[type.callout, { color: colors.textSecondary, marginTop: 8 }]}>
-              В Telegram нажали «Это не я» — доступ не выдан. Если это были вы, начните вход заново.
-            </Text>
-            <Button title="Попробовать снова" variant="telegram" icon="paper-plane" style={{ marginTop: space.lg }} onPress={() => void begin(true)} />
-          </Animated.View>
-        ) : (
-          <Animated.View entering={FadeInDown.delay(200).duration(500)}>
-            <View style={styles.features}>
-              {FEATURES.map((f) => (
-                <View key={f.title} style={styles.feature}>
-                  <View style={styles.featureIcon}><Icon name={f.icon} size={18} color={colors.violetLight} /></View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.featureTitle}>{f.title}</Text>
-                    <Text style={type.caption}>{f.text}</Text>
-                  </View>
-                </View>
-              ))}
-            </View>
-
-            <Button
-              title="Войти через Telegram"
-              variant="telegram"
-              icon="paper-plane"
-              loading={phase === 'starting'}
-              onPress={() => void begin(true)}
-              style={{ marginTop: space.xxl }}
-            />
-            {error ? <Text style={styles.error}>{error}</Text> : null}
-            <Text style={styles.note}>
-              Вход через бота @titanwalletrobot. Ваш Telegram должен быть привязан к профилю в клубе — если нет, попросите администратора.
-            </Text>
-            <Button
-              title="Посмотреть демо"
-              variant="secondary"
-              size="md"
-              style={{ marginTop: space.lg }}
-              onPress={() => { resetDemo(); enterDemo(); }}
-            />
-          </Animated.View>
-        )}
+        {step === 'phone' ? (
+          <PhoneStep
+            phone={phone}
+            onChangePhone={(p) => { setPhone(p); setError(null); }}
+            busy={busy}
+            error={error}
+            onSubmit={() => void submitPhone()}
+            onDemo={() => { resetDemo(); enterDemo(); }}
+          />
+        ) : step === 'register' ? (
+          <RegisterStep
+            phone={phone}
+            draft={draft}
+            onChange={(d) => { setDraft(d); setError(null); }}
+            onPickPhoto={() => void pickPhoto()}
+            busy={busy}
+            error={error}
+            onSubmit={() => void submitRegistration()}
+            onBack={() => { setError(null); setStep('phone'); }}
+          />
+        ) : step === 'confirm' && pending ? (
+          <ConfirmStep
+            pending={pending}
+            state={confirmState}
+            waiting={botOpened}
+            note={note}
+            onOpenBot={openBot}
+            onRestart={restart}
+            onChangePhone={() => leaveConfirm('phone')}
+          />
+        ) : null}
       </View>
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
+  screen: { flex: 1, backgroundColor: colors.background },
   container: { paddingHorizontal: GUTTER, flexGrow: 1 },
   column: { width: '100%', maxWidth: MAX_WIDTH, alignSelf: 'center' },
-  kicker: { color: colors.violetLight, fontSize: 12, fontWeight: '900', letterSpacing: 3 },
-  features: { marginTop: space.xl, gap: space.md },
-  feature: { flexDirection: 'row', alignItems: 'center', gap: space.md },
-  featureIcon: {
-    width: 36, height: 36, borderRadius: 11, backgroundColor: colors.violetTint,
-    alignItems: 'center', justifyContent: 'center',
-  },
-  featureTitle: { color: colors.text, fontSize: 15, fontWeight: '700' },
-  error: { color: colors.red, fontSize: 13, textAlign: 'center', marginTop: space.md },
-  note: { color: colors.textSecondary, fontSize: 12, lineHeight: 17, textAlign: 'center', marginTop: space.md, paddingHorizontal: space.sm },
-  waitCard: {
-    marginTop: space.xl, padding: space.lg, borderRadius: 20, backgroundColor: colors.surface,
-    borderWidth: 1, borderColor: 'rgba(42,171,238,0.25)',
-  },
-  waitHead: { flexDirection: 'row', alignItems: 'center', gap: space.md },
-  codeBlock: { marginTop: space.xl, paddingTop: space.lg, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border, alignItems: 'center' },
-  codeRow: { flexDirection: 'row', gap: 10, marginTop: space.md },
-  codeDigit: {
-    width: 52, height: 64, borderRadius: 14, alignItems: 'center', justifyContent: 'center',
-    backgroundColor: colors.violetTint, borderWidth: 1, borderColor: 'rgba(139,92,246,0.35)',
-  },
-  codeText: { color: '#fff', fontSize: 32, fontWeight: '800', fontVariant: ['tabular-nums'] },
-  copyHint: { color: colors.violetLight, fontSize: 12, fontWeight: '600', marginTop: space.sm, marginBottom: space.sm },
 });
