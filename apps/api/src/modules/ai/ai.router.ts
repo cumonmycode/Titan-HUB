@@ -1,6 +1,8 @@
 import type { AppEnv } from '../../types.js'
 import { fmtMsk, bizDayStr, bizDayStart, bizMonthStart } from '../../lib/dateFmt.js'
 import { Hono } from 'hono'
+import { bodyLimit } from 'hono/body-limit'
+import { streamSSE } from 'hono/streaming'
 import { zValidator } from '@hono/zod-validator'
 import { z } from 'zod'
 import { getSharedRedis } from '../../lib/redis.js'
@@ -34,46 +36,13 @@ import {
 import type { Database } from '@titan/database'
 import { requireAuth, requireRole } from '../../middleware/auth.js'
 import { quantityText } from '../inventory/ledger.js'
-import { getClubIntegration } from '../../lib/secrets.js'
+import { answerFromDb, callAI, type DbOrTx } from './sql.js'
+import { confirmAction, dismissAction } from './tai/actions.js'
+import type { TaiEvent } from './tai/blocks.js'
+import { runTai, taiErrorMessage } from './tai/engine.js'
+import { createApiCaller, forwardedHeaders } from './tai/internal.js'
+import { POLZA_BASE, resolveApiKey } from './tai/llm.js'
 import { getBusinessDayStartHour } from '../../lib/appSettings.js'
-
-// Источник БД для модульных хелперов: пер-запросный c.var.db (на основном домене
-// === синглтон) либо tx внутри read-only транзакции answerFromDb/runReadonly.
-type DbOrTx = Database | Parameters<Parameters<Database['transaction']>[0]>[0]
-
-// Снимаем возможные кавычки/пробелы вокруг значений из .env (docker не всегда их убирает)
-const clean = (v: string | undefined): string => (v ?? '').trim().replace(/^["']|["']$/g, '')
-const POLZA_BASE = clean(process.env['POLZA_BASE_URL']) || 'https://polza.ai/api/v1'
-// id модели на Polza: с префиксом провайдера и точкой в версии
-const POLZA_MODEL = clean(process.env['POLZA_MODEL']) || 'google/gemini-3.1-flash-lite'
-
-async function callAI(db: Database, systemPrompt: string, userMessage: string): Promise<string> {
-  // Ключ AI — пер-клубный (integrations БД клуба) с фолбэком на env. На основном
-  // домене integrations пусты → env POLZA_API_KEY (одно-клубный прод не затронут).
-  // BASE_URL/MODEL остаются из env.
-  const apiKey = clean((await getClubIntegration(db, 'ai_api_key')) ?? process.env['POLZA_API_KEY'])
-  const res = await fetch(`${POLZA_BASE}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model: POLZA_MODEL,
-      max_tokens: 2048,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userMessage },
-      ],
-    }),
-  })
-  if (!res.ok) {
-    const body = await res.text().catch(() => '')
-    throw new Error(`Polza AI error: ${res.status} ${body.slice(0, 300)}`)
-  }
-  const data = await res.json() as { choices?: { message?: { content?: string } }[] }
-  return data.choices?.[0]?.message?.content ?? ''
-}
 
 // Действия Tai, доступные только владельцу (зарплаты, расходы).
 const OWNER_ONLY_ACTIONS = new Set<string>(['salary_report', 'expense_analysis'])
@@ -199,99 +168,6 @@ async function buildBusinessSnapshot(db: DbOrTx): Promise<string> {
   } catch { /* skip */ }
 
   return parts.join('\n\n')
-}
-
-// ─── Произвольные вопросы по базе (text-to-SQL) ──────────────────────────────
-// Схема базы из information_schema (кэш 5 мин). Исключаем служебные и
-// чувствительные таблицы/колонки (пароли, пины, токены, ключи).
-let schemaCache: { doc: string; ts: number } | null = null
-const SENSITIVE_TABLES = new Set(['_migrations', 'push_subscriptions'])
-const SENSITIVE_COL = /pass|pin|hash|secret|token|credential|webauthn|private_key|public_key/i
-
-async function getSchemaDoc(db: DbOrTx): Promise<string> {
-  if (schemaCache && Date.now() - schemaCache.ts < 300000) return schemaCache.doc
-  const res: any = await db.execute(sql`
-    SELECT table_name, column_name, data_type
-    FROM information_schema.columns
-    WHERE table_schema = 'public'
-    ORDER BY table_name, ordinal_position
-  `)
-  const rows: any[] = res.rows ?? res ?? []
-  const byTable = new Map<string, string[]>()
-  for (const r of rows) {
-    const t = String(r.table_name)
-    if (SENSITIVE_TABLES.has(t)) continue
-    if (SENSITIVE_COL.test(String(r.column_name))) continue
-    if (!byTable.has(t)) byTable.set(t, [])
-    byTable.get(t)!.push(`${r.column_name} ${r.data_type}`)
-  }
-  const doc = [...byTable.entries()].map(([t, cols]) => `${t}(${cols.join(', ')})`).join('\n')
-  schemaCache = { doc, ts: Date.now() }
-  return doc
-}
-
-// Жёсткая проверка: только одиночный SELECT/WITH на чтение, без DDL/DML и секретов.
-function sanitizeSql(raw: string): string {
-  let s = (raw || '').trim().replace(/```sql/gi, '').replace(/```/g, '').trim()
-  const semi = s.indexOf(';')
-  if (semi >= 0) s = s.slice(0, semi).trim()
-  const lower = s.toLowerCase()
-  if (!/^(select|with)\b/.test(lower)) throw new Error('Не SELECT-запрос')
-  if (/\b(insert|update|delete|drop|alter|truncate|create|grant|revoke|copy|merge|call|vacuum|reindex|lock|begin|commit|rollback)\b/.test(lower)) throw new Error('Запрещённая операция')
-  if (/\binto\b/.test(lower)) throw new Error('INTO запрещён')
-  if (SENSITIVE_COL.test(lower) || /push_subscription/.test(lower)) throw new Error('Чувствительные данные')
-  return s
-}
-
-// Вырезаем чувствительные поля из результата по имени ключа (в т.ч. во вложенных
-// json-объектах): sanitizeSql проверяет только текст запроса, а `SELECT *` или
-// row_to_json(...) всё равно вернут pin/password_hash — в ИИ они уйти не должны.
-function stripSensitive(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(stripSensitive)
-  if (value && typeof value === 'object' && !(value instanceof Date)) {
-    return Object.fromEntries(
-      Object.entries(value as Record<string, unknown>)
-        .filter(([k]) => !SENSITIVE_COL.test(k))
-        .map(([k, v]) => [k, stripSensitive(v)]),
-    )
-  }
-  return value
-}
-
-// Выполнение в READ ONLY транзакции с таймаутом и лимитом строк.
-async function runReadonly(db: Database, query: string): Promise<any[]> {
-  const wrapped = `SELECT * FROM (${query}) AS _q LIMIT 200`
-  return await db.transaction(async (tx) => {
-    await tx.execute(sql`SET TRANSACTION READ ONLY`)
-    await tx.execute(sql`SET LOCAL statement_timeout = '5000'`)
-    const res: any = await tx.execute(sql.raw(wrapped))
-    return ((res.rows ?? res ?? []) as any[]).map((r) => stripSensitive(r))
-  })
-}
-
-const SQLGEN_PROMPT = [
-  'Ты эксперт PostgreSQL. По схеме базы и вопросу составь ОДИН SQL-запрос ТОЛЬКО на чтение (SELECT).',
-  'Правила: только SELECT или WITH...SELECT; без INSERT/UPDATE/DELETE/DDL; одна инструкция без «;».',
-  'Используй ТОЛЬКО таблицы и колонки из схемы. Имена людей сравнивай через ILIKE \'%...%\' (без регистра).',
-  'Долг клиента = отрицательный profiles.balance при role=\'client\'; депозит = положительный balance.',
-  'Остаток товара = inventory.stock_quantity; учёт = inventory.track_stock=true; «нет в наличии» = stock_quantity=0; «заканчивается» = stock_quantity<=min_threshold.',
-  'Денежные/числовые поля часто text/numeric — при сравнении и агрегации приводи через ::numeric.',
-  'Закрытые чеки: checks.status=\'closed\'. Ставь разумный LIMIT. Ответь ТОЛЬКО SQL, без пояснений и markdown.',
-].join(' ')
-
-// Полный конвейер: вопрос → SQL → выполнение → блок данных для финального ответа ИИ.
-async function answerFromDb(db: Database, query: string): Promise<string | null> {
-  try {
-    const schema = await getSchemaDoc(db)
-    const rawSql = await callAI(db, SQLGEN_PROMPT, `СХЕМА БАЗЫ:\n${schema}\n\nВОПРОС: ${query}`)
-    const clean = sanitizeSql(rawSql)
-    const rows = await runReadonly(db, clean)
-    const json = JSON.stringify(rows).slice(0, 6000)
-    return `Чтобы ответить, выполнен SQL-запрос к базе:\n${clean}\n\nРЕЗУЛЬТАТ (${rows.length} строк):\n${json}`
-  } catch {
-    // Не валим запрос — вернём null, выше подставится снимок-фоллбек.
-    return null
-  }
 }
 
 // allowSql=false — без text-to-SQL по всей базе (персонал: только общий снимок).
@@ -700,3 +576,87 @@ async function handleChat(c: any) {
 
 aiRouter.post('/chat', zValidator('json', ActionSchema), handleChat)
 aiRouter.post('/action', zValidator('json', ActionSchema), handleChat)
+
+// ─── Tai: ассистент с инструментами, интерактивными блоками и действиями ─────
+// Поток событий SSE (см. tai/blocks.ts). Старые /chat и /action оставлены для
+// сборок приложения, выпущенных до этого контракта.
+
+const DATE_KEY = /^\d{4}-\d{2}-\d{2}$/
+const AssistantSchema = z.object({
+  messages: z
+    .array(z.object({ role: z.enum(['user', 'assistant']), content: z.string().max(4000), memo: z.string().max(1500).optional() }))
+    .min(1)
+    .max(40),
+  context: z
+    .object({
+      screen: z.enum(['pos', 'check', 'analytics', 'other']).optional(),
+      checkId: z.string().uuid().optional(),
+      period: z.object({ from: z.string().regex(DATE_KEY), to: z.string().regex(DATE_KEY) }).optional(),
+    })
+    .optional(),
+  voice: z.boolean().optional(),
+})
+
+aiRouter.post('/assistant', zValidator('json', AssistantSchema), async (c) => {
+  const body = c.req.valid('json')
+  // Без буферизации nginx: иначе текст придёт одним куском в конце.
+  c.header('X-Accel-Buffering', 'no')
+  c.header('Cache-Control', 'no-cache, no-transform')
+  return streamSSE(c, async (stream) => {
+    const controller = new AbortController()
+    stream.onAbort(() => controller.abort())
+    const emit = (event: TaiEvent) => stream.writeSSE({ data: JSON.stringify(event) })
+    try {
+      await runTai(c, body, emit, controller.signal)
+    } catch (error) {
+      if (!controller.signal.aborted) await emit({ type: 'error', message: taiErrorMessage(error) })
+    }
+  })
+})
+
+const ACTION_ID = /^[0-9a-f-]{36}$/i
+
+// Нажатие «Открыть чек» / «Добавить» и т.п. — выполняется от имени нажавшего.
+aiRouter.post('/assistant/actions/:id', async (c) => {
+  const id = c.req.param('id')
+  if (!ACTION_ID.test(id)) return c.json({ error: 'Неверная карточка' }, 400)
+  const outcome = await confirmAction(c.var.club?.id ?? 'main', c.get('user').sub, id, createApiCaller(forwardedHeaders(c)))
+  if (outcome.status !== 200) return c.json({ error: outcome.error }, outcome.status)
+  return c.json({ action: outcome.card })
+})
+
+aiRouter.post('/assistant/actions/:id/dismiss', async (c) => {
+  const id = c.req.param('id')
+  if (!ACTION_ID.test(id)) return c.json({ error: 'Неверная карточка' }, 400)
+  const card = await dismissAction(c.var.club?.id ?? 'main', c.get('user').sub, id)
+  return c.json({ action: card })
+})
+
+// Распознавание речи на сервере — для браузеров без встроенного (в приложении речь
+// распознаёт телефон). Запись голосом — до ~минуты, поэтому свой предел тела.
+const STT_MODEL = (process.env['TAI_STT_MODEL'] ?? '').trim() || 'openai/gpt-4o-mini-transcribe'
+const MAX_AUDIO_BYTES = 8 * 1024 * 1024
+
+aiRouter.post('/assistant/transcribe', bodyLimit({ maxSize: MAX_AUDIO_BYTES }), async (c) => {
+  const form = await c.req.formData().catch(() => null)
+  const file = form?.get('file')
+  if (!(file instanceof File) || file.size === 0) return c.json({ error: 'Нет записи' }, 400)
+  const apiKey = await resolveApiKey(c.var.db)
+  const out = new FormData()
+  out.set('model', STT_MODEL)
+  out.set('language', 'ru')
+  out.set('file', file, file.name || 'voice.webm')
+  const res = await fetch(`${POLZA_BASE}/audio/transcriptions`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${apiKey}` },
+    body: out,
+    signal: AbortSignal.timeout(30_000),
+  }).catch(() => null)
+  if (!res?.ok) {
+    console.error('[tai] transcribe failed', res?.status, res ? (await res.text().catch(() => '')).slice(0, 200) : 'network')
+    return c.json({ error: 'Не удалось распознать речь' }, 502)
+  }
+  const data = (await res.json().catch(() => ({}))) as { text?: string }
+  return c.json({ text: (data.text ?? '').trim() })
+})
+

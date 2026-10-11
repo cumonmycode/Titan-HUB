@@ -112,11 +112,11 @@ app.use(
 )
 app.use('*', prettyJSON())
 // Общий предел тела 1 МБ. У загрузки картинок (/api/upload, фото анкеты /api/auth/app/photo)
-// свой — в роутере: файл до 8 МБ;
+// свой — в роутере: файл до 8 МБ; у голоса Tai (/api/ai/assistant/transcribe) — тоже 8 МБ;
 // у восстановления из файла (/api/system/restore-upload) — тоже свой, в system.router.
 const defaultBodyLimit = bodyLimit({ maxSize: 1 * 1024 * 1024 })
 const hasOwnBodyLimit = (path: string): boolean =>
-  path.startsWith('/api/upload/') || path === '/api/auth/app/photo' || path === '/api/system/restore-upload'
+  path.startsWith('/api/upload/') || path === '/api/auth/app/photo' || path === '/api/system/restore-upload' || path === '/api/ai/assistant/transcribe'
 app.use('/api/*', (c, next) => (hasOwnBodyLimit(c.req.path) ? next() : defaultBodyLimit(c, next)))
 app.use('/api/*', rateLimit)
 // Инжект БД клуба в контекст (Фаза 1). Wave 0: дефолтная БД = синглтон.
