@@ -39,6 +39,17 @@ const MAX_SPIN_VELOCITY = 2600;
 const TAP_SLOP = 10;
 // Android отдаёт гравитацию с обратным знаком относительно iOS.
 const AXIS_SIGN = Platform.OS === 'ios' ? 1 : -1;
+const SETTLE_SPRING = { damping: 14, stiffness: 120 };
+
+/**
+ * Карта легла на сторону — лёгкий отклик. Именно модульный worklet: встроенную стрелку
+ * React Compiler выносит из компонента в обычную функцию (_temp), и вызов её на UI-потоке
+ * роняет приложение (1.4.0 (12) падала при каждом вращении).
+ */
+function onSettled(done?: boolean) {
+  'worklet';
+  if (done) scheduleOnRN(haptic.soft);
+}
 
 interface ClubCardProps {
   data: ClubCardData;
@@ -67,9 +78,7 @@ export function ClubCard({ data, variant, onPress, motion = true, interactive = 
     'worklet';
     const target = Math.round(spin.get() / 180) * 180;
     if (Math.abs(spin.get() - target) < 0.5) { spin.set(target); return; }
-    spin.set(withSpring(target, { damping: 14, stiffness: 120 }, (done) => {
-      if (done) scheduleOnRN(haptic.soft);
-    }));
+    spin.set(withSpring(target, SETTLE_SPRING, onSettled));
   };
 
   const pan = Gesture.Pan()

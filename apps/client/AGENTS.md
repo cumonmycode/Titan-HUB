@@ -13,6 +13,7 @@ My Titan — клиентское приложение клуба (iOS + Android
 - **iOS 27: плагин `plugins/with-scene-lifecycle` обязателен.** Без жизненного цикла UIScene сборка Xcode 27 мгновенно падает на устройствах с iOS 27 (`_UIApplicationEvaluateRuntimeIssueForNoSceneLifecycleAdoption`). Симулятор iOS 26 этого не ловит — проверять на iOS 27.
 - Деньги не проводятся офлайн и не ставятся в очередь: оплата — только онлайн-платёж через сервер, зачисление по вебхуку банка.
 - ESLint (правила React Compiler) держать чистым: shared value через `.set()`, без setState/записи в ref во время рендера, опрос и таймеры — через `useEffectEvent`.
+- **Колбэки анимаций внутри worklet (`withSpring(..., cb)`, `withTiming`, `withDecay`) — только модульные функции с `'worklet'`.** Встроенную стрелку, не зависящую от компонента, React Compiler выносит в обычную функцию `_temp`; UI-поток вызывает её — и приложение падает (1.4.0 (12) падала при вращении карты). Веб-превью это не ловит. Проверка: `npx expo export --platform ios --no-bytecode --no-minify` и в бандле не должно быть `_temp` в `this.__closure` worklet-ов.
 
 ## Перед коммитом
 

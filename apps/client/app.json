@@ -10,7 +10,7 @@
     "icon": "./assets/images/icon.png",
     "ios": {
       "bundleIdentifier": "ru.titan.resident",
-      "buildNumber": "12",
+      "buildNumber": "13",
       "appleTeamId": "G99YH9UK8C",
       "supportsTablet": false,
       "infoPlist": {
