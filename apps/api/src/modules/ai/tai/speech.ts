@@ -13,6 +13,9 @@ import { voiceById, type TaiSettings } from './settings.js'
 // Подача для моделей, которые её понимают (OpenAI gpt-4o-mini-tts).
 const INSTRUCTIONS = 'Говори по-русски живо и непринуждённо, как дружелюбный коллега в клубе: разговорно, с лёгкой улыбкой, в среднем темпе.'
 const TIMEOUT_MS = 20_000
+// Фраза обычно готова за 1–3 с, голосовое целиком — за 5–6 с; дольше — подстраховываемся.
+const PHRASE_HEDGE_MS = 6_000
+const NOTE_HEDGE_MS = 10_000
 
 export type SpeechAudio = { format: 'mp3' | 'wav'; data: string }
 
@@ -35,10 +38,41 @@ function pcmToWav(pcm: Buffer, sampleRate = 24_000): Buffer {
   return Buffer.concat([header, pcm])
 }
 
+/**
+ * Страховка от зависшего синтеза: у провайдера бывают провалы до самого таймаута.
+ * Не готово за `after` (или первый запрос сразу упал) — второй такой же запрос;
+ * берём первый удачный, остальные отменяем.
+ */
+async function hedged<T>(run: (signal: AbortSignal) => Promise<T | null>, after: number, outer?: AbortSignal): Promise<T | null> {
+  const controllers: AbortController[] = []
+  const launch = () => {
+    const controller = new AbortController()
+    controllers.push(controller)
+    return run(outer ? AbortSignal.any([outer, controller.signal]) : controller.signal)
+  }
+  const first = launch()
+  let timer: NodeJS.Timeout | undefined
+  const early = await Promise.race([first.then((value) => ({ value })), new Promise<null>((resolve) => { timer = setTimeout(() => resolve(null), after) })]).finally(() => clearTimeout(timer))
+  if (early?.value != null || outer?.aborted) return early?.value ?? null
+  const second = launch()
+  const succeeded = (p: Promise<T | null>) => p.then((value) => value ?? Promise.reject(new Error('пусто')))
+  try {
+    return await (early ? second : Promise.any([succeeded(first), succeeded(second)]))
+  } catch {
+    return null
+  } finally {
+    for (const controller of controllers) controller.abort()
+  }
+}
+
 /** Озвучить фразу. null — синтез не удался (клиент тогда промолчит, текст уже на экране). */
 export async function synthesize(apiKey: string, text: string, voiceSettings: Pick<TaiSettings, 'voice' | 'speed'>, signal?: AbortSignal): Promise<SpeechAudio | null> {
   const input = speakable(text).slice(0, 1_000)
   if (!input) return null
+  return hedged((attempt) => synthesizeOnce(apiKey, input, voiceSettings, attempt), PHRASE_HEDGE_MS, signal)
+}
+
+async function synthesizeOnce(apiKey: string, input: string, voiceSettings: Pick<TaiSettings, 'voice' | 'speed'>, signal: AbortSignal): Promise<SpeechAudio | null> {
   const { model: MODEL, voice: VOICE, tunable } = voiceById(voiceSettings.voice)
   const openai = tunable
   try {
@@ -46,7 +80,7 @@ export async function synthesize(apiKey: string, text: string, voiceSettings: Pi
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
       body: JSON.stringify({ model: MODEL, voice: VOICE, input, ...(openai ? { response_format: 'mp3', instructions: INSTRUCTIONS, speed: voiceSettings.speed } : {}) }),
-      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(TIMEOUT_MS)]) : AbortSignal.timeout(TIMEOUT_MS),
+      signal: AbortSignal.any([signal, AbortSignal.timeout(TIMEOUT_MS)]),
     })
     if (!res.ok) {
       console.error('[tai] tts', res.status, (await res.text().catch(() => '')).slice(0, 200))
@@ -60,7 +94,7 @@ export async function synthesize(apiKey: string, text: string, voiceSettings: Pi
     if (bytes.subarray(0, 4).toString() === 'RIFF') return { format: 'wav', data: body.audio }
     return { format: 'wav', data: pcmToWav(bytes).toString('base64') }
   } catch (error) {
-    if (!signal?.aborted) console.error('[tai] tts failed', error)
+    if (!signal.aborted) console.error('[tai] tts failed', error)
     return null
   }
 }
@@ -95,13 +129,17 @@ export async function transcribe(apiKey: string, audio: Blob, filename: string):
 export async function synthesizeVoiceNote(apiKey: string, text: string, voiceSettings: Pick<TaiSettings, 'voice' | 'speed'>): Promise<{ data: Buffer; format: 'ogg' | 'mp3' } | null> {
   const input = speakable(text).slice(0, 2_000)
   if (!input) return null
+  return hedged((signal) => voiceNoteOnce(apiKey, input, voiceSettings, signal), NOTE_HEDGE_MS)
+}
+
+async function voiceNoteOnce(apiKey: string, input: string, voiceSettings: Pick<TaiSettings, 'voice' | 'speed'>, signal: AbortSignal): Promise<{ data: Buffer; format: 'ogg' | 'mp3' } | null> {
   const { model, voice, tunable } = voiceById(voiceSettings.voice)
   try {
     const res = await fetch(`${POLZA_BASE}/audio/speech`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
       body: JSON.stringify({ model, voice, input, ...(tunable ? { response_format: 'opus', instructions: INSTRUCTIONS, speed: voiceSettings.speed } : {}) }),
-      signal: AbortSignal.timeout(TIMEOUT_MS * 2),
+      signal: AbortSignal.any([signal, AbortSignal.timeout(TIMEOUT_MS * 2)]),
     })
     if (!res.ok) {
       console.error('[tai] voice note', res.status, (await res.text().catch(() => '')).slice(0, 200))
@@ -115,7 +153,7 @@ export async function synthesizeVoiceNote(apiKey: string, text: string, voiceSet
     // Microsoft отдаёт PCM/WAV — голосовым его Telegram не покажет, промолчим текстом.
     return null
   } catch (error) {
-    console.error('[tai] voice note failed', error)
+    if (!signal.aborted) console.error('[tai] voice note failed', error)
     return null
   }
 }
