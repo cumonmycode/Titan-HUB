@@ -3,7 +3,8 @@
 FROM node:22-alpine AS deps
 WORKDIR /app
 COPY package.json package-lock.json ./
-RUN npm ci --no-audit --no-fund
+# Повторы загрузки: реестр npm из РФ иногда рвёт соединение (ECONNRESET).
+RUN npm ci --no-audit --no-fund --fetch-retries=5 --fetch-retry-mintimeout=10000 --fetch-retry-maxtimeout=60000
 
 FROM node:22-alpine AS builder
 WORKDIR /app
