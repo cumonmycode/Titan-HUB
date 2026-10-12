@@ -14,6 +14,8 @@ export const POLZA_BASE = clean(process.env['POLZA_BASE_URL']) || 'https://polza
 // пишет выводы по данным; ~0,1 ₽ за реплику.
 const MODEL = clean(process.env['TAI_MODEL']) || 'google/gemini-3.5-flash-lite'
 const REQUEST_TIMEOUT_MS = 45_000
+// Сколько ждать первое слово модели, прежде чем подстраховаться вторым запросом.
+const HEDGE_AFTER_MS = 5_000
 
 export interface LlmToolCall {
   id: string
@@ -47,11 +49,7 @@ type StreamDelta = {
   tool_calls?: { index: number; id?: string; function?: { name?: string; arguments?: string } }[]
 }
 
-/**
- * Один шаг диалога с моделью. Текст отдаётся кусками; вызовы инструментов — одним
- * событием в конце (аргументы приходят частями, собираем их по index).
- */
-export async function* streamChat(opts: {
+interface ChatOpts {
   apiKey: string
   messages: LlmMessage[]
   tools: LlmTool[]
@@ -59,7 +57,10 @@ export async function* streamChat(opts: {
   signal: AbortSignal
   /** 0.3 — точные ответы по цифрам; живой разговор с клиентом — выше. */
   temperature?: number
-}): AsyncGenerator<LlmChunk> {
+}
+
+/** Запрос к модели → содержательные дельты потока (текст или части вызовов). */
+async function* deltaStream(opts: ChatOpts, signal: AbortSignal): AsyncGenerator<StreamDelta> {
   const res = await fetch(`${POLZA_BASE}/chat/completions`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${opts.apiKey}` },
@@ -71,15 +72,13 @@ export async function* streamChat(opts: {
       messages: opts.messages,
       tools: opts.tools.length ? opts.tools : undefined,
     }),
-    signal: AbortSignal.any([opts.signal, AbortSignal.timeout(REQUEST_TIMEOUT_MS)]),
+    signal: AbortSignal.any([signal, AbortSignal.timeout(REQUEST_TIMEOUT_MS)]),
   })
   if (!res.ok || !res.body) {
     const body = await res.text().catch(() => '')
     console.error('[tai] model error', res.status, body.slice(0, 300))
     throw new LlmError(`Модель не ответила (${res.status})`)
   }
-
-  const calls = new Map<number, LlmToolCall>()
   const decoder = new TextDecoder()
   let buffer = ''
   for await (const chunk of res.body as unknown as AsyncIterable<Uint8Array>) {
@@ -93,13 +92,58 @@ export async function* streamChat(opts: {
       if (!line.startsWith('data:')) continue
       const payload = line.slice(5).trim()
       if (payload === '[DONE]') continue
-      let delta: StreamDelta | undefined
       try {
-        delta = (JSON.parse(payload) as { choices?: { delta?: StreamDelta }[] }).choices?.[0]?.delta
+        const delta = (JSON.parse(payload) as { choices?: { delta?: StreamDelta }[] }).choices?.[0]?.delta
+        if (delta && (delta.content || delta.tool_calls?.length)) yield delta
       } catch {
-        continue
+        // Неполная строка — пропускаем.
       }
-      if (!delta) continue
+    }
+  }
+}
+
+type Attempt = { controller: AbortController; stream: AsyncGenerator<StreamDelta>; first: Promise<IteratorResult<StreamDelta>> }
+
+function attempt(opts: ChatOpts): Attempt {
+  const controller = new AbortController()
+  const stream = deltaStream(opts, AbortSignal.any([opts.signal, controller.signal]))
+  return { controller, stream, first: stream.next() }
+}
+
+/**
+ * Страховка от «зависшей» модели: обычно первое слово приходит за 1–3 с, но у
+ * провайдера бывают провалы на 15–40 с. Если за HEDGE_AFTER_MS молчит — шлём такой
+ * же второй запрос и берём тот, что ответил первым; второй отменяем.
+ */
+async function firstResponder(opts: ChatOpts): Promise<{ stream: AsyncGenerator<StreamDelta>; first: IteratorResult<StreamDelta> }> {
+  const a = attempt(opts)
+  let timer: NodeJS.Timeout | undefined
+  const hedge = new Promise<null>((resolve) => { timer = setTimeout(() => resolve(null), HEDGE_AFTER_MS) })
+  const early = await Promise.race([a.first.then((first) => ({ stream: a.stream, first })), hedge]).finally(() => clearTimeout(timer))
+  if (early) return early
+  const b = attempt(opts)
+  const tagged = [a, b].map((x) => x.first.then((first) => ({ x, first })))
+  try {
+    const won = await Promise.any(tagged)
+    const lost = won.x === a ? b : a
+    lost.first.catch(() => undefined)
+    lost.controller.abort()
+    return { stream: won.x.stream, first: won.first }
+  } catch (error) {
+    throw error instanceof AggregateError ? (error.errors[0] as Error) : error
+  }
+}
+
+/**
+ * Один шаг диалога с моделью. Текст отдаётся кусками; вызовы инструментов — одним
+ * событием в конце (аргументы приходят частями, собираем их по index).
+ */
+export async function* streamChat(opts: ChatOpts): AsyncGenerator<LlmChunk> {
+  const { stream, first } = await firstResponder(opts)
+  const calls = new Map<number, LlmToolCall>()
+  try {
+    for (let next = first; !next.done; next = await stream.next()) {
+      const delta = next.value
       if (delta.content) yield { type: 'text', text: delta.content }
       for (const part of delta.tool_calls ?? []) {
         const current = calls.get(part.index) ?? { id: '', type: 'function' as const, function: { name: '', arguments: '' } }
@@ -113,6 +157,9 @@ export async function* streamChat(opts: {
         })
       }
     }
+  } finally {
+    // Дочитывать не стали (отмена) — закрываем ответ модели.
+    await stream.return(undefined).catch(() => undefined)
   }
   if (calls.size) {
     const ordered = [...calls.entries()].sort(([a], [b]) => a - b).map(([index, call]) => ({ ...call, id: call.id || `call_${index}` }))
