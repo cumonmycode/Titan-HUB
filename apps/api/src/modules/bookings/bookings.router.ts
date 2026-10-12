@@ -1,24 +1,18 @@
 /**
- * Онлайн-бронирование зон — клиентский конструктор мероприятия.
- *
- * Публичная сторона (без авторизации, ДО requireActiveSubscription): /config —
- * данные виджета (локации, кабинки+ставка, тарифы по часам); POST / — заявка с
- * выдачей claim_token (узнавание клиента); GET/PATCH /:token — статус и правки по
- * токену без авторизации (токен = секрет в localStorage гостя). Внутренняя (auth):
- * список + смена статуса; подтверждение создаёт planned-мероприятие (titan/exit,
- * кабинка, плановые часы) и пишет event_id.
+ * Заявки онлайн-записи в HUB («Мероприятия → Заявки»). Принимает их сайт клуба
+ * (requests/intake.router.ts); здесь — список и решение персонала. Подтверждение
+ * заявки-мероприятия создаёт planned-мероприятие (titan/exit, кабинка, плановые
+ * часы) и пишет event_id; итог уходит в чат персонала и гостю (requests/notify.ts).
  *
  * Таблица bookings — raw SQL; мероприятия/справочники — drizzle.
  */
 import { Hono } from 'hono'
 import { zValidator } from '@hono/zod-validator'
 import { z } from 'zod'
-import { randomUUID } from 'node:crypto'
-import { sql, events, spaces, appSettings, eventHourlyRates, customers, eq, and, inArray, asc } from '@titan/database'
+import { sql, events, profiles, eq } from '@titan/database'
 import type { AppEnv } from '../../types.js'
 import { requireAuth, requireRole } from '../../middleware/auth.js'
-import { clientIp } from '../../lib/clientIp.js'
-import { notifyOwners, publicRateLimited, startError } from './publicGuards.js'
+import { notifyRequestStatus } from '../requests/notify.js'
 import { findOverlappingEvent, lockEventBooking } from '../events/events.router.js'
 import { cancelEventTx } from '../events/eventLifecycle.js'
 import { publishEvent } from '../../lib/realtime.js'
@@ -37,266 +31,12 @@ function mskParts(iso: string): { date: string; time: string } {
   return { date: d.toISOString().slice(0, 10), time: d.toISOString().slice(11, 16) }
 }
 
-// ─── Анти-перебор для публичного lookup ──────────────────────────────────────
-// Отдельный (поверх глобального per-IP) узкий лимит ИМЕННО на /lookup: перебор
-// телефонов жертв для раскрытия их броней. Лимитируем И по IP, И по телефону —
-// чтобы нельзя было ни долбить один номер, ни сканировать диапазон номеров с
-// одного IP. Скоупим ключ по клубу (мультитенант), чтобы лимит одного клуба не
-// влиял на другой. Fail-open при недоступности Redis (как глобальный rateLimit).
-const LOOKUP_MAX_PER_WINDOW = parseInt(process.env['BOOKING_LOOKUP_LIMIT'] ?? '10')
-const LOOKUP_WINDOW_SECONDS = 60
-// Создание брони (POST /): тот же приём, но окно шире — заявки не шлют пачками;
-// защита от спама заявками владельцу (каждая — пуш) и засорения списка броней.
-const CREATE_MAX_PER_WINDOW = parseInt(process.env['BOOKING_CREATE_LIMIT'] ?? '5')
-const CREATE_WINDOW_SECONDS = 600
-
-const lookupRateLimited = (clubId: string, ip: string, phoneTail: string) =>
-  publicRateLimited('bl', clubId, ip, phoneTail, LOOKUP_MAX_PER_WINDOW, LOOKUP_WINDOW_SECONDS)
-const createRateLimited = (clubId: string, ip: string, phoneTail: string) =>
-  publicRateLimited('bc', clubId, ip, phoneTail, CREATE_MAX_PER_WINDOW, CREATE_WINDOW_SECONDS)
-
 // Дата/время/зона/часы, которые видит гость: после подтверждения бронь живёт как
 // мероприятие, и персонал может его перенести (время, зона) — показываем актуальное
 // из events, а не исходную заявку. ev/es/s — алиасы events/spaces в запросах ниже.
 const guestStartsAt = sql`CASE WHEN ev.id IS NOT NULL THEN ((ev.date || ' ' || ev.start_time)::timestamp AT TIME ZONE 'Europe/Moscow') ELSE b.starts_at END`
 const guestZoneName = sql`CASE WHEN ev.id IS NOT NULL THEN es.name ELSE s.name END`
 const guestHours = sql`COALESCE(ev.planned_hours, b.tariff_hours)`
-
-// ─── Публичный роутер (без авторизации) ──────────────────────────────────────
-export const bookingsPublicRouter = new Hono<AppEnv>()
-
-bookingsPublicRouter.get('/config', async (c) => {
-  const db = c.var.db
-  const sx = await db.select().from(appSettings)
-    .where(inArray(appSettings.key, ['booking_enabled', 'venue_name', 'venue_address', 'hours_open', 'hours_close']))
-  const m = Object.fromEntries(sx.map((r) => [r.key, r.value]))
-  if (m['booking_enabled'] !== 'true') return c.json({ enabled: false })
-
-  const cabins = await db.select({ id: spaces.id, name: spaces.name, capacity: spaces.capacity, hourlyRate: spaces.hourlyRate })
-    .from(spaces).where(eq(spaces.isActive, true))
-  const tariffs = await db.select({ hours: eventHourlyRates.hours, price: eventHourlyRates.price })
-    .from(eventHourlyRates).orderBy(asc(eventHourlyRates.hours))
-
-  return c.json({
-    enabled: true,
-    clubName: m['venue_name'] || 'Titan',
-    venueAddress: m['venue_address'] || '',
-    hoursOpen: m['hours_open'] || '',
-    hoursClose: m['hours_close'] || '',
-    cabins,
-    tariffs,
-  })
-})
-
-// Узнавание клиента по номеру телефона: возвращает его брони (по цифрам, последние
-// 10 — без привязки к устройству). Регистрируется ДО /:token, чтобы не перехватился.
-//
-// БЕЗОПАСНОСТЬ (P1): этот эндпоинт публичный и не подтверждает владение номером.
-// Раньше он отдавал claim_token — секрет УПРАВЛЕНИЯ бронью (PATCH/отмена по токену).
-// Любой, зная 10 цифр телефона жертвы, получал её токен и мог угнать/отменить бронь.
-// Теперь:
-//   1) claim_token из ответа УБРАН — lookup даёт только ПРОСМОТР брони (статус, дата,
-//      зона, число гостей). Управление осталось доступно лишь владельцу токена,
-//      который выдаётся ОДИН раз при создании брони (POST /) и хранится у гостя в
-//      localStorage (то же устройство). Это сохраняет полезную функцию «увидеть свою
-//      бронь по телефону», но не раздаёт управляющий секрет произвольному запросившему.
-//   2) ПДн ужаты: телефон/имя/комментарий из ответа убраны — по чужому номеру нельзя
-//      выкачать персональные данные. Гость и так знает свои имя/телефон.
-//   3) Добавлен узкий per-IP + per-phone rate-limit против перебора номеров.
-bookingsPublicRouter.get('/lookup', async (c) => {
-  const db = c.var.db
-  const tail = (c.req.query('phone') || '').replace(/\D/g, '').slice(-10)
-  if (tail.length < 10) return c.json({ bookings: [] })
-
-  // Анти-перебор: блокируем сканирование диапазона номеров с одного IP и долбёжку
-  // одного номера. Возвращаем 429, а не пустой список, чтобы не маскировать причину.
-  const limited = await lookupRateLimited(c.var.club?.id ?? '', clientIp(c), tail)
-  if (limited) return c.json({ error: 'Слишком много запросов, попробуйте позже' }, 429)
-
-  const res = await db.execute(sql`
-    SELECT b.id, b.status, b.location, b.address, b.title, ${guestZoneName} AS zone_name, ${guestHours} AS tariff_hours, b.guests,
-           ${guestStartsAt} AS starts_at, b.created_at, ev.status AS event_status
-    FROM bookings b
-    LEFT JOIN spaces s ON s.id = b.space_id
-    LEFT JOIN events ev ON ev.id = b.event_id
-    LEFT JOIN spaces es ON es.id = ev.space_id
-    WHERE right(regexp_replace(coalesce(b.phone, ''), '[^0-9]', '', 'g'), 10) = ${tail}
-    ORDER BY starts_at DESC -- выходной столбец (актуальное время мероприятия)
-    LIMIT 20
-  `)
-  return c.json({ bookings: rows(res) })
-})
-
-const CreateSchema = z.object({
-  location: z.enum(['titan', 'exit']),
-  title: z.string().max(160).optional(),
-  address: z.string().max(300).optional(),
-  spaceId: z.string().uuid().optional(),
-  tariffHours: z.number().int().min(1).max(24).optional(),
-  guests: z.number().int().min(1).max(500).optional(),
-  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  time: z.string().regex(/^\d{2}:\d{2}$/),
-  name: z.string().min(1).max(120),
-  phone: z.string().min(5).max(30),
-  comment: z.string().max(500).optional(),
-})
-
-bookingsPublicRouter.post('/', zValidator('json', CreateSchema), async (c) => {
-  const db = c.var.db
-  const [en] = await db.select().from(appSettings).where(eq(appSettings.key, 'booking_enabled')).limit(1)
-  if (en?.value !== 'true') return c.json({ error: 'Бронирование отключено' }, 403)
-  const b = c.req.valid('json')
-  const phoneTail = b.phone.replace(/\D/g, '').slice(-10)
-  if (phoneTail.length < 10) return c.json({ error: 'Укажите номер телефона полностью' }, 400)
-
-  // Анти-спам: узкий лимит заявок по IP и по телефону (как у /lookup).
-  if (await createRateLimited(c.var.club?.id ?? '', clientIp(c), phoneTail)) {
-    return c.json({ error: 'Слишком много заявок, попробуйте позже' }, 429)
-  }
-
-  const badStart = startError(b.date, b.time)
-  if (badStart) return c.json({ error: badStart }, 400)
-
-  // Зона — только существующая и активная (виджет показывает лишь активные).
-  if (b.spaceId) {
-    const [space] = await db.select({ id: spaces.id }).from(spaces)
-      .where(and(eq(spaces.id, b.spaceId), eq(spaces.isActive, true))).limit(1)
-    if (!space) return c.json({ error: 'Эта зона сейчас недоступна для брони — выберите другую' }, 400)
-  }
-
-  const startsAt = `${b.date}T${b.time}:00+03:00`
-  const token = randomUUID()
-
-  // Дедуп: та же ожидающая заявка (телефон + начало) — повторная отправка формы /
-  // двойной тап. Проверка и вставка — под advisory-lock по (телефон, начало), чтобы два
-  // одновременных запроса не создали две брони. Токен существующей брони НЕ отдаём:
-  // знание телефона и времени не даёт права управлять чужой бронью (см. /lookup) —
-  // гость, отправивший её первым, токен уже получил.
-  const created = await db.transaction(async (tx) => {
-    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${`booking-create:${phoneTail}:${startsAt}`}, 0))`)
-    const dup = await tx.execute(sql`
-      SELECT id FROM bookings
-      WHERE status = 'new' AND starts_at = ${startsAt}::timestamptz
-        AND right(regexp_replace(coalesce(phone, ''), '[^0-9]', '', 'g'), 10) = ${phoneTail}
-      LIMIT 1
-    `)
-    const existingId = rows<{ id: string }>(dup)[0]?.id
-    if (existingId) return { id: existingId, duplicate: true }
-    const res = await tx.execute(sql`
-      INSERT INTO bookings (space_id, name, phone, guests, starts_at, duration_hours, comment, status, source, location, address, tariff_hours, claim_token, title)
-      VALUES (${b.spaceId ?? null}, ${b.name}, ${b.phone}, ${b.guests ?? null}, ${startsAt}::timestamptz,
-              ${b.tariffHours ?? null}, ${b.comment ?? null}, 'new', 'widget',
-              ${b.location}, ${b.location === 'exit' ? (b.address ?? null) : null}, ${b.tariffHours ?? null}, ${token}, ${b.title ?? null})
-      RETURNING id
-    `)
-    return { id: rows<{ id: string }>(res)[0]?.id, duplicate: false }
-  })
-  if (created.duplicate) return c.json({ ok: true, id: created.id, token: null, duplicate: true })
-  const id = created.id
-
-  // Выезд = заказчик мероприятия: сохраняем имя+телефон в справочник «Заказчики».
-  // Дедуп по ЦИФРАМ номера (последние 10) — устойчиво к формату и префиксу 8/+7,
-  // чтобы тот же телефон в другом написании не плодил дубль. Не валит ответ гостю.
-  if (b.location === 'exit' && b.phone) {
-    try {
-      const tail = b.phone.replace(/\D/g, '').slice(-10)
-      let exists = false
-      if (tail.length >= 10) {
-        const found = await db.execute(sql`
-          SELECT id FROM customers
-          WHERE right(regexp_replace(coalesce(phone, ''), '[^0-9]', '', 'g'), 10) = ${tail}
-          LIMIT 1
-        `)
-        exists = rows(found).length > 0
-      }
-      if (!exists) await db.insert(customers).values({ name: b.name ?? null, phone: b.phone })
-    } catch { /* non-fatal */ }
-  }
-
-  const where = b.location === 'exit' ? 'выезд' : 'Штаб'
-  const body = `${b.title ? b.title + ' · ' : ''}${b.name} · ${where} · ${b.date} ${b.time}${b.guests ? ` · ${b.guests} гост.` : ''}`
-  await notifyOwners(db, c.var.club?.id, { type: 'booking', title: '🗓️ Новая бронь', body, meta: { bookingId: id, url: '/events' } })
-
-  return c.json({ ok: true, id, token })
-})
-
-// Статус брони по токену (узнавание клиента, без авторизации).
-bookingsPublicRouter.get('/:token', async (c) => {
-  const db = c.var.db
-  const token = c.req.param('token')
-  const res = await db.execute(sql`
-    SELECT b.id, b.status, b.location, b.address, b.title, ${guestZoneName} AS zone_name, ${guestHours} AS tariff_hours, b.guests,
-           ${guestStartsAt} AS starts_at, b.name, b.phone, b.comment, b.created_at, ev.status AS event_status
-    FROM bookings b
-    LEFT JOIN spaces s ON s.id = b.space_id
-    LEFT JOIN events ev ON ev.id = b.event_id
-    LEFT JOIN spaces es ON es.id = ev.space_id
-    WHERE b.claim_token = ${token} LIMIT 1
-  `)
-  const bk = rows(res)[0]
-  if (!bk) return c.json({ error: 'not found' }, 404)
-  return c.json({ booking: bk })
-})
-
-const PublicPatchSchema = z.object({
-  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-  time: z.string().regex(/^\d{2}:\d{2}$/).optional(),
-  guests: z.number().int().min(1).max(500).nullable().optional(),
-  tariffHours: z.number().int().min(1).max(24).nullable().optional(),
-  address: z.string().max(300).optional(),
-  comment: z.string().max(500).optional(),
-  cancel: z.boolean().optional(),
-})
-
-// Правка/отмена брони гостем по токену — пока статус 'new'.
-bookingsPublicRouter.patch('/:token', zValidator('json', PublicPatchSchema), async (c) => {
-  const db = c.var.db
-  const token = c.req.param('token')
-  const b = c.req.valid('json')
-  const res = await db.execute(sql`SELECT * FROM bookings WHERE claim_token = ${token} LIMIT 1`)
-  const bk = rows<Record<string, unknown>>(res)[0]
-  if (!bk) return c.json({ error: 'not found' }, 404)
-  if (bk['status'] !== 'new') return c.json({ error: 'Бронь уже обработана — правки недоступны' }, 409)
-
-  // Проверка статуса выше — по снимку; персонал мог подтвердить бронь между чтением
-  // и записью. Поэтому и в UPDATE условие status = 'new': иначе гость отменил бы/
-  // перенёс уже подтверждённую бронь, у которой есть мероприятие.
-  const processed = () => c.json({ error: 'Бронь уже обработана — правки недоступны' }, 409)
-
-  if (b.cancel) {
-    const cancelled = await db.execute(sql`
-      UPDATE bookings SET status = 'cancelled', updated_at = now()
-      WHERE claim_token = ${token} AND status = 'new' RETURNING id
-    `)
-    if (!rows(cancelled).length) return processed()
-    return c.json({ ok: true, status: 'cancelled' })
-  }
-
-  const cur = mskParts(bk['starts_at'] as string)
-  const date = b.date ?? cur.date
-  const time = b.time ?? cur.time
-  // Проверяем только перенос: форма шлёт дату/время и при правке одного комментария.
-  if (date !== cur.date || time !== cur.time) {
-    const badStart = startError(date, time)
-    if (badStart) return c.json({ error: badStart }, 400)
-  }
-  const startsAt = `${date}T${time}:00+03:00`
-
-  const upd = await db.execute(sql`
-    UPDATE bookings SET
-      starts_at = ${startsAt}::timestamptz,
-      guests = ${b.guests !== undefined ? b.guests : (bk['guests'] as number | null)},
-      tariff_hours = ${b.tariffHours !== undefined ? b.tariffHours : (bk['tariff_hours'] as number | null)},
-      duration_hours = ${b.tariffHours !== undefined ? b.tariffHours : (bk['duration_hours'] as number | null)},
-      address = ${b.address !== undefined ? b.address : (bk['address'] as string | null)},
-      comment = ${b.comment !== undefined ? b.comment : (bk['comment'] as string | null)},
-      updated_at = now()
-    WHERE claim_token = ${token} AND status = 'new'
-    RETURNING id
-  `)
-  if (!rows(upd).length) return processed()
-  return c.json({ ok: true })
-})
 
 // ─── Внутренний роутер (авторизация) ─────────────────────────────────────────
 export const bookingsRouter = new Hono<AppEnv>()
@@ -308,7 +48,8 @@ bookingsRouter.get('/', requireRole('owner', 'staff'), async (c) => {
   const res = await db.execute(sql`
     SELECT b.id, b.space_id, s.name AS zone_name, b.name, b.phone, b.guests, b.title,
            b.starts_at, b.duration_hours, b.tariff_hours, b.location, b.address,
-           b.comment, b.status, b.source, b.kind, b.meta, b.event_id, b.created_at
+           b.comment, b.status, b.source, b.kind, b.meta, b.event_id, b.created_at,
+           (b.guest_tg_chat IS NOT NULL) AS guest_follows
     FROM bookings b
     LEFT JOIN spaces s ON s.id = b.space_id
     ${status ? sql`WHERE b.status = ${status}` : sql``}
@@ -435,6 +176,11 @@ bookingsRouter.patch('/:id', requireRole('owner', 'staff'), zValidator('json', P
     }, 409)
   }
   for (const checkId of result.cancelledCheckIds) publishEvent(c.var.club?.id, 'check:deleted', { checkId })
+  if (status === 'confirmed' || status === 'cancelled') {
+    const [actor] = await db.select({ nickname: profiles.nickname }).from(profiles).where(eq(profiles.id, user.sub)).limit(1)
+    const host = (c.req.header('host') ?? '').split(':')[0]
+    void notifyRequestStatus(db, id, status, actor?.nickname ?? 'администратор', host ? `https://${host}` : null)
+  }
   const eventId = result.eventId
   return c.json({ ok: true, status, eventId })
 })

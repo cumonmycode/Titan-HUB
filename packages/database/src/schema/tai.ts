@@ -4,7 +4,7 @@ import { profiles } from './profiles.js'
 /** Во что играет человек: спортивная, городская или обе мафии. */
 export type TaiGames = 'sport' | 'city' | 'both'
 
-// Собеседники Tai в личке (миграция 081): кто это и что Tai о нём помнит.
+// Собеседники Tai в личке (миграция 082): кто это и что Tai о нём помнит.
 export const taiContacts = pgTable('tai_contacts', {
   tgId: text('tg_id').primaryKey(),
   profileId: uuid('profile_id').references(() => profiles.id),

@@ -3,7 +3,8 @@ import Link from 'next/link'
 import { ArrowUpRight, Download } from 'lucide-react'
 import type { Player, PlayersPayload, StorySummary } from '@/lib/types'
 import { DOCS, REVIEWS, TEAM, VALUES } from '@/content/people'
-import { GOMAFIA, SITE, SOCIALS } from '@/content/site'
+import { GOMAFIA, SITE } from '@/content/site'
+import type { Contacts } from '@/lib/contacts'
 import { Photo } from './blocks'
 import { PlayerSearch } from './PlayerSearch'
 
@@ -108,13 +109,13 @@ export function Players({ data, limit = 10 }: { data: PlayersPayload; limit?: nu
   )
 }
 
-export function ContactList() {
+export function ContactList({ contacts }: { contacts: Contacts }) {
   return (
     <ul className="contact-list">
       <li><span>Адрес</span><a href={SITE.mapUrl} target="_blank" rel="noopener noreferrer">{SITE.address}</a></li>
-      <li><span>Телефон и WhatsApp</span><a href={SITE.phoneHref}>{SITE.phone}</a></li>
-      <li><span>Почта</span><a href={`mailto:${SITE.email}`}>{SITE.email}</a></li>
-      {SOCIALS.map((s) => <li key={s.id}><span>{s.label}</span><a href={s.href} target="_blank" rel="noopener noreferrer">{s.href.replace(/^https:\/\/(www\.)?/, '')}</a></li>)}
+      <li><span>Телефон и WhatsApp</span><a href={contacts.phoneHref}>{contacts.phone}</a></li>
+      <li><span>Почта</span><a href={`mailto:${contacts.email}`}>{contacts.email}</a></li>
+      {contacts.socials.map((s) => <li key={s.id}><span>{s.label}</span><a href={s.href} target="_blank" rel="noopener noreferrer">{s.href.replace(/^https:\/\/(www\.)?/, '')}</a></li>)}
     </ul>
   )
 }

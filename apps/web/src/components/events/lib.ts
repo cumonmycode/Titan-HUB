@@ -61,6 +61,10 @@ export interface BookingRequest {
   /** event — мероприятие (подтверждение создаёт его); game — запись на игру; message — обращение. */
   kind?: 'event' | 'game' | 'message'
   source?: string | null
+  /** Поля формы сайта: telegram, формат, вечер, № сертификата… */
+  meta?: Record<string, unknown> | null
+  /** Гость нажал «Получать статус в Telegram» — решение придёт ему от бота клуба. */
+  guest_follows?: boolean
 }
 
 /** Конфликт брони зоны (409 от POST/PATCH /events и /events/availability). */

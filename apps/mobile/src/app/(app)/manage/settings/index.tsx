@@ -4,7 +4,9 @@ import { Stack, useRouter } from 'expo-router';
 
 import { LinkRow, TextRow, TimeRow } from '@/components/native-form';
 import { useSettingsEditor } from '@/components/settings-parts';
-import { SITE_HOLIDAYS, useBookingConfig, useIntegrations, usePaymentConfig, useSiteConfig } from '@/lib/admin-api';
+import { useIntegrations, usePaymentConfig } from '@/lib/admin-api';
+import { useSiteConfig } from '@/lib/site-api';
+import { lookOf } from '@/lib/site-looks';
 import { haptic } from '@/lib/haptics';
 import { METHODS, type TenderMethod } from '@/lib/payment';
 
@@ -15,19 +17,18 @@ const hourText = (hour: number) => `${String(hour).padStart(2, '0')}:00`;
 /**
  * Настройки клуба — как «Настройки» iOS: правка прямо в строке (название, адрес, время),
  * выбор из системного меню; всё сохраняется сразу. Большие темы
- * (оплата и чеки, онлайн-бронь, отзывы, интеграции) — отдельными экранами-переходами.
+ * (оплата и чеки, отзывы, сайт и онлайн-запись, интеграции) — отдельными экранами-переходами.
  * Раньше каждое поле открывало системный диалог, а оплата и бронь были только в вебе.
  */
 export default function SettingsScreen() {
   const router = useRouter();
   const settings = useSettingsEditor();
   const payment = usePaymentConfig();
-  const booking = useBookingConfig();
   const site = useSiteConfig();
   const integrations = useIntegrations(true);
 
   const refresh = async () => {
-    await Promise.allSettled([settings.refetch(), payment.refetch(), booking.refetch(), site.refetch(), integrations.refetch()]);
+    await Promise.allSettled([settings.refetch(), payment.refetch(), site.refetch(), integrations.refetch()]);
   };
 
   if (settings.loading || settings.error) {
@@ -104,20 +105,13 @@ export default function SettingsScreen() {
               subtitle={payment.data ? (payment.data.sbpConfigured ? `СБП через ${payment.data.sbpProviderLabel}` : 'Эквайер не подключён') : undefined}
               onPress={() => router.push('/manage/settings/payment')}
             />
-            <LinkRow
-              icon="calendar.badge.plus"
-              color="#FF2D55"
-              title="Онлайн-бронирование"
-              value={booking.data ? (booking.data.enabled ? 'Вкл.' : 'Выкл.') : undefined}
-              onPress={() => router.push('/manage/settings/booking')}
-            />
             <LinkRow icon="star.bubble" color="#FF9500" title="Отзывы гостей" subtitle="Яндекс Карты, 2ГИС" onPress={() => router.push('/manage/settings/reviews')} />
             <LinkRow
               icon="globe"
-              color="#E5322D"
-              title="Сайт"
-              subtitle="titanmafia.ru — тема и публикации"
-              value={site.data ? (SITE_HOLIDAYS.find((h) => h.id === site.data?.holiday)?.title ?? 'Без праздника') : undefined}
+              color="#5856D6"
+              title="Сайт и онлайн-запись"
+              subtitle="Оформление, расписание, публикации, заявки, домен"
+              value={site.data ? lookOf(site.data.holiday).title : undefined}
               onPress={() => router.push('/manage/settings/site')}
             />
           </Section>

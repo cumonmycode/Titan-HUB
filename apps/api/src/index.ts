@@ -7,6 +7,7 @@ import { runPollsForDb } from './cron/polls.js'
 import { fiscalizePendingForDb } from './cron/fiscalize.js'
 import { purgeOldAnalyticsEvents } from './cron/analytics-retention.js'
 import { getCronTargets } from './cron/targets.js'
+import { remindRequestGuestsForDb } from './cron/request-reminders.js'
 import { runStaffAlerts } from './modules/notifications/staff-calls.js'
 import { ensureTaiWebhook } from './modules/tg/club.js'
 import { runOutreach } from './modules/tg/outreach.js'
@@ -243,6 +244,17 @@ function scheduleTaiCron() {
 }
 
 if (!CRON_DISABLED) scheduleTaiCron()
+
+// Напоминания гостям о подтверждённых заявках в день визита (от Tai — бота клуба):
+// тик раз в минуту, идемпотентно по reminded_at; до 10:00 МСК ничего не шлёт.
+function scheduleRequestRemindersCron() {
+  setInterval(() => {
+    runForAllClubs('request-reminders', remindRequestGuestsForDb).catch(console.error)
+  }, 60_000)
+  console.log('⏰ Request-reminders cron scheduled (тик раз в минуту, с 10:00 МСК)')
+}
+
+if (!CRON_DISABLED) scheduleRequestRemindersCron()
 
 // Фискализация 54-ФЗ: тик КАЖДУЮ МИНУТУ по всем клубам. Идемпотентно (один ряд
 // fiscal_receipts на чек), клубы без фискального провайдера пропускаются. НЕ трогает

@@ -13,7 +13,7 @@ import { clubRouter } from './modules/club/club.router.js'
 import { alertsRouter } from './modules/notifications/alerts.router.js'
 import { tgRouter } from './modules/tg/tg.router.js'
 import { payRouter } from './modules/pay/pay.router.js'
-import { bookingsPublicRouter, bookingsRouter } from './modules/bookings/bookings.router.js'
+import { bookingsRouter } from './modules/bookings/bookings.router.js'
 import { siteRouter } from './modules/site/site.router.js'
 import { siteAdminRouter } from './modules/site/stories.js'
 import { geoRouter } from './modules/geo/geo.router.js'
@@ -161,13 +161,9 @@ app.route('/api/pay', payRouter)
 // тоже блокировалось — тупик). Целевой клуб резолвится из payload, не по Host.
 app.route('/api/platega', plategaRouter)
 
-// Публичный приём брони с виджета /book (гость без авторизации). Защита — гейт
-// booking_enabled + глобальный rate-limit + валидация. ДО requireActiveSubscription.
-app.route('/api/bookings/public', bookingsPublicRouter)
-
-// Сайт клуба (titanmafia.ru): витрина и заявки гостей без авторизации. Не зависит
-// от тумблера виджета брони (booking_enabled) — сайт клуба принимает заявки всегда.
-// Защита — узкий лимит по IP/телефону, ловушка для ботов, согласие на ПДн.
+// Сайт клуба: витрина и единая онлайн-запись гостей без авторизации (бывшая форма
+// /book перенаправляет на сайт). Защита — узкий лимит по IP/телефону, ловушка для
+// ботов, согласие на ПДн. ДО requireActiveSubscription.
 app.route('/api/site', siteRouter)
 
 // Геосаджест (Яндекс) — публичный прокси подсказок адресов (нужен и на /book).

@@ -5,10 +5,12 @@ import { usePathname } from 'next/navigation'
 import { useEffect, useState } from 'react'
 import { Menu, Phone, X } from 'lucide-react'
 import { NAV, SITE } from '@/content/site'
+import { useContacts } from './ContactsContext'
 import { RequestButton } from '@/components/request/RequestButton'
 
 export function Header({ ctaLabel }: { ctaLabel: string }) {
   const path = usePathname()
+  const contacts = useContacts()
   const [open, setOpen] = useState(false)
   const [scrolled, setScrolled] = useState(false)
   useEffect(() => setOpen(false), [path])
@@ -42,7 +44,7 @@ export function Header({ ctaLabel }: { ctaLabel: string }) {
           <span>{SITE.name}</span>
         </Link>
         <nav className="hdr-nav" aria-label="Разделы">{links}</nav>
-        <a className="hdr-phone" href={SITE.phoneHref}><Phone size={16} aria-hidden="true" />{SITE.phone}</a>
+        <a className="hdr-phone" href={contacts.phoneHref}><Phone size={16} aria-hidden="true" />{contacts.phone}</a>
         <RequestButton preset={{ kind: 'game' }} className="btn btn-primary hdr-cta">{ctaLabel}</RequestButton>
         <button type="button" className="hdr-burger" aria-label={open ? 'Закрыть меню' : 'Открыть меню'} aria-expanded={open} onClick={() => setOpen(!open)}>
           {open ? <X size={24} /> : <Menu size={24} />}
@@ -55,7 +57,7 @@ export function Header({ ctaLabel }: { ctaLabel: string }) {
             {links}
           </nav>
           <div className="mnav-foot">
-            <a href={SITE.phoneHref} className="btn btn-ghost"><Phone size={18} aria-hidden="true" />{SITE.phone}</a>
+            <a href={contacts.phoneHref} className="btn btn-ghost"><Phone size={18} aria-hidden="true" />{contacts.phone}</a>
             <RequestButton preset={{ kind: 'game' }} className="btn btn-primary">{ctaLabel}</RequestButton>
           </div>
         </div>

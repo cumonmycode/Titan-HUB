@@ -1,6 +1,8 @@
 import type { MetadataRoute } from 'next'
-import { SITE } from '@/content/site'
+import { getSiteConfig } from '@/lib/hub'
+import { siteUrlOf } from '@/lib/contacts'
 
-export default function robots(): MetadataRoute.Robots {
-  return { rules: [{ userAgent: '*', allow: '/', disallow: ['/preview/', '/api/'] }], sitemap: `${SITE.url}/sitemap.xml`, host: SITE.url }
+export default async function robots(): Promise<MetadataRoute.Robots> {
+  const url = siteUrlOf((await getSiteConfig()).url)
+  return { rules: [{ userAgent: '*', allow: '/', disallow: ['/preview/', '/api/'] }], sitemap: `${url}/sitemap.xml`, host: url }
 }

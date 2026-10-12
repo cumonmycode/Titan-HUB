@@ -1,9 +1,10 @@
 'use client'
 /**
- * «Заявки с сайта» вверху «Предстоящих»: брони виджета /book и заявки сайта клуба.
- * Мероприятие: подтвердить → сервер создаёт мероприятие, и сразу открывается его
- * форма. Запись на игру и обращение подтверждаются как «приняты» — без мероприятия.
- * Отклонить — только после подтверждения в диалоге.
+ * «Заявки с сайта» вверху «Предстоящих» — единая онлайн-запись клуба (запись на
+ * игру, бронь зоны, выезд, сертификат, сообщение). Мероприятие: подтвердить →
+ * сервер создаёт мероприятие, и сразу открывается его форма. Запись на игру и
+ * обращение подтверждаются как «приняты» — без мероприятия. Отклонить — только
+ * после подтверждения в диалоге. Решение уходит гостю в Telegram, если он подписан.
  */
 import React, { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
@@ -11,7 +12,7 @@ import { api } from '@/lib/api'
 import { useToast } from '@/components/Toast'
 import { Button, ConfirmDialog } from '@/components/manage/DesignSystem'
 import { Card } from '@/components/manage/goods/parts'
-import { telLink } from '@/lib/contact'
+import { telLink, whatsappLink } from '@/lib/contact'
 import { MUTED, type BookingRequest } from './lib'
 
 type Kind = NonNullable<BookingRequest['kind']>
@@ -49,6 +50,18 @@ function requestMeta(b: BookingRequest): string {
   return parts.join(' · ')
 }
 
+const CONTACT_LINK: React.CSSProperties = {
+  display: 'inline-flex', alignItems: 'center', padding: '6px 12px', borderRadius: 10, fontSize: 12.5, fontWeight: 700,
+  textDecoration: 'none', color: 'var(--on-surface)', background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.1)',
+}
+
+/** @ник или t.me-ссылка из формы сайта → https://t.me/<ник>. */
+function telegramOf(b: BookingRequest): string | null {
+  const raw = typeof b.meta?.['telegram'] === 'string' ? (b.meta['telegram'] as string).trim() : ''
+  const m = raw.match(/^(?:@|https?:\/\/t\.me\/)?([A-Za-z0-9_]{5,32})$/)
+  return m ? `https://t.me/${m[1]}` : null
+}
+
 function RequestItem({ b, busy, onConfirm, onReject }: { b: BookingRequest; busy: boolean; onConfirm: () => void; onReject: () => void }) {
   const title = b.title || b.name || 'Заявка'
   // Имя отдельной строкой — только если заголовком стало название заявки (без дубля).
@@ -66,6 +79,14 @@ function RequestItem({ b, busy, onConfirm, onReject }: { b: BookingRequest; busy
         </span>
       )}
       {b.comment && <p style={{ margin: 0, fontSize: 13, lineHeight: 1.45, whiteSpace: 'pre-line' }}>{b.comment}</p>}
+      {(b.phone || telegramOf(b)) && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 2 }}>
+          {b.phone && <a href={telLink(b.phone)} style={CONTACT_LINK}>Позвонить</a>}
+          {b.phone && <a href={whatsappLink(b.phone)} target="_blank" rel="noopener noreferrer" style={CONTACT_LINK}>WhatsApp</a>}
+          {telegramOf(b) && <a href={telegramOf(b)!} target="_blank" rel="noopener noreferrer" style={CONTACT_LINK}>Telegram</a>}
+        </div>
+      )}
+      {b.guest_follows && <span style={{ fontSize: 12, color: '#7CE0A8' }}>Гость получит ответ в Telegram</span>}
       <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
         <Button size="sm" fullWidth onClick={onConfirm} loading={busy}>{look.confirm}</Button>
         <Button size="sm" variant="secondary" fullWidth onClick={onReject} disabled={busy}>{look.reject}</Button>

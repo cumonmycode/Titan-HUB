@@ -28,7 +28,32 @@ export const SITE_HOLIDAYS: { id: SiteHoliday; label: string; text: string; colo
 ]
 
 export interface ScheduleDay { day: number; title: string; time?: string }
-export interface SiteConfig { holiday: SiteHoliday | null; holidays: SiteHoliday[]; schedule: ScheduleDay[] | null }
+export interface SiteContacts { phone: string; email: string; telegram: string; channel: string; whatsapp: string; vk: string; instagram: string }
+export interface TgChat { id: string; title: string | null; type: string | null; topics: { threadId: string; name: string | null }[] }
+export interface SiteConfig {
+  holiday: SiteHoliday | null
+  holidays: SiteHoliday[]
+  schedule: ScheduleDay[] | null
+  contacts: SiteContacts
+  /** Чат персонала в Telegram для заявок; null — не писать. */
+  notifyChat: { chatId: string; threadId: number | null } | null
+  /** Чаты, где есть бот клуба (из «Опросов»). */
+  chats: TgChat[]
+  /** Бот групп клуба подключён (пишет заявки в чат персонала). */
+  staffBot: boolean
+  /** Клиентский бот (My Titan): через него гость получает статус заявки. */
+  guestBot: string | null
+}
+
+export interface SiteDomainState {
+  domain: string | null
+  primary: 'www' | 'apex'
+  url: string | null
+  mirror: string
+  serverIp: string | null
+  dns: { apex: { ips: string[]; ok: boolean }; www: { ips: string[]; ok: boolean } }
+  cert: { cert: 'none' | 'pending' | 'active' | 'error'; expiresAt: string | null; error: string | null; checkedAt: string | null } | null
+}
 
 export const DAYS = ['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота', 'Воскресенье']
 export const EVENING_TITLES = ['Городская мафия', 'Спортивная мафия', 'Настольные игры', 'Детская мафия', 'Турнир']

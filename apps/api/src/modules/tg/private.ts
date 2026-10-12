@@ -14,6 +14,7 @@ import { NO, REMOVE_KEYBOARD, pendingRow } from './login/common.js'
 import { handleAppContact, handleAppStart, handleLegacyLogin, handleWebCode, rejectLatest } from './login/app.js'
 import { handleHubContact, handleHubStart } from './login/hub.js'
 import { handleLinkCode, handleLinkStart } from './login/link.js'
+import { handleRequestStart } from './login/request.js'
 import { converse } from './dialog/converse.js'
 import { touchContact, updateContact } from './dialog/memory.js'
 
@@ -60,6 +61,7 @@ async function onStartPayload(club: TgClub, from: TgUser, chatId: number, payloa
   else if (payload.startsWith('hub_')) await handleHubStart(club, from, chatId, payload.slice(4))
   else if (payload.startsWith('login_')) await handleLegacyLogin(club, from, chatId, payload.slice(6))
   else if (payload.startsWith('link_')) await handleLinkStart(club, from, chatId, payload.slice(5))
+  else if (payload.startsWith('r_')) await handleRequestStart(club, from, chatId, payload.slice(2))
   else return false
   return true
 }

@@ -75,6 +75,10 @@ export type BookingRequest = {
   comment: string | null;
   status: 'new' | 'confirmed' | 'cancelled' | 'done';
   event_id: string | null;
+  /** Поля формы сайта: telegram, формат, вечер, № сертификата… */
+  meta?: Record<string, unknown> | null;
+  /** Гость нажал «Получать статус в Telegram» — решение придёт ему от бота клуба. */
+  guest_follows?: boolean;
 };
 
 /** Старая бронь: зона штаба, мероприятие по ней завершено. `check_total` — итог вечера. */

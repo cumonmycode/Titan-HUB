@@ -127,19 +127,49 @@ export async function isTelegramChatAdmin(token: string, chatId: string | number
   return status === 'creator' || status === 'administrator'
 }
 
-// Отправить текстовое сообщение в чат/топик. Никогда не бросает.
+/** Кнопка-ссылка под сообщением (Telegram принимает только http(s) и tg://). */
+export interface TgUrlButton { text: string; url: string }
+
+// Отправить текстовое сообщение в чат/топик. Никогда не бросает. messageId — для
+// последующей правки (editTelegramMessage).
 export async function sendTelegramMessage(
   token: string,
   chatId: string | number,
   text: string,
-  opts?: { messageThreadId?: number | null; parseMode?: 'HTML' | 'Markdown'; replyToMessageId?: number | null },
-): Promise<{ ok: boolean; error?: string }> {
-  return tgCall(token, 'sendMessage', {
+  opts?: { messageThreadId?: number | null; parseMode?: 'HTML' | 'Markdown'; replyToMessageId?: number | null; buttons?: TgUrlButton[][] },
+): Promise<{ ok: boolean; error?: string; messageId?: number }> {
+  const r = await tgCall(token, 'sendMessage', {
     chat_id: chatId,
     text,
     ...(opts?.messageThreadId ? { message_thread_id: opts.messageThreadId } : {}),
     ...(opts?.parseMode ? { parse_mode: opts.parseMode } : {}),
     ...(opts?.replyToMessageId ? { reply_to_message_id: opts.replyToMessageId } : {}),
+    ...(opts?.buttons?.length ? { reply_markup: { inline_keyboard: opts.buttons } } : {}),
     disable_web_page_preview: true,
   })
+  return { ok: r.ok, error: r.error, messageId: typeof r.result?.message_id === 'number' ? r.result.message_id : undefined }
+}
+
+// Заменить текст отправленного сообщения (кнопки сохраняются, если переданы). Не бросает.
+export async function editTelegramMessage(
+  token: string,
+  chatId: string | number,
+  messageId: number,
+  text: string,
+  opts?: { parseMode?: 'HTML' | 'Markdown'; buttons?: TgUrlButton[][] },
+): Promise<{ ok: boolean; error?: string }> {
+  return tgCall(token, 'editMessageText', {
+    chat_id: chatId,
+    message_id: messageId,
+    text,
+    ...(opts?.parseMode ? { parse_mode: opts.parseMode } : {}),
+    ...(opts?.buttons?.length ? { reply_markup: { inline_keyboard: opts.buttons } } : {}),
+    disable_web_page_preview: true,
+  })
+}
+
+// Имя бота (для ссылок t.me/<бот>?start=…). null — токен неверный или Telegram недоступен.
+export async function getTelegramBotUsername(token: string): Promise<string | null> {
+  const r = await tgCall(token, 'getMe', {})
+  return r.ok && typeof r.result?.username === 'string' ? r.result.username : null
 }

@@ -1,15 +1,18 @@
 import { SymbolView } from 'expo-symbols';
-import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Linking, Pressable, StyleSheet, View } from 'react-native';
+import type { SFSymbol } from 'sf-symbols-typescript';
 
 import { GlassCard } from '@/components/new-check-parts';
 import { Text } from '@/components/text';
-import { formatMskDateTime, parsePgTimestamp, type BookingRequest } from '@/lib/events-api';
+import { formatMskDateTime, normalizePhone, parsePgTimestamp, type BookingRequest } from '@/lib/events-api';
+import { haptic } from '@/lib/haptics';
 import { useTextLayout } from '@/lib/text-scale';
 import { colors, space, type } from '@/lib/theme';
 
 /**
- * Заявка на бронь с сайта: что, когда, где и кто — и два решения. Подтверждённая заявка
- * становится мероприятием, его детали уточняют уже в форме.
+ * Заявка онлайн-записи с сайта: что, когда, где и кто, связь в один тап и два решения.
+ * Подтверждённая заявка-мероприятие становится мероприятием, его детали уточняют уже в
+ * форме. Решение уходит гостю в Telegram, если он подписался на статус.
  */
 // Что значат решения для каждого вида заявки с сайта.
 const LOOK = {
@@ -18,12 +21,37 @@ const LOOK = {
   message: { confirm: 'Обработано', reject: 'Скрыть', symbol: 'envelope' },
 } as const;
 
+/** Telegram гостя из формы сайта (@ник или t.me-ссылка) → https://t.me/<ник>. */
+function telegramOf(b: BookingRequest): string | null {
+  const raw = typeof b.meta?.['telegram'] === 'string' ? (b.meta['telegram'] as string).trim() : '';
+  const m = raw.match(/^(?:@|https?:\/\/t\.me\/)?([A-Za-z0-9_]{5,32})$/);
+  return m ? `https://t.me/${m[1]}` : null;
+}
+
+function ContactChip({ icon, label, url }: { icon: SFSymbol; label: string; url: string }) {
+  return (
+    <Pressable
+      onPress={() => {
+        haptic.light();
+        void Linking.openURL(url);
+      }}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      style={({ pressed }) => [styles.chip, pressed && styles.pressed]}>
+      <SymbolView name={icon} size={13} weight="semibold" tintColor={colors.accent} />
+      <Text style={[type.footnote, styles.chipText]}>{label}</Text>
+    </Pressable>
+  );
+}
+
 export function BookingCard({ booking, busy, onConfirm, onReject }: { booking: BookingRequest; busy: boolean; onConfirm: () => void; onReject: () => void }) {
   const look = LOOK[booking.kind ?? 'event'];
   // Очень крупный текст: кнопки друг под другом, иначе подписи не помещаются.
   const { stacked } = useTextLayout();
   const startsAt = parsePgTimestamp(booking.starts_at);
   const hours = booking.tariff_hours ?? (booking.duration_hours ? Number(booking.duration_hours) : null);
+  const phoneNumber = booking.phone ? normalizePhone(booking.phone) : null;
+  const tg = telegramOf(booking);
   const where = booking.location === 'exit' ? (booking.address ?? 'Выезд') : (booking.zone_name ?? 'Клуб');
   const when = booking.kind === 'message'
     ? `Получено ${formatMskDateTime(startsAt)}`
@@ -45,6 +73,16 @@ export function BookingCard({ booking, busy, onConfirm, onReject }: { booking: B
         <Text style={[type.footnote, styles.tertiary]} numberOfLines={3}>
           {booking.comment}
         </Text>
+      ) : null}
+      {(phoneNumber || tg) && (
+        <View style={styles.chips}>
+          {phoneNumber ? <ContactChip icon="phone.fill" label="Позвонить" url={`tel:+${phoneNumber}`} /> : null}
+          {phoneNumber ? <ContactChip icon="message.fill" label="WhatsApp" url={`https://wa.me/${phoneNumber}`} /> : null}
+          {tg ? <ContactChip icon="paperplane.fill" label="Telegram" url={tg} /> : null}
+        </View>
+      )}
+      {booking.guest_follows ? (
+        <Text style={[type.footnote, styles.follows]}>Гость получит ответ в Telegram</Text>
       ) : null}
       <View style={[styles.buttons, stacked && styles.buttonsStacked]}>
         <Pressable
@@ -94,4 +132,8 @@ const styles = StyleSheet.create({
   confirm: { backgroundColor: colors.accent },
   confirmText: { color: 'white', fontWeight: '600' },
   pressed: { opacity: 0.7 },
+  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm, marginTop: space.xs },
+  chip: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: space.md, minHeight: 32, borderRadius: 16, backgroundColor: colors.fill },
+  chipText: { color: colors.label, fontWeight: '600' },
+  follows: { color: colors.green },
 });
