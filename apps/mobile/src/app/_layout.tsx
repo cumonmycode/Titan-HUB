@@ -134,19 +134,8 @@ export default function RootLayout() {
             />
             {/* Чат с кабинкой — полный экран мессенджера: стеклянная шапка, поле ввода у клавиатуры. */}
             <Stack.Screen name="chat" options={glassHeader({ headerShown: true, headerBackButtonDisplayMode: 'minimal', title: 'Чат' })} />
-            {/* Tai — шторка поверх кассы, чека или аналитики: свой заголовок и поле ввода внизу.
-                Одна высота: поле ввода прижато к низу, на средней высоте оно ушло бы за экран. */}
-            <Stack.Screen
-              name="tai"
-              options={{
-                presentation: 'formSheet',
-                ...sheetOptions,
-                sheetAllowedDetents: [1],
-                sheetGrabberVisible: true,
-                headerShown: false,
-                contentStyle: { backgroundColor: colors.sheetBackground },
-              }}
-            />
+            {/* Tai — на весь экран, как Gemini: своя шапка с историей чатов и поле ввода внизу. */}
+            <Stack.Screen name="tai" options={{ presentation: 'fullScreenModal', headerShown: false, contentStyle: { backgroundColor: colors.background } }} />
           </Stack.Protected>
         </Stack>
         {!warm && <SwiftUIWarmup onDone={finishWarmup} />}

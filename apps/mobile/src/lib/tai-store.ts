@@ -6,20 +6,22 @@ import { useSession } from './session';
 import {
   confirmTaiAction,
   dismissTaiAction,
+  getTaiChat,
   isTaiLocked,
   streamTai,
   taiErrorText,
   type TaiActionCard,
   type TaiBlock,
+  type TaiChatTurn,
   type TaiContext,
   type TaiEvent,
   type TaiTurn,
 } from './tai-api';
 
 /**
- * Диалог с Tai на время работы приложения: шторка закрылась и открылась — разговор
- * продолжается («а за вчера?»), «Новый диалог» начинает заново. История уходит на
- * сервер с каждым вопросом — на сервере её нет.
+ * Текущий чат с Tai. Чаты хранит сервер (у каждого сотрудника свои, общие для его
+ * устройств): первый вопрос начинает новый чат, дальше реплики дописываются в него.
+ * Экран закрылся и открылся — разговор продолжается; из истории можно открыть старый.
  */
 
 export type TaiUserMessage = { id: string; role: 'user'; text: string };
@@ -40,6 +42,11 @@ export type TaiReply = {
 export type TaiMessage = TaiUserMessage | TaiReply;
 
 type TaiState = {
+  /** Чат на сервере; null — новый, создастся с первым вопросом. */
+  chatId: string | null;
+  title: string | null;
+  /** Открывается чат из истории. */
+  opening: boolean;
   messages: TaiMessage[];
   busy: boolean;
   locked: boolean;
@@ -49,6 +56,10 @@ type TaiState = {
   send: (text: string, options?: { display?: string; voice?: boolean }) => Promise<void>;
   stop: () => void;
   reset: () => void;
+  /** Открыть чат из истории. */
+  openChat: (id: string) => Promise<void>;
+  /** Ответ не пришёл (ошибка) — задать тот же вопрос ещё раз. */
+  retry: (replyId: string) => void;
   confirm: (actionId: string) => Promise<TaiActionCard | null>;
   dismiss: (actionId: string) => void;
 };
@@ -111,6 +122,21 @@ function replaceAction(card: TaiActionCard) {
   }));
 }
 
+/** Список чатов в истории: новый чат, свежий ответ или имя от Tai. */
+export function refreshTaiChats() {
+  const host = useSession.getState().club?.host ?? 'none';
+  void queryClient.invalidateQueries({ queryKey: [host, 'ai', 'chats'] });
+}
+
+/** Реплики сохранённого чата → сообщения экрана. */
+function fromTurns(turns: TaiChatTurn[]): TaiMessage[] {
+  return turns.map((t) =>
+    t.role === 'user'
+      ? { id: `h${t.id}`, role: 'user', text: t.content }
+      : { id: `h${t.id}`, role: 'tai', text: t.content, blocks: t.blocks, status: null, suggestions: [], memo: t.memo ?? undefined, streaming: false, voice: false, gate: null },
+  );
+}
+
 /** Касса и аналитика после действия Tai — как после нажатия кнопки в самой кассе. */
 function refreshAfter(card: TaiActionCard) {
   const host = useSession.getState().club?.host ?? 'none';
@@ -124,6 +150,9 @@ function refreshAfter(card: TaiActionCard) {
 }
 
 export const useTaiStore = create<TaiState>((set, get) => ({
+  chatId: null,
+  title: null,
+  opening: false,
   messages: [],
   busy: false,
   locked: false,
@@ -166,7 +195,13 @@ export const useTaiStore = create<TaiState>((set, get) => ({
     controller = current;
     try {
       await streamTai(
-        { messages: turns, context: get().context, voice: options.voice },
+        {
+          messages: turns,
+          context: get().context,
+          voice: options.voice,
+          chatId: get().chatId ?? 'new',
+          display: options.display && options.display !== text ? options.display : undefined,
+        },
         (event) => {
           switch (event.type) {
             case 'status':
@@ -180,6 +215,10 @@ export const useTaiStore = create<TaiState>((set, get) => ({
               break;
             case 'suggestions':
               patchReply(reply.id, () => ({ suggestions: event.items }));
+              break;
+            case 'chat':
+              set({ chatId: event.chat.id, title: event.chat.title });
+              refreshTaiChats();
               break;
             case 'done':
               patchReply(reply.id, () => ({ memo: event.memo }));
@@ -208,6 +247,7 @@ export const useTaiStore = create<TaiState>((set, get) => ({
       patchReply(reply.id, (m) => ({ streaming: false, status: null, text: m.text.trimEnd(), ...(heardAudio ? {} : { gate: null }) }));
       if (controller === current) controller = null;
       set({ busy: false });
+      refreshTaiChats();
     }
   },
 
@@ -222,7 +262,31 @@ export const useTaiStore = create<TaiState>((set, get) => ({
 
   reset: () => {
     get().stop();
-    set({ messages: [] });
+    set({ messages: [], chatId: null, title: null });
+  },
+
+  retry: (replyId) => {
+    const messages = get().messages;
+    const index = messages.findIndex((m) => m.id === replyId);
+    const question = messages[index - 1];
+    if (index < 1 || question?.role !== 'user' || get().busy) return;
+    set({ messages: messages.slice(0, index - 1) });
+    void get().send(question.text);
+  },
+
+  openChat: async (id) => {
+    if (id === get().chatId) return;
+    get().stop();
+    set({ opening: true, chatId: id, messages: [] });
+    try {
+      const { chat, turns } = await getTaiChat(id);
+      if (get().chatId === id) set({ title: chat.title, messages: fromTurns(turns) });
+    } catch (error) {
+      haptic.error();
+      if (get().chatId === id) set({ chatId: null, title: null, messages: [{ id: nextId(), role: 'tai', text: '', blocks: [], status: null, suggestions: [], error: taiErrorText(error), streaming: false, voice: false, gate: null }] });
+    } finally {
+      set({ opening: false });
+    }
   },
 
   confirm: async (actionId) => {

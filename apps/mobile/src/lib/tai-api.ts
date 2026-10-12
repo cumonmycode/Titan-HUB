@@ -1,7 +1,10 @@
 import { fetch } from 'expo/fetch';
 import { Platform } from 'react-native';
 
+import { useQuery } from '@tanstack/react-query';
+
 import { api, ApiError } from './api';
+import { useClubKey } from './queries';
 import { hostOrigin, useSession } from './session';
 
 /**
@@ -102,6 +105,8 @@ export type TaiEvent =
   | { type: 'suggestions'; items: string[] }
   /** Голосовой режим: озвученная фраза ответа (base64), по порядку seq. */
   | { type: 'audio'; seq: number; format: 'mp3' | 'wav'; data: string; upTo: number }
+  /** Начат новый чат истории (запрос с chatId: 'new'). */
+  | { type: 'chat'; chat: { id: string; title: string } }
   | { type: 'done'; memo: string }
   | { type: 'error'; message: string };
 
@@ -118,7 +123,7 @@ export type TaiTurn = { role: 'user' | 'assistant'; content: string; memo?: stri
  * новый ход модели. Ошибка до начала потока бросается как ApiError (403 — нет подписки).
  */
 export async function streamTai(
-  body: { messages: TaiTurn[]; context?: TaiContext; voice?: boolean },
+  body: { messages: TaiTurn[]; context?: TaiContext; voice?: boolean; chatId?: string; display?: string },
   onEvent: (event: TaiEvent) => void,
   signal: AbortSignal,
 ): Promise<void> {
@@ -177,6 +182,27 @@ export async function streamTai(
     }
   }
 }
+
+/* ─────────────────────────── История чатов ─────────────────────────── */
+
+export type TaiChatSummary = { id: string; title: string; updatedAt: string };
+export type TaiChatTurn = { id: number; role: 'user' | 'assistant'; content: string; blocks: TaiBlock[]; memo: string | null; createdAt: string };
+
+/** Чаты сотрудника, свежие сверху; q — поиск по заголовку и тексту. */
+export function useTaiChats(q: string, enabled = true) {
+  const club = useClubKey();
+  const query = q.trim();
+  return useQuery({
+    queryKey: [club, 'ai', 'chats', query],
+    queryFn: ({ signal }) => api.get<{ chats: TaiChatSummary[] }>(`/ai/chats${query ? `?q=${encodeURIComponent(query)}` : ''}`, { signal }).then((r) => r.chats),
+    enabled,
+    staleTime: 15_000,
+  });
+}
+
+export const getTaiChat = (id: string) => api.get<{ chat: TaiChatSummary; turns: TaiChatTurn[] }>(`/ai/chats/${id}`);
+export const renameTaiChat = (id: string, title: string) => api.patch<{ chat: TaiChatSummary }>(`/ai/chats/${id}`, { title }).then((r) => r.chat);
+export const deleteTaiChat = (id: string) => api.delete(`/ai/chats/${id}`);
 
 /** Нажатие кнопки карточки: сервер выполняет действие от имени сотрудника. */
 export async function confirmTaiAction(id: string): Promise<TaiActionCard> {

@@ -119,7 +119,9 @@ export default function ManageLayout() {
       <Stack.Screen name="polls/edit" options={editorModal} />
 
       <Stack.Screen name="tai/index" options={formHeader({ title: 'Tai' })} />
-      <Stack.Screen name="tai/chats" options={formHeader({ title: 'Tai в чатах' })} />
+      <Stack.Screen name="tai/voice" options={formHeader({ title: 'Голос' })} />
+      <Stack.Screen name="tai/chat" options={formHeader()} />
+      <Stack.Screen name="tai/brief" options={editorModal} />
 
       <Stack.Screen name="about/index" options={formHeader({ title: 'О системе' })} />
     </Stack>

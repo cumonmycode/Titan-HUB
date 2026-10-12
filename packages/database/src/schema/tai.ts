@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, boolean, timestamp, integer, bigserial } from 'drizzle-orm/pg-core'
+import { pgTable, uuid, text, boolean, timestamp, integer, bigserial, jsonb } from 'drizzle-orm/pg-core'
 import { profiles } from './profiles.js'
 
 /** Во что играет человек: спортивная, городская или обе мафии. */
@@ -38,3 +38,26 @@ export const taiMessages = pgTable('tai_messages', {
 })
 
 export type TaiContact = typeof taiContacts.$inferSelect
+
+// История чатов с Tai в Titan HUB (миграция 083): у каждого сотрудника свои чаты.
+export const taiChats = pgTable('tai_chats', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  userId: uuid('user_id').notNull().references(() => profiles.id),
+  title: text('title').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+// Реплики чата: вопрос или ответ Tai с блоками интерфейса (карточки обновляются при нажатии).
+export const taiChatTurns = pgTable('tai_chat_turns', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  chatId: uuid('chat_id').notNull().references(() => taiChats.id, { onDelete: 'cascade' }),
+  role: text('role').$type<'user' | 'assistant'>().notNull(),
+  content: text('content').notNull(),
+  blocks: jsonb('blocks').$type<unknown[]>().notNull().default([]),
+  memo: text('memo'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+export type TaiChat = typeof taiChats.$inferSelect
+export type TaiChatTurn = typeof taiChatTurns.$inferSelect

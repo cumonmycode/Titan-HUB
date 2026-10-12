@@ -133,6 +133,8 @@ export type TaiEvent =
   | { type: 'suggestions'; items: string[] }
   /** Голосовой режим: озвученная фраза ответа, по порядку seq (base64). */
   | { type: 'audio'; seq: number; format: 'mp3' | 'wav'; data: string; upTo: number }
+  /** Начат новый чат истории (запрос с chatId: 'new'). */
+  | { type: 'chat'; chat: { id: string; title: string } }
   | { type: 'done'; memo: string }
   | { type: 'error'; message: string }
 

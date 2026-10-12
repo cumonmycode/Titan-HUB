@@ -8,6 +8,8 @@ import { z } from 'zod'
 import type { AppEnv } from '../../../types.js'
 import { createApiCaller, forwardedHeaders, InternalApiError } from './internal.js'
 import { acceptSupply, cancelSupply, editSupply, supplyCard, type SupplyCtx, type SupplyOp } from './supply.js'
+import { updateStoredBlock } from './history.js'
+import type { TaiSupplyCard } from './blocks.js'
 
 export const supplyRouter = new Hono<AppEnv>()
 
@@ -26,6 +28,12 @@ const ctxOf = (c: Context<AppEnv>): SupplyCtx => ({ db: c.var.db, api: createApi
 const failed = (c: Context<AppEnv>, error: unknown) =>
   c.json({ error: error instanceof Error ? error.message : 'Не получилось' }, error instanceof InternalApiError && error.status < 500 ? (error.status as 400) : 400)
 
+/** Новое состояние карточки — и в историю чатов Tai, где она была показана. */
+async function remember<T extends TaiSupplyCard | null>(c: Context<AppEnv>, id: string, card: T): Promise<T> {
+  if (card) await updateStoredBlock(c.var.db, 'supply', id, card)
+  return card
+}
+
 supplyRouter.get('/:id', async (c) => {
   const id = c.req.param('id')
   if (!ID.test(id)) return c.json({ error: 'Неверная поставка' }, 400)
@@ -37,7 +45,7 @@ supplyRouter.post('/:id/edit', zValidator('json', z.object({ ops: z.array(OpSche
   const id = c.req.param('id')
   if (!ID.test(id)) return c.json({ error: 'Неверная поставка' }, 400)
   try {
-    return c.json({ supply: await editSupply(ctxOf(c), id, c.req.valid('json').ops as SupplyOp[]) })
+    return c.json({ supply: await remember(c, id, await editSupply(ctxOf(c), id, c.req.valid('json').ops as SupplyOp[])) })
   } catch (error) {
     return failed(c, error)
   }
@@ -47,7 +55,7 @@ supplyRouter.post('/:id/accept', async (c) => {
   const id = c.req.param('id')
   if (!ID.test(id)) return c.json({ error: 'Неверная поставка' }, 400)
   try {
-    return c.json({ supply: await acceptSupply(ctxOf(c), id) })
+    return c.json({ supply: await remember(c, id, await acceptSupply(ctxOf(c), id)) })
   } catch (error) {
     return failed(c, error)
   }
@@ -57,7 +65,7 @@ supplyRouter.post('/:id/cancel', async (c) => {
   const id = c.req.param('id')
   if (!ID.test(id)) return c.json({ error: 'Неверная поставка' }, 400)
   try {
-    return c.json({ supply: await cancelSupply(ctxOf(c), id) })
+    return c.json({ supply: await remember(c, id, await cancelSupply(ctxOf(c), id)) })
   } catch (error) {
     return failed(c, error)
   }

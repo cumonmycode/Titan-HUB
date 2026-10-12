@@ -46,6 +46,8 @@ import { resolveApiKey } from './tai/llm.js'
 import { synthesize, transcribe } from './tai/speech.js'
 import { getTaiSettings, normalizeTaiSettings, saveTaiSettings, TAI_SPEEDS, TAI_VOICES } from './tai/settings.js'
 import { supplyRouter } from './tai/supply.router.js'
+import { chatsRouter } from './tai/chats.router.js'
+import { appendTurn, createChat, nameChat, ownChat, recordReply, titleOf, updateStoredBlock } from './tai/history.js'
 import { getBusinessDayStartHour, getStringSetting } from '../../lib/appSettings.js'
 import { DEFAULT_CLUB_BRIEF } from '../tg/dialog/client-tools.js'
 
@@ -600,6 +602,11 @@ const AssistantSchema = z.object({
     })
     .optional(),
   voice: z.boolean().optional(),
+  // История в HUB: 'new' — начать чат (придёт событие chat), id — продолжить свой чат.
+  // Без поля ничего не сохраняется (старые клиенты).
+  chatId: z.union([z.literal('new'), z.string().uuid()]).optional(),
+  // Что показать в истории вместо текста для модели (ответ кнопкой выбора).
+  display: z.string().max(4000).optional(),
 })
 
 aiRouter.post('/assistant', zValidator('json', AssistantSchema), async (c) => {
@@ -610,14 +617,36 @@ aiRouter.post('/assistant', zValidator('json', AssistantSchema), async (c) => {
   return streamSSE(c, async (stream) => {
     const controller = new AbortController()
     stream.onAbort(() => controller.abort())
-    const emit = (event: TaiEvent) => stream.writeSSE({ data: JSON.stringify(event) })
+    const send = (event: TaiEvent) => stream.writeSSE({ data: JSON.stringify(event) })
+    const db = c.var.db
+    const userId = c.get('user').sub
+    const question = body.messages[body.messages.length - 1]!.content
+    const fresh = body.chatId === 'new'
+    const chat = !body.chatId ? null : fresh ? await createChat(db, userId, titleOf(body.display ?? question)) : await ownChat(db, userId, body.chatId)
+    if (body.chatId && !chat) {
+      await send({ type: 'error', message: 'Чат не найден — начните новый.' })
+      return
+    }
+    if (chat) {
+      if (fresh) await send({ type: 'chat', chat: { id: chat.id, title: chat.title } })
+      await appendTurn(db, chat.id, { role: 'user', content: body.display ?? question })
+    }
+    const { reply, emit } = recordReply(send)
     try {
       await runTai(c, body, emit, controller.signal)
     } catch (error) {
       if (!controller.signal.aborted) await emit({ type: 'error', message: taiErrorMessage(error) })
+    } finally {
+      if (chat && (reply.text.trim() || reply.blocks.length)) {
+        await appendTurn(db, chat.id, { role: 'assistant', content: reply.text.trim(), blocks: reply.blocks, memo: reply.memo })
+        if (fresh) void nameChat(db, chat.id, body.display ?? question, reply.text)
+      }
     }
   })
 })
+
+// История чатов Tai: список, открыть, переименовать, удалить.
+aiRouter.route('/chats', chatsRouter)
 
 const ACTION_ID = /^[0-9a-f-]{36}$/i
 
@@ -630,6 +659,7 @@ aiRouter.post('/assistant/actions/:id', async (c) => {
   if (!ACTION_ID.test(id)) return c.json({ error: 'Неверная карточка' }, 400)
   const outcome = await confirmAction(c.var.club?.id ?? 'main', c.get('user').sub, id, createApiCaller(forwardedHeaders(c)))
   if (outcome.status !== 200) return c.json({ error: outcome.error }, outcome.status)
+  await updateStoredBlock(c.var.db, 'action', id, outcome.card)
   return c.json({ action: outcome.card })
 })
 
@@ -637,6 +667,7 @@ aiRouter.post('/assistant/actions/:id/dismiss', async (c) => {
   const id = c.req.param('id')
   if (!ACTION_ID.test(id)) return c.json({ error: 'Неверная карточка' }, 400)
   const card = await dismissAction(c.var.club?.id ?? 'main', c.get('user').sub, id)
+  if (card) await updateStoredBlock(c.var.db, 'action', id, card)
   return c.json({ action: card })
 })
 
