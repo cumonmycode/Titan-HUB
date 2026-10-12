@@ -58,6 +58,9 @@ export interface BookingRequest {
   location: string | null
   address: string | null
   comment: string | null
+  /** event — мероприятие (подтверждение создаёт его); game — запись на игру; message — обращение. */
+  kind?: 'event' | 'game' | 'message'
+  source?: string | null
 }
 
 /** Конфликт брони зоны (409 от POST/PATCH /events и /events/availability). */

@@ -15,6 +15,8 @@ import { internalRouter } from './modules/internal/internal.router.js'
 import { tgRouter } from './modules/tg/tg.router.js'
 import { payRouter } from './modules/pay/pay.router.js'
 import { bookingsPublicRouter, bookingsRouter } from './modules/bookings/bookings.router.js'
+import { siteRouter } from './modules/site/site.router.js'
+import { siteAdminRouter } from './modules/site/stories.js'
 import { geoRouter } from './modules/geo/geo.router.js'
 
 import { authRouter } from './modules/auth/auth.router.js'
@@ -166,6 +168,11 @@ app.route('/api/platega', plategaRouter)
 // booking_enabled + глобальный rate-limit + валидация. ДО requireActiveSubscription.
 app.route('/api/bookings/public', bookingsPublicRouter)
 
+// Сайт клуба (titanmafia.ru): витрина и заявки гостей без авторизации. Не зависит
+// от тумблера виджета брони (booking_enabled) — сайт клуба принимает заявки всегда.
+// Защита — узкий лимит по IP/телефону, ловушка для ботов, согласие на ПДн.
+app.route('/api/site', siteRouter)
+
 // Геосаджест (Яндекс) — публичный прокси подсказок адресов (нужен и на /book).
 // ДО requireActiveSubscription; ключ — в integrations, защита пер-IP лимитом.
 app.route('/api/geo', geoRouter)
@@ -225,6 +232,8 @@ app.route('/api/refunds', refundsRouter)
 app.route('/api/notifications', notificationsRouter)
 app.route('/api/ai', aiRouter)
 app.route('/api/system', systemRouter)
+// Сайт клуба: публикации (турниры, вечеринки) — ведёт владелец из HUB.
+app.route('/api/site-admin', siteAdminRouter)
 app.route('/api/upload', uploadRouter)
 app.route('/api/staff', staffRouter)
 app.route('/api/cashops', cashopsRouter)

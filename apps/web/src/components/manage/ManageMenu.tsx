@@ -86,6 +86,8 @@ const NAV: NavGroup[] = [
     icon: 'settings',
     items: [
       { href: '/manage/settings', label: 'Настройки',   icon: 'settings',    color: '#94A3B8', bg: 'rgba(148,163,184,0.15)', roles: ['owner'] },
+      // Сайт клуба titanmafia.ru: тема, расписание, публикации турниров (заявки — в «Мероприятиях»).
+      { href: '/manage/site',     label: 'Сайт',        icon: 'language',    color: '#E5322D', bg: 'rgba(229,50,45,0.15)',  roles: ['owner'] },
       { href: '/manage/tai',      label: 'Tai',         icon: 'auto_awesome', color: '#8B5CF6', bg: 'rgba(139,92,246,0.15)', roles: ['owner'] },
       { href: '/manage/polls',    label: 'Опросы',      icon: 'fact_check',  color: '#8B5CF6', bg: 'rgba(139,92,246,0.15)', roles: ['owner'] },
       { href: '/manage/about',    label: 'О системе',   icon: 'info',        color: '#94A3B8', bg: 'rgba(148,163,184,0.15)', roles: ['owner'] },

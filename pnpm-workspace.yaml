@@ -6,6 +6,8 @@ packages:
   - "!apps/mobile"
   - "!apps/client"
   - "!apps/home"
+  # Сайт клуба (titanmafia.ru) — отдельный npm-проект со своим Dockerfile.
+  - "!apps/site"
 allowBuilds:
   esbuild: true
   msgpackr-extract: true

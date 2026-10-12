@@ -22,6 +22,7 @@ import { upsertRosterUser } from '../../lib/roster.js'
 import { listChats, recordChat } from '../../lib/tgChats.js'
 import { getBoolSetting, getStringSetting } from '../../lib/appSettings.js'
 import { TAI_PRESETS } from '../../lib/tai.js'
+import { SITE_THEMES, DEFAULT_SITE_THEME, isSiteTheme, parseSchedule } from '../site/site.router.js'
 // Control-БД: резолв clubId на основном домене (c.var.club=null → ищем по db_name).
 import { getControlDb, clubs as ctrlClubs, eq as ceq } from '../../../../../packages/database/dist/control/index.js'
 
@@ -591,6 +592,42 @@ systemRouter.put(
     return c.json({ ok: true })
   },
 )
+
+// ─── Сайт клуба (titanmafia.ru): тема и расписание вечеров ──────────────────
+// Сайт читает их через публичный /api/site/config (кэш 60 с) — смена темы в HUB
+// доезжает до сайта в течение минуты. Только владелец.
+systemRouter.get('/site-config', requireAuth, requireRole('owner'), async (c) => {
+  const db = c.var.db
+  const rows = await db.select().from(appSettings).where(inArray(appSettings.key, ['site_theme', 'site_schedule']))
+  const m = Object.fromEntries(rows.map((r) => [r.key, r.value]))
+  return c.json({
+    theme: isSiteTheme(m['site_theme']) ? m['site_theme'] : DEFAULT_SITE_THEME,
+    themes: SITE_THEMES,
+    schedule: parseSchedule(m['site_schedule']),
+  })
+})
+
+const SiteConfigSchema = z.object({
+  theme: z.enum(SITE_THEMES).optional(),
+  schedule: z.array(z.object({
+    day: z.number().int().min(1).max(7),
+    title: z.string().trim().min(1).max(60),
+    time: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).optional(),
+  })).max(14).nullable().optional(),
+})
+
+systemRouter.put('/site-config', requireAuth, requireRole('owner'), zValidator('json', SiteConfigSchema), async (c) => {
+  const db = c.var.db
+  const body = c.req.valid('json')
+  const upsert = (key: string, value: string) => db.insert(appSettings).values({ key, value })
+    .onConflictDoUpdate({ target: appSettings.key, set: { value } })
+  if (body.theme) await upsert('site_theme', body.theme)
+  if (body.schedule !== undefined) {
+    if (body.schedule === null) await db.delete(appSettings).where(eq(appSettings.key, 'site_schedule'))
+    else await upsert('site_schedule', JSON.stringify([...body.schedule].sort((a, b) => a.day - b.day)))
+  }
+  return c.json({ ok: true })
+})
 
 // QR на публичную форму брони. origin передаёт фронт (свой window.location.origin),
 // валидируем формат; только owner.

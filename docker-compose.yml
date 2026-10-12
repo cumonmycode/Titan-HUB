@@ -189,6 +189,29 @@ services:
     networks:
       - titan-net
 
+  # Сайт клуба titanmafia.ru (Next.js). Данные и заявки — API клуба внутри сети
+  # (Host клубного поддомена выбирает БД клуба). nginx ходит сюда через resolver,
+  # поэтому сайт не блокирует старт nginx.
+  site:
+    build:
+      context: ./apps/site
+      dockerfile: Dockerfile
+    container_name: titan-site
+    restart: unless-stopped
+    logging: *default-logging
+    mem_limit: 384m
+    environment:
+      SITE_API_URL: http://api:3001
+      SITE_CLUB_HOST: kbr.titanpos.ru
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/robots.txt').then(r=>process.exit(r.status<500?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - titan-net
+
   nginx:
     image: nginx:alpine
     container_name: titan-nginx
@@ -201,6 +224,8 @@ services:
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./nginx/ssl:/etc/nginx/ssl:ro
+      # Webroot для certbot (HTTP-01): titanmafia.ru и admin — выпуск и продление без даунтайма.
+      - ./nginx/acme:/var/www/certbot:ro
       - nginx-cache:/var/cache/nginx
     # Стартуем nginx только когда апстримы здоровы (api прогнал миграции) —
     # закрывает окно 502 при холодном старте/перезагрузке хоста.

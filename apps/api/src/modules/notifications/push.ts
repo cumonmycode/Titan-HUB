@@ -99,6 +99,8 @@ export const NOTIFICATION_TYPES: NotificationTypeDef[] = [
   { key: 'client_registration', label: 'Регистрация в My Titan', description: 'Клиент зарегистрировался в приложении и ждёт подтверждения', defaultEnabled: true },
   { key: 'supply_received', label: 'Приход на склад', description: 'Оформлен приход товара на склад', defaultEnabled: true },
   { key: 'large_refund', label: 'Крупный возврат', description: 'Оформлен возврат на крупную сумму', defaultEnabled: true },
+  { key: 'booking', label: 'Бронь с виджета', description: 'Гость забронировал зону или выезд через /book', defaultEnabled: true },
+  { key: 'site_request', label: 'Заявка с сайта', description: 'Запись на игру, заявка на мероприятие или сообщение с сайта клуба', defaultEnabled: true },
 ]
 
 const DEFAULT_ENABLED: Record<string, boolean> = Object.fromEntries(

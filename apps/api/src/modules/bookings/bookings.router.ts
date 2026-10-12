@@ -14,12 +14,11 @@ import { Hono } from 'hono'
 import { zValidator } from '@hono/zod-validator'
 import { z } from 'zod'
 import { randomUUID } from 'node:crypto'
-import { sql, events, spaces, appSettings, eventHourlyRates, profiles, customers, eq, and, isNull, inArray, asc } from '@titan/database'
+import { sql, events, spaces, appSettings, eventHourlyRates, customers, eq, and, inArray, asc } from '@titan/database'
 import type { AppEnv } from '../../types.js'
 import { requireAuth, requireRole } from '../../middleware/auth.js'
-import { notify } from '../notifications/push.js'
-import { getSharedRedis } from '../../lib/redis.js'
 import { clientIp } from '../../lib/clientIp.js'
+import { notifyOwners, publicRateLimited, startError } from './publicGuards.js'
 import { findOverlappingEvent, lockEventBooking } from '../events/events.router.js'
 import { cancelEventTx } from '../events/eventLifecycle.js'
 import { publishEvent } from '../../lib/realtime.js'
@@ -51,40 +50,10 @@ const LOOKUP_WINDOW_SECONDS = 60
 const CREATE_MAX_PER_WINDOW = parseInt(process.env['BOOKING_CREATE_LIMIT'] ?? '5')
 const CREATE_WINDOW_SECONDS = 600
 
-async function publicRateLimited(
-  prefix: string, clubId: string, ip: string, phoneTail: string, max: number, windowSeconds: number,
-): Promise<boolean> {
-  try {
-    const redis = getSharedRedis()
-    const scope = clubId || 'default'
-    // Два независимых окна: по IP и по телефону. Превышение любого = блок.
-    const keys = [`${prefix}:ip:${scope}:${ip}`, `${prefix}:ph:${scope}:${phoneTail}`]
-    for (const key of keys) {
-      const current = await redis.incr(key)
-      if (current === 1) await redis.expire(key, windowSeconds)
-      if (current > max) return true
-    }
-    return false
-  } catch {
-    // Redis недоступен — не блокируем легитимных гостей (доступность важнее).
-    return false
-  }
-}
 const lookupRateLimited = (clubId: string, ip: string, phoneTail: string) =>
   publicRateLimited('bl', clubId, ip, phoneTail, LOOKUP_MAX_PER_WINDOW, LOOKUP_WINDOW_SECONDS)
 const createRateLimited = (clubId: string, ip: string, phoneTail: string) =>
   publicRateLimited('bc', clubId, ip, phoneTail, CREATE_MAX_PER_WINDOW, CREATE_WINDOW_SECONDS)
-
-// Начало брони гостя: календарно существующая дата + время 00:00–23:59, не в прошлом.
-// Иначе Postgres падал на касте «2026-02-31»/«25:99» (500), а заявка «на вчера»
-// уходила владельцу. Возвращает текст ошибки для 400 или null.
-function startError(date: string, time: string): string | null {
-  const d = new Date(`${date}T00:00:00Z`)
-  if (Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== date) return 'Такой даты нет — проверьте день и месяц'
-  if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) return 'Время указано неверно — нужно ЧЧ:ММ от 00:00 до 23:59'
-  if (new Date(`${date}T${time}:00+03:00`).getTime() < Date.now()) return 'Это время уже прошло — выберите будущую дату'
-  return null
-}
 
 // Дата/время/зона/часы, которые видит гость: после подтверждения бронь живёт как
 // мероприятие, и персонал может его перенести (время, зона) — показываем актуальное
@@ -244,15 +213,9 @@ bookingsPublicRouter.post('/', zValidator('json', CreateSchema), async (c) => {
     } catch { /* non-fatal */ }
   }
 
-  try {
-    const owners = await db.select({ id: profiles.id }).from(profiles)
-      .where(and(eq(profiles.role, 'owner'), isNull(profiles.deletedAt)))
-    const where = b.location === 'exit' ? 'выезд' : 'Штаб'
-    const body = `${b.title ? b.title + ' · ' : ''}${b.name} · ${where} · ${b.date} ${b.time}${b.guests ? ` · ${b.guests} гост.` : ''}`
-    for (const o of owners) {
-      await notify({ type: 'booking', title: '🗓️ Новая бронь', body, meta: { bookingId: id, url: '/events' }, userId: o.id }, db, c.var.club?.id)
-    }
-  } catch { /* non-fatal */ }
+  const where = b.location === 'exit' ? 'выезд' : 'Штаб'
+  const body = `${b.title ? b.title + ' · ' : ''}${b.name} · ${where} · ${b.date} ${b.time}${b.guests ? ` · ${b.guests} гост.` : ''}`
+  await notifyOwners(db, c.var.club?.id, { type: 'booking', title: '🗓️ Новая бронь', body, meta: { bookingId: id, url: '/events' } })
 
   return c.json({ ok: true, id, token })
 })
@@ -345,7 +308,7 @@ bookingsRouter.get('/', requireRole('owner', 'staff'), async (c) => {
   const res = await db.execute(sql`
     SELECT b.id, b.space_id, s.name AS zone_name, b.name, b.phone, b.guests, b.title,
            b.starts_at, b.duration_hours, b.tariff_hours, b.location, b.address,
-           b.comment, b.status, b.source, b.event_id, b.created_at
+           b.comment, b.status, b.source, b.kind, b.meta, b.event_id, b.created_at
     FROM bookings b
     LEFT JOIN spaces s ON s.id = b.space_id
     ${status ? sql`WHERE b.status = ${status}` : sql``}
@@ -418,7 +381,10 @@ bookingsRouter.patch('/:id', requireRole('owner', 'staff'), zValidator('json', P
         cancelledCheckIds = (await cancelEventTx(tx, eventId, user.sub))?.cancelledCheckIds ?? []
       }
     }
-    if (status === 'confirmed' && !eventId) {
+    // Мероприятие создаёт только заявка-мероприятие. Запись на игровой вечер и
+    // обращение с сайта (kind game/message) подтверждаются как «приняты» — без события.
+    const createsEvent = (bk['kind'] ?? 'event') === 'event'
+    if (status === 'confirmed' && !eventId && createsEvent) {
       const { date, time } = mskParts(bk['starts_at'] as string)
       const hours = bk['tariff_hours'] != null ? Number(bk['tariff_hours']) : (bk['duration_hours'] != null ? Number(bk['duration_hours']) : 0)
       const endTime = hours > 0 ? addHours(time, hours) : null
