@@ -1,105 +1,139 @@
-import { Button, ContentUnavailableView, Form, HStack, Host, Image, ProgressView, Section, Spacer, Text, VStack } from '@expo/ui/swift-ui';
-import { background, buttonStyle, font, frame, lineLimit, refreshable, shapes } from '@expo/ui/swift-ui/modifiers';
 import { Stack, useRouter } from 'expo-router';
+import { SymbolView } from 'expo-symbols';
 import { useState } from 'react';
-import { Linking } from 'react-native';
-import type { SFSymbol } from 'sf-symbols-typescript';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
-import { ActionRow, primary, SearchRow, secondary } from '@/components/native-form';
+import { Avatar } from '@/components/new-check-parts';
 import { useDebounced } from '@/components/player-picker';
+import { Card } from '@/components/profile-parts';
+import { AppRefreshControl } from '@/components/refresh-control';
+import { Text, TextInput } from '@/components/text';
+import { ToolbarButton } from '@/components/toolbar';
 import { useCustomerList, type CustomerRow } from '@/lib/clients-api';
-import { normalizePhone } from '@/lib/events-api';
+import { monthShort } from '@/lib/events-api';
 import { plural } from '@/lib/format';
 import { haptic } from '@/lib/haptics';
+import { usePageGutter } from '@/lib/layout';
+import { colors, space, type } from '@/lib/theme';
 
 /**
- * Заказчики мероприятий — контакты, которые копятся из броней и мероприятий.
- * Позвонить или написать можно прямо из списка; тап по имени открывает карточку для правки.
+ * Заказчики мероприятий — контакты из броней и мероприятий. В строке: кто, телефон и
+ * сколько мероприятий было; нажатие открывает карточку со связью и историей мероприятий.
  */
 export default function CustomersScreen() {
   const router = useRouter();
+  const gutter = usePageGutter();
   const [query, setQuery] = useState('');
   const search = useDebounced(query, 300);
   const customers = useCustomerList(search);
+  const [pulling, setPulling] = useState(false);
   const list = customers.data ?? [];
   const searching = search.trim().length > 0;
-
-  const open = (customer?: CustomerRow) => {
-    haptic.light();
-    router.push(
-      customer
-        ? { pathname: '/manage/customers/edit', params: { customerId: customer.id, name: customer.name ?? '', phone: customer.phone ?? '' } }
-        : '/manage/customers/edit',
-    );
-  };
 
   const caption = searching
     ? list.length >= 8
       ? 'Первые 8 совпадений — уточните запрос'
       : `Найдено: ${list.length}`
-    : `${list.length} ${plural(list.length, ['заказчик', 'заказчика', 'заказчиков'])}`;
+    : `${list.length} ${plural(list.length, ['заказчик', 'заказчика', 'заказчиков'])} · из броней и мероприятий`;
 
   return (
-    <>
+    <View style={styles.screen}>
       <Stack.Title>Заказчики</Stack.Title>
-      <Host style={{ flex: 1 }} useViewportSizeMeasurement>
-        <Form modifiers={[refreshable(async () => void (await customers.refetch()))]}>
-          <Section>
-            <SearchRow placeholder="Имя или телефон" onChange={setQuery} />
-          </Section>
+      <Stack.Toolbar placement="right">
+        <ToolbarButton icon="plus" accessibilityLabel="Новый заказчик" onPress={() => router.push('/manage/customers/edit')} />
+      </Stack.Toolbar>
+      <ScrollView
+        contentInsetAdjustmentBehavior="automatic"
+        contentContainerStyle={[styles.content, gutter]}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
+        refreshControl={
+          <AppRefreshControl
+            tintColor={colors.accent}
+            refreshing={pulling}
+            onRefresh={() => {
+              setPulling(true);
+              void customers.refetch().finally(() => setPulling(false));
+            }}
+          />
+        }
+      >
+        <View style={styles.search}>
+          <SymbolView name="magnifyingglass" size={16} tintColor={colors.secondaryLabel} />
+          <TextInput
+            value={query}
+            onChangeText={setQuery}
+            placeholder="Имя или телефон"
+            placeholderTextColor={colors.tertiaryLabel}
+            selectionColor={colors.accent}
+            style={[type.body, styles.searchInput]}
+            returnKeyType="search"
+            accessibilityLabel="Поиск заказчика"
+          />
+        </View>
 
-          <Section title={customers.data ? caption : undefined} footer={<Text>Контакты появляются из броней и мероприятий. Кнопки справа — позвонить, WhatsApp, Telegram.</Text>}>
-            {customers.isLoading ? (
-              <ProgressView />
-            ) : customers.isError && list.length === 0 ? (
-              <ContentUnavailableView title="Нет связи" systemImage="wifi.exclamationmark" description={customers.error.message} />
-            ) : list.length === 0 ? (
-              <ContentUnavailableView title={searching ? 'Никого не нашли' : 'Заказчиков нет'} systemImage="person.crop.rectangle.stack" description={searching ? 'Проверьте имя или номер.' : undefined} />
-            ) : (
-              list.map((customer) => <CustomerLine key={customer.id} customer={customer} onOpen={() => open(customer)} />)
-            )}
-            <ActionRow title="Новый заказчик" icon="plus.circle.fill" onPress={() => open()} />
-          </Section>
-        </Form>
-      </Host>
-    </>
+        {customers.isLoading ? (
+          <ActivityIndicator style={styles.loading} />
+        ) : list.length === 0 ? (
+          <View style={styles.empty}>
+            <SymbolView name="person.crop.rectangle.stack" size={40} tintColor={colors.tertiaryLabel} />
+            <Text style={[type.headline, styles.label]}>{searching ? 'Никого не нашли' : 'Заказчиков пока нет'}</Text>
+            <Text style={[type.subhead, styles.secondary, styles.centerText]}>
+              {searching ? 'Проверьте имя или номер.' : 'Они появятся из броней и мероприятий — или добавьте вручную кнопкой «+».'}
+            </Text>
+          </View>
+        ) : (
+          <Card footer={caption}>
+            {list.map((customer) => (
+              <CustomerLine
+                key={customer.id}
+                customer={customer}
+                onPress={() => {
+                  haptic.selection();
+                  router.push({ pathname: '/manage/customers/[customerId]', params: { customerId: customer.id } });
+                }}
+              />
+            ))}
+          </Card>
+        )}
+      </ScrollView>
+    </View>
   );
 }
 
-function CustomerLine({ customer, onOpen }: { customer: CustomerRow; onOpen: () => void }) {
-  const phone = customer.phone ? normalizePhone(customer.phone) : null;
+function CustomerLine({ customer, onPress }: { customer: CustomerRow; onPress: () => void }) {
+  const name = customer.name || 'Без имени';
+  const events = customer.events ?? 0;
+  const details = [customer.phone || 'нет телефона', events ? `${events} ${plural(events, ['мероприятие', 'мероприятия', 'мероприятий'])}` : null].filter(Boolean).join(' · ');
   return (
-    <HStack spacing={10}>
-      <Button onPress={onOpen} modifiers={[buttonStyle('borderless')]}>
-        <VStack alignment="leading" spacing={1}>
-          <Text modifiers={[customer.name ? primary : secondary, font({ weight: 'semibold' }), lineLimit(1)]}>{customer.name || 'Без имени'}</Text>
-          <Text modifiers={[font({ textStyle: 'subheadline' }), secondary, lineLimit(1)]}>{customer.phone || 'Нет телефона'}</Text>
-        </VStack>
-      </Button>
-      <Spacer />
-      {phone ? (
-        <>
-          <Quick icon="phone.fill" color="#34C759" onPress={() => void Linking.openURL(`tel:+${phone}`)} />
-          <Quick icon="message.fill" color="#25D366" onPress={() => void Linking.openURL(`https://wa.me/${phone}`)} />
-          <Quick icon="paperplane.fill" color="#32ADE6" onPress={() => void Linking.openURL(`tg://resolve?phone=${phone}`)} />
-        </>
-      ) : null}
-    </HStack>
+    <Pressable onPress={onPress} style={({ pressed }) => [styles.row, pressed && styles.pressed]} accessibilityRole="button" accessibilityLabel={name}>
+      <Avatar name={name} size={40} />
+      <View style={styles.flex}>
+        <Text style={[type.body, customer.name ? styles.label : styles.secondary, styles.bold]} numberOfLines={1}>
+          {name}
+        </Text>
+        <Text style={[type.footnote, styles.secondary]} numberOfLines={1}>
+          {details}
+        </Text>
+      </View>
+      {customer.lastDate ? <Text style={[type.footnote, styles.secondary]}>{`${Number(customer.lastDate.slice(8, 10))} ${monthShort(customer.lastDate)}`}</Text> : null}
+      <SymbolView name="chevron.right" size={13} weight="semibold" tintColor={colors.tertiaryLabel} />
+    </Pressable>
   );
 }
 
-/** Круглая кнопка быстрого действия в строке — отдельная от нажатия на имя. */
-function Quick({ icon, color, onPress }: { icon: SFSymbol; color: string; onPress: () => void }) {
-  return (
-    <Image
-      systemName={icon}
-      size={13}
-      color="white"
-      modifiers={[frame({ width: 30, height: 30 }), background(color, shapes.circle())]}
-      onPress={() => {
-        haptic.light();
-        onPress();
-      }}
-    />
-  );
-}
+const styles = StyleSheet.create({
+  screen: { flex: 1, backgroundColor: colors.groupedBackground },
+  content: { gap: space.lg, paddingTop: space.sm, paddingBottom: space.xxxl },
+  search: { flexDirection: 'row', alignItems: 'center', gap: space.sm, backgroundColor: colors.fill, borderRadius: 12, borderCurve: 'continuous', paddingHorizontal: space.md, minHeight: 40 },
+  searchInput: { flex: 1, color: colors.label, paddingVertical: 8 },
+  loading: { marginTop: space.xxl },
+  empty: { alignItems: 'center', gap: space.sm, paddingTop: space.xxxl, paddingHorizontal: space.xl },
+  centerText: { textAlign: 'center' },
+  row: { flexDirection: 'row', alignItems: 'center', gap: space.md, paddingHorizontal: space.lg, paddingVertical: 10, minHeight: 60 },
+  pressed: { backgroundColor: colors.fill },
+  flex: { flex: 1, minWidth: 0 },
+  label: { color: colors.label },
+  secondary: { color: colors.secondaryLabel },
+  bold: { fontWeight: '600' },
+});

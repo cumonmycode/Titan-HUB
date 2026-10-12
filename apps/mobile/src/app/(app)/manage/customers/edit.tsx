@@ -57,7 +57,8 @@ function CustomerForm({ initial }: { initial: CustomerRow | undefined }) {
           deleteCustomer(initial.id)
             .then(() => {
               haptic.success();
-              router.back();
+              // Удалили с карточки — её больше нет, возвращаемся к списку.
+              router.dismissTo('/manage/customers');
             })
             .catch((error: unknown) => {
               haptic.error();

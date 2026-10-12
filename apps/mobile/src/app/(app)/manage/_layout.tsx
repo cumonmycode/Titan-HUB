@@ -67,6 +67,7 @@ export default function ManageLayout() {
       <Stack.Screen name="balances/find" options={compactSheet} />
 
       <Stack.Screen name="customers/index" options={formHeader({ title: 'Заказчики' })} />
+      <Stack.Screen name="customers/[customerId]" options={formHeader()} />
       <Stack.Screen name="customers/edit" options={editorModal} />
 
       <Stack.Screen name="collections/index" options={formHeader({ title: 'Сбор средств' })} />

@@ -6,6 +6,7 @@ import { queryClient } from './query';
 import { useClubKey } from './queries';
 import { useSession } from './session';
 import { invalidateShift } from './shift-api';
+import type { EventStatus } from './events-api';
 import type { NumericString } from './types';
 
 /**
@@ -538,7 +539,27 @@ export function balanceDelta(op: BalanceOp, value: number, balance: number): num
 
 /* ─────────────────────────── Заказчики ─────────────────────────── */
 
-export type CustomerRow = { id: string; name: string | null; phone: string | null; createdAt: string };
+export type CustomerRow = {
+  id: string;
+  name: string | null;
+  phone: string | null;
+  createdAt: string;
+  /** Мероприятий с этим телефоном (без отменённых), последнее и сумма чеков — со списка. */
+  events?: number;
+  lastDate?: string | null;
+  total?: number;
+};
+export type CustomerEvent = { id: string; title: string | null; date: string; startTime: string; status: EventStatus; type: string; format: string; total: number | null };
+
+/** Карточка заказчика: контакт и его мероприятия (по телефону), свежие сверху. */
+export function useCustomer(customerId: string | undefined) {
+  const club = useClubKey();
+  return useQuery({
+    queryKey: [club, 'customers', 'one', customerId],
+    queryFn: () => api.get<{ customer: CustomerRow; events: CustomerEvent[] }>(`/customers/${customerId}`),
+    enabled: !!customerId,
+  });
+}
 
 /** Без запроса — до 200 последних, с запросом сервер отдаёт не больше 8. */
 export function useCustomerList(query: string) {
