@@ -19,6 +19,20 @@ import type { LoginResponse } from '@/lib/types';
 
 const PIN_LENGTH = 4;
 
+/**
+ * Продлить сессию устройства после разблокировки: первый вход был через Tai в
+ * Telegram, дальше устройство открывается Face ID или PIN и не теряет вход.
+ * 401 — сотрудника уволили или токен отозван: api сам вернёт на экран входа.
+ */
+async function refreshSession(): Promise<void> {
+  try {
+    const res = await api.post<LoginResponse>('/auth/hub/refresh');
+    await useSession.getState().signIn(res.token, res.user);
+  } catch {
+    // Нет сети — продлим при следующей разблокировке.
+  }
+}
+
 /** Через сколько в фоне касса снова просит Face ID или PIN — как 30 минут простоя в вебе. */
 const LOCK_AFTER_MS = 30 * 60 * 1000;
 
@@ -109,6 +123,7 @@ export function SessionLock() {
       if (result.success) {
         haptic.success();
         useSession.getState().unlock();
+        void refreshSession();
       }
     } finally {
       prompting.current = false;
@@ -158,6 +173,7 @@ function LockedContent({ biometrics, onBiometrics }: { biometrics: boolean; onBi
       const res = await api.post<LoginResponse>('/auth/login/pin', { pin: code, userId: user?.id }, { auth: false });
       haptic.success();
       await useSession.getState().signIn(res.token, res.user);
+      void refreshSession();
     } catch (error) {
       haptic.error();
       setPin('');

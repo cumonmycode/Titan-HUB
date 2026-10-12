@@ -196,6 +196,7 @@ const ACTION_ICON: Record<TaiActionCard['kind'], SFSymbol> = {
   change_item: 'slider.horizontal.3',
   discount: 'percent',
   cancel_check: 'xmark.bin',
+  send_poll: 'paperplane',
 };
 
 function ActionBlock({ card }: { card: TaiActionCard }) {
@@ -212,7 +213,7 @@ function ActionBlock({ card }: { card: TaiActionCard }) {
     <GlassCard style={[styles.card, cancelled && styles.cancelled]}>
       <View style={styles.actionHeader}>
         <SymbolView
-          name={done ? 'checkmark.circle.fill' : failed ? 'exclamationmark.triangle.fill' : ACTION_ICON[card.kind]}
+          name={done ? 'checkmark.circle.fill' : failed ? 'exclamationmark.triangle.fill' : ACTION_ICON[card.kind] ?? 'bolt'}
           size={20}
           weight="semibold"
           tintColor={done ? colors.green : failed ? colors.orange : tint}

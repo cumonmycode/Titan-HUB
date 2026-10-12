@@ -29,6 +29,8 @@ type RequestOptions = {
   host?: string;
   /** `false` — запрос без токена (вход). 401 такого запроса не разлогинивает. */
   auth?: boolean;
+  /** Токен вместо сохранённого — например, задать PIN сразу после входа через Telegram. */
+  token?: string;
   signal?: AbortSignal;
 };
 
@@ -87,7 +89,7 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
   const useAuth = options.auth !== false;
   // Токен, с которым ушёл запрос: поздний 401 по старому токену не должен выкинуть
   // сотрудника, который уже вошёл заново.
-  const sentToken = useAuth ? session.token : null;
+  const sentToken = useAuth ? (options.token ?? session.token) : null;
   const headers: Record<string, string> = {
     Accept: 'application/json',
     'X-App-Platform': Platform.OS,

@@ -9,7 +9,7 @@
     "ios": {
       "icon": "./assets/titan.icon",
       "bundleIdentifier": "ru.titan.hub",
-      "buildNumber": "33",
+      "buildNumber": "34",
       "appleTeamId": "G99YH9UK8C",
       "supportsTablet": true,
       "infoPlist": {

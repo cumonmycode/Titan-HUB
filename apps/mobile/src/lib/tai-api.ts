@@ -33,7 +33,7 @@ export type TaiPart = { key: string; label: string; value: number; share: number
 
 export type TaiActionCard = {
   id: string;
-  kind: 'open_check' | 'add_items' | 'change_item' | 'discount' | 'cancel_check';
+  kind: 'open_check' | 'add_items' | 'change_item' | 'discount' | 'cancel_check' | 'send_poll';
   title: string;
   rows: { label: string; value: string }[];
   total?: string;
