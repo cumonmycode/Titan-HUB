@@ -75,7 +75,7 @@ export function GlassHome({ config, stories, players }: HomeProps) {
             <span className="g-line" style={v({ '--i': 1 })}>Каждый вечер —</span>
             <span className="g-line g-line-accent" style={v({ '--i': 2 })}><WordRotator words={['городская', 'спортивная', 'детская', 'корпоративная']} /></span>
           </h1>
-          <p className="lead g-rise" style={v({ '--i': 3 })}>Клуб TITAN KBR: игры с ведущими, турниры с рейтингом GoMafia, праздники и выезд со всем реквизитом. Цены и расписание — прямо из кассы клуба.</p>
+          <p className="lead g-rise" style={v({ '--i': 3 })}>Клуб TITAN KBR: игры с ведущими, турниры с рейтингом GoMafia, праздники и выезд со всем реквизитом.</p>
           <div className="actions g-rise" style={v({ '--i': 4 })}>
             <RequestButton preset={{ kind: 'game' }} className="btn btn-primary btn-lg">Записаться на игру</RequestButton>
             <RequestButton preset={{ kind: 'event' }} className="btn btn-ghost btn-lg glass">Заказать праздник</RequestButton>
@@ -144,7 +144,7 @@ export function GlassHome({ config, stories, players }: HomeProps) {
       </Reveal>
 
       <Reveal as="section" className="sec">
-        <SectionHead title="Цены" lead="Всегда актуальные — подтягиваются из кассы клуба." />
+        <SectionHead title="Цены" />
         <RevealItem><PriceTabs evening={config.eveningPrices} rates={config.eventRates} zones={config.zones} /></RevealItem>
       </Reveal>
 

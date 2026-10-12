@@ -36,7 +36,7 @@ export default async function EventsPage() {
       <Section title="Форматы">
         <Formats formats={events} config={config} />
       </Section>
-      <Section title="Тарифы" lead="Стоимость мероприятия по продолжительности — из кассы клуба.">
+      <Section title="Тарифы" lead="Стоимость мероприятия по продолжительности.">
         <EventRates config={config} />
       </Section>
       {config.zones.length > 0 && (

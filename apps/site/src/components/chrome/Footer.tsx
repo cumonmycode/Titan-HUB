@@ -27,7 +27,7 @@ export function Footer({ config }: { config: SiteConfig }) {
           {FOOTER_LINKS.map((n) => <Link key={n.href} href={n.href}>{n.label}</Link>)}
         </nav>
       </div>
-      <p className="ftr-copy">© {SITE.since}–{new Date().getFullYear()} {SITE.name}. Цены и расписание — из кассы клуба, обновляются автоматически.</p>
+      <p className="ftr-copy">© {SITE.since}–{new Date().getFullYear()} {SITE.name}.</p>
     </footer>
   )
 }
