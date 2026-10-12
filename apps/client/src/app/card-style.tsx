@@ -18,6 +18,8 @@ import { colors, space, type } from '@/lib/theme';
 
 const GAP = 14;
 const SIDE_PEEK = 44;
+/** Запас под картой для её тени (0 18px 36px): лента обрезает всё за своими краями. */
+const SHADOW_ROOM = 56;
 const MAX_ITEM = 360;
 /** Насколько соседние карты подтянуты к центру (доля ширины) — чтобы выглядывали из-за краёв. */
 const NEIGHBOR_PULL = 0.08;
@@ -123,7 +125,8 @@ function CarouselItem({ i, step, width, scrollX, children }: {
 const styles = StyleSheet.create({
   root: { flex: 1 },
   body: { flex: 1, justifyContent: 'center' },
-  carousel: { flexGrow: 0, paddingVertical: space.xl },
+  // Отрицательный отступ возвращает точки к карте — тень под ними не обрезается.
+  carousel: { flexGrow: 0, paddingTop: space.xl, paddingBottom: SHADOW_ROOM, marginBottom: space.xl - SHADOW_ROOM },
   dots: { flexDirection: 'row', justifyContent: 'center', gap: 6, marginTop: space.sm },
   dot: { width: 6, height: 6, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.22)' },
   dotOn: { width: 18, backgroundColor: colors.violetLight },
