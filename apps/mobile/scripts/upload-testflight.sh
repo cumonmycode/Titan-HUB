@@ -55,6 +55,10 @@ if [ ! -f ios/TitanHUB/Info.plist ] || [ app.json -nt ios/TitanHUB/Info.plist ] 
   npx expo prebuild --platform ios
 fi
 
+# DERIVED_DATA_PATH — своя папка DerivedData (например, когда внешний диск из настроек Xcode не подключён).
+DERIVED=()
+if [ -n "${DERIVED_DATA_PATH:-}" ]; then DERIVED=(-derivedDataPath "$DERIVED_DATA_PATH"); fi
+
 VERSION=$(node -p "require('./app.json').expo.version")
 BUILD=$(node -p "require('./app.json').expo.ios.buildNumber")
 OUT=ios/build/testflight
@@ -69,6 +73,7 @@ if ! xcodebuild \
   -archivePath "$OUT/TitanHUB.xcarchive" \
   -allowProvisioningUpdates \
   "${AUTH[@]}" \
+  "${DERIVED[@]}" \
   archive >"$OUT/archive.log" 2>&1; then
   grep -E "error:|Provisioning|No profiles|No signing certificate" "$OUT/archive.log" | head -20 || true
   echo "Архив не собрался, подробности в apps/mobile/$OUT/archive.log"
