@@ -45,6 +45,8 @@ export const DEFAULT_SCHEDULE: ScheduleDay[] = [
 
 export const FALLBACK_CONFIG: SiteConfig = {
   holiday: null,
+  contacts: null,
+  url: null,
   venue: { name: 'TITAN KBR', address: 'Кабардинская улица, 152', hoursOpen: '19:00', hoursClose: '03:00' },
   schedule: DEFAULT_SCHEDULE,
   eveningPrices: [
@@ -58,6 +60,8 @@ export const FALLBACK_CONFIG: SiteConfig = {
 
 interface RawConfig {
   holiday?: unknown
+  contacts?: SiteConfig['contacts']
+  url?: unknown
   venue?: SiteConfig['venue']
   schedule?: ScheduleDay[] | null
   eveningPrices?: SiteConfig['eveningPrices']
@@ -71,6 +75,8 @@ async function loadConfig(): Promise<SiteConfig> {
   const raw = (await getJson('/api/site/config')) as RawConfig
   return {
     holiday: isHoliday(raw.holiday) ? raw.holiday : null,
+    contacts: raw.contacts ?? null,
+    url: typeof raw.url === 'string' && /^https:\/\//.test(raw.url) ? raw.url : null,
     venue: raw.venue ?? FALLBACK_CONFIG.venue,
     schedule: raw.schedule?.length ? raw.schedule : DEFAULT_SCHEDULE,
     eveningPrices: raw.eveningPrices?.length ? raw.eveningPrices : FALLBACK_CONFIG.eveningPrices,

@@ -5,10 +5,10 @@
  * владельцу. Одна разметка на все темы; вид задаёт CSS темы.
  */
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react'
-import { Check, Minus, Plus } from 'lucide-react'
+import { Check, Minus, Plus, Send } from 'lucide-react'
 import type { RequestPreset, SiteConfig } from '@/lib/types'
 import { rub } from '@/lib/format'
-import { SITE } from '@/content/site'
+import { useContacts } from '@/components/chrome/ContactsContext'
 import { EVENT_FORMATS, TIMES, TOPICS, formatPhone, mskToday, upcomingEvenings, type EventFormat, type EveningSlot, type Topic } from './options'
 
 type Kind = RequestPreset['kind']
@@ -67,8 +67,11 @@ export function RequestForm({ config, preset, variant, onClose, lockKind }: {
 }) {
   const [kind, setKind] = useState<Kind>(preset.kind)
   const [s, setS] = useState<State>(() => initial(preset))
+  const contacts = useContacts()
   const [slots, setSlots] = useState<EveningSlot[]>([])
   const [status, setStatus] = useState<'idle' | 'sending' | 'done'>('idle')
+  // Ссылка на клиентского бота клуба: через него гостю придёт статус заявки.
+  const [botUrl, setBotUrl] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   // Вечера считаем на клиенте — по его «сейчас», без рассинхрона с серверным рендером.
@@ -120,16 +123,17 @@ export function RequestForm({ config, preset, variant, onClose, lockKind }: {
     setStatus('sending')
     try {
       const res = await fetch('/api/site/requests', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
-      const data = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string }
+      const data = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string; botUrl?: string | null }
       if (!res.ok || !data.ok) throw new Error(data.error || 'Не получилось отправить заявку')
+      setBotUrl(typeof data.botUrl === 'string' && data.botUrl.startsWith('https://t.me/') ? data.botUrl : null)
       setStatus('done')
     } catch (err) {
       setStatus('idle')
-      setError(err instanceof Error && err.message !== 'Failed to fetch' ? err.message : `Нет связи — позвоните нам: ${SITE.phone}`)
+      setError(err instanceof Error && err.message !== 'Failed to fetch' ? err.message : `Нет связи — позвоните нам: ${contacts.phone}`)
     }
   }
 
-  if (status === 'done') return <Done kind={kind} variant={variant} onClose={onClose} />
+  if (status === 'done') return <Done kind={kind} variant={variant} botUrl={botUrl} onClose={onClose} />
 
   return (
     <form className={`rq rq-${variant}`} onSubmit={submit} noValidate>
@@ -239,7 +243,7 @@ export function RequestForm({ config, preset, variant, onClose, lockKind }: {
       </label>
       {error && <p className="rq-error" role="alert">{error}</p>}
       <button type="submit" className="btn btn-primary rq-submit" disabled={status === 'sending'}>{status === 'sending' ? 'Отправляем…' : 'Отправить заявку'}</button>
-      <p className="rq-note">Или позвоните: <a href={SITE.phoneHref}>{SITE.phone}</a></p>
+      <p className="rq-note">Или позвоните: <a href={contacts.phoneHref}>{contacts.phone}</a></p>
     </form>
   )
 }
@@ -270,12 +274,18 @@ const DONE_TEXT: Record<Kind, string> = {
   message: 'Сообщение получено. Ответим в течение дня.',
 }
 
-function Done({ kind, variant, onClose }: { kind: Kind; variant: 'sheet' | 'inline'; onClose?: () => void }) {
+function Done({ kind, variant, botUrl, onClose }: { kind: Kind; variant: 'sheet' | 'inline'; botUrl: string | null; onClose?: () => void }) {
   return (
     <div className={`rq rq-${variant} rq-done`} role="status">
       <span className="rq-done-mark" aria-hidden="true"><Check size={34} strokeWidth={2.4} /></span>
       <h2 className="rq-title">Заявка принята</h2>
       <p>{DONE_TEXT[kind]}</p>
+      {botUrl && (
+        <div className="rq-bot">
+          <p>Подтверждение и напоминание в день визита — в Telegram.</p>
+          <a className="btn btn-primary" href={botUrl} target="_blank" rel="noopener noreferrer"><Send size={18} aria-hidden="true" /> Получать статус в Telegram</a>
+        </div>
+      )}
       {onClose && <button type="button" className="btn btn-ghost" onClick={onClose}>Готово</button>}
     </div>
   )

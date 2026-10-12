@@ -2,6 +2,7 @@ import { Bot, InlineKeyboard } from 'grammy'
 import { profiles, tgLinkRequests, transactions, clientTiers, appSettings, walletLoginCodes, eq, and, gt, isNull, desc, type Database } from '@titan/database'
 import { createHmac, timingSafeEqual } from 'node:crypto'
 import { registerAppLogin } from './app-login.js'
+import { bindRequestChat } from './request-status.js'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Фабрика wallet-бота (мульти-тенант). createWalletBot(ctx) поднимает grammy Bot
@@ -231,6 +232,12 @@ export function createWalletBot(ctx: WalletBotCtx): Bot {
 
     if (payload?.startsWith('app_')) {
       await appLogin.handleStart(ctx2, payload.slice(4))
+      return
+    }
+
+    // Статус заявки с сайта клуба: t.me/<бот>?start=r_<claim_token>.
+    if (payload?.startsWith('r_')) {
+      await bindRequestChat(ctx2, db, payload.slice(2))
       return
     }
 

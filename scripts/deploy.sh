@@ -53,6 +53,14 @@ sleep 10
 echo "🔁 Пересоздание nginx (свежий конфиг + upstream-IP)..."
 docker compose up -d --force-recreate nginx || docker compose restart nginx
 
+# Домен сайта клуба (HUB → «Сайт → Домен»): агент выпускает сертификат и пишет
+# конфиг nginx. Запускаем сразу и ставим в cron раз в 5 минут (идемпотентно).
+echo "🌍 Домен сайта клуба..."
+mkdir -p nginx/sites
+SITE_AGENT_CRON="*/5 * * * * cd $REPO_DIR && bash scripts/site/domain-agent.sh >> /var/log/site-domain-agent.log 2>&1"
+( crontab -l 2>/dev/null | grep -v 'scripts/site/domain-agent.sh'; echo "$SITE_AGENT_CRON" ) | crontab -
+bash scripts/site/domain-agent.sh >> /var/log/site-domain-agent.log 2>&1 || echo "⚠️  Агент домена сайта завершился с ошибкой — см. /var/log/site-domain-agent.log"
+
 echo "🏥 Проверка health (через nginx)..."
 # Порт api не публикуется на хост — проверяем публичный endpoint через nginx.
 curl -sf https://titanpos.ru/api/health && echo "✅ API OK" || echo "❌ API не отвечает"

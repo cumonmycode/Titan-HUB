@@ -7,6 +7,7 @@ import { runPollsForDb } from './cron/polls.js'
 import { fiscalizePendingForDb } from './cron/fiscalize.js'
 import { purgeOldAnalyticsEvents } from './cron/analytics-retention.js'
 import { getCronTargets } from './cron/targets.js'
+import { remindRequestGuestsForDb } from './cron/request-reminders.js'
 import { runStaffAlerts } from './modules/notifications/staff-calls.js'
 import { runMigrations, runMigrationsOn } from './migrations/runner.js'
 import { listActiveClubDbNames, buildClubConnString } from './lib/clubResolver.js'
@@ -223,6 +224,17 @@ function schedulePollsCron() {
 }
 
 if (!CRON_DISABLED) schedulePollsCron()
+
+// Напоминания гостям о подтверждённых заявках в день визита (клиентский бот клуба):
+// тик раз в минуту, идемпотентно по reminded_at; до 10:00 МСК ничего не шлёт.
+function scheduleRequestRemindersCron() {
+  setInterval(() => {
+    runForAllClubs('request-reminders', remindRequestGuestsForDb).catch(console.error)
+  }, 60_000)
+  console.log('⏰ Request-reminders cron scheduled (тик раз в минуту, с 10:00 МСК)')
+}
+
+if (!CRON_DISABLED) scheduleRequestRemindersCron()
 
 // Фискализация 54-ФЗ: тик КАЖДУЮ МИНУТУ по всем клубам. Идемпотентно (один ряд
 // fiscal_receipts на чек), клубы без фискального провайдера пропускаются. НЕ трогает

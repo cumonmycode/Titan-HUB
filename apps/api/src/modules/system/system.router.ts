@@ -22,7 +22,7 @@ import { upsertRosterUser } from '../../lib/roster.js'
 import { listChats, recordChat } from '../../lib/tgChats.js'
 import { getBoolSetting, getStringSetting } from '../../lib/appSettings.js'
 import { TAI_PRESETS } from '../../lib/tai.js'
-import { SITE_HOLIDAYS, isSiteHoliday, parseSchedule } from '../site/site.router.js'
+import { siteAdminSettingsRouter } from '../site/admin.router.js'
 // Control-БД: резолв clubId на основном домене (c.var.club=null → ищем по db_name).
 import { getControlDb, clubs as ctrlClubs, eq as ceq } from '../../../../../packages/database/dist/control/index.js'
 
@@ -572,78 +572,8 @@ systemRouter.get('/reviews/qr', requireAuth, requireRole('owner'), async (c) => 
   return c.json({ qrDataUrl: `data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`, url })
 })
 
-// ─── Онлайн-бронирование: вкл/выкл + ссылка/QR на публичную форму /book ───────────
-systemRouter.get('/booking-config', requireAuth, requireRole('owner'), async (c) => {
-  const db = c.var.db
-  const [row] = await db.select().from(appSettings).where(eq(appSettings.key, 'booking_enabled')).limit(1)
-  return c.json({ enabled: row?.value === 'true' })
-})
-
-systemRouter.put(
-  '/booking-config',
-  requireAuth,
-  requireRole('owner'),
-  zValidator('json', z.object({ enabled: z.boolean() })),
-  async (c) => {
-    const db = c.var.db
-    const { enabled } = c.req.valid('json')
-    await db.insert(appSettings).values({ key: 'booking_enabled', value: String(enabled) })
-      .onConflictDoUpdate({ target: appSettings.key, set: { value: String(enabled) } })
-    return c.json({ ok: true })
-  },
-)
-
-// ─── Сайт клуба (titanmafia.ru): праздник и расписание вечеров ──────────────
-// Сайт читает их через публичный /api/site/config (кэш 60 с) — изменения в HUB
-// доезжают до сайта в течение минуты. Только владелец.
-systemRouter.get('/site-config', requireAuth, requireRole('owner'), async (c) => {
-  const db = c.var.db
-  const rows = await db.select().from(appSettings).where(inArray(appSettings.key, ['site_holiday', 'site_schedule']))
-  const m = Object.fromEntries(rows.map((r) => [r.key, r.value]))
-  return c.json({
-    holiday: isSiteHoliday(m['site_holiday']) ? m['site_holiday'] : null,
-    holidays: SITE_HOLIDAYS,
-    schedule: parseSchedule(m['site_schedule']),
-  })
-})
-
-const SiteConfigSchema = z.object({
-  // null — снять праздник (обычный вид сайта).
-  holiday: z.enum(SITE_HOLIDAYS).nullable().optional(),
-  schedule: z.array(z.object({
-    day: z.number().int().min(1).max(7),
-    title: z.string().trim().min(1).max(60),
-    time: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).optional(),
-  })).max(14).nullable().optional(),
-})
-
-systemRouter.put('/site-config', requireAuth, requireRole('owner'), zValidator('json', SiteConfigSchema), async (c) => {
-  const db = c.var.db
-  const body = c.req.valid('json')
-  const upsert = (key: string, value: string) => db.insert(appSettings).values({ key, value })
-    .onConflictDoUpdate({ target: appSettings.key, set: { value } })
-  if (body.holiday !== undefined) {
-    if (body.holiday === null) await db.delete(appSettings).where(eq(appSettings.key, 'site_holiday'))
-    else await upsert('site_holiday', body.holiday)
-  }
-  if (body.schedule !== undefined) {
-    if (body.schedule === null) await db.delete(appSettings).where(eq(appSettings.key, 'site_schedule'))
-    else await upsert('site_schedule', JSON.stringify([...body.schedule].sort((a, b) => a.day - b.day)))
-  }
-  return c.json({ ok: true })
-})
-
-// QR на публичную форму брони. origin передаёт фронт (свой window.location.origin),
-// валидируем формат; только owner.
-systemRouter.get('/booking/qr', requireAuth, requireRole('owner'), async (c) => {
-  const origin = c.req.query('origin') || ''
-  if (!/^https?:\/\/[a-zA-Z0-9.\-:]+$/.test(origin)) return c.json({ error: 'bad origin' }, 400)
-  const loc = c.req.query('loc')
-  const url = `${origin}/book${loc === 'titan' || loc === 'exit' ? `?loc=${loc}` : ''}`
-  const QRCode = await import('qrcode')
-  const svg = await QRCode.toString(url, { type: 'svg', width: 240, margin: 1 })
-  return c.json({ qrDataUrl: `data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`, url })
-})
+// ─── Сайт клуба: оформление, расписание, контакты, уведомления, домен ────────
+systemRouter.route('/', siteAdminSettingsRouter)
 
 // ─── Tai в чате: дерзкие ответы бота опросов на сообщения (комедийный роуст) ──────
 // Мастер-тумблер (tai_chat_enabled) + пресет стиля (tai_preset) + пер-групповые

@@ -341,3 +341,6 @@ select.rq-input { appearance: none; background-image: linear-gradient(45deg, tra
 .pl-search-list li:last-child { border-bottom: 0; }
 .pl-search-list .pl-search-empty { display: block; color: var(--muted); }
 .pl-profile { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 50%; color: var(--fg); background: var(--hover-fill, rgba(255, 255, 255, .08)); }
+.rq-bot { display: grid; gap: 12px; width: 100%; padding: 16px; border-radius: 20px; background: rgba(255, 255, 255, .06); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .12); }
+.rq-done .rq-bot p { font-size: 15px; }
+.rq-bot .btn { justify-self: start; }

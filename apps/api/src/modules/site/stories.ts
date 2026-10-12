@@ -18,7 +18,7 @@ function rows<T = Record<string, unknown>>(res: unknown): T[] {
 const RESERVED_SLUGS = new Set([
   'games', 'events', 'kidspromo', 'portfolio', 'residents', 'studio', 'contact', 'promoinfo',
   'privacy-policy', 'terms-and-conditions', 'refund-policy', 'accessibility-statement', 'members',
-  'preview', 'api', 'media', 'docs', 'sitemap.xml', 'robots.txt', '_next',
+  'preview', 'api', 'media', 'docs', 'sitemap.xml', 'robots.txt', '_next', 'book',
 ])
 
 // Фото: загрузка HUB (https) или файл сайта (/media/…).

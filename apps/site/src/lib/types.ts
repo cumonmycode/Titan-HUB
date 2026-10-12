@@ -5,10 +5,18 @@ export interface Price { name: string; price: number }
 export interface EventRate { hours: number; price: number }
 export interface Zone { id: string; name: string; capacity: number | null; hourlyRate: number }
 
+/** Контакты клуба из HUB («Сайт → Контакты»); пустая строка — не задано. */
+export interface SiteContactsData {
+  phone: string; email: string; telegram: string; channel: string; whatsapp: string; vk: string; instagram: string
+}
+
 export interface SiteConfig {
   /** Праздничное оформление (включается в HUB) или null. */
   holiday: HolidayId | null
   venue: { name: string; address: string; hoursOpen: string; hoursClose: string }
+  contacts: SiteContactsData | null
+  /** Адрес сайта из HUB («Сайт → Домен») или null — встроенный. */
+  url: string | null
   schedule: ScheduleDay[]
   eveningPrices: Price[]
   eventRates: EventRate[]

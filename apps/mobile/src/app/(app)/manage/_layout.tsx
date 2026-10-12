@@ -91,9 +91,17 @@ export default function ManageLayout() {
 
       <Stack.Screen name="settings/index" options={formHeader({ title: 'Настройки клуба' })} />
       <Stack.Screen name="settings/payment" options={formHeader({ title: 'Оплата и чеки' })} />
-      <Stack.Screen name="settings/booking" options={formHeader({ title: 'Онлайн-бронирование' })} />
       <Stack.Screen name="settings/reviews" options={formHeader({ title: 'Отзывы гостей' })} />
-      <Stack.Screen name="settings/site" options={formHeader({ title: 'Сайт' })} />
+      {/* «Сайт»: оформление, расписание, публикации, онлайн-запись, домен и контакты — нативно. */}
+      <Stack.Screen name="settings/site/index" options={formHeader({ title: 'Сайт' })} />
+      <Stack.Screen name="settings/site/look" options={formHeader({ title: 'Оформление' })} />
+      <Stack.Screen name="settings/site/schedule" options={formHeader({ title: 'Расписание вечеров' })} />
+      <Stack.Screen name="settings/site/evening" options={editorModal} />
+      <Stack.Screen name="settings/site/stories" options={formHeader({ title: 'Публикации' })} />
+      <Stack.Screen name="settings/site/story" options={editorModal} />
+      <Stack.Screen name="settings/site/domain" options={formHeader({ title: 'Домен' })} />
+      <Stack.Screen name="settings/site/contacts" options={formHeader({ title: 'Контакты' })} />
+      <Stack.Screen name="settings/site/notify" options={formHeader({ title: 'Уведомления' })} />
       <Stack.Screen name="settings/integrations" options={formHeader({ title: 'Интеграции' })} />
       {/* Home Assistant для HUB: подключение и помещения шторки «Свет и климат» на кассе. */}
       <Stack.Screen name="settings/home/index" options={formHeader({ title: 'Home Assistant' })} />

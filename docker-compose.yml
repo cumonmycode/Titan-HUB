@@ -226,6 +226,7 @@ services:
       - ./nginx/ssl:/etc/nginx/ssl:ro
       # Webroot для certbot (HTTP-01): titanmafia.ru и admin — выпуск и продление без даунтайма.
       - ./nginx/acme:/var/www/certbot:ro
+      - ./nginx/sites:/etc/nginx/sites:ro
       - nginx-cache:/var/cache/nginx
     # Стартуем nginx только когда апстримы здоровы (api прогнал миграции) —
     # закрывает окно 502 при холодном старте/перезагрузке хоста.
