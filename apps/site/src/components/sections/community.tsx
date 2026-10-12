@@ -18,10 +18,9 @@ export function StoriesGrid({ stories, limit }: { stories: StorySummary[]; limit
           <Link href={`/${s.slug}`}>
             {s.coverUrl && <Photo url={s.coverUrl} alt={s.title} sizes="(max-width: 720px) 100vw, 33vw" />}
             <div className="story-body">
-              <span className="story-kind">{KIND_LABEL[s.kind] ?? 'Событие'}</span>
               <h3>{s.title}</h3>
+              <p className="story-kind">{[KIND_LABEL[s.kind] ?? 'Событие', s.stats[0] ? `${s.stats[0].value} ${s.stats[0].label}` : null].filter(Boolean).join(' · ')}</p>
               {s.tagline && <p>{s.tagline}</p>}
-              {s.stats[0] && <p className="story-stat"><b>{s.stats[0].value}</b> {s.stats[0].label}</p>}
             </div>
           </Link>
         </li>

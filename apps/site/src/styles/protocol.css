@@ -53,7 +53,7 @@ body:has(.site[data-theme="protocol"]) { background: #221A44; }
 .site[data-theme="protocol"] .btn-ghost:hover { background: var(--fg); color: var(--bg); }
 
 /* Значения, вписанные ручкой */
-.site[data-theme="protocol"] :is(.price-value, .stat dd, .day-date b, .pl-elo, .story-stat b) { font-family: var(--font-hand); color: var(--pen); font-weight: 700; }
+.site[data-theme="protocol"] :is(.price-value, .stat dd, .day-date b, .pl-elo) { font-family: var(--font-hand); color: var(--pen); font-weight: 700; }
 .site[data-theme="protocol"] .price-value { font-size: clamp(34px, 3.4vw, 46px); }
 .site[data-theme="protocol"] .stat dd { font-size: clamp(44px, 5vw, 72px); }
 .site[data-theme="protocol"] .day-date b { font-size: 44px; }

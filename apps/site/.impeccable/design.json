@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-12T11:30:00Z",
+  "title": "Design System: TITAN KBR — сайт клуба",
+  "extensions": {
+    "shadows": [
+      { "name": "case-paper", "value": "0 16px 28px -14px rgba(0,0,0,.6), 0 1px 0 rgba(0,0,0,.12)", "purpose": "Бумага и полароиды на стене штаба." }
+    ],
+    "motion": [
+      { "name": "ease-out-expo", "value": "cubic-bezier(0.16, 1, 0.3, 1)", "purpose": "Все переходы и выезд шторки заявки." },
+      { "name": "case-thread-draw", "value": "stroke-dashoffset 1.6s cubic-bezier(.6,0,.2,1)", "purpose": "Нити доски дорисовываются при загрузке." },
+      { "name": "protocol-write", "value": "clip-path inset 0.7s, шаг 0.1s по строкам", "purpose": "Значения протокола «вписываются» по очереди." },
+      { "name": "night-sky", "value": "--sky 0…1 по прокрутке", "purpose": "Небо светлеет от ночи к рассвету." }
+    ],
+    "breakpoints": [
+      { "name": "sheet-bottom", "value": "720px" },
+      { "name": "page-stack", "value": "860px" },
+      { "name": "nav-burger", "value": "1000px" }
+    ]
+  },
+  "components": [],
+  "narrative": {
+    "northStar": "Четыре стола одного клуба",
+    "overview": "Один контент — четыре мира: доска улик, судейский протокол, циклорама ночи и классика. Тема переключается в HUB.",
+    "keyCharacteristics": ["Общая разметка, тема в CSS", "Живые данные HUB", "Каждая кнопка — заявка в HUB"],
+    "rules": [
+      { "name": "Правило бумаги и чернил", "body": "На стене case — бумага с чернилами; красный только для нити, печатей и главной кнопки.", "section": "colors" },
+      { "name": "Правило ручки", "body": "Синяя ручка protocol — только для вписанных значений.", "section": "colors" }
+    ],
+    "dos": ["Брать цены и расписание из HUB", "Собирать страницы из общих блоков"],
+    "donts": ["Киккеры над заголовками", "Символы вместо иконок", "Выдуманные факты"]
+  }
+}
