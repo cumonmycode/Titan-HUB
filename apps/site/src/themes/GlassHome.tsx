@@ -8,7 +8,7 @@ import type { CSSProperties } from 'react'
 import { ArrowRight, MapPin } from 'lucide-react'
 import { FORMATS } from '@/content/formats'
 import { GOMAFIA, SITE } from '@/content/site'
-import { DAY_SHORT, dateLabel, isoDate, nextEvening, newbiePrice, rub } from '@/lib/format'
+import { DAY_LONG, DAY_SHORT, dateLabel, isoDate, nextEvening, newbiePrice, rub } from '@/lib/format'
 import type { ScheduleDay } from '@/lib/types'
 import { RequestButton } from '@/components/request/RequestButton'
 import { eveningOf } from '@/components/request/options'
@@ -28,14 +28,16 @@ import type { HomeProps } from './types'
 const WEEK_DAYS = 14
 const v = (vars: Record<string, string | number>) => vars as CSSProperties
 
-/** Две недели вперёд по МСК с играми из расписания HUB. */
+/** Две недели по МСК с понедельника текущей недели; прошедшие дни — неактивны. */
 function buildWeek(schedule: ScheduleDay[]): WeekDay[] {
   const msk = new Date(Date.now() + 3 * 3600_000)
   const nowMin = msk.getUTCHours() * 60 + msk.getUTCMinutes()
-  return Array.from({ length: WEEK_DAYS }, (_, add) => {
+  const todayDow = ((msk.getUTCDay() + 6) % 7) + 1
+  return Array.from({ length: WEEK_DAYS }, (_, i) => {
+    const add = i - (todayDow - 1)
     const d = new Date(Date.UTC(msk.getUTCFullYear(), msk.getUTCMonth(), msk.getUTCDate() + add))
     const dow = ((d.getUTCDay() + 6) % 7) + 1
-    const events = schedule.filter((s) => s.day === dow).flatMap((s) => {
+    const events = add < 0 ? [] : schedule.filter((s) => s.day === dow).flatMap((s) => {
       const time = s.time ?? '19:00'
       const [h, m] = time.split(':').map(Number)
       if (add === 0 && (h ?? 19) * 60 + (m ?? 0) <= nowMin) return []
@@ -43,7 +45,8 @@ function buildWeek(schedule: ScheduleDay[]): WeekDay[] {
       return [{ title: s.title, time, evening: evening === 'any' ? undefined : evening }]
     })
     return {
-      iso: isoDate(d), dow: DAY_SHORT[dow] ?? '', num: d.getUTCDate(), today: add === 0,
+      iso: isoDate(d), dow: DAY_SHORT[dow] ?? '', dowLong: DAY_LONG[dow] ?? '', num: d.getUTCDate(),
+      today: add === 0, past: add < 0,
       month: d.toLocaleDateString('ru-RU', { timeZone: 'UTC', month: 'long', day: 'numeric' }).replace(/^\d+\s/, ''),
       events,
     }

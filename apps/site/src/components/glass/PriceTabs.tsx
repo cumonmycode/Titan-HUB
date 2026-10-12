@@ -1,5 +1,5 @@
 'use client'
-/** Цены из кассы HUB в стеклянной панели с переключателем «вечер · мероприятие · залы». */
+/** Цены в стеклянной панели: переключатель «вечер · мероприятие · залы» и список «название — цена». */
 import { useState } from 'react'
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import type { EventRate, Price, Zone } from '@/lib/types'
@@ -22,7 +22,7 @@ export function PriceTabs({ evening, rates, zones }: { evening: Price[]; rates: 
         {tabs.map((t) => (
           <button key={t.id} type="button" role="tab" aria-selected={tab === t.id} className="g-seg-btn" onClick={() => setTab(t.id)}>
             {tab === t.id && <motion.span layoutId="g-seg-pill" className="g-seg-pill" transition={reduce ? { duration: 0 } : { type: 'spring', stiffness: 420, damping: 34 }} />}
-            <span>{t.label}</span>
+            <span className="g-seg-label">{t.label}</span>
           </button>
         ))}
       </div>
@@ -38,19 +38,19 @@ export function PriceTabs({ evening, rates, zones }: { evening: Price[]; rates: 
         >
           {tab === 'evening' && (
             <>
-              <ul className="g-price-grid">{evening.map((p) => <li key={p.name}><span>{p.name}</span><b>{rub(p.price)}</b></li>)}</ul>
+              <ul className="g-price-list">{evening.map((p) => <li key={p.name}><span>{p.name}</span><b>{rub(p.price)}</b></li>)}</ul>
               <div className="g-price-foot"><p>Цена за вечер игр. Баллы My Titan оплачивают до половины счёта.</p><RequestButton preset={{ kind: 'game' }} className="btn btn-primary">Записаться</RequestButton></div>
             </>
           )}
           {tab === 'event' && (
             <>
-              <ul className="g-price-grid">{rates.map((r) => <li key={r.hours}><span>{r.hours} {r.hours === 1 ? 'час' : r.hours < 5 ? 'часа' : 'часов'}</span><b>{rub(r.price)}</b></li>)}</ul>
+              <ul className="g-price-list">{rates.map((r) => <li key={r.hours}><span>{r.hours} {r.hours === 1 ? 'час' : r.hours < 5 ? 'часа' : 'часов'}</span><b>{rub(r.price)}</b></li>)}</ul>
               <div className="g-price-foot"><p>Мероприятие под ключ: ведущий, реквизит, игра — в штабе или у вас.</p><RequestButton preset={{ kind: 'event' }} className="btn btn-primary">Заказать</RequestButton></div>
             </>
           )}
           {tab === 'zones' && (
             <>
-              <ul className="g-price-grid">{zones.map((z) => <li key={z.id}><span>{z.name}</span><b>{rub(z.hourlyRate)}<small>/ч</small></b></li>)}</ul>
+              <ul className="g-price-list">{zones.map((z) => <li key={z.id}><span>{z.name}</span><b>{rub(z.hourlyRate)}<small> / час</small></b></li>)}</ul>
               <div className="g-price-foot"><p>Почасовая аренда зон штаба для своей компании.</p><RequestButton preset={{ kind: 'event', location: 'titan' }} className="btn btn-primary">Забронировать</RequestButton></div>
             </>
           )}

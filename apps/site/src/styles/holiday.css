@@ -37,13 +37,13 @@
 .hd-mimosa { position: absolute; left: 0; bottom: 0; width: 170px; }
 
 /* Поздравление */
-.hd-greet { position: fixed; z-index: 47; left: 20px; bottom: 20px; max-width: 420px; display: flex; align-items: center; gap: 12px; padding: 12px 12px 12px 14px; border-radius: 22px; animation: g-pop .6s var(--ease) both; --glass-tint: rgba(16, 12, 36, .45); }
+.site[data-theme="glass"] .hd-greet { position: fixed; z-index: 47; left: 20px; bottom: 20px; max-width: 420px; display: flex; align-items: center; gap: 12px; padding: 12px 12px 12px 14px; border-radius: 22px; animation: g-pop .6s var(--ease) both; --glass-tint: rgba(16, 12, 36, .45); }
 .hd-greet p { font-size: 14.5px; font-weight: 550; line-height: 1.35; }
 .hd-greet-icon { flex: none; width: 38px; height: 38px; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: rgba(255, 255, 255, .14); color: var(--accent-text); }
 .hd-greet button { flex: none; width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: var(--muted); background: rgba(255, 255, 255, .08); }
 @media (max-width: 1000px) {
   .hd-garland { top: 52px; }
-  .hd-greet { left: 12px; right: 12px; bottom: 84px; max-width: none; }
+  .site[data-theme="glass"] .hd-greet { left: 12px; right: 12px; bottom: 84px; max-width: none; }
   .hd-snowman { width: 70px; bottom: 76px; }
   .hd-pumpkins { width: 130px; bottom: 76px; }
   .hd-web { width: 130px; }
