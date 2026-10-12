@@ -66,14 +66,20 @@ interface Collected {
   blocks: TaiBlock[]
   memo: string
   error: string | null
-  /** Озвученные по ходу ответа фразы (голосовой режим), по порядку. */
-  audio: { seq: number; format: 'mp3' | 'wav'; data: string }[]
+  /** Озвученные по ходу ответа фразы (голосовой режим); upTo — до какого знака текста. */
+  audio: { seq: number; format: 'mp3' | 'wav'; data: string; upTo: number }[]
 }
 
-/** mp3-фразы → одно голосовое: кадры mp3 независимы, ID3-заголовки убираем. */
-function joinMp3(parts: Collected['audio']): Buffer | null {
+/**
+ * mp3-фразы → одно голосовое: кадры mp3 независимы, ID3-заголовки убираем.
+ * Только если озвучен весь ответ: номера фраз подряд с первой и звук доходит до
+ * конца текста — иначе (фраза не синтезировалась) голосовое вышло бы с дырой.
+ */
+function joinMp3(parts: Collected['audio'], text: string): Buffer | null {
   if (!parts.length || parts.some((p) => p.format !== 'mp3')) return null
-  const chunks = [...parts].sort((a, b) => a.seq - b.seq).map((p) => {
+  const sorted = [...parts].sort((a, b) => a.seq - b.seq)
+  if (sorted.some((p, i) => p.seq !== i + 1) || text.slice(sorted[sorted.length - 1]!.upTo).trim()) return null
+  const chunks = sorted.map((p) => {
     const buf = Buffer.from(p.data, 'base64')
     if (buf.subarray(0, 3).toString() !== 'ID3') return buf
     const size = ((buf[6]! & 0x7f) << 21) | ((buf[7]! & 0x7f) << 14) | ((buf[8]! & 0x7f) << 7) | (buf[9]! & 0x7f)
@@ -115,7 +121,7 @@ async function buildEnv(club: TgClub, person: TgPerson, contact: TaiContact | nu
 async function collect(env: TaiEnv, history: Awaited<ReturnType<typeof recentTurns>>, text: string, voice: boolean): Promise<Collected> {
   const out: Collected = { text: '', blocks: [], memo: '', error: null, audio: [] }
   const emit = async (event: TaiEvent) => {
-    if (event.type === 'audio') out.audio.push({ seq: event.seq, format: event.format, data: event.data })
+    if (event.type === 'audio') out.audio.push({ seq: event.seq, format: event.format, data: event.data, upTo: event.upTo })
     else if (event.type === 'delta') out.text += event.text
     else if (event.type === 'block') out.blocks.push(event.block)
     else if (event.type === 'done') out.memo = event.memo
@@ -142,7 +148,7 @@ async function deliver(club: TgClub, person: TgPerson, target: ChatTarget, resul
   let blocked = false
 
   if (text && voice) {
-    const joined = joinMp3(result.audio)
+    const joined = joinMp3(result.audio, result.text)
     const audio = joined
       ? { data: joined, format: 'mp3' as const }
       : await synthesizeVoiceNote(await resolveApiKey(club.db), text, await getTaiSettings(club.db)).catch(() => null)
