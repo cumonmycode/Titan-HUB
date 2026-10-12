@@ -2,13 +2,14 @@
  * Данные из Titan HUB для серверного рендера. Сайт ходит в API напрямую внутри
  * docker-сети с Host клубного поддомена (по нему API выбирает БД клуба). fetch в
  * Node не даёт подменить Host, поэтому — node:http. Кэш — unstable_cache (60 с):
- * смена темы или цен в HUB доезжает до сайта в течение минуты.
+ * праздник, цены и расписание из HUB доезжают до сайта в течение минуты.
  */
 import http from 'node:http'
 import https from 'node:https'
 import { unstable_cache } from 'next/cache'
 import { TOURNAMENTS, type Tournament } from '@/content/tournaments'
-import { isTheme, type PlayersPayload, type ScheduleDay, type SiteConfig, type Story, type StorySummary } from './types'
+import { isHoliday } from '@/content/holidays'
+import { type PlayersPayload, type ScheduleDay, type SiteConfig, type Story, type StorySummary } from './types'
 
 const API_URL = process.env['SITE_API_URL'] ?? 'http://api:3001'
 const CLUB_HOST = process.env['SITE_CLUB_HOST'] ?? 'kbr.titanpos.ru'
@@ -43,7 +44,7 @@ export const DEFAULT_SCHEDULE: ScheduleDay[] = [
 ]
 
 export const FALLBACK_CONFIG: SiteConfig = {
-  theme: 'case',
+  holiday: null,
   venue: { name: 'TITAN KBR', address: 'Кабардинская улица, 152', hoursOpen: '19:00', hoursClose: '03:00' },
   schedule: DEFAULT_SCHEDULE,
   eveningPrices: [
@@ -56,7 +57,7 @@ export const FALLBACK_CONFIG: SiteConfig = {
 }
 
 interface RawConfig {
-  theme?: unknown
+  holiday?: unknown
   venue?: SiteConfig['venue']
   schedule?: ScheduleDay[] | null
   eveningPrices?: SiteConfig['eveningPrices']
@@ -64,34 +65,47 @@ interface RawConfig {
   zones?: SiteConfig['zones']
 }
 
+// Ошибки не кэшируются: unstable_cache запоминает только успешный ответ, сбой
+// бросается наружу и подменяется запасными данными до следующего запроса.
 async function loadConfig(): Promise<SiteConfig> {
+  const raw = (await getJson('/api/site/config')) as RawConfig
+  return {
+    holiday: isHoliday(raw.holiday) ? raw.holiday : null,
+    venue: raw.venue ?? FALLBACK_CONFIG.venue,
+    schedule: raw.schedule?.length ? raw.schedule : DEFAULT_SCHEDULE,
+    eveningPrices: raw.eveningPrices?.length ? raw.eveningPrices : FALLBACK_CONFIG.eveningPrices,
+    eventRates: raw.eventRates?.length ? raw.eventRates : FALLBACK_CONFIG.eventRates,
+    zones: raw.zones ?? [],
+    live: true,
+  }
+}
+
+async function loadPlayers(): Promise<PlayersPayload> {
+  const r = (await getJson('/api/site/players')) as PlayersPayload
+  // Пустой рейтинг (GoMafia не ответила) не кэшируем на полчаса.
+  if (!r.players?.length) throw new Error('GoMafia: пустой рейтинг')
+  return r
+}
+
+const cachedConfig = unstable_cache(loadConfig, ['site-config'], { revalidate: REVALIDATE_SECONDS })
+const cachedPlayers = unstable_cache(loadPlayers, ['site-players'], { revalidate: 30 * 60 })
+
+export async function getSiteConfig(): Promise<SiteConfig> {
   try {
-    const raw = (await getJson('/api/site/config')) as RawConfig
-    return {
-      theme: isTheme(raw.theme) ? raw.theme : FALLBACK_CONFIG.theme,
-      venue: raw.venue ?? FALLBACK_CONFIG.venue,
-      schedule: raw.schedule?.length ? raw.schedule : DEFAULT_SCHEDULE,
-      eveningPrices: raw.eveningPrices?.length ? raw.eveningPrices : FALLBACK_CONFIG.eveningPrices,
-      eventRates: raw.eventRates?.length ? raw.eventRates : FALLBACK_CONFIG.eventRates,
-      zones: raw.zones ?? [],
-      live: true,
-    }
+    return await cachedConfig()
   } catch (err) {
     console.error('[site] HUB недоступен, показываю запасные данные:', err instanceof Error ? err.message : err)
     return FALLBACK_CONFIG
   }
 }
 
-async function loadPlayers(): Promise<PlayersPayload> {
+export async function getPlayers(): Promise<PlayersPayload> {
   try {
-    return (await getJson('/api/site/players')) as PlayersPayload
+    return await cachedPlayers()
   } catch {
     return { club: null, total: 0, players: [] }
   }
 }
-
-export const getSiteConfig = unstable_cache(loadConfig, ['site-config'], { revalidate: REVALIDATE_SECONDS })
-export const getPlayers = unstable_cache(loadPlayers, ['site-players'], { revalidate: 30 * 60 })
 
 // ─── Публикации (турниры, вечеринки) ─────────────────────────────────────────
 // Ведутся в HUB («Сайт → Публикации»). Если HUB недоступен — встроенный список
@@ -107,12 +121,8 @@ function fromContent(t: Tournament): Story {
 }
 
 async function loadStories(): Promise<StorySummary[]> {
-  try {
-    const r = (await getJson('/api/site/stories')) as { stories?: StorySummary[] }
-    return r.stories ?? []
-  } catch {
-    return TOURNAMENTS.map(fromContent)
-  }
+  const r = (await getJson('/api/site/stories')) as { stories?: StorySummary[] }
+  return r.stories ?? []
 }
 
 async function loadStory(slug: string): Promise<Story | null> {
@@ -120,11 +130,27 @@ async function loadStory(slug: string): Promise<Story | null> {
     const r = (await getJson(`/api/site/stories/${encodeURIComponent(slug)}`)) as { story?: Story }
     return r.story ?? null
   } catch (err) {
+    // 404 — публикации нет (кэшируем как «нет»); остальные сбои — наружу, без кэша.
     if (err instanceof Error && / 404$/.test(err.message)) return null
+    throw err
+  }
+}
+
+const cachedStories = unstable_cache(loadStories, ['site-stories'], { revalidate: REVALIDATE_SECONDS })
+
+export async function getStories(): Promise<StorySummary[]> {
+  try {
+    return await cachedStories()
+  } catch {
+    return TOURNAMENTS.map(fromContent)
+  }
+}
+
+export async function getStory(slug: string): Promise<Story | null> {
+  try {
+    return await unstable_cache(() => loadStory(slug), ['site-story', slug], { revalidate: REVALIDATE_SECONDS })()
+  } catch {
     const t = TOURNAMENTS.find((x) => x.slug === slug)
     return t ? fromContent(t) : null
   }
 }
-
-export const getStories = unstable_cache(loadStories, ['site-stories'], { revalidate: REVALIDATE_SECONDS })
-export const getStory = (slug: string) => unstable_cache(() => loadStory(slug), ['site-story', slug], { revalidate: REVALIDATE_SECONDS })()

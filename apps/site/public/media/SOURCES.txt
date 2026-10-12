@@ -38,3 +38,9 @@ book-zen ← static.wixstatic.com/media/ebde67_1bdb2889dbca4d0a85eb022eb0d8cc8c~
 gomafia-logo ← static.wixstatic.com/media/ebde67_8445c5f330c244e9898569a9eea57f22~mv2.png (оригинал с titanmafia.ru на Wix)
 titan-pay ← static.wixstatic.com/media/ebde67_da25ef06a12c44d788dbf76e2565d861~mv2.png (оригинал с titanmafia.ru на Wix)
 logo ← ebde67_72213eb6aa23451c9cb2cebad86bc703~mv2.png
+app-home ← скриншот My Titan (01-home.png, сессия my-titan-telegram-auth)
+app-bonus ← скриншот My Titan (02-bonus.png, сессия my-titan-telegram-auth)
+app-card ← скриншот My Titan (cs-raw.png, сессия my-titan-telegram-auth)
+app-history ← скриншот My Titan (04-history.png, сессия my-titan-telegram-auth)
+app-pay ← скриншот My Titan (06-pay.png, сессия my-titan-telegram-auth)
+glass-backdrop ← table-night, размыт (PIL GaussianBlur 18, яркость 0.55) — фон темы Liquid Glass

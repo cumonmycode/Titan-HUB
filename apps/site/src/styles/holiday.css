@@ -1,0 +1,57 @@
+/* Праздничное оформление поверх Liquid Glass: оттенок подложки, частицы, декорации.
+   Каркас и стекло не меняются — меняется свет за стеклом и детали сверху. */
+.site[data-holiday="new_year"]   { --blob-a: rgba(80, 140, 255, .7);  --blob-b: rgba(124, 77, 255, .6);  --blob-c: rgba(60, 200, 220, .38); }
+.site[data-holiday="winter"]     { --blob-a: rgba(110, 160, 255, .62); --blob-b: rgba(170, 200, 255, .4); --blob-c: rgba(124, 77, 255, .35); }
+.site[data-holiday="valentine"]  { --blob-a: rgba(255, 70, 130, .62); --blob-b: rgba(160, 60, 220, .5);  --blob-c: rgba(255, 120, 160, .4); --accent-text: #FFB3CB; }
+.site[data-holiday="defender"]   { --blob-a: rgba(90, 120, 70, .6);   --blob-b: rgba(60, 80, 160, .5);   --blob-c: rgba(210, 170, 70, .35); --accent-text: #F4D58D; }
+.site[data-holiday="womens_day"] { --blob-a: rgba(255, 120, 190, .6); --blob-b: rgba(160, 110, 255, .5); --blob-c: rgba(247, 227, 91, .3); --accent-text: #FFC4E0; }
+.site[data-holiday="maslenitsa"] { --blob-a: rgba(255, 150, 60, .58); --blob-b: rgba(124, 77, 255, .45); --blob-c: rgba(255, 210, 90, .36); --accent-text: #FFD39A; }
+.site[data-holiday="spring"]     { --blob-a: rgba(120, 210, 140, .45); --blob-b: rgba(255, 150, 200, .45); --blob-c: rgba(124, 77, 255, .4); }
+.site[data-holiday="summer"]     { --blob-a: rgba(60, 210, 200, .5);  --blob-b: rgba(255, 200, 90, .42); --blob-c: rgba(124, 77, 255, .4); --accent-text: #A8F0E6; }
+.site[data-holiday="autumn"]     { --blob-a: rgba(232, 116, 43, .55); --blob-b: rgba(160, 60, 40, .45);  --blob-c: rgba(242, 169, 59, .35); --accent-text: #FFC68A; }
+.site[data-holiday="halloween"]  { --blob-a: rgba(255, 120, 30, .55); --blob-b: rgba(110, 40, 180, .6);  --blob-c: rgba(60, 200, 90, .25); --accent-text: #FFB070; }
+.site[data-holiday="club_birthday"] { --blob-a: rgba(244, 201, 93, .5); --blob-b: rgba(155, 123, 255, .6); --blob-c: rgba(255, 111, 163, .42); --accent-text: #F8DC8F; }
+
+.hd-canvas { position: fixed; inset: 0; width: 100%; height: 100%; z-index: 45; pointer-events: none; }
+.hd-bats { z-index: 2; }
+.hd-decor { position: fixed; inset: 0; z-index: 46; pointer-events: none; }
+
+/* Гирлянда — висит под шапкой-капсулой */
+.hd-garland { position: absolute; top: 58px; left: 50%; translate: -50% 0; width: min(1180px, calc(100% - 32px)); height: 54px; }
+.hd-bulb { filter: drop-shadow(0 0 6px currentColor); animation: hd-twinkle 2.2s ease-in-out infinite; }
+@keyframes hd-twinkle { 50% { opacity: .35; } }
+.hd-snowman { position: absolute; left: 18px; bottom: 0; width: 110px; animation: hd-sway 6s ease-in-out infinite; transform-origin: 50% 100%; }
+@keyframes hd-sway { 50% { rotate: 2deg; } }
+.hd-pumpkins { position: absolute; right: 16px; bottom: 0; width: 200px; }
+.hd-glow { animation: hd-flicker 2.4s infinite; }
+@keyframes hd-flicker { 20%, 60% { opacity: .55; } 40%, 80% { opacity: 1; } }
+.hd-web { position: absolute; left: 0; top: 0; width: 200px; }
+.hd-spider { animation: hd-spider 5s ease-in-out infinite; }
+@keyframes hd-spider { 50% { translate: 0 18px; } }
+.hd-balloons { position: absolute; right: 2vw; bottom: 0; width: 220px; height: 100%; overflow: hidden; }
+.hd-balloon { position: absolute; bottom: -160px; width: 54px; animation: hd-rise 13s linear infinite; }
+@keyframes hd-rise { to { translate: 0 calc(-100vh - 200px); rotate: 6deg; } }
+.hd-sun { position: absolute; right: -40px; top: 70px; width: 220px; opacity: .55; }
+.hd-sun-rays { transform-origin: 100px 100px; animation: hd-spin 40s linear infinite; }
+@keyframes hd-spin { to { rotate: 360deg; } }
+.hd-mimosa { position: absolute; left: 0; bottom: 0; width: 170px; }
+
+/* Поздравление */
+.hd-greet { position: fixed; z-index: 47; left: 20px; bottom: 20px; max-width: 420px; display: flex; align-items: center; gap: 12px; padding: 12px 12px 12px 14px; border-radius: 22px; animation: g-pop .6s var(--ease) both; --glass-tint: rgba(16, 12, 36, .45); }
+.hd-greet p { font-size: 14.5px; font-weight: 550; line-height: 1.35; }
+.hd-greet-icon { flex: none; width: 38px; height: 38px; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: rgba(255, 255, 255, .14); color: var(--accent-text); }
+.hd-greet button { flex: none; width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: var(--muted); background: rgba(255, 255, 255, .08); }
+@media (max-width: 1000px) {
+  .hd-garland { top: 52px; }
+  .hd-greet { left: 12px; right: 12px; bottom: 84px; max-width: none; }
+  .hd-snowman { width: 70px; bottom: 76px; }
+  .hd-pumpkins { width: 130px; bottom: 76px; }
+  .hd-web { width: 130px; }
+  .hd-balloons { width: 140px; }
+  .hd-sun { width: 150px; }
+  .hd-mimosa { width: 110px; bottom: 76px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .hd-bulb, .hd-snowman, .hd-glow, .hd-spider, .hd-balloon, .hd-sun-rays { animation: none; }
+  .hd-balloons { display: none; }
+}

@@ -1,6 +1,4 @@
-export const THEMES = ['case', 'protocol', 'night', 'classic'] as const
-export type ThemeId = (typeof THEMES)[number]
-export const isTheme = (v: unknown): v is ThemeId => typeof v === 'string' && (THEMES as readonly string[]).includes(v)
+import type { HolidayId } from '@/content/holidays'
 
 export interface ScheduleDay { day: number; title: string; time?: string }
 export interface Price { name: string; price: number }
@@ -8,7 +6,8 @@ export interface EventRate { hours: number; price: number }
 export interface Zone { id: string; name: string; capacity: number | null; hourlyRate: number }
 
 export interface SiteConfig {
-  theme: ThemeId
+  /** Праздничное оформление (включается в HUB) или null. */
+  holiday: HolidayId | null
   venue: { name: string; address: string; hoursOpen: string; hoursClose: string }
   schedule: ScheduleDay[]
   eveningPrices: Price[]
@@ -18,7 +17,8 @@ export interface SiteConfig {
   live: boolean
 }
 
-export interface Player { nickname: string; elo: number; avatar: string | null; tournaments: number | null }
+/** Резидент клуба на GoMafia; id — для ссылки на профиль gomafia.pro/stats/<id>. */
+export interface Player { id: string | null; nickname: string; elo: number; avatar: string | null; tournaments: number | null }
 export interface PlayersPayload { club: string | null; total: number; players: Player[] }
 
 /** Что открывает кнопка заявки. */

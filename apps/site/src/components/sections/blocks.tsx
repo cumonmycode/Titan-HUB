@@ -2,12 +2,19 @@
 import type { ReactNode } from 'react'
 import type { RequestPreset, StoryStat } from '@/lib/types'
 import { media, photo } from '@/lib/format'
+import { DEFAULT_FOCAL, FOCAL } from '@/content/focal'
 import { RequestButton } from '@/components/request/RequestButton'
+
+/** Имя фото сайта из ссылки «/media/<имя>-1600.webp» — для точки кадрирования. */
+const mediaName = (url: string): string | null => /^\/media\/(.+)-1600\.webp$/.exec(url)?.[1] ?? null
 
 export function Photo({ name, url, alt, className, eager, sizes }: { name?: string; url?: string; alt: string; className?: string; eager?: boolean; sizes?: string }) {
   const p = name ? media(name) : photo(url ?? '')
+  const key = name ?? mediaName(url ?? '')
+  const focal = (key && FOCAL[key]) || DEFAULT_FOCAL
   return (
     <img
+      style={{ objectPosition: focal }}
       className={className} src={p.src} srcSet={p.srcSet} sizes={p.srcSet ? (sizes ?? '(max-width: 720px) 100vw, 50vw') : undefined}
       alt={alt} loading={eager ? 'eager' : 'lazy'} decoding="async" fetchPriority={eager ? 'high' : undefined}
     />

@@ -1,0 +1,295 @@
+/* Тема Liquid Glass — основная тема сайта. Ночной клуб под слоями жидкого стекла:
+   подложка (фото штаба + пятна света) движется, стекло преломляет её цвет. */
+@property --fy { syntax: '<length>'; inherits: false; initial-value: 0px; }
+
+.site[data-theme="glass"] {
+  --bg: #07060E;
+  --fg: #FFFFFF;
+  --muted: rgba(232, 228, 255, .72);
+  --accent: #7C4DFF;
+  --accent-hover: #8E66FF;
+  --accent-fg: #FFFFFF;
+  --accent-text: #C6B4FF;
+  --line: rgba(255, 255, 255, .12);
+  --line-strong: rgba(255, 255, 255, .4);
+  --hover-fill: rgba(255, 255, 255, .08);
+  --focus: #C6B4FF;
+  --scroll: #3A3360;
+  --font-display: 'Onest Variable', system-ui, sans-serif;
+  --font-body: 'Onest Variable', system-ui, sans-serif;
+  --font-data: 'Onest Variable', system-ui, sans-serif;
+  --display-weight: 800;
+  --btn-radius: 999px;
+  --chip-radius: 999px;
+  --input-radius: 16px;
+  --radius: 26px;
+  --radius-lg: 32px;
+  --sheet-bg: rgba(18, 14, 38, .72);
+  --sheet-line: rgba(255, 255, 255, .16);
+  --input-bg: rgba(255, 255, 255, .06);
+  --sheet-close-bg: rgba(255, 255, 255, .12);
+  --error: #FFB4C0;
+  background: var(--bg);
+}
+body:has(.site[data-theme="glass"]) { background: #07060E; }
+.site[data-theme="glass"] h1, .site[data-theme="glass"] h2 { letter-spacing: -.035em; }
+.site[data-theme="glass"] h3 { letter-spacing: -.02em; font-weight: 700; }
+.site[data-theme="glass"] main { padding-top: 104px; }
+
+/* ── Подложка ───────────────────────────────────────────────────────────── */
+.g-backdrop { position: fixed; inset: 0; z-index: 0; overflow: hidden; pointer-events: none; }
+.g-backdrop-photo { position: absolute; inset: -5%; width: 110%; height: 110%; object-fit: cover; opacity: .9; }
+.g-backdrop::before { content: ""; position: absolute; inset: 0; z-index: 2; background: radial-gradient(600px circle at var(--sx, 70%) var(--sy, 20%), rgba(160, 130, 255, .18), transparent 60%); transition: background-position .3s; }
+.g-backdrop::after { content: ""; position: absolute; inset: 0; z-index: 3; background: linear-gradient(to bottom, rgba(7, 6, 14, .2), rgba(7, 6, 14, .55) 60%, rgba(7, 6, 14, .8)); }
+.g-blob { position: absolute; z-index: 1; width: 70vmax; height: 70vmax; border-radius: 50%; opacity: .6; will-change: transform; }
+.g-blob-a { left: -20vmax; top: -25vmax; background: radial-gradient(circle, var(--blob-a, rgba(124, 77, 255, .75)), transparent 62%); animation: g-drift-a 26s ease-in-out infinite alternate; }
+.g-blob-b { right: -25vmax; top: 10vmax; background: radial-gradient(circle, var(--blob-b, rgba(52, 92, 255, .6)), transparent 62%); animation: g-drift-b 32s ease-in-out infinite alternate; }
+.g-blob-c { left: 10vmax; bottom: -35vmax; background: radial-gradient(circle, var(--blob-c, rgba(196, 64, 160, .42)), transparent 62%); animation: g-drift-c 38s ease-in-out infinite alternate; }
+@keyframes g-drift-a { to { transform: translate(18vmax, 14vmax) scale(1.15); } }
+@keyframes g-drift-b { to { transform: translate(-20vmax, 12vmax) scale(.9); } }
+@keyframes g-drift-c { to { transform: translate(14vmax, -18vmax) scale(1.1); } }
+.g-grain { position: absolute; inset: 0; z-index: 4; opacity: .18; mix-blend-mode: overlay; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23n)' opacity='.6'/%3E%3C/svg%3E"); }
+.site[data-theme="glass"] > :not(.g-backdrop) { position: relative; z-index: 1; }
+
+/* ── Материал: жидкое стекло ───────────────────────────────────────────── */
+.site[data-theme="glass"] .glass {
+  position: relative;
+  isolation: isolate;
+  background: linear-gradient(150deg, rgba(255, 255, 255, .16) 0%, rgba(255, 255, 255, .06) 38%, rgba(255, 255, 255, .03) 100%), var(--glass-tint, rgba(20, 16, 44, .18));
+  -webkit-backdrop-filter: blur(26px) saturate(185%);
+  backdrop-filter: blur(26px) saturate(185%);
+  border: 1px solid transparent;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .42), inset 0 -1px 0 rgba(255, 255, 255, .06), 0 30px 60px -32px rgba(0, 0, 0, .7);
+}
+/* Кромка: ярче сверху-слева, гаснет книзу — как у толстого стекла. */
+.site[data-theme="glass"] .glass::before {
+  content: ""; position: absolute; inset: -1px; border-radius: inherit; padding: 1px; pointer-events: none; z-index: 1;
+  background: linear-gradient(140deg, rgba(255, 255, 255, .7), rgba(255, 255, 255, .14) 30%, rgba(255, 255, 255, .04) 60%, rgba(198, 180, 255, .35));
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+}
+/* Блик под курсором (GlassSheen → --mx/--my). */
+.site[data-theme="glass"] .glass::after {
+  content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; z-index: -1;
+  background: radial-gradient(380px circle at var(--mx, 25%) var(--my, -30%), rgba(255, 255, 255, .2), transparent 62%);
+}
+
+/* ── Кнопки-капсулы ─────────────────────────────────────────────────────── */
+.site[data-theme="glass"] .btn { font-weight: 650; letter-spacing: -.01em; translate: var(--tx, 0) var(--ty, 0); transition: translate .35s var(--ease), transform .25s var(--ease), background-color .2s, box-shadow .3s; }
+.site[data-theme="glass"] .btn-primary {
+  position: relative; isolation: isolate;
+  background: linear-gradient(180deg, rgba(255, 255, 255, .32), rgba(255, 255, 255, .02) 55%), rgba(124, 77, 255, .78);
+  -webkit-backdrop-filter: blur(14px) saturate(180%); backdrop-filter: blur(14px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, .3);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .5), 0 14px 30px -14px rgba(90, 50, 230, .9);
+}
+.site[data-theme="glass"] .btn-primary:hover { background: linear-gradient(180deg, rgba(255, 255, 255, .36), rgba(255, 255, 255, .04) 55%), rgba(142, 102, 255, .86); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .55), 0 18px 40px -14px rgba(110, 70, 255, .95); }
+.site[data-theme="glass"] .btn-ghost { border: 0; color: var(--fg); }
+.site[data-theme="glass"] .btn-ghost:not(.glass) { background: rgba(255, 255, 255, .08); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .18); }
+.site[data-theme="glass"] .btn-link { color: var(--fg); text-decoration-color: rgba(255, 255, 255, .4); }
+
+/* ── Шапка-капсула ──────────────────────────────────────────────────────── */
+.site[data-theme="glass"] .hdr {
+  position: fixed; top: 16px; left: 50%; translate: -50% 0; z-index: 50;
+  width: min(1180px, calc(100% - 32px)); border-radius: 999px; padding: 8px 8px 8px 20px;
+  --glass-tint: rgba(16, 12, 36, .28);
+  transition: top .4s var(--ease), width .5s var(--ease), padding .4s var(--ease);
+}
+.site[data-theme="glass"] .hdr.is-scrolled { top: 10px; width: min(1080px, calc(100% - 32px)); --glass-tint: rgba(16, 12, 36, .5); }
+.site[data-theme="glass"] .hdr-brand { font-family: var(--font-display); font-weight: 800; font-size: 17px; letter-spacing: -.01em; }
+.site[data-theme="glass"] .hdr-brand img { width: 30px; height: 30px; }
+.site[data-theme="glass"] .hdr-nav { gap: 2px; }
+.site[data-theme="glass"] .hdr-nav a { font-size: 14.5px; font-weight: 550; padding: 8px 14px; border-radius: 999px; text-decoration: none; opacity: .8; transition: background-color .25s, opacity .2s; }
+.site[data-theme="glass"] .hdr-nav a:hover { background: rgba(255, 255, 255, .1); opacity: 1; }
+.site[data-theme="glass"] .hdr-nav a[aria-current="page"] { background: rgba(255, 255, 255, .16); opacity: 1; box-shadow: inset 0 1px 0 rgba(255, 255, 255, .3); }
+.site[data-theme="glass"] .hdr-phone { font-size: 14px; }
+.site[data-theme="glass"] .hdr-cta { min-height: 42px; padding: 0 20px; font-size: 14.5px; }
+.site[data-theme="glass"] .mnav { position: fixed; inset: 82px 12px 96px; z-index: 49; border-radius: 34px; padding: 14px 22px 22px; --glass-tint: rgba(14, 10, 32, .55); animation: g-pop .45s var(--ease) both; }
+.site[data-theme="glass"] .mnav nav a { font-family: var(--font-display); font-weight: 750; letter-spacing: -.03em; font-size: clamp(26px, 7.5vw, 36px); border-bottom-color: var(--line); animation: g-up .6s var(--ease) both; }
+.site[data-theme="glass"] .mnav nav a:nth-child(2) { animation-delay: .04s; } .site[data-theme="glass"] .mnav nav a:nth-child(3) { animation-delay: .08s; }
+.site[data-theme="glass"] .mnav nav a:nth-child(4) { animation-delay: .12s; } .site[data-theme="glass"] .mnav nav a:nth-child(5) { animation-delay: .16s; }
+.site[data-theme="glass"] .mnav nav a:nth-child(6) { animation-delay: .2s; } .site[data-theme="glass"] .mnav nav a:nth-child(7) { animation-delay: .24s; }
+@keyframes g-pop { from { opacity: 0; scale: .94; filter: blur(8px); } }
+@keyframes g-up { from { opacity: 0; translate: 0 16px; } }
+
+/* Нижняя панель на телефоне */
+.g-dock { display: none; }
+@media (max-width: 1000px) {
+  .site[data-theme="glass"] .hdr { top: 10px; width: calc(100% - 20px); padding: 6px 6px 6px 16px; }
+  .site[data-theme="glass"] main { padding-top: 86px; }
+  .site[data-theme="glass"] .g-dock {
+    display: flex; position: fixed; z-index: 48; left: 50%; translate: -50% 0; bottom: max(12px, env(safe-area-inset-bottom));
+    width: calc(100% - 24px); max-width: 520px; padding: 6px; gap: 6px; border-radius: 999px; --glass-tint: rgba(16, 12, 36, .4);
+    animation: g-dock-in .7s .4s var(--ease) both;
+  }
+  .g-dock-call { flex: none; width: 50px; height: 50px; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: #fff; background: rgba(255, 255, 255, .1); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .16); }
+  .g-dock-cta { flex: 1; min-height: 50px; }
+  .site[data-theme="glass"] .ftr { padding-bottom: 104px; }
+}
+@keyframes g-dock-in { from { opacity: 0; translate: -50% 40px; } }
+
+/* ── Общие носители контента — стекло ──────────────────────────────────── */
+.site[data-theme="glass"] :is(.fmt, .day, .price, .zone, .steps li, .review, .doc, .value, .member, .faq details, .stat, .form-card, .players, .rates, .contact-list) {
+  position: relative; border-radius: var(--radius);
+  background: linear-gradient(150deg, rgba(255, 255, 255, .13), rgba(255, 255, 255, .04) 45%, rgba(255, 255, 255, .025));
+  -webkit-backdrop-filter: blur(22px) saturate(170%); backdrop-filter: blur(22px) saturate(170%);
+  border: 1px solid rgba(255, 255, 255, .14);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .32), 0 26px 50px -32px rgba(0, 0, 0, .7);
+}
+.site[data-theme="glass"] .contact-list { padding: 6px 22px; }
+.site[data-theme="glass"] .contact-list li:last-child { border-bottom: 0; }
+.site[data-theme="glass"] .fmt { overflow: hidden; padding: 8px 8px 16px; transition: translate .5s var(--ease); }
+.site[data-theme="glass"] .fmt:hover { translate: 0 -4px; }
+.site[data-theme="glass"] .fmt img { border-radius: 20px; }
+.site[data-theme="glass"] .fmt-body { padding: 14px 10px 0; }
+.site[data-theme="glass"] :is(.fmt-meta, .story-kind) { color: var(--accent-text); font-weight: 600; }
+.site[data-theme="glass"] .day.is-today { border-color: rgba(198, 180, 255, .5); }
+.site[data-theme="glass"] .day.is-today .day-dow { color: var(--accent-text); }
+.site[data-theme="glass"] .rates { padding: 14px 22px; }
+.site[data-theme="glass"] .players { padding: 14px 22px; }
+.site[data-theme="glass"] .pl-elo { color: var(--accent-text); }
+.site[data-theme="glass"] .page-head h1 { font-size: clamp(40px, 6vw, 88px); }
+.site[data-theme="glass"] .page-head-media img { border-radius: 32px; box-shadow: 0 40px 80px -40px rgba(0, 0, 0, .9); }
+.site[data-theme="glass"] .gallery img { border-radius: 22px; }
+.site[data-theme="glass"] .sec-head h2 { font-size: clamp(36px, 5vw, 68px); }
+.site[data-theme="glass"] .cta-band { border-radius: 40px; --glass-tint: rgba(124, 77, 255, .16); padding: clamp(32px, 5vw, 72px); }
+.site[data-theme="glass"] .ftr { margin-top: var(--sec-gap); background: rgba(7, 6, 14, .55); -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px); border-top: 1px solid var(--line); }
+.site[data-theme="glass"] .sheet { -webkit-backdrop-filter: blur(36px) saturate(180%); backdrop-filter: blur(36px) saturate(180%); border-left: 1px solid rgba(255, 255, 255, .16); }
+.site[data-theme="glass"] .rq-tab[aria-selected="true"] { background: rgba(255, 255, 255, .92); color: #120E26; }
+.site[data-theme="glass"] .chip[aria-pressed="true"] { background: rgba(124, 77, 255, .8); border-color: rgba(255, 255, 255, .3); }
+
+/* Публикации: фото сверху целиком, подпись — под ним в той же стеклянной карточке */
+.site[data-theme="glass"] .story a { border-radius: var(--radius); overflow: hidden; background: linear-gradient(160deg, rgba(255, 255, 255, .1), rgba(255, 255, 255, .03)); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .12), 0 30px 60px -36px rgba(0, 0, 0, .9); }
+.site[data-theme="glass"] .story img { aspect-ratio: 4 / 3; }
+.site[data-theme="glass"] .story-body { padding: 16px 18px 20px; }
+
+/* ── Главная: первый экран в духе Apple Keynote ─────────────────────────── */
+.k-hero { width: min(var(--maxw), 100% - 2 * var(--gutter)); margin: 0 auto; padding-top: clamp(32px, 7vh, 88px); display: grid; gap: clamp(36px, 6vw, 72px); }
+.k-hero-copy { display: grid; justify-items: center; text-align: center; }
+.k-hero .g-title { font-size: clamp(44px, 7.4vw, 108px); }
+.k-hero .lead { margin: 26px auto 32px; font-size: clamp(17px, 1.4vw, 21px); max-width: 52ch; color: var(--muted); }
+.k-hero .actions { justify-content: center; }
+.k-hero-media { border-radius: clamp(26px, 3vw, 40px); overflow: hidden; aspect-ratio: 16 / 8; box-shadow: 0 60px 120px -60px rgba(0, 0, 0, .95), 0 0 0 1px rgba(255, 255, 255, .12); transform-origin: 50% 0; }
+.k-hero-media img { width: 100%; height: 100%; object-fit: cover; }
+.g-title { font-size: clamp(44px, 6.2vw, 96px); line-height: .98; font-weight: 800; }
+.g-line { display: block; animation: g-rise 1s var(--ease) both; animation-delay: calc(var(--i) * 90ms + 100ms); }
+.g-line-accent { color: var(--accent-text); }
+.g-rotator { display: inline-block; position: relative; min-height: 1em; }
+.g-rotator-word { display: inline-block; }
+.g-rise { animation: g-rise 1s var(--ease) both; animation-delay: calc(var(--i) * 90ms + 100ms); }
+@keyframes g-rise { from { opacity: 0; translate: 0 .6em; filter: blur(12px); } }
+.g-live { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 650; color: var(--accent-text); }
+.g-live::before { content: ""; flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--accent-text); }
+/* Запись на сегодня из опроса в Telegram: инициалы игроков и счётчик с зелёным пульсом. */
+.g-signups { display: flex; align-items: center; gap: 12px; text-align: left; width: fit-content; max-width: 100%; margin-top: 22px; padding: 8px 18px 8px 10px; border-radius: 26px; background: rgba(124, 255, 178, .07); box-shadow: inset 0 0 0 1px rgba(124, 255, 178, .2); animation: g-up .7s var(--ease) both; }
+.g-signups-faces { display: flex; flex: none; }
+.g-signups-faces span { width: 32px; height: 32px; margin-left: -8px; border-radius: 50%; display: grid; place-items: center; font-size: 12px; font-weight: 800; color: #fff; background: linear-gradient(140deg, #8E66FF, #3B5BFF); box-shadow: 0 0 0 2px rgba(16, 12, 36, .9); }
+.g-signups-faces span:first-child { margin-left: 0; }
+.g-signups p { margin: 0; font-size: 14.5px; line-height: 1.35; color: var(--fg); }
+.g-signups b { display: inline-flex; align-items: center; gap: 7px; }
+.g-signups b::before { content: ""; flex: none; width: 8px; height: 8px; border-radius: 50%; background: #7CFFB2; box-shadow: 0 0 0 0 rgba(124, 255, 178, .6); animation: g-pulse 1.8s infinite; }
+.g-signups small { display: block; margin-top: 2px; font-size: 12.5px; color: var(--muted); overflow-wrap: anywhere; }
+@keyframes g-pulse { 70% { box-shadow: 0 0 0 9px rgba(124, 255, 178, 0); } 100% { box-shadow: 0 0 0 0 rgba(124, 255, 178, 0); } }
+
+/* Карточки под фото: игра, цена, лидер */
+.k-glance { width: min(var(--maxw), 100% - 2 * var(--gutter)); margin: 18px auto 0; display: flex; gap: 18px; }
+.k-glance-card { flex: 1 1 0; min-width: 0; display: grid; align-content: start; gap: 6px; padding: 24px 26px; border-radius: 30px; }
+.k-glance-next { flex-grow: 1.4; }
+.k-glance-next h2 { font-size: clamp(26px, 2.4vw, 34px); margin: 8px 0 0; line-height: 1.05; }
+.k-glance-next p { color: var(--muted); font-size: 15.5px; }
+.k-glance-next .btn { justify-self: start; margin-top: 12px; }
+.k-glance-addr { display: flex; align-items: center; gap: 6px; font-size: 14px; }
+.k-glance-card > span, .k-glance-card small { color: var(--muted); font-size: 14px; }
+.k-glance-price b { font-size: clamp(44px, 4.4vw, 64px); font-weight: 800; letter-spacing: -.04em; line-height: 1; margin: 6px 0 2px; }
+.k-glance-top img, .k-glance-dot { width: 56px; height: 56px; border-radius: 50%; object-fit: cover; background: rgba(255, 255, 255, .2); margin-bottom: 8px; }
+.k-glance-top b { font-size: clamp(22px, 2vw, 28px); font-weight: 800; letter-spacing: -.02em; overflow-wrap: anywhere; }
+
+/* Цифры клуба */
+.g-stats { width: min(var(--maxw), 100% - 2 * var(--gutter)); margin: clamp(48px, 7vw, 104px) auto 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 24px; text-align: center; }
+.g-stat { display: grid; gap: 6px; justify-items: center; padding: 4px 12px; }
+.g-stat b { font-size: clamp(36px, 4vw, 58px); font-weight: 800; letter-spacing: -.04em; line-height: 1; }
+.g-stat span { color: var(--muted); font-size: 15px; }
+
+/* Форматы: фото сверху целиком, текст под ним; на телефоне — карусель */
+.k-tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; }
+.k-tile { display: grid; grid-template-rows: auto 1fr; padding: 8px; border-radius: 32px; }
+.k-tile-media { border-radius: 25px; overflow: hidden; aspect-ratio: 4 / 3; }
+.k-tile-media img { width: 100%; height: 100%; object-fit: cover; transition: scale 1.2s var(--ease); }
+.k-tile:hover .k-tile-media img { scale: 1.05; }
+.k-tile-body { display: grid; align-content: start; gap: 6px; padding: 18px 16px 14px; }
+.k-tile-body h3 { font-size: clamp(22px, 2vw, 28px); }
+.k-tile-meta { font-size: 13.5px; font-weight: 650; color: var(--accent-text); }
+.k-tile-text { font-size: 15px; color: var(--muted); }
+.k-tile-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin-top: 10px; }
+
+/* Заголовки разделов главной — по центру, как у Apple */
+.g-home .sec-head { margin-inline: auto; justify-items: center; text-align: center; }
+.g-home .sec-more { text-align: center; }
+
+/* Неделя игр */
+.g-week { display: grid; gap: 14px; max-width: 920px; }
+.g-week-strip { display: flex; gap: 4px; padding: 6px; border-radius: 999px; overflow-x: auto; scrollbar-width: none; }
+.g-week-strip::-webkit-scrollbar { display: none; }
+.g-week-day { position: relative; flex: 1 0 64px; display: grid; justify-items: center; gap: 2px; padding: 10px 6px 12px; border-radius: 999px; color: var(--muted); }
+.g-week-day b { position: relative; z-index: 1; font-size: 22px; font-weight: 750; color: var(--fg); }
+.g-week-dow { position: relative; z-index: 1; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; }
+.g-week-dot { position: relative; z-index: 1; width: 6px; height: 6px; border-radius: 50%; background: transparent; }
+.g-week-day.has-game .g-week-dot { background: var(--accent-text); }
+.g-week-day.is-today .g-week-dow { color: var(--accent-text); }
+.g-week-pill { position: absolute; inset: 0; border-radius: 999px; background: linear-gradient(180deg, rgba(255, 255, 255, .3), rgba(255, 255, 255, .06)), rgba(124, 77, 255, .55); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .5), 0 10px 24px -12px rgba(90, 50, 230, .9); }
+.g-week-day[aria-selected="true"] .g-week-dow { color: #fff; }
+.g-week-day[aria-selected="true"] .g-week-dot { background: #fff; }
+.g-week-card { padding: 22px 24px; border-radius: 30px; display: grid; gap: 14px; }
+.g-week-date { color: var(--accent-text); font-weight: 650; }
+.g-week-event { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 14px 24px; padding-top: 14px; border-top: 1px solid var(--line); }
+.g-week-event:first-of-type { border-top: 0; padding-top: 0; }
+.g-week-event h3 { font-size: clamp(22px, 2.2vw, 30px); }
+.g-week-event p { color: var(--muted); }
+
+/* Цены с сегментным переключателем */
+.g-prices { padding: clamp(18px, 3vw, 32px); border-radius: 36px; display: grid; gap: 22px; }
+.g-seg { display: inline-flex; gap: 4px; padding: 5px; border-radius: 999px; background: rgba(0, 0, 0, .22); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .1); justify-self: start; max-width: 100%; overflow-x: auto; scrollbar-width: none; }
+.g-seg-btn { position: relative; padding: 10px 18px; border-radius: 999px; font-weight: 600; font-size: 15px; color: var(--muted); white-space: nowrap; }
+.g-seg-btn span { position: relative; z-index: 1; }
+.g-seg-btn[aria-selected="true"] { color: #120E26; }
+.g-seg-pill { position: absolute; inset: 0; border-radius: 999px; background: rgba(255, 255, 255, .94); box-shadow: 0 6px 16px -6px rgba(0, 0, 0, .5); }
+.g-price-grid { list-style: none; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 12px; }
+.g-price-grid li { display: grid; gap: 6px; padding: 18px 20px; border-radius: 22px; background: rgba(255, 255, 255, .06); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .1); }
+.g-price-grid span { color: var(--muted); font-size: 15px; }
+.g-price-grid b { font-size: clamp(28px, 2.8vw, 40px); font-weight: 800; letter-spacing: -.03em; line-height: 1; white-space: nowrap; }
+.g-price-grid small { font-size: .5em; color: var(--muted); font-weight: 600; margin-left: 2px; }
+.g-price-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 14px; margin-top: 18px; }
+.g-price-foot p { color: var(--muted); max-width: 52ch; }
+
+/* Приложение, рейтинг, ленты */
+.site[data-theme="glass"] .app-promo { padding: clamp(24px, 4vw, 56px); border-radius: 40px; background: linear-gradient(150deg, rgba(255, 255, 255, .12), rgba(255, 255, 255, .03)); -webkit-backdrop-filter: blur(24px) saturate(170%); backdrop-filter: blur(24px) saturate(170%); border: 1px solid rgba(255, 255, 255, .14); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .3); }
+.site[data-theme="glass"] .phone::after { content: ""; position: absolute; inset: 7px; border-radius: 33px; pointer-events: none; background: linear-gradient(125deg, rgba(255, 255, 255, .22) 0%, transparent 32%); }
+.site[data-theme="glass"] .store-badge { background: rgba(255, 255, 255, .08); -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px); border-color: rgba(255, 255, 255, .2); }
+.site[data-theme="glass"] .podium-place { --glass-tint: rgba(16, 12, 36, .25); }
+.site[data-theme="glass"] .podium-1 { --glass-tint: rgba(124, 77, 255, .22); }
+.g-home .g-stories .stories { grid-auto-flow: column; grid-template-columns: none; grid-auto-columns: minmax(250px, 300px); overflow-x: auto; scroll-snap-type: x mandatory; padding: 6px 2px 16px; scrollbar-width: none; }
+.g-home .g-stories .stories::-webkit-scrollbar { display: none; }
+.g-home .g-stories .story { scroll-snap-align: start; }
+.site[data-theme="glass"] .marquee .review { --glass-tint: rgba(16, 12, 36, .2); }
+
+@media (max-width: 1000px) {
+  .k-hero-media { aspect-ratio: 4 / 3; }
+  .k-glance { flex-wrap: wrap; }
+  .k-glance-next { flex-basis: 100%; }
+  .g-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .k-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 560px) {
+  .k-hero { padding-top: 20px; gap: 32px; }
+  .k-hero-media { aspect-ratio: 4 / 5; }
+  .k-glance { gap: 12px; margin-top: 12px; }
+  .k-glance-card { padding: 18px; border-radius: 26px; }
+  .g-stats { gap: 28px 12px; }
+  /* Форматы — горизонтальная карусель с прилипанием, как на страницах Apple */
+  .k-tiles { grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: 84%; overflow-x: auto; scroll-snap-type: x mandatory; margin-inline: calc(var(--gutter) * -1); padding: 4px var(--gutter) 14px; scroll-padding-inline: var(--gutter); scrollbar-width: none; }
+  .k-tiles::-webkit-scrollbar { display: none; }
+  .k-tile { scroll-snap-align: start; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .g-blob, .g-line, .g-rise, .g-signups, .g-signups b::before, .site[data-theme="glass"] .g-dock, .site[data-theme="glass"] .mnav, .site[data-theme="glass"] .mnav nav a { animation: none; }
+}

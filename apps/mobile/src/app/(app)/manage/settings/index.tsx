@@ -4,7 +4,7 @@ import { Stack, useRouter } from 'expo-router';
 
 import { LinkRow, TextRow, TimeRow } from '@/components/native-form';
 import { useSettingsEditor } from '@/components/settings-parts';
-import { useBookingConfig, useIntegrations, usePaymentConfig, useSiteConfig } from '@/lib/admin-api';
+import { SITE_HOLIDAYS, useBookingConfig, useIntegrations, usePaymentConfig, useSiteConfig } from '@/lib/admin-api';
 import { haptic } from '@/lib/haptics';
 import { METHODS, type TenderMethod } from '@/lib/payment';
 
@@ -12,8 +12,6 @@ import { METHODS, type TenderMethod } from '@/lib/payment';
 const DEFAULT_METHODS: TenderMethod[] = ['cash', 'card', 'transfer'];
 const HOURS = Array.from({ length: 24 }, (_, hour) => hour);
 const hourText = (hour: number) => `${String(hour).padStart(2, '0')}:00`;
-const SITE_THEME_TITLE = { case: 'Дело о мафии', protocol: 'Протокол', night: 'Город засыпает', classic: 'Классика' } as const;
-
 /**
  * Настройки клуба — как «Настройки» iOS: правка прямо в строке (название, адрес, время),
  * выбор из системного меню; всё сохраняется сразу. Большие темы
@@ -119,7 +117,7 @@ export default function SettingsScreen() {
               color="#E5322D"
               title="Сайт"
               subtitle="titanmafia.ru — тема и публикации"
-              value={site.data ? SITE_THEME_TITLE[site.data.theme] : undefined}
+              value={site.data ? (SITE_HOLIDAYS.find((h) => h.id === site.data?.holiday)?.title ?? 'Без праздника') : undefined}
               onPress={() => router.push('/manage/settings/site')}
             />
           </Section>

@@ -28,10 +28,8 @@ export const SOCIALS: SocialLink[] = [
 export const GOMAFIA = {
   club: 'https://gomafia.pro/club/40',
   register: 'https://gomafia.pro/register',
+  player: (id: string) => `https://gomafia.pro/stats/${encodeURIComponent(id)}`,
 } as const
-
-/** Виртуальная кэшбэк-карта клуба (была на Wix-сайте). */
-export const WALLET_CARD_URL = 'https://passl.ink/yM7HU'
 
 export interface NavItem { href: string; label: string }
 

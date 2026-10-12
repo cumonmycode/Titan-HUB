@@ -110,9 +110,25 @@ export async function saveBookingConfig(enabled: boolean): Promise<void> {
 
 /* ─────────────────────────── Сайт клуба ─────────────────────────── */
 
-export type SiteTheme = 'case' | 'protocol' | 'night' | 'classic';
+/** Праздничное оформление сайта поверх Liquid Glass (список — как на сайте). */
+export type SiteHoliday =
+  | 'new_year' | 'winter' | 'valentine' | 'defender' | 'womens_day' | 'maslenitsa'
+  | 'spring' | 'summer' | 'autumn' | 'halloween' | 'club_birthday';
+export const SITE_HOLIDAYS: { id: SiteHoliday; title: string; hint: string }[] = [
+  { id: 'new_year', title: 'Новый год', hint: 'Снег, гирлянда и снеговик' },
+  { id: 'winter', title: 'Зима', hint: 'Тихий снегопад' },
+  { id: 'valentine', title: 'День влюблённых', hint: 'Летящие сердца' },
+  { id: 'defender', title: '23 февраля', hint: 'Золотые звёзды' },
+  { id: 'womens_day', title: '8 Марта', hint: 'Лепестки и мимоза' },
+  { id: 'maslenitsa', title: 'Масленица', hint: 'Искры и солнце' },
+  { id: 'spring', title: 'Весна', hint: 'Лепестки сакуры' },
+  { id: 'summer', title: 'Лето', hint: 'Солнечные блики' },
+  { id: 'autumn', title: 'Осень', hint: 'Падающие листья' },
+  { id: 'halloween', title: 'Хэллоуин', hint: 'Летучие мыши, тыквы, паутина' },
+  { id: 'club_birthday', title: 'День рождения клуба', hint: 'Конфетти и шары' },
+];
 export type SiteScheduleDay = { day: number; title: string; time?: string };
-export type SiteConfig = { theme: SiteTheme; themes: SiteTheme[]; schedule: SiteScheduleDay[] | null };
+export type SiteConfig = { holiday?: SiteHoliday | null; holidays?: SiteHoliday[]; schedule: SiteScheduleDay[] | null };
 
 export function useSiteConfig() {
   const club = useClubKey();
@@ -123,8 +139,14 @@ export function useSiteConfig() {
   });
 }
 
-export async function saveSiteTheme(theme: SiteTheme): Promise<void> {
-  await api.put('/system/site-config', { theme });
+/** null — снять праздник (обычный вид сайта). */
+export async function saveSiteHoliday(holiday: SiteHoliday | null): Promise<void> {
+  await api.put('/system/site-config', { holiday });
+  invalidate(['system', 'site-config']);
+}
+
+export async function saveSiteSchedule(schedule: SiteScheduleDay[]): Promise<void> {
+  await api.put('/system/site-config', { schedule });
   invalidate(['system', 'site-config']);
 }
 

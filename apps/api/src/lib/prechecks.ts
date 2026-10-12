@@ -24,7 +24,7 @@ export interface PrecheckCandidate {
 }
 
 // Начало текущего БИЗНЕС-ДНЯ (МСК, граница h:00) в UTC-мс.
-function businessDayStartMs(hour: number): number {
+export function businessDayStartMs(hour: number): number {
   const MSK = 3 * 3600 * 1000
   const d = new Date(Date.now() + MSK)
   let y = d.getUTCFullYear(), m = d.getUTCMonth(), day = d.getUTCDate()

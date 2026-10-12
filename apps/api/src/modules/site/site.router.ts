@@ -7,6 +7,7 @@
  *
  *  GET  /config   — заведение, часы, цены вечера (тарифы «на экране ТВ»),
  *                   почасовые тарифы мероприятий и зоны — всё живое из HUB;
+ *  GET  /tonight  — запись на сегодня: «Да» в опросе Telegram (+8) и ники игроков;
  *  GET  /players  — резиденты клуба на GoMafia по ELO (кэш 30 мин);
  *  POST /requests — заявка с сайта → bookings (kind) → «Заявки с сайта» в HUB
  *                   и push владельцам. Мероприятие создаётся при подтверждении.
@@ -15,14 +16,19 @@ import { Hono } from 'hono'
 import { zValidator } from '@hono/zod-validator'
 import { z } from 'zod'
 import {
-  sql, appSettings, tariffs, inventory, spaces, eventHourlyRates, certificates, customers,
-  eq, and, asc, inArray, type Database,
+  sql, appSettings, tariffs, inventory, spaces, eventHourlyRates, certificates, customers, profiles,
+  eq, and, asc, inArray, isNull, type Database,
 } from '@titan/database'
 import type { AppEnv } from '../../types.js'
 import { clientIp } from '../../lib/clientIp.js'
 import { getClubIntegration } from '../../lib/secrets.js'
 import { clubResidents, type GomafiaPlayer } from '../../lib/gomafia.js'
 import { notifyOwners, publicRateLimited, startError } from '../bookings/publicGuards.js'
+import { getBusinessDayStartHour } from '../../lib/appSettings.js'
+import { businessDayStartMs } from '../../lib/prechecks.js'
+import { listLastPolls, votersForToday } from '../../lib/pollState.js'
+import { readPollConfigs } from '../../lib/polls.js'
+import { readAliases } from '../../lib/tgAliases.js'
 import { findPublished, listPublished, publicStory } from './stories.js'
 
 function rows<T = Record<string, unknown>>(res: unknown): T[] {
@@ -35,17 +41,26 @@ const CONFIG_MAX_AGE_SECONDS = 60
 const PLAYERS_MAX_AGE_SECONDS = 600
 const PLAYERS_TTL_MS = 30 * 60 * 1000
 const PLAYERS_MAX_PAGES = 12
-const PLAYERS_TOP = 30
+const PLAYERS_TOP = 60
+// Запись на сегодня: к голосам «Да» прибавляем базу (формула владельца) и
+// пересчитываем раз в полчаса — счётчик на сайте меняется не чаще.
+const SIGNUPS_BASE = 8
+const SIGNUPS_TTL_MS = 30 * 60 * 1000
+const SIGNUPS_MAX_AGE_SECONDS = 300
+const SIGNUPS_NAMES_MAX = 12
 
 export const siteRouter = new Hono<AppEnv>()
 
 // ─── Витрина ─────────────────────────────────────────────────────────────────
-const VENUE_KEYS = ['venue_name', 'venue_address', 'hours_open', 'hours_close', 'site_schedule', 'site_theme']
-// Темы сайта — переключаются владельцем в HUB («Настройки → Сайт»).
-export const SITE_THEMES = ['case', 'protocol', 'night', 'classic'] as const
-export type SiteTheme = (typeof SITE_THEMES)[number]
-export const DEFAULT_SITE_THEME: SiteTheme = 'case'
-export const isSiteTheme = (v: unknown): v is SiteTheme => typeof v === 'string' && (SITE_THEMES as readonly string[]).includes(v)
+const VENUE_KEYS = ['venue_name', 'venue_address', 'hours_open', 'hours_close', 'site_schedule', 'site_holiday']
+// Праздничное оформление сайта — включает владелец в HUB («Сайт → Оформление»);
+// пусто — обычный вид. Список совпадает с apps/site/src/content/holidays.ts.
+export const SITE_HOLIDAYS = [
+  'new_year', 'winter', 'valentine', 'defender', 'womens_day', 'maslenitsa',
+  'spring', 'summer', 'autumn', 'halloween', 'club_birthday',
+] as const
+export type SiteHoliday = (typeof SITE_HOLIDAYS)[number]
+export const isSiteHoliday = (v: unknown): v is SiteHoliday => typeof v === 'string' && (SITE_HOLIDAYS as readonly string[]).includes(v)
 
 export interface ScheduleDay { day: number; title: string; time?: string }
 
@@ -90,7 +105,7 @@ siteRouter.get('/config', async (c) => {
 
   c.header('Cache-Control', `public, max-age=${CONFIG_MAX_AGE_SECONDS}`)
   return c.json({
-    theme: isSiteTheme(m['site_theme']) ? m['site_theme'] : DEFAULT_SITE_THEME,
+    holiday: isSiteHoliday(m['site_holiday']) ? m['site_holiday'] : null,
     venue: {
       name: m['venue_name'] || 'TITAN KBR',
       address: m['venue_address'] || '',
@@ -104,8 +119,56 @@ siteRouter.get('/config', async (c) => {
   })
 })
 
+// ─── Запись на сегодня (опрос в Telegram) ────────────────────────────────────
+// Опрос сегодняшнего вечера (опубликован с начала бизнес-дня): сколько отметили
+// «Да» + SIGNUPS_BASE и клубные ники тех, кто сопоставлен с клиентом HUB. Наружу
+// — только ники, без имён из Telegram и фото. Нет опроса — { poll: false }.
+interface Signups { poll: boolean; evening: string | null; going: number; names: string[] }
+const signupsCache = new Map<string, { at: number; value: Signups }>()
+
+async function loadSignups(db: Database): Promise<Signups> {
+  const since = businessDayStartMs(await getBusinessDayStartHour(db))
+  const today = (await listLastPolls(db)).filter((p) => Date.parse(p.postedAt) >= since)
+  if (!today.length) return { poll: false, evening: null, going: 0, names: [] }
+
+  const configs = await readPollConfigs(db)
+  const evening = today.map((p) => configs.find((cfg) => cfg.chatId === p.chatId)?.title).find(Boolean) ?? null
+  const voters = await votersForToday(db, since, ['да'])
+  const tgIds = [...voters.keys()]
+  if (!tgIds.length) return { poll: true, evening, going: SIGNUPS_BASE, names: [] }
+
+  // tgId → профиль (основной tg_id или алиас доп. аккаунта), как в предчеках.
+  const profileIds = new Set<string>()
+  const byPrimary = await db.select({ id: profiles.id, tgId: profiles.tgId })
+    .from(profiles).where(and(inArray(profiles.tgId, tgIds), isNull(profiles.deletedAt)))
+  const matched = new Set(byPrimary.map((r) => r.tgId))
+  for (const r of byPrimary) profileIds.add(r.id)
+  const aliases = await readAliases(db)
+  for (const tg of tgIds) if (!matched.has(tg) && aliases[tg]) profileIds.add(aliases[tg]!.profileId)
+
+  const named = profileIds.size
+    ? await db.select({ nickname: profiles.nickname }).from(profiles)
+      .where(and(inArray(profiles.id, [...profileIds]), isNull(profiles.deletedAt)))
+    : []
+  const names = named.map((p) => p.nickname.trim()).filter(Boolean)
+    .sort((x, y) => x.localeCompare(y, 'ru')).slice(0, SIGNUPS_NAMES_MAX)
+  return { poll: true, evening, going: tgIds.length + SIGNUPS_BASE, names }
+}
+
+siteRouter.get('/tonight', async (c) => {
+  const key = c.var.club?.id ?? 'main'
+  const cached = signupsCache.get(key)
+  let value = cached && Date.now() - cached.at < SIGNUPS_TTL_MS ? cached.value : null
+  if (!value) {
+    value = await loadSignups(c.var.db)
+    signupsCache.set(key, { at: Date.now(), value })
+  }
+  c.header('Cache-Control', `public, max-age=${SIGNUPS_MAX_AGE_SECONDS}`)
+  return c.json(value)
+})
+
 // ─── Резиденты на GoMafia ────────────────────────────────────────────────────
-interface PublicPlayer { nickname: string; elo: number; avatar: string | null; tournaments: number | null }
+interface PublicPlayer { id: string; nickname: string; elo: number; avatar: string | null; tournaments: number | null }
 interface PlayersPayload { club: string | null; total: number; players: PublicPlayer[] }
 const playersCache = new Map<string, { at: number; value: PlayersPayload }>()
 
@@ -126,7 +189,7 @@ async function loadPlayers(gomafiaClubId: string): Promise<PlayersPayload> {
     .filter((p) => p.elo != null && p.login)
     .sort((a, b) => (b.elo ?? 0) - (a.elo ?? 0))
     .slice(0, PLAYERS_TOP)
-    .map((p) => ({ nickname: p.login, elo: Math.round(p.elo ?? 0), avatar: p.avatar, tournaments: p.tournaments }))
+    .map((p) => ({ id: p.gomafiaId, nickname: p.login, elo: Math.round(p.elo ?? 0), avatar: p.avatar, tournaments: p.tournaments }))
   const value = { club, total: total || all.length, players }
   // Пустой ответ (GoMafia недоступна) не кэшируем — следующий запрос попробует снова.
   if (players.length) playersCache.set(gomafiaClubId, { at: Date.now(), value })

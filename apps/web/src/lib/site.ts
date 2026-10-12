@@ -1,5 +1,5 @@
 /**
- * Сайт клуба (titanmafia.ru) в HUB: тема, расписание вечеров и публикации
+ * Сайт клуба (titanmafia.ru) в HUB: праздничное оформление, расписание вечеров и публикации
  * (турниры, вечеринки). Сайт подхватывает изменения в течение минуты.
  */
 
@@ -8,17 +8,27 @@ export const SITE_URL = 'https://www.titanmafia.ru'
 /** Зеркало сайта на поддомене HUB — работает и до переключения домена. */
 export const SITE_MIRROR = 'https://site.titanpos.ru'
 
-export type SiteTheme = 'case' | 'protocol' | 'night' | 'classic'
+/** Праздничное оформление поверх Liquid Glass; список совпадает с сайтом (content/holidays.ts). */
+export type SiteHoliday =
+  | 'new_year' | 'winter' | 'valentine' | 'defender' | 'womens_day' | 'maslenitsa'
+  | 'spring' | 'summer' | 'autumn' | 'halloween' | 'club_birthday'
 
-export const SITE_THEMES: { id: SiteTheme; label: string; text: string; colors: string[] }[] = [
-  { id: 'case', label: 'Дело о мафии', text: 'Доска улик на фиолетовой стене штаба: полароиды, красная нить, печати.', colors: ['#2E1766', '#EEE7DA', '#E5322D'] },
-  { id: 'protocol', label: 'Протокол судьи', text: 'Судейский бланк игры: девять мест заняты форматами клуба, десятое — гостя.', colors: ['#F4F4F0', '#111111', '#1F3FD1'] },
-  { id: 'night', label: 'Город засыпает', text: 'Сайт как раунд игры: при прокрутке ночь сменяется днём.', colors: ['#05040A', '#1E2C8F', '#E8728F'] },
-  { id: 'classic', label: 'Классика', text: 'Фото клуба во весь экран, карточки форматов — привычно и понятно.', colors: ['#0B0B10', '#7C4DFF', '#FFFFFF'] },
+export const SITE_HOLIDAYS: { id: SiteHoliday; label: string; text: string; colors: string[] }[] = [
+  { id: 'new_year', label: 'Новый год', text: 'Снег, гирлянда и снеговик', colors: ['#FFFFFF', '#C9DCFF', '#F4C95D'] },
+  { id: 'winter', label: 'Зима', text: 'Тихий снегопад, холодный оттенок', colors: ['#FFFFFF', '#E3EEFF', '#9DB8FF'] },
+  { id: 'valentine', label: 'День влюблённых', text: 'Летящие сердца, розовый оттенок', colors: ['#FF5C8A', '#FF8FB1', '#E8336B'] },
+  { id: 'defender', label: '23 февраля', text: 'Золотые звёзды', colors: ['#F4C95D', '#FFE29A', '#D9A93B'] },
+  { id: 'womens_day', label: '8 Марта', text: 'Лепестки и ветка мимозы', colors: ['#FFB3D1', '#FFD6E5', '#F7E35B'] },
+  { id: 'maslenitsa', label: 'Масленица', text: 'Искры и солнце', colors: ['#FFB547', '#FFD27A', '#FF8A3D'] },
+  { id: 'spring', label: 'Весна', text: 'Лепестки сакуры', colors: ['#FFD1E3', '#FFFFFF', '#FFC2D6'] },
+  { id: 'summer', label: 'Лето', text: 'Солнечные блики и солнце', colors: ['#FFE08A', '#8FF0E0', '#FFFFFF'] },
+  { id: 'autumn', label: 'Осень', text: 'Падающие листья, тёплый оттенок', colors: ['#E8742B', '#F2A93B', '#C7442E'] },
+  { id: 'halloween', label: 'Хэллоуин', text: 'Летучие мыши, тыквы и паутина', colors: ['#FF7A1A', '#22172F', '#8B5CF6'] },
+  { id: 'club_birthday', label: 'День рождения клуба', text: 'Конфетти и воздушные шары', colors: ['#F4C95D', '#9B7BFF', '#FF6FA3'] },
 ]
 
 export interface ScheduleDay { day: number; title: string; time?: string }
-export interface SiteConfig { theme: SiteTheme; themes: SiteTheme[]; schedule: ScheduleDay[] | null }
+export interface SiteConfig { holiday: SiteHoliday | null; holidays: SiteHoliday[]; schedule: ScheduleDay[] | null }
 
 export const DAYS = ['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота', 'Воскресенье']
 export const EVENING_TITLES = ['Городская мафия', 'Спортивная мафия', 'Настольные игры', 'Детская мафия', 'Турнир']

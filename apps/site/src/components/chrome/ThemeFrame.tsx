@@ -1,27 +1,31 @@
 import type { ReactNode } from 'react'
-import type { SiteConfig, ThemeId } from '@/lib/types'
+import type { HolidayId } from '@/content/holidays'
+import type { SiteConfig } from '@/lib/types'
 import { RequestProvider } from '@/components/request/RequestProvider'
+import { GlassSheen } from '@/components/motion/GlassSheen'
+import { GlassBackdrop } from '@/components/glass/GlassBackdrop'
+import { MobileDock } from '@/components/glass/MobileDock'
+import { HolidayLayer } from '@/components/holiday/HolidayLayer'
 import { Header } from './Header'
 import { Footer } from './Footer'
-import { NightSky } from './NightSky'
 
-// Слова главной кнопки — в голосе темы.
-const CTA: Record<ThemeId, string> = {
-  case: 'Записаться',
-  protocol: 'Занять место',
-  night: 'Записаться',
-  classic: 'Записаться',
-}
+const CTA = 'Записаться'
 
-/** Обёртка сайта в выбранной теме: шапка, контент, подвал и шторка заявки. */
-export function ThemeFrame({ theme, config, children }: { theme: ThemeId; config: SiteConfig; children: ReactNode }) {
+/**
+ * Каркас сайта (Liquid Glass): подложка, шапка-капсула, контент, подвал, нижняя
+ * панель на телефоне и шторка заявки; при включённом в HUB празднике — его слой.
+ */
+export function ThemeFrame({ config, holiday, children }: { config: SiteConfig; holiday: HolidayId | null; children: ReactNode }) {
   return (
-    <div className="site" data-theme={theme}>
+    <div className="site" data-theme="glass" data-holiday={holiday ?? undefined}>
       <RequestProvider config={config}>
-        {theme === 'night' && <NightSky />}
-        <Header ctaLabel={CTA[theme]} />
+        <GlassBackdrop />
+        <GlassSheen />
+        <Header ctaLabel={CTA} />
         <main id="main">{children}</main>
         <Footer config={config} />
+        <MobileDock ctaLabel={CTA} />
+        {holiday && <HolidayLayer key={holiday} holiday={holiday} />}
       </RequestProvider>
     </div>
   )

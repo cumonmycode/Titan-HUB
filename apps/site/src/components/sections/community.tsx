@@ -1,10 +1,11 @@
 /** Сообщество: публикации, отзывы, команда, ценности, книги, рейтинг GoMafia, контакты. */
 import Link from 'next/link'
 import { ArrowUpRight, Download } from 'lucide-react'
-import type { PlayersPayload, StorySummary } from '@/lib/types'
+import type { Player, PlayersPayload, StorySummary } from '@/lib/types'
 import { DOCS, REVIEWS, TEAM, VALUES } from '@/content/people'
 import { GOMAFIA, SITE, SOCIALS } from '@/content/site'
 import { Photo } from './blocks'
+import { PlayerSearch } from './PlayerSearch'
 
 const KIND_LABEL: Record<string, string> = { tournament: 'Турнир', party: 'Вечеринка', event: 'Событие' }
 
@@ -76,6 +77,12 @@ export function Docs() {
 }
 
 /** Рейтинг резидентов клуба на GoMafia (живые данные, кэш 30 мин). */
+/** Ник со ссылкой на профиль GoMafia; ссылка растянута на всю строку/карточку. */
+function PlayerName({ player }: { player: Player }) {
+  if (!player.id) return <>{player.nickname}</>
+  return <a className="pl-link" href={GOMAFIA.player(player.id)} target="_blank" rel="noopener noreferrer">{player.nickname}</a>
+}
+
 export function Players({ data, limit = 10 }: { data: PlayersPayload; limit?: number }) {
   if (!data.players.length) {
     return <p className="empty">Рейтинг клуба — на <a href={GOMAFIA.club} target="_blank" rel="noopener noreferrer">GoMafia</a>.</p>
@@ -89,7 +96,7 @@ export function Players({ data, limit = 10 }: { data: PlayersPayload; limit?: nu
           {data.players.slice(0, limit).map((p, i) => (
             <tr key={p.nickname}>
               <td className="pl-rank">{i + 1}</td>
-              <td className="pl-name">{p.avatar ? <img src={p.avatar} alt="" width={28} height={28} loading="lazy" /> : <span className="pl-dot" aria-hidden="true" />}{p.nickname}</td>
+              <td className="pl-name">{p.avatar ? <img src={p.avatar} alt="" width={28} height={28} loading="lazy" /> : <span className="pl-dot" aria-hidden="true" />}<PlayerName player={p} /></td>
               <td className="pl-elo">{p.elo}</td>
               <td className="pl-t">{p.tournaments ?? '—'}</td>
             </tr>
@@ -109,5 +116,56 @@ export function ContactList() {
       <li><span>Почта</span><a href={`mailto:${SITE.email}`}>{SITE.email}</a></li>
       {SOCIALS.map((s) => <li key={s.id}><span>{s.label}</span><a href={s.href} target="_blank" rel="noopener noreferrer">{s.href.replace(/^https:\/\/(www\.)?/, '')}</a></li>)}
     </ul>
+  )
+}
+
+/** Рейтинг пьедесталом: тройка лидеров крупно, дальше — список. */
+export function PlayersPodium({ data, limit = 10 }: { data: PlayersPayload; limit?: number }) {
+  if (data.players.length < 3) return <Players data={data} limit={limit} />
+  const [first, second, third] = data.players
+  const rest = data.players.slice(3, limit)
+  const place = (p: typeof first, n: number) => (
+    <li className={`podium-place podium-${n} glass`}>
+      <span className="podium-n">{n}</span>
+      {p!.avatar ? <img src={p!.avatar} alt="" width={84} height={84} loading="lazy" /> : <span className="podium-dot" aria-hidden="true" />}
+      <b><PlayerName player={p!} /></b>
+      <span className="podium-elo">ELO {p!.elo}</span>
+    </li>
+  )
+  return (
+    <div className="podium-wrap">
+      <ol className="podium">{place(second, 2)}{place(first, 1)}{place(third, 3)}</ol>
+      {rest.length > 0 && (
+        <ol className="podium-rest glass" start={4}>
+          {rest.map((p, i) => (
+            <li key={p.nickname}>
+              <span className="pl-rank">{i + 4}</span>
+              <span className="pl-name">{p.avatar ? <img src={p.avatar} alt="" width={28} height={28} loading="lazy" /> : <span className="pl-dot" aria-hidden="true" />}<PlayerName player={p} /></span>
+              <span className="pl-elo">{p.elo}</span>
+            </li>
+          ))}
+        </ol>
+      )}
+      {data.players.length > limit && <PlayerSearch players={data.players} />}
+      <a className="btn btn-link" href={GOMAFIA.club} target="_blank" rel="noopener noreferrer">Весь клуб на GoMafia <ArrowUpRight size={16} aria-hidden="true" /></a>
+    </div>
+  )
+}
+
+/** Отзывы бегущей лентой (останавливается под курсором). Дубль для бесшовной петли скрыт от чтения. */
+export function ReviewsMarquee() {
+  const card = (r: (typeof REVIEWS)[number], hidden?: boolean) => (
+    <li key={`${r.author}${hidden ? '-2' : ''}`} className="review glass" aria-hidden={hidden || undefined}>
+      <blockquote><p>{r.text}</p></blockquote>
+      <cite>{r.author}</cite>
+    </li>
+  )
+  return (
+    <div className="marquee">
+      <ul className="marquee-track">
+        {REVIEWS.map((r) => card(r))}
+        {REVIEWS.map((r) => card(r, true))}
+      </ul>
+    </div>
   )
 }

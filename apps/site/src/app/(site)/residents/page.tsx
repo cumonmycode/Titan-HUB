@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
-import { ArrowUpRight, Wallet } from 'lucide-react'
-import { GOMAFIA, WALLET_CARD_URL } from '@/content/site'
+import { ArrowUpRight } from 'lucide-react'
+import { GOMAFIA } from '@/content/site'
+import { AppPromo } from '@/components/app/AppPromo'
 import { getPlayers } from '@/lib/hub'
 import { PageHead, Section } from '@/components/sections/blocks'
 import { Docs, Players } from '@/components/sections/community'
@@ -8,14 +9,14 @@ import { Docs, Players } from '@/components/sections/community'
 export const revalidate = 600
 export const metadata: Metadata = {
   title: 'Резидентам',
-  description: 'Всё для резидентов клуба TITAN KBR: правила спортивной мафии ФСМ, книги по стратегии, рейтинг GoMafia и кэшбэк-карта клуба.',
+  description: 'Всё для резидентов клуба TITAN KBR: правила спортивной мафии ФСМ, книги по стратегии, рейтинг GoMafia и приложение клуба My Titan.',
 }
 
 export default async function ResidentsPage() {
   const players = await getPlayers()
   return (
     <>
-      <PageHead title="Резидентам" lead="Правила, книги, рейтинг и карта клуба — всё, что нужно, чтобы расти в спортивной мафии." photoName="duo-violet" />
+      <PageHead title="Резидентам" lead="Правила, книги, рейтинг и приложение клуба — всё, что нужно, чтобы расти в спортивной мафии." photoName="duo-violet" />
       <Section title="Важная литература">
         <Docs />
       </Section>
@@ -26,11 +27,7 @@ export default async function ResidentsPage() {
         </div>
         <Players data={players} limit={20} />
       </Section>
-      <Section title="Стань частью семьи" lead="Кэшбэк-карта клуба: за каждый игровой вечер возвращаются баллы. Оплачивайте ими до 50 % счёта.">
-        <div className="actions">
-          <a className="btn btn-primary" href={WALLET_CARD_URL} target="_blank" rel="noopener noreferrer"><Wallet size={18} aria-hidden="true" /> Добавить карту в Wallet</a>
-        </div>
-      </Section>
+      <AppPromo title="Стань частью семьи" />
     </>
   )
 }

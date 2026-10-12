@@ -22,7 +22,7 @@ import { upsertRosterUser } from '../../lib/roster.js'
 import { listChats, recordChat } from '../../lib/tgChats.js'
 import { getBoolSetting, getStringSetting } from '../../lib/appSettings.js'
 import { TAI_PRESETS } from '../../lib/tai.js'
-import { SITE_THEMES, DEFAULT_SITE_THEME, isSiteTheme, parseSchedule } from '../site/site.router.js'
+import { SITE_HOLIDAYS, isSiteHoliday, parseSchedule } from '../site/site.router.js'
 // Control-БД: резолв clubId на основном домене (c.var.club=null → ищем по db_name).
 import { getControlDb, clubs as ctrlClubs, eq as ceq } from '../../../../../packages/database/dist/control/index.js'
 
@@ -593,22 +593,23 @@ systemRouter.put(
   },
 )
 
-// ─── Сайт клуба (titanmafia.ru): тема и расписание вечеров ──────────────────
-// Сайт читает их через публичный /api/site/config (кэш 60 с) — смена темы в HUB
-// доезжает до сайта в течение минуты. Только владелец.
+// ─── Сайт клуба (titanmafia.ru): праздник и расписание вечеров ──────────────
+// Сайт читает их через публичный /api/site/config (кэш 60 с) — изменения в HUB
+// доезжают до сайта в течение минуты. Только владелец.
 systemRouter.get('/site-config', requireAuth, requireRole('owner'), async (c) => {
   const db = c.var.db
-  const rows = await db.select().from(appSettings).where(inArray(appSettings.key, ['site_theme', 'site_schedule']))
+  const rows = await db.select().from(appSettings).where(inArray(appSettings.key, ['site_holiday', 'site_schedule']))
   const m = Object.fromEntries(rows.map((r) => [r.key, r.value]))
   return c.json({
-    theme: isSiteTheme(m['site_theme']) ? m['site_theme'] : DEFAULT_SITE_THEME,
-    themes: SITE_THEMES,
+    holiday: isSiteHoliday(m['site_holiday']) ? m['site_holiday'] : null,
+    holidays: SITE_HOLIDAYS,
     schedule: parseSchedule(m['site_schedule']),
   })
 })
 
 const SiteConfigSchema = z.object({
-  theme: z.enum(SITE_THEMES).optional(),
+  // null — снять праздник (обычный вид сайта).
+  holiday: z.enum(SITE_HOLIDAYS).nullable().optional(),
   schedule: z.array(z.object({
     day: z.number().int().min(1).max(7),
     title: z.string().trim().min(1).max(60),
@@ -621,7 +622,10 @@ systemRouter.put('/site-config', requireAuth, requireRole('owner'), zValidator('
   const body = c.req.valid('json')
   const upsert = (key: string, value: string) => db.insert(appSettings).values({ key, value })
     .onConflictDoUpdate({ target: appSettings.key, set: { value } })
-  if (body.theme) await upsert('site_theme', body.theme)
+  if (body.holiday !== undefined) {
+    if (body.holiday === null) await db.delete(appSettings).where(eq(appSettings.key, 'site_holiday'))
+    else await upsert('site_holiday', body.holiday)
+  }
   if (body.schedule !== undefined) {
     if (body.schedule === null) await db.delete(appSettings).where(eq(appSettings.key, 'site_schedule'))
     else await upsert('site_schedule', JSON.stringify([...body.schedule].sort((a, b) => a.day - b.day)))
