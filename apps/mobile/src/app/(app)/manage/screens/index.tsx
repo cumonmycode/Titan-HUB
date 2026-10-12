@@ -1,77 +1,143 @@
-import { ContentUnavailableView, Form, Host, ProgressView, Section, Text } from '@expo/ui/swift-ui';
-import { refreshable } from '@expo/ui/swift-ui/modifiers';
 import { Stack, useRouter } from 'expo-router';
+import { SymbolView } from 'expo-symbols';
+import { useState } from 'react';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
 
-import { ActionRow, LinkRow } from '@/components/native-form';
-import { ROTATIONS, deviceStatus, showLabel, useScreens } from '@/lib/screens-api';
+import { AppRefreshControl } from '@/components/refresh-control';
+import { ScreenPreview } from '@/components/screen-preview';
+import { Text } from '@/components/text';
+import { ToolbarButton } from '@/components/toolbar';
+import { haptic } from '@/lib/haptics';
+import { usePageGutter } from '@/lib/layout';
+import { deviceStatus, showLabel, THEMES, useScreens, type Screen } from '@/lib/screens-api';
 import { useSession } from '@/lib/session';
+import { colors, space, type, useAccentHex } from '@/lib/theme';
+
+const TILE_MIN = 160;
+const TILE_PAD = space.md;
 
 /**
- * «Экраны» — телевизоры клуба с приложением Titan Menu. У каждого свои настройки (как
- * висит, показ из меню и картинок, тема, реклама); подключить новый ТВ — поиском в Wi‑Fi сети.
+ * «Экраны» — телевизоры клуба с Titan Menu плитками: превью, что показывает и в сети ли.
+ * «+» сразу ищет телевизор в Wi‑Fi сети; всё остальное — внутри экрана.
  */
 export default function ScreensScreen() {
   const router = useRouter();
+  const gutter = usePageGutter();
+  const accent = useAccentHex();
+  const { width } = useWindowDimensions();
   const screens = useScreens();
   const isOwner = useSession((s) => s.user?.role === 'owner');
+  const [pulling, setPulling] = useState(false);
   const list = screens.data ?? [];
 
-  if (screens.isLoading) {
-    return (
-      <Host style={{ flex: 1 }} useViewportSizeMeasurement>
-        <ProgressView />
-      </Host>
-    );
-  }
-  if (screens.error && !screens.data) {
-    return (
-      <Host style={{ flex: 1 }} useViewportSizeMeasurement>
-        <ContentUnavailableView title="Нет связи" systemImage="wifi.exclamationmark" description={screens.error.message} />
-      </Host>
-    );
-  }
+  const inner = width - gutter.paddingLeft - gutter.paddingRight;
+  const columns = Math.max(1, Math.floor((inner + space.md) / (TILE_MIN + space.md)));
+  const tile = Math.floor((inner - space.md * (columns - 1)) / columns);
+  const connect = () => {
+    haptic.light();
+    router.push('/manage/screens/connect');
+  };
 
   return (
-    <>
+    <View style={styles.screen}>
       <Stack.Title>Экраны</Stack.Title>
-      <Host style={{ flex: 1 }} useViewportSizeMeasurement>
-        <Form
-          modifiers={[
-            refreshable(async () => {
-              await screens.refetch();
-            }),
-          ]}>
-          <Section
-            title="Телевизоры"
-            footer={<Text>У каждого экрана свои настройки: как висит ТВ, показ из меню и картинок, тема и реклама. Приставка подхватывает изменения за 20 секунд.</Text>}>
-            {list.length === 0 ? (
-              <Text>Экранов пока нет</Text>
-            ) : (
-              list.map((s) => {
-                const status = deviceStatus(s);
-                const rotation = ROTATIONS.find((r) => r.key === s.rotation);
-                return (
-                  <LinkRow
-                    key={s.id}
-                    icon={s.show.menu ? 'tv' : 'photo.on.rectangle'}
-                    color={s.show.menu ? '#8B5CF6' : '#FF9500'}
-                    title={s.name}
-                    subtitle={`${showLabel(s.show)} · ${rotation?.label ?? ''} · ${status.label}`}
-                    onPress={() => router.push({ pathname: '/manage/screens/[screenId]', params: { screenId: s.id } })}
-                  />
-                );
-              })
-            )}
-          </Section>
-
-          {isOwner && (
-            <Section footer={<Text>Телефон найдёт приставку с Titan Menu в той же Wi‑Fi сети — по коду на экране телевизора.</Text>}>
-              <ActionRow title="Подключить ТВ" icon="antenna.radiowaves.left.and.right" onPress={() => router.push('/manage/screens/connect')} />
-              <ActionRow title="Добавить экран" icon="plus" onPress={() => router.push('/manage/screens/new')} />
-            </Section>
-          )}
-        </Form>
-      </Host>
-    </>
+      {isOwner ? (
+        <Stack.Toolbar placement="right">
+          <ToolbarButton icon="plus" accessibilityLabel="Добавить экран" onPress={connect} />
+        </Stack.Toolbar>
+      ) : null}
+      <ScrollView
+        contentInsetAdjustmentBehavior="automatic"
+        contentContainerStyle={[styles.content, gutter]}
+        refreshControl={
+          <AppRefreshControl
+            tintColor={colors.accent}
+            refreshing={pulling}
+            onRefresh={() => {
+              setPulling(true);
+              void screens.refetch().finally(() => setPulling(false));
+            }}
+          />
+        }
+      >
+        {screens.isLoading ? (
+          <ActivityIndicator style={styles.loading} />
+        ) : screens.error && !screens.data ? (
+          <Text style={[type.body, styles.secondary, styles.centerText]}>{`Нет связи. ${screens.error.message}`}</Text>
+        ) : list.length === 0 ? (
+          <View style={styles.empty}>
+            <SymbolView name="tv" size={48} tintColor={colors.tertiaryLabel} />
+            <Text style={[type.title3, styles.label]}>Телевизоров пока нет</Text>
+            <Text style={[type.subhead, styles.secondary, styles.centerText]}>Откройте Titan Menu на приставке — телефон найдёт её в той же Wi‑Fi сети по коду на экране.</Text>
+            {isOwner ? (
+              <Pressable onPress={connect} style={({ pressed }) => [styles.cta, { backgroundColor: accent }, pressed && styles.pressed]} accessibilityRole="button">
+                <SymbolView name="antenna.radiowaves.left.and.right" size={17} tintColor="white" />
+                <Text style={[type.headline, styles.ctaText]}>Подключить телевизор</Text>
+              </Pressable>
+            ) : null}
+          </View>
+        ) : (
+          <>
+            <View style={styles.grid}>
+              {list.map((s) => (
+                <ScreenTile key={s.id} screen={s} width={tile} onPress={() => router.push({ pathname: '/manage/screens/[screenId]', params: { screenId: s.id } })} />
+              ))}
+            </View>
+            <Text style={[type.footnote, styles.secondary, styles.footer]}>Приставка подхватывает изменения за 20 секунд.</Text>
+          </>
+        )}
+      </ScrollView>
+    </View>
   );
 }
+
+function ScreenTile({ screen, width, onPress }: { screen: Screen; width: number; onPress: () => void }) {
+  const status = deviceStatus(screen);
+  const theme = THEMES.find((t) => t.key === screen.theme)?.name;
+  return (
+    <Pressable
+      onPress={() => {
+        haptic.selection();
+        onPress();
+      }}
+      style={({ pressed }) => [styles.tile, { width }, pressed && styles.pressed]}
+      accessibilityRole="button"
+      accessibilityLabel={`${screen.name}, ${status.label}`}
+    >
+      <View style={styles.previewBox}>
+        <ScreenPreview rotation={screen.rotation} theme={screen.theme} width={width - TILE_PAD * 2} />
+      </View>
+      <Text style={[type.headline, styles.label]} numberOfLines={1}>
+        {screen.name}
+      </Text>
+      <Text style={[type.footnote, styles.secondary]} numberOfLines={1}>
+        {[showLabel(screen.show), screen.show.menu ? theme : null].filter(Boolean).join(' · ')}
+      </Text>
+      <View style={styles.statusRow}>
+        <View style={[styles.dot, { backgroundColor: status.color }]} />
+        <Text style={[type.caption1, styles.secondary]} numberOfLines={1}>
+          {status.label}
+        </Text>
+      </View>
+    </Pressable>
+  );
+}
+
+const styles = StyleSheet.create({
+  screen: { flex: 1, backgroundColor: colors.groupedBackground },
+  content: { gap: space.lg, paddingTop: space.md, paddingBottom: space.xxxl },
+  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: space.md },
+  tile: { padding: TILE_PAD, gap: 3, borderRadius: 18, borderCurve: 'continuous', backgroundColor: colors.card },
+  previewBox: { minHeight: 120, justifyContent: 'center', marginBottom: space.sm },
+  statusRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 2 },
+  dot: { width: 7, height: 7, borderRadius: 4 },
+  label: { color: colors.label },
+  secondary: { color: colors.secondaryLabel },
+  centerText: { textAlign: 'center' },
+  footer: { textAlign: 'center' },
+  loading: { marginTop: space.xxl },
+  empty: { alignItems: 'center', gap: space.sm, paddingTop: space.xxxl, paddingHorizontal: space.lg },
+  cta: { flexDirection: 'row', alignItems: 'center', gap: space.sm, marginTop: space.lg, paddingHorizontal: space.xl, height: 50, borderRadius: 25 },
+  ctaText: { color: 'white' },
+  pressed: { opacity: 0.7 },
+});

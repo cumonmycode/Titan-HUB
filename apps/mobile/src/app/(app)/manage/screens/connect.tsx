@@ -121,6 +121,29 @@ export default function ConnectTvScreen() {
       `ТВ ${tv.code}`,
     );
 
+  const createWithoutTv = () =>
+    promptText(
+      'Новый экран',
+      'Как назвать телевизор? Например, «ТВ у бара».',
+      [
+        { text: 'Отмена', style: 'cancel' },
+        {
+          text: 'Создать',
+          onPress: (value?: string) => {
+            const name = (value ?? '').trim();
+            if (!name) return;
+            void createScreen({ name })
+              .then((screen) => {
+                haptic.success();
+                router.replace({ pathname: '/manage/screens/[screenId]', params: { screenId: screen.id } });
+              })
+              .catch((error: unknown) => Alert.alert('Экран не создан', errorText(error)));
+          },
+        },
+      ],
+      'plain-text',
+    );
+
   const choose = (tv: FoundTv) => {
     if (pairing) return;
     if (tv.paired) {
@@ -187,6 +210,12 @@ export default function ConnectTvScreen() {
             <ActionRow title="Искать снова" icon="arrow.clockwise" disabled={scanning} onPress={scan} />
             <ActionRow title="Ввести IP вручную" icon="keyboard" onPress={enterIp} />
           </Section>
+
+          {!screenId ? (
+            <Section footer={<Text>Экран можно настроить заранее и подключить телевизор потом — из его настроек.</Text>}>
+              <ActionRow title="Создать экран без телевизора" icon="plus.rectangle" onPress={createWithoutTv} />
+            </Section>
+          ) : null}
         </Form>
       </Host>
     </>

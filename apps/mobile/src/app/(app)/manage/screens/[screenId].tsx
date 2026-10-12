@@ -1,55 +1,52 @@
-import { ContentUnavailableView, Form, Host, Picker, ProgressView, Section, Text } from '@expo/ui/swift-ui';
+import { ContentUnavailableView, Form, Host, Picker, ProgressView, RNHostView, Section, Text } from '@expo/ui/swift-ui';
 import { pickerStyle, refreshable, tag } from '@expo/ui/swift-ui/modifiers';
+import { Image } from 'expo-image';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
+import { SymbolView } from 'expo-symbols';
 import * as WebBrowser from 'expo-web-browser';
 import { useState } from 'react';
-import { Alert } from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
 
 import { ActionRow, LinkRow, TextRow } from '@/components/native-form';
+import { ScreenPreview, swatchOf } from '@/components/screen-preview';
+import { Text as RNText } from '@/components/text';
 import { haptic } from '@/lib/haptics';
 import {
-  BAND_DURATIONS,
-  ROTATIONS,
-  THEMES,
   createSlide,
   deleteScreen,
   deviceStatus,
-  myTitanSlide,
+  durationLabel,
   pickScreenImages,
+  reorderSlides,
+  ROTATIONS,
   screenPageUrl,
   showItemSummary,
-  showLabel,
+  THEMES,
   unpairScreen,
   updateScreen,
   useScreen,
-  withCurrent,
   type ScreenPatch,
   type ScreenSlide,
 } from '@/lib/screens-api';
 import { useSession } from '@/lib/session';
+import { colors, space, type } from '@/lib/theme';
 
 const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error));
-
-function bandTitle(slide: ScreenSlide, index: number): string {
-  return slide.kind === 'image' ? `Картинка ${index + 1}` : slide.title || 'Карточка';
-}
-
-function bandSubtitle(slide: ScreenSlide): string {
-  const parts = [`${slide.durationSec} с`];
-  if (slide.kind === 'card') parts.push(slide.linkUrl ? `QR → ${slide.linkUrl.replace(/^https?:\/\//, '')}` : 'без QR');
-  return parts.join(' · ');
-}
+const PREVIEW_MAX = 360;
 
 /**
- * Один экран: телевизор (статус, подключение, отвязка), как висит ТВ, показ (по кругу
- * меню и картинки), а если в показе есть меню — его тема, лента и реклама. Правит владелец.
+ * Один экран: превью телевизора, «Что показывать» — один плейлист по кругу (меню и
+ * картинки, порядок меняется), оформление меню (тема и реклама внизу — отдельным экраном)
+ * и сам телевизор (название, поворот, подключение). Правит владелец.
  */
 export default function ScreenEditorScreen() {
   const { screenId } = useLocalSearchParams<{ screenId: string }>();
   const router = useRouter();
+  const { width } = useWindowDimensions();
   const query = useScreen(screenId);
   const isOwner = useSession((s) => s.user?.role === 'owner');
   const [busy, setBusy] = useState<string | null>(null);
+  const [ordering, setOrdering] = useState(false);
 
   const screen = query.data?.screen;
   const show = query.data?.show ?? [];
@@ -70,12 +67,11 @@ export default function ScreenEditorScreen() {
     );
   }
 
-  // Тема и лента нужны, только если меню есть в показе (пустой показ — тоже меню).
   const active = show.filter((s) => s.isActive);
+  // Пустой показ — тоже меню.
   const hasMenu = active.length === 0 || active.some((s) => s.kind === 'menu');
   const status = deviceStatus(screen);
-  const device = [screen.deviceModel, screen.appVersion && `Titan Menu ${screen.appVersion}`, screen.deviceIp].filter(Boolean).join(' · ');
-  const images = show.filter((s) => s.kind === 'image');
+  const device = [screen.deviceModel, screen.appVersion && `Titan Menu ${screen.appVersion}`].filter(Boolean).join(' · ');
 
   const run = async (action: () => Promise<void>, failure: string) => {
     try {
@@ -86,22 +82,18 @@ export default function ScreenEditorScreen() {
       Alert.alert(failure, errorText(error));
     }
   };
-
   const save = (patch: ScreenPatch) => {
     if (!isOwner) return;
     haptic.selection();
     void run(() => updateScreen(screen.id, patch), 'Не сохранилось');
   };
 
-  // Картинки в показ — несколько сразу; в ленту — по одной.
-  const addImages = async (placement: 'show' | 'band') => {
+  const addImages = async () => {
     if (busy) return;
     setBusy('Загружаем…');
     try {
-      const urls = await pickScreenImages(placement === 'show', (done, total) => setBusy(total > 1 ? `Загружаем ${done + 1} из ${total}…` : 'Загружаем…'));
-      for (const url of urls) {
-        await createSlide(screen.id, { placement, kind: 'image', imageUrl: url, durationSec: 10, transition: 'fade', transitionMs: 900, fit: 'contain' });
-      }
+      const urls = await pickScreenImages(true, (done, total) => setBusy(total > 1 ? `Загружаем ${done + 1} из ${total}…` : 'Загружаем…'));
+      for (const url of urls) await createSlide(screen.id, { placement: 'show', kind: 'image', imageUrl: url, durationSec: 10, transition: 'fade', transitionMs: 900, fit: 'contain' });
       if (urls.length) haptic.success();
     } catch (error) {
       haptic.error();
@@ -110,19 +102,24 @@ export default function ScreenEditorScreen() {
       setBusy(null);
     }
   };
+  const addMenu = () => void run(() => createSlide(screen.id, { placement: 'show', kind: 'menu', durationSec: 60, transition: 'fade', transitionMs: 900 }), 'Меню не добавилось');
 
-  const addMenu = () =>
-    void run(() => createSlide(screen.id, { placement: 'show', kind: 'menu', durationSec: 60, transition: 'fade', transitionMs: 900 }), 'Меню не добавилось');
-  const addMyTitan = () => void run(() => createSlide(screen.id, myTitanSlide()), 'Карточка не добавилась');
+  const move = (index: number, delta: -1 | 1) => {
+    const target = index + delta;
+    if (target < 0 || target >= show.length) return;
+    haptic.selection();
+    const next = [...show];
+    [next[index], next[target]] = [next[target]!, next[index]!];
+    void run(() => reorderSlides(screen.id, next.map((s, i) => ({ id: s.id, sortOrder: i }))), 'Порядок не сохранился');
+  };
 
   const unpair = () =>
     Alert.alert('Отвязать телевизор?', 'Приставка перестанет показывать этот экран и снова покажет код для подключения.', [
       { text: 'Отмена', style: 'cancel' },
       { text: 'Отвязать', style: 'destructive', onPress: () => void run(() => unpairScreen(screen.id), 'Не отвязался') },
     ]);
-
   const remove = () =>
-    Alert.alert(`Удалить «${screen.name}»?`, 'Настройки, показ и реклама удалятся, приставка вернётся к экрану подключения.', [
+    Alert.alert(`Удалить «${screen.name}»?`, 'Показ и реклама удалятся, приставка вернётся к экрану подключения.', [
       { text: 'Отмена', style: 'cancel' },
       {
         text: 'Удалить',
@@ -135,120 +132,205 @@ export default function ScreenEditorScreen() {
       },
     ]);
 
-  const openItem = (slide?: ScreenSlide, kind?: 'card') =>
-    router.push({ pathname: '/manage/screens/slide', params: { screenId: screen.id, ...(slide ? { slideId: slide.id } : {}), ...(kind ? { kind } : {}) } });
+  const openItem = (slide: ScreenSlide) => router.push({ pathname: '/manage/screens/slide', params: { screenId: screen.id, slideId: slide.id } });
+  const images = show.filter((s) => s.kind === 'image');
 
   return (
     <>
       <Stack.Title>{screen.name}</Stack.Title>
       <Host style={{ flex: 1 }} useViewportSizeMeasurement>
-        <Form
-          modifiers={[
-            refreshable(async () => {
-              await query.refetch();
-            }),
-          ]}>
-          <Section title="Телевизор" footer={<Text>{screen.paired ? 'Приставка показывает этот экран и отмечается раз в 20 секунд.' : 'Откройте Titan Menu на приставке — на экране появится код. Телефон найдёт её в той же Wi‑Fi сети.'}</Text>}>
-            <LinkRow icon="tv" color={status.color} title={status.label} subtitle={device || undefined} />
-            {isOwner && !screen.paired && (
-              <ActionRow title="Подключить ТВ" icon="antenna.radiowaves.left.and.right" onPress={() => router.push({ pathname: '/manage/screens/connect', params: { screenId: screen.id } })} />
-            )}
-            <ActionRow title="Открыть экран" icon="eye" onPress={() => void WebBrowser.openBrowserAsync(screenPageUrl(screen.id))} />
-            {isOwner && screen.paired && <ActionRow title="Отвязать ТВ" icon="link.badge.plus" destructive onPress={unpair} />}
+        <Form modifiers={[refreshable(async () => void (await query.refetch()))]}>
+          <Section footer={<Text>{screen.paired ? (device ? `${device}. Приставка отмечается раз в 20 секунд.` : 'Приставка отмечается раз в 20 секунд.') : 'Телевизор не подключён — ниже «Подключить телевизор».'}</Text>}>
+            <RNHostView matchContents>
+              <View style={styles.preview}>
+                <ScreenPreview rotation={screen.rotation} theme={screen.theme} first={active[0]} width={Math.min(width - 64, PREVIEW_MAX)} status={status} />
+              </View>
+            </RNHostView>
           </Section>
 
-          <Section title="Экран">
-            {isOwner ? (
-              <TextRow key={screen.name} label="Название" value={screen.name} maxLength={60} onCommit={(name) => name && save({ name })} />
+          <Section
+            title="Что показывать"
+            footer={
+              <Text>
+                {isOwner ? 'По кругу, сверху вниз. Нажмите на элемент, чтобы задать время показа и анимацию.' : 'Показ экрана настраивает владелец.'}
+              </Text>
+            }
+          >
+            {show.length === 0 ? (
+              <LinkRow icon="menucard" color="#8B5CF6" title="Меню" subtitle="Показ пуст — телевизор показывает меню" chevron={false} />
             ) : (
-              <LinkRow title="Название" value={screen.name} />
+              show.map((item, index) => (
+                <RNHostView key={item.id} matchContents>
+                  <PlaylistRow
+                    item={item}
+                    title={item.kind === 'menu' ? 'Меню' : `Картинка ${images.indexOf(item) + 1}`}
+                    ordering={ordering}
+                    first={index === 0}
+                    last={index === show.length - 1}
+                    onPress={isOwner && !ordering ? () => openItem(item) : undefined}
+                    onUp={() => move(index, -1)}
+                    onDown={() => move(index, 1)}
+                  />
+                </RNHostView>
+              ))
             )}
-            <Picker label="Как висит ТВ" selection={screen.rotation} onSelectionChange={(next) => save({ rotation: Number(next) as ScreenPatch['rotation'] })} modifiers={[pickerStyle('menu')]}>
+            {isOwner && !ordering ? <ActionRow title={busy ?? 'Добавить картинки'} icon="photo.badge.plus" disabled={!!busy} onPress={() => void addImages()} /> : null}
+            {isOwner && !ordering && !show.some((s) => s.kind === 'menu') ? <ActionRow title="Добавить меню" icon="menucard" disabled={!!busy} onPress={addMenu} /> : null}
+            {isOwner && show.length > 1 ? (
+              <ActionRow title={ordering ? 'Готово' : 'Изменить порядок'} icon={ordering ? 'checkmark.circle' : 'arrow.up.arrow.down'} onPress={() => setOrdering((v) => !v)} />
+            ) : null}
+          </Section>
+
+          {hasMenu ? (
+            <Section title="Оформление меню" footer={<Text>Что попадает в меню — кнопкой «На экране ТВ» у позиций в «Товарах» и «Тарифах».</Text>}>
+              <RNHostView matchContents>
+                <ThemeChips value={screen.theme} disabled={!isOwner} onChange={(theme) => save({ theme })} />
+              </RNHostView>
+              <LinkRow
+                icon="rectangle.bottomthird.inset.filled"
+                color="#FF9500"
+                title="Реклама внизу меню"
+                value={band.length ? `${band.filter((s) => s.isActive).length} · ${durationLabel(screen.bandSec)}` : 'нет'}
+                onPress={() => router.push({ pathname: '/manage/screens/band', params: { screenId: screen.id } })}
+              />
+              <ActionRow title="Посмотреть на весь экран" icon="play.rectangle" onPress={() => void WebBrowser.openBrowserAsync(screenPageUrl(screen.id, screen.theme))} />
+            </Section>
+          ) : null}
+
+          <Section title="Телевизор">
+            {isOwner ? <TextRow key={screen.name} label="Название" value={screen.name} maxLength={60} onCommit={(name) => name && save({ name })} /> : <LinkRow title="Название" value={screen.name} chevron={false} />}
+            <Picker label="Как висит" selection={screen.rotation} onSelectionChange={(next) => save({ rotation: Number(next) as ScreenPatch['rotation'] })} modifiers={[pickerStyle('menu')]}>
               {ROTATIONS.map((r) => (
                 <Text key={r.key} modifiers={[tag(r.key)]}>
                   {r.label}
                 </Text>
               ))}
             </Picker>
+            {isOwner && !screen.paired ? (
+              <ActionRow title="Подключить телевизор" icon="antenna.radiowaves.left.and.right" onPress={() => router.push({ pathname: '/manage/screens/connect', params: { screenId: screen.id } })} />
+            ) : null}
+            {isOwner && screen.paired ? <ActionRow title="Отвязать телевизор" icon="link.badge.plus" destructive onPress={unpair} /> : null}
           </Section>
 
-          <Section
-            title={`Показ · ${showLabel(screen.show)}`}
-            footer={
-              <Text>
-                {isOwner
-                  ? 'По кругу, сверху вниз. Картинка появляется поверх меню на весь экран, меню — из-под уходящей картинки. Нажмите на элемент, чтобы задать время, анимацию и её скорость.'
-                  : 'Показ экрана настраивает владелец.'}
-              </Text>
-            }>
-            {show.length === 0 && <Text>Показ пуст — экран показывает меню</Text>}
-            {show.map((item) => (
-              <LinkRow
-                key={item.id}
-                icon={item.kind === 'menu' ? 'menucard' : 'photo'}
-                color={item.isActive ? (item.kind === 'menu' ? '#8B5CF6' : '#FF9500') : '#8E8E93'}
-                title={item.kind === 'menu' ? 'Меню' : `Картинка ${images.indexOf(item) + 1}`}
-                subtitle={showItemSummary(item)}
-                value={item.isActive ? undefined : 'Выкл.'}
-                onPress={isOwner ? () => openItem(item) : undefined}
-              />
-            ))}
-            {isOwner && <ActionRow title={busy ?? 'Добавить картинки'} icon="photo.badge.plus" disabled={!!busy} onPress={() => void addImages('show')} />}
-            {isOwner && <ActionRow title="Добавить меню" icon="menucard" disabled={!!busy} onPress={addMenu} />}
-          </Section>
-
-          {hasMenu && (
-            <>
-              <Section title="Оформление меню" footer={<Text>Состав меню — кнопкой «На экране ТВ» у позиций в «Меню» и «Тарифах».</Text>}>
-                <Picker label="Тема" selection={THEMES.some((t) => t.key === screen.theme) ? screen.theme : 'night'} onSelectionChange={(next) => save({ theme: String(next) })} modifiers={[pickerStyle('menu')]}>
-                  {THEMES.map((t) => (
-                    <Text key={t.key} modifiers={[tag(t.key)]}>
-                      {t.name}
-                    </Text>
-                  ))}
-                </Picker>
-                <ActionRow title="Посмотреть тему на весь экран" icon="play.rectangle" onPress={() => void WebBrowser.openBrowserAsync(screenPageUrl(screen.id, screen.theme))} />
-              </Section>
-
-              <Section
-                title="Реклама в ленте меню"
-                footer={<Text>{isOwner ? 'Слайды по очереди сменяют ленту тарифов внизу меню: панель переворачивается, меню остаётся на месте. Картинка лучше широкая, примерно 3:1.' : 'Рекламу на экране настраивает владелец.'}</Text>}>
-                <Picker label="Лента тарифов" selection={screen.bandSec} onSelectionChange={(next) => save({ bandSec: Number(next) })} modifiers={[pickerStyle('menu')]}>
-                  {withCurrent(BAND_DURATIONS, screen.bandSec).map((sec) => (
-                    <Text key={sec} modifiers={[tag(sec)]}>
-                      {`${sec} с`}
-                    </Text>
-                  ))}
-                </Picker>
-                {band.map((slide, i) => (
-                  <LinkRow
-                    key={slide.id}
-                    icon={slide.kind === 'image' ? 'photo' : 'qrcode'}
-                    color={slide.isActive ? (slide.kind === 'image' ? '#FF9500' : '#8B5CF6') : '#8E8E93'}
-                    title={bandTitle(slide, i)}
-                    subtitle={bandSubtitle(slide)}
-                    value={slide.isActive ? undefined : 'Скрыт'}
-                    onPress={isOwner ? () => openItem(slide) : undefined}
-                  />
-                ))}
-              </Section>
-              {isOwner && (
-                <Section>
-                  <ActionRow title={busy ?? 'Добавить картинку в ленту'} icon="photo.badge.plus" disabled={!!busy} onPress={() => void addImages('band')} />
-                  <ActionRow title="Добавить карточку с QR" icon="qrcode" disabled={!!busy} onPress={() => openItem(undefined, 'card')} />
-                  <ActionRow title="QR приложения My Titan" icon="iphone" disabled={!!busy} onPress={addMyTitan} />
-                </Section>
-              )}
-            </>
-          )}
-
-          {isOwner && (
+          {isOwner ? (
             <Section>
               <ActionRow title="Удалить экран" icon="trash" destructive onPress={remove} />
             </Section>
-          )}
+          ) : null}
         </Form>
       </Host>
     </>
   );
 }
+
+/** Элемент показа: миниатюра, что это, время и анимация; в режиме порядка — стрелки. */
+function PlaylistRow({
+  item,
+  title,
+  ordering,
+  first,
+  last,
+  onPress,
+  onUp,
+  onDown,
+}: {
+  item: ScreenSlide;
+  title: string;
+  ordering: boolean;
+  first: boolean;
+  last: boolean;
+  onPress?: () => void;
+  onUp: () => void;
+  onDown: () => void;
+}) {
+  return (
+    <Pressable onPress={onPress} disabled={!onPress} style={({ pressed }) => [styles.row, pressed && styles.pressed]} accessibilityRole={onPress ? 'button' : undefined}>
+      <View style={[styles.thumb, !item.isActive && styles.off]}>
+        {item.kind === 'image' && item.imageUrl ? (
+          <Image source={{ uri: item.imageUrl }} style={StyleSheet.absoluteFill} contentFit="cover" />
+        ) : (
+          <SymbolView name="menucard.fill" size={22} tintColor="white" />
+        )}
+      </View>
+      <View style={styles.flex}>
+        <RNText style={[type.body, item.isActive ? styles.label : styles.tertiary]} numberOfLines={1}>
+          {title}
+        </RNText>
+        <RNText style={[type.footnote, styles.secondary]} numberOfLines={1}>
+          {item.isActive ? showItemSummary(item) : 'Выключено'}
+        </RNText>
+      </View>
+      {ordering ? (
+        <View style={styles.arrows}>
+          <Arrow icon="chevron.up" disabled={first} onPress={onUp} />
+          <Arrow icon="chevron.down" disabled={last} onPress={onDown} />
+        </View>
+      ) : onPress ? (
+        <SymbolView name="chevron.right" size={13} weight="semibold" tintColor={colors.tertiaryLabel} />
+      ) : null}
+    </Pressable>
+  );
+}
+
+function Arrow({ icon, disabled, onPress }: { icon: 'chevron.up' | 'chevron.down'; disabled: boolean; onPress: () => void }) {
+  return (
+    <Pressable
+      onPress={onPress}
+      disabled={disabled}
+      hitSlop={6}
+      style={({ pressed }) => [styles.arrow, (pressed || disabled) && styles.dim]}
+      accessibilityRole="button"
+      accessibilityLabel={icon === 'chevron.up' ? 'Выше' : 'Ниже'}
+    >
+      <SymbolView name={icon} size={14} weight="bold" tintColor={colors.accent} />
+    </Pressable>
+  );
+}
+
+/** Темы меню цветными плашками — видно, как будет выглядеть, до выбора. */
+function ThemeChips({ value, disabled, onChange }: { value: string; disabled: boolean; onChange: (theme: string) => void }) {
+  const current = THEMES.some((t) => t.key === value) ? value : 'night';
+  return (
+    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
+      {THEMES.map((theme) => {
+        const swatch = swatchOf(theme.key);
+        const selected = theme.key === current;
+        return (
+          <Pressable
+            key={theme.key}
+            disabled={disabled || selected}
+            onPress={() => onChange(theme.key)}
+            style={[styles.chip, { backgroundColor: swatch.bg, borderColor: selected ? colors.accent : 'transparent' }]}
+            accessibilityRole="button"
+            accessibilityState={{ selected }}
+            accessibilityLabel={`Тема ${theme.name}`}
+          >
+            <View style={[styles.chipAccent, { backgroundColor: swatch.accent }]} />
+            <RNText style={[type.footnote, styles.chipText, { color: swatch.ink }]} numberOfLines={1}>
+              {theme.name}
+            </RNText>
+          </Pressable>
+        );
+      })}
+    </ScrollView>
+  );
+}
+
+const styles = StyleSheet.create({
+  preview: { paddingVertical: space.md, alignItems: 'center' },
+  row: { flexDirection: 'row', alignItems: 'center', gap: space.md, paddingHorizontal: space.lg, paddingVertical: 8, minHeight: 60 },
+  pressed: { opacity: 0.6 },
+  thumb: { width: 52, height: 40, borderRadius: 8, overflow: 'hidden', alignItems: 'center', justifyContent: 'center', backgroundColor: '#8B5CF6' },
+  off: { opacity: 0.4 },
+  flex: { flex: 1, minWidth: 0 },
+  label: { color: colors.label },
+  secondary: { color: colors.secondaryLabel },
+  tertiary: { color: colors.tertiaryLabel },
+  arrows: { flexDirection: 'row', gap: space.sm },
+  arrow: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.fill },
+  dim: { opacity: 0.35 },
+  chips: { gap: space.sm, paddingHorizontal: space.lg, paddingVertical: space.md },
+  chip: { width: 96, height: 64, borderRadius: 12, borderCurve: 'continuous', padding: 8, justifyContent: 'space-between', borderWidth: 2.5 },
+  chipAccent: { width: 28, height: 6, borderRadius: 3 },
+  chipText: { fontWeight: '600' },
+});
