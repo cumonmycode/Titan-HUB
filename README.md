@@ -51,7 +51,7 @@
 | Продукт | Для кого | Что это | Где в коде |
 |---|---|---|---|
 | **Titan HUB** | персонал | основное кассовое ПО: касса, «Управление», аналитика, Tai | `apps/web` (PWA), `apps/mobile` (iOS/Android) |
-| **My Titan** | клиенты клуба | бонусы, депозит и долг, история, оплата через СБП, уведомления | `apps/client` (iOS/Android), `apps/wallet` (веб-версия, `/residents`), `apps/bot-wallet` |
+| **My Titan** | клиенты клуба | бонусы, депозит и долг, история, оплата через СБП, уведомления | `apps/client` (iOS/Android), `apps/wallet` (веб-версия, `/residents`); вход и уведомления — бот Tai |
 | **Titan Home** | гости в кабинке | счёт, меню и заказ, оплата по QR, оценка вечера и управление светом и кондиционером (Home Assistant) на Android-планшете | `apps/home` (Android, см. [docs/HOME_APP.md](docs/HOME_APP.md)), веб-версия `apps/web/src/app/tablet` (`/tablet`) |
 | **Titan Menu** | гости в зале | меню на телевизоре (AbleSign) | `apps/web/public/tv-menu.html` (`/menu`) |
 
@@ -218,8 +218,6 @@ titan-hub/
 │   ├── web/          # @titan/web      — фронтенд PWA (Next.js 15, порт 3000)
 │   ├── api/          # @titan/api      — REST API (Hono, порт 3001)
 │   ├── wallet/       # @titan/wallet   — My Titan, веб-версия и Telegram WebApp (Next.js, basePath /residents, порт 3002)
-│   ├── bot-admin/    # @titan/bot-admin  — Telegram-бот персонала (уведомления, grammY)
-│   ├── bot-wallet/   # @titan/bot-wallet — Telegram-бот My Titan (вход, баланс, история, grammY)
 │   ├── mobile/       # titan-mobile     — Titan HUB для iOS и Android (Expo SDK 57, вне pnpm-воркспейса)
 │   └── client/       # titan-resident   — My Titan для iOS и Android (Expo SDK 57, вне pnpm-воркспейса)
 ├── packages/
@@ -235,7 +233,7 @@ titan-hub/
 │   └── renew-ssl.sh    # обновление TLS-сертификата
 ├── nginx/
 │   └── nginx.conf      # конфигурация nginx (bind-mount в контейнер)
-├── docker-compose.yml  # 9 сервисов: api, web, wallet, bot-admin, bot-wallet, nginx, postgres, redis, minio
+├── docker-compose.yml  # сервисы: api, web, wallet, site, nginx, postgres, redis, minio (Telegram-бот Tai живёт в api: modules/tg)
 ├── turbo.json
 ├── pnpm-workspace.yaml
 └── package.json
@@ -566,7 +564,7 @@ pnpm dev
 
 Подробная инструкция: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 
-Продакшн работает на VPS `/opt/titan-hub` через `docker compose`. Контейнеры: `api`, `web`, `wallet`, `bot-admin`, `bot-wallet`, `nginx:alpine`, `postgres:16-alpine`, `redis:7-alpine`, `minio`.
+Продакшн работает на VPS `/opt/titan-hub` через `docker compose`. Контейнеры: `api`, `web`, `wallet`, `site`, `nginx:alpine`, `postgres:16-alpine`, `redis:7-alpine`, `minio`.
 
 ```bash
 # На VPS из /opt/titan-hub

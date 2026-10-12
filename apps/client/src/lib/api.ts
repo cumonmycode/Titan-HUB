@@ -1,5 +1,5 @@
 // HTTP-клиент приложения. Сервер — основной клуб Titan (titanpos.ru), бот входа
-// @titanwalletrobot. В демо-режиме запросы обслуживает lib/demo.ts без сети.
+// Tai (@tigran_ai_bot). В демо-режиме запросы обслуживает lib/demo.ts без сети.
 import Constants from 'expo-constants';
 
 import { demoRequest } from './demo';

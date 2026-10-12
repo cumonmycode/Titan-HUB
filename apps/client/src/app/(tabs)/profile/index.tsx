@@ -25,7 +25,7 @@ import { keys, useUpdatePrefs, useWallet } from '@/lib/queries';
 import { useSession } from '@/lib/session';
 import { colors, IS_IOS, radius, space, type } from '@/lib/theme';
 
-const BOT = 'titanwalletrobot';
+const BOT = 'tigran_ai_bot';
 
 export default function ProfileScreen() {
   const router = useRouter();
