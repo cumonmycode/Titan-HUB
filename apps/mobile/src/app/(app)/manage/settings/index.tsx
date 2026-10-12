@@ -4,7 +4,7 @@ import { Stack, useRouter } from 'expo-router';
 
 import { LinkRow, TextRow, TimeRow } from '@/components/native-form';
 import { useSettingsEditor } from '@/components/settings-parts';
-import { useBookingConfig, useIntegrations, usePaymentConfig } from '@/lib/admin-api';
+import { useBookingConfig, useIntegrations, usePaymentConfig, useSiteConfig } from '@/lib/admin-api';
 import { haptic } from '@/lib/haptics';
 import { METHODS, type TenderMethod } from '@/lib/payment';
 
@@ -12,6 +12,7 @@ import { METHODS, type TenderMethod } from '@/lib/payment';
 const DEFAULT_METHODS: TenderMethod[] = ['cash', 'card', 'transfer'];
 const HOURS = Array.from({ length: 24 }, (_, hour) => hour);
 const hourText = (hour: number) => `${String(hour).padStart(2, '0')}:00`;
+const SITE_THEME_TITLE = { case: 'Дело о мафии', protocol: 'Протокол', night: 'Город засыпает', classic: 'Классика' } as const;
 
 /**
  * Настройки клуба — как «Настройки» iOS: правка прямо в строке (название, адрес, время),
@@ -24,10 +25,11 @@ export default function SettingsScreen() {
   const settings = useSettingsEditor();
   const payment = usePaymentConfig();
   const booking = useBookingConfig();
+  const site = useSiteConfig();
   const integrations = useIntegrations(true);
 
   const refresh = async () => {
-    await Promise.allSettled([settings.refetch(), payment.refetch(), booking.refetch(), integrations.refetch()]);
+    await Promise.allSettled([settings.refetch(), payment.refetch(), booking.refetch(), site.refetch(), integrations.refetch()]);
   };
 
   if (settings.loading || settings.error) {
@@ -112,6 +114,14 @@ export default function SettingsScreen() {
               onPress={() => router.push('/manage/settings/booking')}
             />
             <LinkRow icon="star.bubble" color="#FF9500" title="Отзывы гостей" subtitle="Яндекс Карты, 2ГИС" onPress={() => router.push('/manage/settings/reviews')} />
+            <LinkRow
+              icon="globe"
+              color="#E5322D"
+              title="Сайт"
+              subtitle="titanmafia.ru — тема и публикации"
+              value={site.data ? SITE_THEME_TITLE[site.data.theme] : undefined}
+              onPress={() => router.push('/manage/settings/site')}
+            />
           </Section>
 
 

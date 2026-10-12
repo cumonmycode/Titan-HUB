@@ -59,6 +59,8 @@ export type EventRow = {
 /** Заявка на бронь с сайта — raw SQL, ключи в snake_case, время в формате Postgres. */
 export type BookingRequest = {
   id: string;
+  /** event — мероприятие (подтверждение создаёт его); game — запись на игру; message — обращение. */
+  kind?: 'event' | 'game' | 'message';
   space_id: string | null;
   zone_name: string | null;
   name: string;

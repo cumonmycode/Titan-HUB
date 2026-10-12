@@ -93,6 +93,7 @@ export default function ManageLayout() {
       <Stack.Screen name="settings/payment" options={formHeader({ title: 'Оплата и чеки' })} />
       <Stack.Screen name="settings/booking" options={formHeader({ title: 'Онлайн-бронирование' })} />
       <Stack.Screen name="settings/reviews" options={formHeader({ title: 'Отзывы гостей' })} />
+      <Stack.Screen name="settings/site" options={formHeader({ title: 'Сайт' })} />
       <Stack.Screen name="settings/integrations" options={formHeader({ title: 'Интеграции' })} />
       {/* Home Assistant для HUB: подключение и помещения шторки «Свет и климат» на кассе. */}
       <Stack.Screen name="settings/home/index" options={formHeader({ title: 'Home Assistant' })} />

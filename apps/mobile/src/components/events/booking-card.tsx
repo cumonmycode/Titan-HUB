@@ -11,18 +11,28 @@ import { colors, space, type } from '@/lib/theme';
  * Заявка на бронь с сайта: что, когда, где и кто — и два решения. Подтверждённая заявка
  * становится мероприятием, его детали уточняют уже в форме.
  */
+// Что значат решения для каждого вида заявки с сайта.
+const LOOK = {
+  event: { confirm: 'Подтвердить', reject: 'Отклонить', symbol: null },
+  game: { confirm: 'Ждём', reject: 'Отклонить', symbol: 'person.badge.plus' },
+  message: { confirm: 'Обработано', reject: 'Скрыть', symbol: 'envelope' },
+} as const;
+
 export function BookingCard({ booking, busy, onConfirm, onReject }: { booking: BookingRequest; busy: boolean; onConfirm: () => void; onReject: () => void }) {
+  const look = LOOK[booking.kind ?? 'event'];
   // Очень крупный текст: кнопки друг под другом, иначе подписи не помещаются.
   const { stacked } = useTextLayout();
   const startsAt = parsePgTimestamp(booking.starts_at);
   const hours = booking.tariff_hours ?? (booking.duration_hours ? Number(booking.duration_hours) : null);
   const where = booking.location === 'exit' ? (booking.address ?? 'Выезд') : (booking.zone_name ?? 'Клуб');
-  const when = [formatMskDateTime(startsAt), hours ? `${hours} ч` : null, booking.guests ? `${booking.guests} гостей` : null].filter(Boolean).join(' · ');
+  const when = booking.kind === 'message'
+    ? `Получено ${formatMskDateTime(startsAt)}`
+    : [formatMskDateTime(startsAt), hours ? `${hours} ч` : null, booking.guests ? `${booking.guests} гостей` : null].filter(Boolean).join(' · ');
 
   return (
     <GlassCard style={styles.card}>
       <View style={styles.top}>
-        <SymbolView name={booking.location === 'exit' ? 'car' : 'building.2'} size={15} weight="semibold" tintColor={colors.secondaryLabel} />
+        <SymbolView name={look.symbol ?? (booking.location === 'exit' ? 'car' : 'building.2')} size={15} weight="semibold" tintColor={colors.secondaryLabel} />
         <Text style={[type.headline, styles.label, styles.flex]} numberOfLines={2}>
           {booking.title || booking.name}
         </Text>
@@ -43,7 +53,7 @@ export function BookingCard({ booking, busy, onConfirm, onReject }: { booking: B
           style={({ pressed }) => [styles.button, !stacked && styles.flex, styles.reject, pressed && styles.pressed]}
           accessibilityRole="button"
           accessibilityState={{ disabled: busy }}>
-          <Text style={[type.subhead, styles.rejectText]}>Отклонить</Text>
+          <Text style={[type.subhead, styles.rejectText]}>{look.reject}</Text>
         </Pressable>
         <Pressable
           disabled={busy}
@@ -52,7 +62,7 @@ export function BookingCard({ booking, busy, onConfirm, onReject }: { booking: B
           accessibilityRole="button"
           accessibilityState={{ disabled: busy, busy }}>
           {busy ? <ActivityIndicator color="white" /> : <SymbolView name="checkmark" size={13} weight="bold" tintColor="white" />}
-          <Text style={[type.subhead, styles.confirmText]}>Подтвердить</Text>
+          <Text style={[type.subhead, styles.confirmText]}>{look.confirm}</Text>
         </Pressable>
       </View>
     </GlassCard>

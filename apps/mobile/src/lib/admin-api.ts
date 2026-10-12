@@ -108,6 +108,26 @@ export async function saveBookingConfig(enabled: boolean): Promise<void> {
   invalidate(['system', 'booking-config']);
 }
 
+/* ─────────────────────────── Сайт клуба ─────────────────────────── */
+
+export type SiteTheme = 'case' | 'protocol' | 'night' | 'classic';
+export type SiteScheduleDay = { day: number; title: string; time?: string };
+export type SiteConfig = { theme: SiteTheme; themes: SiteTheme[]; schedule: SiteScheduleDay[] | null };
+
+export function useSiteConfig() {
+  const club = useClubKey();
+  return useQuery({
+    queryKey: [club, 'system', 'site-config'],
+    queryFn: () => api.get<SiteConfig>('/system/site-config'),
+    staleTime: 60_000,
+  });
+}
+
+export async function saveSiteTheme(theme: SiteTheme): Promise<void> {
+  await api.put('/system/site-config', { theme });
+  invalidate(['system', 'site-config']);
+}
+
 export type ReviewsConfig = { yandexUrl: string; twogisUrl: string; inviteText: string };
 
 export function useReviewsConfig() {
