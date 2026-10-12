@@ -1,14 +1,17 @@
-import { Button, ContentUnavailableView, DatePicker, Form, Picker, ProgressView, Section, Text, Toggle } from '@expo/ui/swift-ui';
+import { Button, ContentUnavailableView, DatePicker, Form, Picker, ProgressView, RNHostView, Section, Text, Toggle } from '@expo/ui/swift-ui';
 import { pickerStyle, tag } from '@expo/ui/swift-ui/modifiers';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useState } from 'react';
-import { Alert, Linking } from 'react-native';
+import { ActivityIndicator, Alert, Linking, Pressable, StyleSheet, View } from 'react-native';
 
 import { RankRow } from '@/components/analytics/native';
 import { EditorToolbar } from '@/components/editor-toolbar';
 import { ActionRow, FieldRow, FormHost, LinkRow } from '@/components/native-form';
+import { Avatar } from '@/components/new-check-parts';
+import { Text as RNText } from '@/components/text';
 import { useDebounced } from '@/components/player-picker';
 import {
+  clientPhoto,
   createClientProfile,
   fetchGomafiaFullName,
   gomafiaIdOf,
@@ -26,6 +29,8 @@ import {
 } from '@/lib/clients-api';
 import { haptic } from '@/lib/haptics';
 import { cleanPhone, pickContact } from '@/lib/phone-book';
+import { pickAndUploadPhoto } from '@/lib/photo';
+import { colors } from '@/lib/theme';
 
 const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
@@ -83,6 +88,7 @@ function ClientForm({ initial, onCreated }: { initial: Client | undefined; onCre
   const [linkQuery, setLinkQuery] = useState('');
   const [linking, setLinking] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [photoBusy, setPhotoBusy] = useState(false);
 
   const creating = !initial;
   const linkedId = initial ? gomafiaIdOf(initial) : null;
@@ -146,6 +152,19 @@ function ClientForm({ initial, onCreated }: { initial: Client | undefined; onCre
     });
   };
 
+  // Фото сохраняется сразу — отдельно от «Сохранить», как в «Контактах».
+  const savePhoto = (photoUrl: string | null) =>
+    initial &&
+    updateClient(initial.id, { photoUrl })
+      .then(() => haptic.success())
+      .catch((error: unknown) => Alert.alert('Фото не сохранилось', errorText(error)));
+  const changePhoto = () => pickAndUploadPhoto('Фото клиента', (photoUrl) => void savePhoto(photoUrl), setPhotoBusy);
+  const removePhoto = () =>
+    Alert.alert('Убрать фото?', 'Останется фото из Telegram или GoMafia, если оно есть.', [
+      { text: 'Отмена', style: 'cancel' },
+      { text: 'Убрать', style: 'destructive', onPress: () => void savePhoto(null) },
+    ]);
+
   const save = async () => {
     const nick = nickname.trim();
     if (nick.length < 2) return;
@@ -207,6 +226,29 @@ function ClientForm({ initial, onCreated }: { initial: Client | undefined; onCre
       <EditorToolbar title={initial ? 'Профиль клиента' : 'Новый клиент'} canSave={nickname.trim().length >= 2} busy={busy} saveLabel={initial ? 'Сохранить' : 'Создать'} onSave={() => void save()} />
       <FormHost>
         <Form>
+          {initial ? (
+            <Section>
+              <RNHostView matchContents>
+                <View style={styles.photo}>
+                  <Pressable onPress={changePhoto} accessibilityRole="button" accessibilityLabel="Сменить фото">
+                    <Avatar name={initial.nickname} photoUrl={clientPhoto(initial)} size={88} />
+                    {photoBusy ? <ActivityIndicator style={styles.photoBusy} /> : null}
+                  </Pressable>
+                  <View style={styles.photoActions}>
+                    <Pressable onPress={changePhoto} hitSlop={6} accessibilityRole="button">
+                      <RNText style={styles.photoAction}>{initial.photoUrl ? 'Сменить фото' : 'Добавить фото'}</RNText>
+                    </Pressable>
+                    {initial.photoUrl ? (
+                      <Pressable onPress={removePhoto} hitSlop={6} accessibilityRole="button">
+                        <RNText style={[styles.photoAction, styles.remove]}>Убрать</RNText>
+                      </Pressable>
+                    ) : null}
+                  </View>
+                </View>
+              </RNHostView>
+            </Section>
+          ) : null}
+
           <Section title="Ник и имя" footer={creating && !gomafia ? <Text>Начните вводить ник — найдём игрока на GoMafia и подставим имя и фото.</Text> : undefined}>
             <FieldRow key={`nick-${fieldsVersion}`} value={nickname} placeholder="Ник" autoFocus={creating && fieldsVersion === 0} maxLength={40} onChange={setNickname} />
             <FieldRow key={`name-${fieldsVersion}`} value={fullName} placeholder="Реальное имя" onChange={setFullName} />
@@ -226,9 +268,18 @@ function ClientForm({ initial, onCreated }: { initial: Client | undefined; onCre
 
           {creating && !gomafia && showSuggestions && <Section title="Найдено на GoMafia">{results(pickGomafia)}</Section>}
 
-          <Section title="Контакты">
+          <Section title="Связь">
             <FieldRow key={`phone-${fieldsVersion}`} value={phone} placeholder="Телефон" keyboard="phone-pad" onChange={setPhone} />
             <ActionRow title="Взять телефон из контактов" icon="person.crop.circle.badge.plus" onPress={fromContacts} />
+            {initial ? (
+              <LinkRow
+                icon="paperplane.fill"
+                color="#2AABEE"
+                title="Telegram"
+                value={initial.tgUsername ? `@${initial.tgUsername.replace(/^@/, '')}` : initial.tgId ? 'привязан' : 'привязать'}
+                onPress={() => router.push({ pathname: '/manage/clients/telegram', params: { clientId: initial.id } })}
+              />
+            ) : null}
             <Toggle
               label="День рождения"
               isOn={hasBirthday}
@@ -255,7 +306,7 @@ function ClientForm({ initial, onCreated }: { initial: Client | undefined; onCre
             {tiers.isLoading ? (
               <ProgressView />
             ) : (
-              <Picker selection={tier} onSelectionChange={(value) => setTier(String(value))} modifiers={[pickerStyle('inline')]}>
+              <Picker label="Статус" selection={tier} onSelectionChange={(value) => setTier(String(value))} modifiers={[pickerStyle('menu')]}>
                 {tierList.map((t) => (
                   <Text key={t.key} modifiers={[tag(t.key)]}>
                     {tierLook(t.key, tiers.data).label}
@@ -299,3 +350,11 @@ function ClientForm({ initial, onCreated }: { initial: Client | undefined; onCre
     </>
   );
 }
+
+const styles = StyleSheet.create({
+  photo: { alignItems: 'center', gap: 10, paddingVertical: 14 },
+  photoBusy: { position: 'absolute', top: 34, left: 34 },
+  photoActions: { flexDirection: 'row', gap: 24 },
+  photoAction: { fontSize: 16, color: colors.accent, fontWeight: '500' },
+  remove: { color: colors.red },
+});

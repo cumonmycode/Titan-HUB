@@ -57,6 +57,7 @@ export default function ManageLayout() {
 
       <Stack.Screen name="clients/index" options={formHeader({ title: 'Клиенты' })} />
       <Stack.Screen name="clients/[clientId]" options={formHeader()} />
+      <Stack.Screen name="clients/history" options={formHeader({ title: 'История' })} />
       <Stack.Screen name="clients/edit" options={editorModal} />
       <Stack.Screen name="clients/adjust" options={compactSheet} />
       <Stack.Screen name="clients/telegram" options={editorModal} />

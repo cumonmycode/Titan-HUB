@@ -1,54 +1,35 @@
-import { Button, ContentUnavailableView, Form, HStack, Host, Image, LabeledContent, Picker, ProgressView, RNHostView, Section, Spacer, Text, VStack } from '@expo/ui/swift-ui';
-import {
-  background,
-  buttonStyle,
-  contentTransition,
-  controlSize,
-  font,
-  foregroundStyle,
-  frame,
-  lineLimit,
-  monospacedDigit,
-  pickerStyle,
-  refreshable,
-  shapes,
-  tag,
-} from '@expo/ui/swift-ui/modifiers';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
+import { SymbolView } from 'expo-symbols';
 import { useState } from 'react';
-import { ActivityIndicator, Alert, Linking, View } from 'react-native';
+import { ActivityIndicator, Alert, Linking, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
-import { LinkRow, primary, secondary } from '@/components/native-form';
-import { Avatar } from '@/components/new-check-parts';
-import { ToolbarMenu, ToolbarMenuAction } from '@/components/toolbar';
+import { ClientMoveRow } from '@/components/client-moves';
+import { Card, ContactButtons, InfoRow, ProfileHeader, StatTile } from '@/components/profile-parts';
+import { AppRefreshControl } from '@/components/refresh-control';
+import { Text } from '@/components/text';
+import { ToolbarButton, ToolbarMenu, ToolbarMenuAction } from '@/components/toolbar';
 import {
   adjustVisits,
   archiveClient,
-  BALANCE_OPS,
   clientPhoto,
   gomafiaIdOf,
   purgeClient,
   restoreClient,
   tierLook,
-  transactionLook,
-  updateClient,
   useClient,
   useClientTiers,
   useClientTransactions,
   userTags,
   useVisitProgress,
-  whenText,
-  type BalanceOp,
 } from '@/lib/clients-api';
 import { normalizePhone } from '@/lib/events-api';
 import { formatMoney, plural, toNumber } from '@/lib/format';
 import { haptic } from '@/lib/haptics';
-import { pickAndUploadPhoto } from '@/lib/photo';
+import { usePageGutter } from '@/lib/layout';
 import { useSession } from '@/lib/session';
-import { colors } from '@/lib/theme';
+import { colors, space, type } from '@/lib/theme';
 
-type Tab = 'main' | 'history';
-
+const RECENT = 5;
 const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error));
 const birthdayFormat = new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'long', timeZone: 'UTC' });
 
@@ -58,28 +39,28 @@ function birthdayText(value: string | null): string | null {
 }
 
 /**
- * Карточка клиента: фото, статус, депозит или долг и бонусы; связь в один тап; операции
- * с балансом и бонусами — шторками; прогресс «Новичок → Резидент»; контакты; вкладка
- * «История» — движения денег и посещений.
+ * Карточка клиента, как в «Контактах» iOS: шапка с фото и статусом, связь в один тап,
+ * плитки «Депозит/Долг» и «Бонусы» (единственное место операций — открывают шторку),
+ * прогресс до резидента, контакты и последние движения. Профиль правится по «Изменить».
  */
 export default function ClientScreen() {
   const { clientId } = useLocalSearchParams<{ clientId: string }>();
   const router = useRouter();
+  const gutter = usePageGutter();
   const client = useClient(clientId);
   const tiers = useClientTiers();
   const isOwner = useSession((s) => s.user?.role === 'owner');
-  const [tab, setTab] = useState<Tab>('main');
   const data = client.data;
   const visits = useVisitProgress(clientId, data?.clientTier === 'newbie' && !data?.deletedAt);
   const history = useClientTransactions(clientId);
   const [visitBusy, setVisitBusy] = useState(false);
-  const [photoBusy, setPhotoBusy] = useState(false);
+  const [pulling, setPulling] = useState(false);
 
   if (!data) {
     return (
-      <Host style={{ flex: 1 }} useViewportSizeMeasurement>
-        {client.isError ? <ContentUnavailableView title="Клиент не загрузился" systemImage="wifi.exclamationmark" description={errorText(client.error)} /> : <ProgressView />}
-      </Host>
+      <View style={[styles.screen, styles.center]}>
+        {client.isError ? <Text style={[type.body, styles.secondary, styles.centerText]}>{`Клиент не загрузился. ${errorText(client.error)}`}</Text> : <ActivityIndicator />}
+      </View>
     );
   }
 
@@ -90,15 +71,19 @@ export default function ClientScreen() {
   const phone = data.phone ? normalizePhone(data.phone) : null;
   const gomafiaId = gomafiaIdOf(data);
   const tags = userTags(data);
-  const balanceColor = balance > 0.004 ? '#06B6D4' : balance < -0.004 ? '#F43F5E' : '#8E8E93';
+  const debt = balance < -0.004;
+  const deposit = balance > 0.004;
+  const telegramUrl = data.tgUsername ? `https://t.me/${data.tgUsername.replace(/^@/, '')}` : phone ? `tg://resolve?phone=${phone}` : null;
+  const moves = history.data ?? [];
 
-  const openBalance = (op: BalanceOp) => {
-    haptic.light();
-    router.push({ pathname: '/manage/clients/adjust', params: { clientId, mode: 'balance', op } });
-  };
-  const openBonus = (sign: 'plus' | 'minus') => {
-    haptic.light();
-    router.push({ pathname: '/manage/clients/adjust', params: { clientId, mode: 'bonus', op: sign } });
+  const open = (url: string) => void Linking.openURL(url);
+  const openAdjust = (mode: 'balance' | 'bonus') =>
+    router.push({ pathname: '/manage/clients/adjust', params: { clientId, mode, op: mode === 'bonus' ? 'plus' : debt ? 'debt_repay' : 'deposit_add' } });
+
+  const refresh = async () => {
+    setPulling(true);
+    await Promise.allSettled([client.refetch(), history.refetch(), visits.refetch()]);
+    setPulling(false);
   };
 
   const archive = () =>
@@ -161,48 +146,12 @@ export default function ClientScreen() {
     }
   };
 
-  const savePhoto = (photoUrl: string | null) =>
-    updateClient(data.id, { photoUrl })
-      .then(() => haptic.success())
-      .catch((error: unknown) => Alert.alert('Фото не сохранилось', errorText(error)));
-  const changePhoto = () => pickAndUploadPhoto('Фото клиента', (photoUrl) => void savePhoto(photoUrl), setPhotoBusy);
-  const removePhoto = () =>
-    Alert.alert('Убрать фото?', 'Останется фото из Telegram или GoMafia, если оно есть.', [
-      { text: 'Отмена', style: 'cancel' },
-      { text: 'Убрать', style: 'destructive', onPress: () => void savePhoto(null) },
-    ]);
-
-  const open = (url: string) => {
-    haptic.light();
-    void Linking.openURL(url);
-  };
-  const telegramUrl = data.tgUsername ? `https://t.me/${data.tgUsername.replace(/^@/, '')}` : phone ? `tg://resolve?phone=${phone}` : null;
-
   return (
-    <>
+    <View style={styles.screen}>
       <Stack.Title>{data.nickname}</Stack.Title>
       <Stack.Toolbar placement="right">
-        <ToolbarMenu icon="ellipsis" accessibilityLabel="Действия с клиентом">
-          {!archived && (
-            <ToolbarMenuAction icon="pencil" onPress={() => router.push({ pathname: '/manage/clients/edit', params: { clientId: data.id } })}>
-              Изменить
-            </ToolbarMenuAction>
-          )}
-          {!archived && (
-            <ToolbarMenuAction icon="camera" onPress={changePhoto}>
-              {data.photoUrl ? 'Сменить фото' : 'Добавить фото'}
-            </ToolbarMenuAction>
-          )}
-          {!archived && data.photoUrl && (
-            <ToolbarMenuAction icon="trash" onPress={removePhoto}>
-              Убрать фото
-            </ToolbarMenuAction>
-          )}
-          {!archived && (
-            <ToolbarMenuAction icon="paperplane" onPress={() => router.push({ pathname: '/manage/clients/telegram', params: { clientId: data.id } })}>
-              Привязать Telegram
-            </ToolbarMenuAction>
-          )}
+        {!archived ? <ToolbarButton onPress={() => router.push({ pathname: '/manage/clients/edit', params: { clientId: data.id } })}>Изменить</ToolbarButton> : null}
+        <ToolbarMenu icon="ellipsis" accessibilityLabel="Ещё">
           {!archived && (
             <ToolbarMenuAction icon="archivebox" destructive onPress={archive}>
               В архив
@@ -210,7 +159,7 @@ export default function ClientScreen() {
           )}
           {archived && (
             <ToolbarMenuAction icon="arrow.uturn.backward" onPress={() => void restore()}>
-              Восстановить из архива
+              Вернуть из архива
             </ToolbarMenuAction>
           )}
           {archived && isOwner && (
@@ -221,176 +170,131 @@ export default function ClientScreen() {
         </ToolbarMenu>
       </Stack.Toolbar>
 
-      <Host style={{ flex: 1 }} useViewportSizeMeasurement>
-        <Form modifiers={[refreshable(async () => void (await Promise.allSettled([client.refetch(), history.refetch(), visits.refetch()])))]}>
-          <Section>
-            <HStack spacing={14}>
-              <Button onPress={archived ? undefined : changePhoto} modifiers={[buttonStyle('borderless')]}>
-                <RNHostView matchContents>
-                  <View>
-                    <Avatar name={data.nickname} photoUrl={clientPhoto(data)} size={68} />
-                    {photoBusy && <ActivityIndicator style={{ position: 'absolute', top: 24, left: 24 }} />}
-                  </View>
-                </RNHostView>
-              </Button>
-              <VStack alignment="leading" spacing={2}>
-                <Text modifiers={[font({ textStyle: 'title2', weight: 'bold' }), primary, lineLimit(2)]}>{data.nickname}</Text>
-                {data.fullName ? <Text modifiers={[secondary, lineLimit(1)]}>{data.fullName}</Text> : null}
-                <Text modifiers={[font({ textStyle: 'subheadline', weight: 'semibold' }), foregroundStyle(archived ? '#8E8E93' : tier.color)]}>
-                  {archived ? `${tier.label} · в архиве` : tier.label}
-                </Text>
-              </VStack>
-            </HStack>
-            <HStack spacing={12}>
-              <Button onPress={archived ? undefined : () => openBalance(balance < -0.004 ? 'debt_repay' : 'deposit_add')} modifiers={[buttonStyle('borderless'), frame({ maxWidth: 10_000 })]}>
-                <VStack alignment="leading" spacing={2} modifiers={[frame({ maxWidth: 10_000, alignment: 'leading' })]}>
-                  <Text modifiers={[font({ textStyle: 'caption', weight: 'semibold' }), foregroundStyle(balanceColor)]}>{balance > 0.004 ? 'Депозит' : balance < -0.004 ? 'Долг' : 'Баланс'}</Text>
-                  <Text modifiers={[font({ textStyle: 'title2', weight: 'semibold', design: 'rounded' }), primary, monospacedDigit(), contentTransition('numericText')]}>
-                    {formatMoney(Math.abs(balance), { kopecks: 'auto' })}
-                  </Text>
-                </VStack>
-              </Button>
-              <Button onPress={archived ? undefined : () => openBonus('plus')} modifiers={[buttonStyle('borderless'), frame({ maxWidth: 10_000 })]}>
-                <VStack alignment="leading" spacing={2} modifiers={[frame({ maxWidth: 10_000, alignment: 'leading' })]}>
-                  <Text modifiers={[font({ textStyle: 'caption', weight: 'semibold' }), foregroundStyle('#FF9500')]}>Бонусы</Text>
-                  <Text modifiers={[font({ textStyle: 'title2', weight: 'semibold', design: 'rounded' }), primary, monospacedDigit(), contentTransition('numericText')]}>{`★ ${bonus}`}</Text>
-                </VStack>
-              </Button>
-            </HStack>
-            <HStack spacing={8}>
-              <Contact icon="phone.fill" label="позвонить" onPress={phone ? () => open(`tel:+${phone}`) : undefined} />
-              <Contact icon="paperplane.fill" label="Telegram" onPress={telegramUrl ? () => open(telegramUrl) : undefined} />
-              <Contact icon="message.fill" label="WhatsApp" onPress={phone ? () => open(`https://wa.me/${phone}`) : undefined} />
-            </HStack>
-          </Section>
+      <ScrollView
+        contentInsetAdjustmentBehavior="automatic"
+        contentContainerStyle={[styles.content, gutter]}
+        showsVerticalScrollIndicator={false}
+        refreshControl={<AppRefreshControl tintColor={colors.accent} refreshing={pulling} onRefresh={() => void refresh()} />}
+      >
+        <ProfileHeader
+          name={data.nickname}
+          photoUrl={clientPhoto(data)}
+          title={data.nickname}
+          subtitle={data.fullName}
+          chip={archived ? { text: `${tier.label} · в архиве`, color: '#8E8E93' } : { text: tier.label, color: tier.color }}
+        />
 
-          {data.appDeletedAt ? (
-            <Section footer={<Text>Карточка клиента не изменилась. Войти в приложение снова можно через сутки после удаления.</Text>}>
-              <LinkRow
-                icon="person.crop.circle.badge.xmark"
-                color="#FF3B30"
-                title="Удалил аккаунт My Titan"
-                value={new Date(data.appDeletedAt).toLocaleString('ru-RU', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })}
-                chevron={false}
-              />
-            </Section>
-          ) : null}
+        <ContactButtons
+          items={[
+            { icon: 'phone.fill', label: 'Позвонить', onPress: phone ? () => open(`tel:+${phone}`) : undefined },
+            { icon: 'paperplane.fill', label: 'Telegram', onPress: telegramUrl ? () => open(telegramUrl) : undefined },
+            { icon: 'message.fill', label: 'WhatsApp', onPress: phone ? () => open(`https://wa.me/${phone}`) : undefined },
+          ]}
+        />
 
-          <Section>
-            <Picker
-              selection={tab}
-              onSelectionChange={(value) => {
-                haptic.selection();
-                setTab(value as Tab);
-              }}
-              modifiers={[pickerStyle('segmented')]}>
-              <Text modifiers={[tag('main')]}>Основное</Text>
-              <Text modifiers={[tag('history')]}>История</Text>
-            </Picker>
-          </Section>
+        {data.appDeletedAt ? (
+          <Card footer="Карточка клиента не изменилась. Войти в приложение снова можно через сутки после удаления.">
+            <InfoRow
+              icon="person.crop.circle.badge.xmark"
+              iconColor="#FF3B30"
+              label="Удалил аккаунт My Titan"
+              value={new Date(data.appDeletedAt).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' })}
+            />
+          </Card>
+        ) : null}
 
-          {tab === 'main' ? (
-            <>
-              {!archived && (
-                <Section title="Депозит и долг">
-                  {(['deposit_add', 'deposit_sub', 'debt_repay', 'debt_lend'] as const).map((op) => {
-                    const look = BALANCE_OPS[op];
-                    const disabled = (op === 'deposit_sub' && balance <= 0.004) || (op === 'debt_repay' && balance >= -0.004);
-                    return <LinkRow key={op} icon={look.symbol} color={disabled ? '#8E8E93' : look.color} title={look.title} onPress={disabled ? undefined : () => openBalance(op)} />;
-                  })}
-                </Section>
-              )}
+        <View style={styles.tiles}>
+          <StatTile
+            label={debt ? 'Долг' : deposit ? 'Депозит' : 'Баланс'}
+            value={formatMoney(Math.abs(balance), { kopecks: 'auto' })}
+            color={debt ? '#F43F5E' : deposit ? '#06B6D4' : colors.secondaryLabel}
+            hint={archived ? undefined : debt ? 'Погасить или дать в долг' : 'Пополнить или списать'}
+            onPress={archived ? undefined : () => openAdjust('balance')}
+          />
+          <StatTile label="Бонусы" value={`★ ${bonus}`} color="#FF9500" hint={archived ? undefined : 'Начислить или списать'} onPress={archived ? undefined : () => openAdjust('bonus')} />
+        </View>
 
-              {!archived && (
-                <Section title="Бонусы">
-                  <LinkRow icon="star.circle.fill" color="#FF9500" title="Начислить бонусы" onPress={() => openBonus('plus')} />
-                  <LinkRow icon="minus.circle.fill" color={bonus > 0 ? '#8E8E93' : '#C7C7CC'} title="Списать бонусы" onPress={bonus > 0 ? () => openBonus('minus') : undefined} />
-                </Section>
-              )}
+        {visits.data && visits.data.tier === 'newbie' ? <VisitsCard progress={visits.data} busy={visitBusy} onChange={(delta) => void changeVisits(delta)} /> : null}
 
-              {visits.data && visits.data.tier === 'newbie' && (
-                <Section
-                  title="Новичок → Резидент"
-                  footer={
-                    <Text>
-                      {visits.data.remaining > 0
-                        ? `Ещё ${visits.data.remaining} ${plural(visits.data.remaining, ['посещение', 'посещения', 'посещений'])} до статуса «Резидент».`
-                        : 'Порог достигнут — статус повысится при следующем посещении.'}
-                    </Text>
-                  }>
-                  <HStack spacing={10}>
-                    <Text modifiers={[primary, monospacedDigit(), contentTransition('numericText')]}>{`Посещений: ${visits.data.visits} из ${visits.data.threshold}`}</Text>
-                    <Spacer />
-                    <Button systemImage="minus" onPress={visitBusy || visits.data.visits <= 0 ? undefined : () => void changeVisits(-1)} modifiers={[buttonStyle('bordered'), controlSize('small')]} />
-                    <Button systemImage="plus" onPress={visitBusy ? undefined : () => void changeVisits(1)} modifiers={[buttonStyle('bordered'), controlSize('small')]} />
-                  </HStack>
-                </Section>
-              )}
+        <Card title="Контакты" footer={`В клубе с ${new Date(data.createdAt).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' })}`}>
+          <InfoRow label="Телефон" value={data.phone || 'не указан'} muted={!data.phone} onPress={phone ? () => open(`tel:+${phone}`) : undefined} />
+          <InfoRow
+            label="Telegram"
+            value={data.tgUsername ? `@${data.tgUsername.replace(/^@/, '')}` : data.tgId ? 'привязан' : 'не привязан'}
+            muted={!data.tgId && !data.tgUsername}
+            onPress={data.tgUsername && telegramUrl ? () => open(telegramUrl) : undefined}
+          />
+          <InfoRow label="День рождения" value={birthdayText(data.birthday) ?? 'не указан'} muted={!data.birthday} />
+          {tags.length > 0 ? <InfoRow label="Теги" value={tags.join(', ')} /> : null}
+          {gomafiaId ? <InfoRow label="GoMafia" value={`#${gomafiaId}`} onPress={() => open(`https://gomafia.pro/stats/${gomafiaId}`)} /> : null}
+        </Card>
 
-              <Section title="Контакты" footer={<Text>{`В клубе с ${new Date(data.createdAt).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' })}`}</Text>}>
-                <Info label="Телефон" value={data.phone || 'не указан'} muted={!data.phone} />
-                <Info label="Telegram" value={data.tgUsername ? `@${data.tgUsername.replace(/^@/, '')}` : data.tgId ? `id ${data.tgId}` : 'не привязан'} muted={!data.tgId && !data.tgUsername} />
-                <Info label="День рождения" value={birthdayText(data.birthday) ?? 'не указан'} muted={!data.birthday} />
-                {tags.length > 0 && <Info label="Теги" value={tags.join(', ')} />}
-                {gomafiaId && <LinkRow icon="link" color="#5856D6" title="GoMafia" value={`#${gomafiaId}`} onPress={() => open(`https://gomafia.pro/stats/${gomafiaId}`)} />}
-              </Section>
-            </>
+        <Card title="Последние операции">
+          {history.isLoading ? (
+            <View style={styles.loading}>
+              <ActivityIndicator />
+            </View>
+          ) : moves.length === 0 ? (
+            <InfoRow label="Движений пока не было" muted />
           ) : (
-            <Section title="История" footer={history.data?.length ? <Text>Показаны последние 50 движений. Нажмите на движение с чеком, чтобы открыть чек.</Text> : undefined}>
-              {history.isLoading ? (
-                <ProgressView />
-              ) : history.isError ? (
-                <Text modifiers={[secondary]}>{errorText(history.error)}</Text>
-              ) : !history.data?.length ? (
-                <ContentUnavailableView title="Движений пока не было" systemImage="clock.arrow.circlepath" />
-              ) : (
-                history.data.map((tx) => {
-                  const look = transactionLook(tx);
-                  const amount = toNumber(tx.amount);
-                  const color = look.sign > 0 ? colors.green : look.sign < 0 ? colors.red : undefined;
-                  const amountText =
-                    tx.type === 'visit_adjust'
-                      ? `${amount > 0 ? '+' : ''}${amount} ${plural(Math.abs(amount), ['посещение', 'посещения', 'посещений'])}`
-                      : formatMoney(look.sign < 0 ? -amount : amount, { sign: look.sign > 0, kopecks: 'auto' });
-                  return (
-                    <LinkRow
-                      key={tx.id}
-                      icon={look.symbol}
-                      color={look.sign > 0 ? '#34C759' : look.sign < 0 ? '#FF3B30' : '#8E8E93'}
-                      title={look.title}
-                      subtitle={whenText(tx.createdAt)}
-                      value={amountText}
-                      valueColor={color}
-                      onPress={tx.checkId ? () => router.push({ pathname: '/pos/[checkId]', params: { checkId: tx.checkId! } }) : undefined}
-                    />
-                  );
-                })
-              )}
-            </Section>
+            moves.slice(0, RECENT).map((tx) => (
+              <ClientMoveRow key={tx.id} tx={tx} onPress={tx.checkId ? () => router.push({ pathname: '/pos/[checkId]', params: { checkId: tx.checkId! } }) : undefined} />
+            ))
           )}
-        </Form>
-      </Host>
-    </>
+          {moves.length > RECENT ? <InfoRow label="Вся история" chevron onPress={() => router.push({ pathname: '/manage/clients/history', params: { clientId } })} /> : null}
+        </Card>
+      </ScrollView>
+    </View>
   );
 }
 
-/** Кнопка связи как в «Контактах» iOS: значок над подписью, недоступная — приглушена. */
-function Contact({ icon, label, onPress }: { icon: 'phone.fill' | 'paperplane.fill' | 'message.fill'; label: string; onPress?: () => void }) {
-  const tint = onPress ? colors.accent : colors.tertiaryLabel;
+/** Новичок → Резидент: полоса прогресса и ручная правка посещений. */
+function VisitsCard({ progress, busy, onChange }: { progress: { visits: number; threshold: number; remaining: number }; busy: boolean; onChange: (delta: 1 | -1) => void }) {
+  const share = progress.threshold > 0 ? Math.min(1, progress.visits / progress.threshold) : 0;
   return (
-    <Button onPress={onPress} modifiers={[buttonStyle('borderless'), frame({ maxWidth: 10_000 })]}>
-      <VStack spacing={4} modifiers={[frame({ maxWidth: 10_000, minHeight: 54 }), background(colors.fill, shapes.roundedRectangle({ cornerRadius: 12 }))]}>
-        <Image systemName={icon} size={17} color={tint} />
-        <Text modifiers={[font({ textStyle: 'caption2', weight: 'medium' }), foregroundStyle(tint), lineLimit(1)]}>{label}</Text>
-      </VStack>
-    </Button>
+    <Card
+      title="До резидента"
+      footer={
+        progress.remaining > 0
+          ? `Ещё ${progress.remaining} ${plural(progress.remaining, ['посещение', 'посещения', 'посещений'])} — и статус станет «Резидент».`
+          : 'Порог достигнут — статус повысится при следующем посещении.'
+      }
+    >
+      <View style={styles.visits}>
+        <View style={styles.flex}>
+          <Text style={[type.headline, styles.label]}>{`${progress.visits} из ${progress.threshold} посещений`}</Text>
+          <View style={styles.bar}>
+            <View style={[styles.fill, { width: `${Math.round(share * 100)}%` }]} />
+          </View>
+        </View>
+        <Step icon="minus" label="Убрать посещение" disabled={busy || progress.visits <= 0} onPress={() => onChange(-1)} />
+        <Step icon="plus" label="Добавить посещение" disabled={busy} onPress={() => onChange(1)} />
+      </View>
+    </Card>
   );
 }
 
-function Info({ label, value, muted }: { label: string; value: string; muted?: boolean }) {
+function Step({ icon, label, disabled, onPress }: { icon: 'plus' | 'minus'; label: string; disabled: boolean; onPress: () => void }) {
   return (
-    <LabeledContent label={label}>
-      <Text modifiers={[muted ? foregroundStyle(colors.tertiaryLabel) : secondary, lineLimit(2)]}>{value}</Text>
-    </LabeledContent>
+    <Pressable disabled={disabled} onPress={onPress} hitSlop={6} style={({ pressed }) => [styles.step, (pressed || disabled) && styles.dim]} accessibilityRole="button" accessibilityLabel={label}>
+      <SymbolView name={icon} size={15} weight="bold" tintColor={colors.accent} />
+    </Pressable>
   );
 }
+
+const styles = StyleSheet.create({
+  screen: { flex: 1, backgroundColor: colors.groupedBackground },
+  center: { alignItems: 'center', justifyContent: 'center', padding: space.xl },
+  centerText: { textAlign: 'center' },
+  content: { gap: space.xl, paddingTop: space.sm, paddingBottom: space.xxxl },
+  tiles: { flexDirection: 'row', gap: space.md },
+  flex: { flex: 1, minWidth: 0, gap: space.sm },
+  label: { color: colors.label },
+  secondary: { color: colors.secondaryLabel },
+  loading: { padding: space.lg },
+  visits: { flexDirection: 'row', alignItems: 'center', gap: space.md, padding: space.lg },
+  bar: { height: 6, borderRadius: 3, backgroundColor: colors.fill, overflow: 'hidden' },
+  fill: { height: 6, borderRadius: 3, backgroundColor: colors.accent },
+  step: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.fill },
+  dim: { opacity: 0.4 },
+});
