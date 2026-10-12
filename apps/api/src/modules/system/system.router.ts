@@ -267,12 +267,11 @@ systemRouter.post('/restore-upload', operatorDomainOnly, requireAuth, requireRol
 // Белый список допустимых ключей + человекочитаемые подписи для UI.
 // Любой key вне списка → 400 (никаких записей произвольных ключей в таблицу).
 const INTEGRATION_KEYS: Record<string, string> = {
-  admin_bot_token: 'Токен админ-бота Telegram',
-  wallet_bot_token: 'Токен Telegram-бота My Titan',
-  ai_api_key: 'API-ключ TITAN AI',
+  // Боты HUB и Wallet слиты в Tai (2026-10-12): их ключи больше не читаются и не показываются.
+  ai_api_key: 'Tai — ИИ: API-ключ',
   platega_merchant_id: 'Platega: Merchant ID',
   platega_secret: 'Platega: секретный ключ',
-  poll_bot_token: 'Токен бота опросов Telegram',
+  poll_bot_token: 'Tai — бот клуба: токен',
   // СБП-эквайеры (приём оплат). Заведение вводит свои боевые/тестовые ключи.
   tbank_terminal_key: 'Т-Банк: Terminal Key',
   tbank_password: 'Т-Банк: Password',

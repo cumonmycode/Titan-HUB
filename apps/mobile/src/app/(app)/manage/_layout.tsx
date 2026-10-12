@@ -90,7 +90,6 @@ export default function ManageLayout() {
       <Stack.Screen name="staff/new" options={editorModal} />
 
       <Stack.Screen name="settings/index" options={formHeader({ title: 'Настройки клуба' })} />
-      <Stack.Screen name="settings/payment" options={formHeader({ title: 'Оплата и чеки' })} />
       <Stack.Screen name="settings/reviews" options={formHeader({ title: 'Отзывы гостей' })} />
       {/* «Сайт»: оформление, расписание, публикации, онлайн-запись, домен и контакты — нативно. */}
       <Stack.Screen name="settings/site/index" options={formHeader({ title: 'Сайт' })} />
@@ -103,6 +102,8 @@ export default function ManageLayout() {
       <Stack.Screen name="settings/site/contacts" options={formHeader({ title: 'Контакты' })} />
       <Stack.Screen name="settings/site/notify" options={formHeader({ title: 'Уведомления' })} />
       <Stack.Screen name="settings/integrations" options={formHeader({ title: 'Интеграции' })} />
+      <Stack.Screen name="settings/integration-store" options={formHeader({ title: 'Добавить интеграцию' })} />
+      <Stack.Screen name="settings/integration" options={formHeader()} />
       {/* Home Assistant для HUB: подключение и помещения шторки «Свет и климат» на кассе. */}
       <Stack.Screen name="settings/home/index" options={formHeader({ title: 'Home Assistant' })} />
       <Stack.Screen name="settings/home/zone" options={formHeader()} />

@@ -4,9 +4,11 @@ import { Stack, useRouter } from 'expo-router';
 
 import { LinkRow, TextRow, TimeRow } from '@/components/native-form';
 import { useSettingsEditor } from '@/components/settings-parts';
-import { useIntegrations, usePaymentConfig } from '@/lib/admin-api';
+import { useIntegrations } from '@/lib/admin-api';
+import { CATALOG, statusOf, useGomafiaStatus } from '@/lib/integrations';
 import { useSiteConfig } from '@/lib/site-api';
 import { lookOf } from '@/lib/site-looks';
+import { plural } from '@/lib/format';
 import { haptic } from '@/lib/haptics';
 import { METHODS, type TenderMethod } from '@/lib/payment';
 
@@ -16,19 +18,18 @@ const HOURS = Array.from({ length: 24 }, (_, hour) => hour);
 const hourText = (hour: number) => `${String(hour).padStart(2, '0')}:00`;
 /**
  * Настройки клуба — как «Настройки» iOS: правка прямо в строке (название, адрес, время),
- * выбор из системного меню; всё сохраняется сразу. Большие темы
- * (оплата и чеки, отзывы, сайт и онлайн-запись, интеграции) — отдельными экранами-переходами.
- * Раньше каждое поле открывало системный диалог, а оплата и бронь были только в вебе.
+ * выбор из меню; всё сохраняется сразу. Гости (отзывы, сайт) и интеграции — переходами.
+ * Оплата и чеки живут в карточках своих интеграций (эквайер, касса 54-ФЗ), а не здесь.
  */
 export default function SettingsScreen() {
   const router = useRouter();
   const settings = useSettingsEditor();
-  const payment = usePaymentConfig();
   const site = useSiteConfig();
   const integrations = useIntegrations(true);
+  const gomafia = useGomafiaStatus();
 
   const refresh = async () => {
-    await Promise.allSettled([settings.refetch(), payment.refetch(), site.refetch(), integrations.refetch()]);
+    await Promise.allSettled([settings.refetch(), site.refetch(), integrations.refetch(), gomafia.refetch()]);
   };
 
   if (settings.loading || settings.error) {
@@ -45,7 +46,7 @@ export default function SettingsScreen() {
 
   const startHour = settings.number('business_day_start_hour', 9);
   const defaultPayment = settings.text('default_payment', 'cash') as TenderMethod;
-  const connected = (integrations.data ?? []).filter((item) => item.configured).length;
+  const installed = integrations.data ? CATALOG.filter((p) => statusOf(p, integrations.data, gomafia.data).installed).length : null;
 
   return (
     <>
@@ -60,8 +61,8 @@ export default function SettingsScreen() {
           </Section>
 
           <Section
-            title="Рабочий день"
-            footer={<Text>{`Смены и отчёты считаются от начала суток клуба: смена, открытая после полуночи, относится к предыдущему дню, пока не наступит ${hourText(startHour)}.`}</Text>}>
+            title="Касса"
+            footer={<Text>{`Смены и отчёты считаются от начала суток: смена, открытая после полуночи, относится к предыдущему дню до ${hourText(startHour)}. Способ оплаты по умолчанию касса предлагает первым.`}</Text>}>
             <Picker
               label="Начало суток"
               selection={startHour}
@@ -76,9 +77,6 @@ export default function SettingsScreen() {
                 </Text>
               ))}
             </Picker>
-          </Section>
-
-          <Section title="Касса" footer={<Text>Способ, который касса предлагает первым при оплате чека.</Text>}>
             <Picker
               label="Оплата по умолчанию"
               selection={DEFAULT_METHODS.includes(defaultPayment) ? defaultPayment : 'cash'}
@@ -97,14 +95,7 @@ export default function SettingsScreen() {
 
           {/* Автозакрытие смены, общий порог остатка и общий тумблер Telegram убраны: сервер
               их не читал. Уведомления настраиваются у каждого сотрудника, порог — у позиции склада. */}
-          <Section title="Гости и оплата">
-            <LinkRow
-              icon="creditcard"
-              color="#34C759"
-              title="Оплата и чеки"
-              subtitle={payment.data ? (payment.data.sbpConfigured ? `СБП через ${payment.data.sbpProviderLabel}` : 'Эквайер не подключён') : undefined}
-              onPress={() => router.push('/manage/settings/payment')}
-            />
+          <Section title="Гости">
             <LinkRow icon="star.bubble" color="#FF9500" title="Отзывы гостей" subtitle="Яндекс Карты, 2ГИС" onPress={() => router.push('/manage/settings/reviews')} />
             <LinkRow
               icon="globe"
@@ -116,13 +107,13 @@ export default function SettingsScreen() {
             />
           </Section>
 
-
-          <Section footer={<Text>Home Assistant (свет и климат на кассе) настраивается здесь; остальные ключи — в веб-панели.</Text>}>
+          <Section footer={<Text>Приём оплат и чеки, бот Tai, GoMafia, умный дом и другие сервисы. Настройки каждого — внутри его карточки.</Text>}>
             <LinkRow
-              icon="puzzlepiece.extension"
-              color="#5856D6"
+              icon="puzzlepiece.extension.fill"
+              color="#8B5CF6"
               title="Интеграции"
-              value={integrations.data ? `${connected} из ${integrations.data.length}` : undefined}
+              subtitle="Оплата, чеки, Telegram, умный дом"
+              value={installed !== null ? (installed ? `${installed} ${plural(installed, ['подключена', 'подключены', 'подключено'])}` : 'нет') : undefined}
               onPress={() => router.push('/manage/settings/integrations')}
             />
           </Section>
