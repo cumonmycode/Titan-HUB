@@ -64,6 +64,10 @@ export function openRoute(router: Router, to: TaiRoute) {
     case 'events':
       router.navigate('/events');
       return;
+    case 'supply':
+      // Черновик открывается редактором прихода, принятая поставка — исправлением.
+      router.push({ pathname: '/manage/goods/supply', params: to.draft === false ? { supplyId: to.supplyId } : { draftId: to.supplyId } });
+      return;
   }
 }
 

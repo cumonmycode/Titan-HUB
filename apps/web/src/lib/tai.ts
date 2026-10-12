@@ -21,6 +21,7 @@ export type TaiRoute =
   | { screen: 'player'; playerId: string }
   | { screen: 'inventory' }
   | { screen: 'events' }
+  | { screen: 'supply'; supplyId: string; draft?: boolean }
 
 export type TaiLink = { label: string; to: TaiRoute }
 export type TaiMetric = { label: string; value: string; delta?: number; invert?: boolean; hint?: string }
@@ -41,6 +42,24 @@ export type TaiActionCard = {
   to?: TaiRoute
 }
 
+/** Строка поставки, собранной Tai со слов (количество — в базовой единице склада). */
+export type TaiSupplyLine = {
+  index: number; itemId: string | null; name: string; said?: string; quantity: number; unit: string
+  packs?: number; packName?: string | null; packSize?: number | null; costPerUnit: number; sum: number
+  uncertain?: boolean; alternatives?: { itemId: string; name: string }[]
+}
+export type TaiSupplyCard = { id: string; status: 'draft' | 'posted' | 'cancelled'; supplier?: string | null; fromRegister: boolean; lines: TaiSupplyLine[]; total: number; result?: string }
+export type TaiSupplyOp =
+  | { op: 'quantity'; line: number; quantity: number }
+  | { op: 'step'; line: number; direction: 1 | -1 }
+  | { op: 'price'; line: number; costPerUnit: number }
+  | { op: 'remove'; line: number }
+  | { op: 'match'; line: number; itemId: string }
+  | { op: 'payment'; fromRegister: boolean }
+export const editTaiSupply = (id: string, ops: TaiSupplyOp[]) => api.post<{ supply: TaiSupplyCard }>(`/ai/assistant/supply/${id}/edit`, { ops }).then((r) => r.supply)
+export const acceptTaiSupply = (id: string) => api.post<{ supply: TaiSupplyCard }>(`/ai/assistant/supply/${id}/accept`, {}).then((r) => r.supply)
+export const cancelTaiSupply = (id: string) => api.post<{ supply: TaiSupplyCard | null }>(`/ai/assistant/supply/${id}/cancel`, {}).then((r) => r.supply)
+
 export type TaiBlock =
   | { type: 'metrics'; title?: string; items: TaiMetric[]; link?: TaiLink }
   | { type: 'chart'; title: string; unit: 'money' | 'count'; points: TaiPoint[]; caption?: string }
@@ -49,6 +68,7 @@ export type TaiBlock =
   | { type: 'action'; action: TaiActionCard }
   | { type: 'choice'; question: string; options: { label: string; subtitle?: string; reply: string }[] }
   | { type: 'links'; links: TaiLink[] }
+  | { type: 'supply'; supply: TaiSupplyCard }
 
 export type TaiEvent =
   | { type: 'status'; text: string }

@@ -9,6 +9,7 @@ import { BarChart } from '@/components/charts/bar-chart';
 import { ShareChart } from '@/components/charts/donut-chart';
 import { Avatar, GlassCard, PrimaryButton } from '@/components/new-check-parts';
 import { Text } from '@/components/text';
+import { SupplyBlock } from '@/components/tai/supply-block';
 import { formatMoney } from '@/lib/format';
 import { haptic } from '@/lib/haptics';
 import type { TaiActionCard, TaiBlock, TaiLink, TaiRoute } from '@/lib/tai-api';
@@ -38,6 +39,8 @@ export function TaiBlockView({ block }: { block: TaiBlock }) {
       return <ChoiceBlock block={block} />;
     case 'links':
       return <LinksBlock links={block.links} />;
+    case 'supply':
+      return <SupplyBlock card={block.supply} />;
   }
 }
 

@@ -45,6 +45,7 @@ import { createApiCaller, forwardedHeaders } from './tai/internal.js'
 import { resolveApiKey } from './tai/llm.js'
 import { synthesize, transcribe } from './tai/speech.js'
 import { getTaiSettings, normalizeTaiSettings, saveTaiSettings, TAI_SPEEDS, TAI_VOICES } from './tai/settings.js'
+import { supplyRouter } from './tai/supply.router.js'
 import { getBusinessDayStartHour, getStringSetting } from '../../lib/appSettings.js'
 import { DEFAULT_CLUB_BRIEF } from '../tg/dialog/client-tools.js'
 
@@ -619,6 +620,9 @@ aiRouter.post('/assistant', zValidator('json', AssistantSchema), async (c) => {
 })
 
 const ACTION_ID = /^[0-9a-f-]{36}$/i
+
+// Карточка поставки Tai: правки, «Принять», «Отменить».
+aiRouter.route('/assistant/supply', supplyRouter)
 
 // Нажатие «Открыть чек» / «Добавить» и т.п. — выполняется от имени нажавшего.
 aiRouter.post('/assistant/actions/:id', async (c) => {

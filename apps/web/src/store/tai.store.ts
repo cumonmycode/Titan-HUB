@@ -219,5 +219,7 @@ export function taiHref(to: TaiRoute): string {
       return '/manage/inventory'
     case 'events':
       return '/events'
+    case 'supply':
+      return to.draft ? `/manage/goods/supply?draft=${to.supplyId}` : `/manage/goods/doc?type=supply&id=${to.supplyId}`
   }
 }

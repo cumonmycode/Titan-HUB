@@ -19,7 +19,7 @@ import { displayName, staffHeaders, type TgPerson } from '../identity.js'
 import { clientTools, selfTools, type ClientSession } from './client-tools.js'
 import { TELEGRAM_STAFF_TOOLS } from './staff-tools.js'
 import { clientPrompt, staffTelegramPrompt } from './prompts.js'
-import { actionMarkup, actionText, blockText, choiceMarkup, linksMarkup, mdToHtml } from './render.js'
+import { actionMarkup, actionText, blockText, choiceMarkup, linksMarkup, mdToHtml, supplyMarkup, supplyText } from './render.js'
 import { appendMessage, markBlocked, markOutbound, recentTurns } from './memory.js'
 
 export interface ChatTarget {
@@ -66,6 +66,20 @@ interface Collected {
   blocks: TaiBlock[]
   memo: string
   error: string | null
+  /** Озвученные по ходу ответа фразы (голосовой режим), по порядку. */
+  audio: { seq: number; format: 'mp3' | 'wav'; data: string }[]
+}
+
+/** mp3-фразы → одно голосовое: кадры mp3 независимы, ID3-заголовки убираем. */
+function joinMp3(parts: Collected['audio']): Buffer | null {
+  if (!parts.length || parts.some((p) => p.format !== 'mp3')) return null
+  const chunks = [...parts].sort((a, b) => a.seq - b.seq).map((p) => {
+    const buf = Buffer.from(p.data, 'base64')
+    if (buf.subarray(0, 3).toString() !== 'ID3') return buf
+    const size = ((buf[6]! & 0x7f) << 21) | ((buf[7]! & 0x7f) << 14) | ((buf[8]! & 0x7f) << 7) | (buf[9]! & 0x7f)
+    return buf.subarray(10 + size + ((buf[5]! & 0x10) ? 10 : 0))
+  })
+  return Buffer.concat(chunks)
 }
 
 async function buildEnv(club: TgClub, person: TgPerson, contact: TaiContact | null, target: ChatTarget, voice: boolean): Promise<TaiEnv> {
@@ -99,16 +113,18 @@ async function buildEnv(club: TgClub, person: TgPerson, contact: TaiContact | nu
 }
 
 async function collect(env: TaiEnv, history: Awaited<ReturnType<typeof recentTurns>>, text: string, voice: boolean): Promise<Collected> {
-  const out: Collected = { text: '', blocks: [], memo: '', error: null }
+  const out: Collected = { text: '', blocks: [], memo: '', error: null, audio: [] }
   const emit = async (event: TaiEvent) => {
-    if (event.type === 'delta') out.text += event.text
+    if (event.type === 'audio') out.audio.push({ seq: event.seq, format: event.format, data: event.data })
+    else if (event.type === 'delta') out.text += event.text
     else if (event.type === 'block') out.blocks.push(event.block)
     else if (event.type === 'done') out.memo = event.memo
     else if (event.type === 'error') out.error = event.message
   }
   const controller = new AbortController()
   try {
-    await runTaiWith(env, { messages: [...history, { role: 'user', content: text }], voice, speak: false }, emit, controller.signal)
+    // Голос: фразы озвучиваются параллельно, пока модель пишет, — ответ готов почти сразу.
+    await runTaiWith(env, { messages: [...history, { role: 'user', content: text }], voice, speak: voice }, emit, controller.signal)
   } catch (error) {
     out.error = taiErrorMessage(error)
   }
@@ -126,8 +142,10 @@ async function deliver(club: TgClub, person: TgPerson, target: ChatTarget, resul
   let blocked = false
 
   if (text && voice) {
-    const settings = await getTaiSettings(club.db)
-    const audio = await synthesizeVoiceNote(await resolveApiKey(club.db), text, settings).catch(() => null)
+    const joined = joinMp3(result.audio)
+    const audio = joined
+      ? { data: joined, format: 'mp3' as const }
+      : await synthesizeVoiceNote(await resolveApiKey(club.db), text, await getTaiSettings(club.db)).catch(() => null)
     if (audio) {
       const r = await bot.sendVoice(target.chatId, audio.data, audio.format, { ...base, markup: linkMarkup })
       sent = r.ok
@@ -152,6 +170,9 @@ async function deliver(club: TgClub, person: TgPerson, target: ChatTarget, resul
   for (const block of result.blocks) {
     if (block.type === 'action') {
       const r = await bot.send(target.chatId, actionText(block.action), { html: true, threadId: target.threadId, markup: actionMarkup(block.action, club.host) })
+      sent = sent || r.ok
+    } else if (block.type === 'supply') {
+      const r = await bot.send(target.chatId, supplyText(block.supply), { html: true, threadId: target.threadId, markup: supplyMarkup(block.supply, club.host) })
       sent = sent || r.ok
     } else if (block.type === 'choice') {
       const key = randomBytes(6).toString('base64url')

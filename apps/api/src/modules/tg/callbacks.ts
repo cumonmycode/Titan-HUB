@@ -12,7 +12,8 @@ import { staffHeaders, whoIs } from './identity.js'
 import type { TgCallbackQuery } from './types.js'
 import { confirmApp, confirmLegacy, rejectApp, rejectLegacy } from './login/app.js'
 import { confirmHub, rejectHub } from './login/hub.js'
-import { actionMarkup, actionText } from './dialog/render.js'
+import { actionMarkup, actionText, supplyAltMarkup, supplyMarkup, supplyText } from './dialog/render.js'
+import { acceptSupply, cancelSupply, editSupply, supplyCard, type SupplyCtx } from '../ai/tai/supply.js'
 import { converse, loadChoice } from './dialog/converse.js'
 import { appendMessage, getContact, touchContact } from './dialog/memory.js'
 
@@ -68,6 +69,9 @@ export async function onCallback(club: TgClub, cq: TgCallbackQuery): Promise<voi
     case 'tc':
       await onChoice(club, cq, arg, Number(extra))
       return
+    case 'sv':
+      await onSupply(club, cq, data.split(':'))
+      return
     default:
       await club.bot.answerCallback(cq.id)
   }
@@ -115,4 +119,65 @@ async function onChoice(club: TgClub, cq: TgCallbackQuery, key: string, index: n
   const group = msg && msg.chat.type !== 'private' ? msg.chat.title ?? 'Рабочий чат' : null
   const contact = group ? null : (await getContact(club.db, person.tgId)) ?? (await touchContact(club.db, cq.from, person.profile?.id ?? null))
   await converse(club, person, contact, { chatId: choice.chatId, threadId: msg?.message_thread_id ?? null, replyTo: null, groupTitle: group }, reply, false)
+}
+
+/** Кнопки карточки поставки: правки, выбор позиции, оплата, «Принять», «Отменить». */
+async function onSupply(club: TgClub, cq: TgCallbackQuery, parts: string[]): Promise<void> {
+  const [, op = '', id = '', lineRaw = '0', altRaw = '0'] = parts
+  const line = Number(lineRaw)
+  const person = await whoIs(club.db, cq.from)
+  const msg = cq.message
+  if (!person.staff || !person.profile || !UUID_RE.test(id) || !msg) {
+    await club.bot.answerCallback(cq.id, 'Поставку правят сотрудники клуба')
+    return
+  }
+  const ctx: SupplyCtx = { db: club.db, api: createApiCaller(await staffHeaders(club, person.profile)), clubKey: club.key }
+  const show = async (card: Awaited<ReturnType<typeof supplyCard>>) => {
+    if (card) await club.bot.edit(msg.chat.id, msg.message_id, supplyText(card), { html: true, markup: supplyMarkup(card, club.host) })
+  }
+  try {
+    if (op === 'n') {
+      const card = await supplyCard(ctx, id)
+      const alts = card?.lines[line]?.alternatives ?? []
+      if (!card || !alts.length) {
+        await club.bot.answerCallback(cq.id, 'Других вариантов нет — назови позицию точнее в чат')
+        return
+      }
+      await club.bot.answerCallback(cq.id)
+      await club.bot.edit(msg.chat.id, msg.message_id, `${supplyText(card)}\n\nСтрока ${line + 1}: какая это позиция?`, { html: true, markup: supplyAltMarkup(card, line) })
+      return
+    }
+    if (op === 'b') {
+      await club.bot.answerCallback(cq.id)
+      await show(await supplyCard(ctx, id))
+      return
+    }
+    if (op === 'k') {
+      const card = await acceptSupply(ctx, id)
+      await club.bot.answerCallback(cq.id, 'Поставка принята')
+      await show(card)
+      await appendMessage(club.db, { chatId: String(msg.chat.id), role: 'assistant', content: `✅ Поставка принята: ${card.lines.length} поз. на ${Math.round(card.total)} ₽` })
+      return
+    }
+    if (op === 'd') {
+      const card = await cancelSupply(ctx, id)
+      await club.bot.answerCallback(cq.id, 'Черновик удалён')
+      await show(card)
+      return
+    }
+    const card = op === 'a'
+      ? await (async () => {
+        const current = await supplyCard(ctx, id)
+        const alt = current?.lines[line]?.alternatives?.[Number(altRaw)]
+        if (!alt) throw new Error('Вариант устарел')
+        return editSupply(ctx, id, [{ op: 'match', line, itemId: alt.itemId }])
+      })()
+      : op === 'c'
+        ? await editSupply(ctx, id, [{ op: 'payment', fromRegister: !(await supplyCard(ctx, id))?.fromRegister }])
+        : await editSupply(ctx, id, [op === 'x' ? { op: 'remove', line } : { op: 'step', line, direction: op === 'p' ? 1 : -1 }])
+    await club.bot.answerCallback(cq.id)
+    await show(card)
+  } catch (error) {
+    await club.bot.answerCallback(cq.id, error instanceof Error ? error.message.slice(0, 180) : 'Не получилось')
+  }
 }

@@ -8,6 +8,7 @@ import { useState } from 'react'
 import { Icon } from '@/components/Icon'
 import type { TaiActionCard, TaiBlock, TaiLink, TaiRoute } from '@/lib/tai'
 import { useTaiStore } from '@/store/tai.store'
+import { SupplyCard } from './SupplyCard'
 
 type Open = (to: TaiRoute) => void
 
@@ -81,6 +82,8 @@ export function TaiBlockView({ block, open }: { block: TaiBlock; open: Open }) {
       return <ChoiceBlock block={block} />
     case 'links':
       return <LinksBlock links={block.links} open={open} />
+    case 'supply':
+      return <SupplyCard card={block.supply} open={open} />
   }
 }
 

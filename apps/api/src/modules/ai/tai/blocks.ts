@@ -21,6 +21,8 @@ export type TaiRoute =
   | { screen: 'player'; playerId: string }
   | { screen: 'inventory' }
   | { screen: 'events' }
+  /** draft — черновик (редактор прихода), иначе проведённый документ. */
+  | { screen: 'supply'; supplyId: string; draft?: boolean }
 
 export interface TaiLink {
   label: string
@@ -82,6 +84,38 @@ export interface TaiActionCard {
   to?: TaiRoute
 }
 
+/** Строка поставки, собранной Tai со слов. */
+export interface TaiSupplyLine {
+  index: number
+  itemId: string | null
+  name: string
+  /** Как назвал человек, если не совпадает с карточкой склада. */
+  said?: string
+  /** В базовой единице склада (шт, г, мл). */
+  quantity: number
+  unit: string
+  packs?: number
+  packName?: string | null
+  packSize?: number | null
+  costPerUnit: number
+  sum: number
+  /** Сопоставление со складом под вопросом — показать варианты. */
+  uncertain?: boolean
+  alternatives?: { itemId: string; name: string }[]
+}
+
+/** Поставка-черновик: правится карточкой и принимается кнопкой. */
+export interface TaiSupplyCard {
+  id: string
+  status: 'draft' | 'posted' | 'cancelled'
+  supplier?: string | null
+  /** Оплата наличными из кассы смены. */
+  fromRegister: boolean
+  lines: TaiSupplyLine[]
+  total: number
+  result?: string
+}
+
 export type TaiBlock =
   | { type: 'metrics'; title?: string; items: TaiMetric[]; link?: TaiLink }
   | { type: 'chart'; title: string; unit: 'money' | 'count'; points: TaiPoint[]; caption?: string }
@@ -90,6 +124,7 @@ export type TaiBlock =
   | { type: 'action'; action: TaiActionCard }
   | { type: 'choice'; question: string; options: { label: string; subtitle?: string; reply: string }[] }
   | { type: 'links'; links: TaiLink[] }
+  | { type: 'supply'; supply: TaiSupplyCard }
 
 export type TaiEvent =
   | { type: 'status'; text: string }

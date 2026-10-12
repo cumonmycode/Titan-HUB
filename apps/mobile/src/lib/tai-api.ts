@@ -23,7 +23,8 @@ export type TaiRoute =
   | { screen: 'analytics-players'; from: string; to: string }
   | { screen: 'player'; playerId: string }
   | { screen: 'inventory' }
-  | { screen: 'events' };
+  | { screen: 'events' }
+  | { screen: 'supply'; supplyId: string; draft?: boolean };
 
 export type TaiLink = { label: string; to: TaiRoute };
 export type TaiMetric = { label: string; value: string; delta?: number; invert?: boolean; hint?: string };
@@ -44,6 +45,46 @@ export type TaiActionCard = {
   to?: TaiRoute;
 };
 
+/** Строка поставки, собранной Tai со слов (количество — в базовой единице склада). */
+export type TaiSupplyLine = {
+  index: number;
+  itemId: string | null;
+  name: string;
+  said?: string;
+  quantity: number;
+  unit: string;
+  packs?: number;
+  packName?: string | null;
+  packSize?: number | null;
+  costPerUnit: number;
+  sum: number;
+  uncertain?: boolean;
+  alternatives?: { itemId: string; name: string }[];
+};
+
+export type TaiSupplyCard = {
+  id: string;
+  status: 'draft' | 'posted' | 'cancelled';
+  supplier?: string | null;
+  fromRegister: boolean;
+  lines: TaiSupplyLine[];
+  total: number;
+  result?: string;
+};
+
+export type TaiSupplyOp =
+  | { op: 'quantity'; line: number; quantity: number }
+  | { op: 'step'; line: number; direction: 1 | -1 }
+  | { op: 'price'; line: number; costPerUnit: number }
+  | { op: 'remove'; line: number }
+  | { op: 'match'; line: number; itemId: string }
+  | { op: 'payment'; fromRegister: boolean };
+
+export const editTaiSupply = (id: string, ops: TaiSupplyOp[]) =>
+  api.post<{ supply: TaiSupplyCard }>(`/ai/assistant/supply/${id}/edit`, { ops }).then((r) => r.supply);
+export const acceptTaiSupply = (id: string) => api.post<{ supply: TaiSupplyCard }>(`/ai/assistant/supply/${id}/accept`).then((r) => r.supply);
+export const cancelTaiSupply = (id: string) => api.post<{ supply: TaiSupplyCard | null }>(`/ai/assistant/supply/${id}/cancel`).then((r) => r.supply);
+
 export type TaiBlock =
   | { type: 'metrics'; title?: string; items: TaiMetric[]; link?: TaiLink }
   | { type: 'chart'; title: string; unit: 'money' | 'count'; points: TaiPoint[]; caption?: string }
@@ -51,7 +92,8 @@ export type TaiBlock =
   | { type: 'list'; title: string; rows: TaiRow[]; more?: TaiLink; empty?: string }
   | { type: 'action'; action: TaiActionCard }
   | { type: 'choice'; question: string; options: { label: string; subtitle?: string; reply: string }[] }
-  | { type: 'links'; links: TaiLink[] };
+  | { type: 'links'; links: TaiLink[] }
+  | { type: 'supply'; supply: TaiSupplyCard };
 
 export type TaiEvent =
   | { type: 'status'; text: string }
@@ -149,12 +191,25 @@ export async function speakTai(text: string, voice?: { voice?: string; speed?: n
 
 /* ─────────────────────────── Настройки ─────────────────────────── */
 
-export type TaiSettings = { voice: string; speed: number; profanity: boolean };
+export type TaiSettings = { voice: string; speed: number; profanity: boolean; outreach: boolean };
 export type TaiVoiceOption = { id: string; label: string; hint: string; tunable: boolean };
-export type TaiSettingsResponse = { settings: TaiSettings; voices: TaiVoiceOption[]; speeds: { value: number; label: string }[] };
+export type TaiSettingsResponse = { settings: TaiSettings; clubBrief: string; voices: TaiVoiceOption[]; speeds: { value: number; label: string }[] };
 
 export const getTaiSettings = () => api.get<TaiSettingsResponse>('/ai/settings');
 export const saveTaiSettings = (patch: Partial<TaiSettings>) => api.put<{ settings: TaiSettings }>('/ai/settings', patch).then((r) => r.settings);
+/** Что Tai рассказывает клиентам в Telegram о форматах клуба. */
+export const saveTaiClubBrief = (clubBrief: string) => api.put<{ clubBrief: string }>('/ai/settings', { clubBrief }).then((r) => r.clubBrief);
+
+/* ───────────────────── Tai в групповых чатах Telegram ───────────────────── */
+
+export type TaiChatMode = 'game' | 'work';
+export type TaiHarshness = 'soft' | 'medium' | 'savage';
+export type TaiChatPreset = { key: string; label: string; desc: string };
+export type TaiChat = { id: number | string; title: string; type: string; mode: TaiChatMode; enabled: boolean; profanity: boolean; harshness: TaiHarshness; preset: string };
+export type TaiChatConfig = { enabled: boolean; presets: TaiChatPreset[]; chats: TaiChat[]; botReady: boolean; aiReady: boolean };
+
+export const getTaiChatConfig = () => api.get<TaiChatConfig>('/system/tai-chat-config');
+export const saveTaiChatConfig = (patch: { enabled?: boolean; chats?: TaiChat[] }) => api.put('/system/tai-chat-config', patch);
 
 export async function dismissTaiAction(id: string): Promise<void> {
   await api.post(`/ai/assistant/actions/${id}/dismiss`).catch(() => undefined);

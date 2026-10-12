@@ -3,7 +3,7 @@
  * компактным текстом; карточки действий и выбор — кнопками под сообщением;
  * переходы — ссылками на экраны HUB клуба.
  */
-import type { TaiActionCard, TaiBlock, TaiRoute } from '../../ai/tai/blocks.js'
+import type { TaiActionCard, TaiBlock, TaiRoute, TaiSupplyCard } from '../../ai/tai/blocks.js'
 import { escapeHtml, type InlineButton, type ReplyMarkup } from '../../../lib/tgBot.js'
 
 const LIST_ROWS = 12
@@ -48,6 +48,8 @@ export function hubUrl(host: string, to: TaiRoute): string {
         return '/manage/inventory'
       case 'events':
         return '/events'
+      case 'supply':
+        return to.draft ? `/manage/goods/supply?draft=${to.supplyId}` : `/manage/goods/doc?type=supply&id=${to.supplyId}`
     }
   })()
   return `https://${host}${path}`
@@ -124,4 +126,56 @@ export function linksMarkup(links: { label: string; to: TaiRoute }[], host: stri
 /** Вопрос с вариантами → кнопки; ответы лежат в Redis под коротким ключом. */
 export function choiceMarkup(key: string, options: { label: string }[]): ReplyMarkup {
   return { inline_keyboard: options.slice(0, 8).map((o, i) => [{ text: o.label.slice(0, 60), callback_data: `tc:${key}:${i}` }]) }
+}
+
+// ── Поставка: карточка с кнопками правки ─────────────────────────────────────
+
+const SUPPLY_BUTTON_LINES = 12
+const rubles = (n: number) => `${Math.round(n).toLocaleString('ru-RU')} ₽`
+const short = (s: string, max = 18) => (s.length > max ? `${s.slice(0, max - 1)}…` : s)
+
+/** Текст карточки поставки: строки с номерами, сомнительные — с «❓». */
+export function supplyText(card: TaiSupplyCard): string {
+  const title = card.status === 'posted' ? '✅ <b>Поставка принята</b>' : card.status === 'cancelled' ? '🗑 <b>Черновик поставки удалён</b>' : '📦 <b>Поставка</b> — проверь и прими'
+  const rows = card.lines.map((l) => {
+    const packs = l.packs && l.packSize ? ` (${l.packs} ${escapeHtml(l.packName || 'уп')})` : ''
+    const said = l.said ? ` <i>— «${escapeHtml(l.said)}»</i>` : ''
+    const mark = l.uncertain && card.status === 'draft' ? '❓ ' : ''
+    return `${l.index + 1}. ${mark}${escapeHtml(l.name)}${said}
+     ${l.quantity} ${escapeHtml(l.unit)}${packs} × ${l.costPerUnit.toLocaleString('ru-RU')} ₽ = <b>${rubles(l.sum)}</b>`
+  })
+  const footer = [
+    card.supplier ? `Поставщик: ${escapeHtml(card.supplier)}` : '',
+    `Итого: <b>${rubles(card.total)}</b>`,
+    card.status === 'draft' ? `Оплата: ${card.fromRegister ? 'наличными из кассы смены' : 'не из кассы'}` : '',
+    card.status === 'draft' && card.lines.some((l) => l.uncertain) ? '❓ — проверь позицию: нажми на название и выбери верную.' : '',
+    card.status === 'draft' ? 'Цену и количество можно поправить и словами: «колы 24 по 85».' : '',
+    card.result ? `\n${escapeHtml(card.result)}` : '',
+  ].filter(Boolean)
+  return [title, '', ...rows, '', ...footer].join('\n')
+}
+
+/** Кнопки поставки: на строку «− имя + ✕», внизу оплата, «Принять», «Отменить», HUB. */
+export function supplyMarkup(card: TaiSupplyCard, host: string): ReplyMarkup {
+  const hub: InlineButton = { text: 'Открыть в HUB', url: hubUrl(host, { screen: 'supply', supplyId: card.id, draft: card.status === 'draft' }) }
+  if (card.status !== 'draft') return { inline_keyboard: card.status === 'posted' ? [[hub]] : [] }
+  const id = card.id
+  const rows: InlineButton[][] = card.lines.slice(0, SUPPLY_BUTTON_LINES).map((l) => [
+    { text: '➖', callback_data: `sv:m:${id}:${l.index}` },
+    { text: `${l.uncertain ? '❓' : ''}${l.index + 1}. ${short(l.name)}`, callback_data: `sv:n:${id}:${l.index}` },
+    { text: '➕', callback_data: `sv:p:${id}:${l.index}` },
+    { text: '✕', callback_data: `sv:x:${id}:${l.index}` },
+  ])
+  rows.push([{ text: card.fromRegister ? '💵 Из кассы: да' : '💵 Из кассы: нет', callback_data: `sv:c:${id}:0` }])
+  rows.push([{ text: `✅ Принять · ${rubles(card.total)}`, callback_data: `sv:k:${id}:0` }, { text: '🗑 Отменить', callback_data: `sv:d:${id}:0` }])
+  rows.push([hub])
+  return { inline_keyboard: rows }
+}
+
+/** Выбор верной позиции склада для строки. */
+export function supplyAltMarkup(card: TaiSupplyCard, line: number): ReplyMarkup {
+  const alts = card.lines[line]?.alternatives ?? []
+  const rows: InlineButton[][] = alts.map((a, j) => [{ text: short(a.name, 40), callback_data: `sv:a:${card.id}:${line}:${j}` }])
+  rows.push([{ text: '← Назад', callback_data: `sv:b:${card.id}:0` }])
+  return { inline_keyboard: rows }
 }

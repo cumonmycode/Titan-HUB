@@ -2,26 +2,29 @@ import { Form, Host, Picker, RNHostView, Section, Text, Toggle } from '@expo/ui/
 import { pickerStyle, refreshable, tag } from '@expo/ui/swift-ui/modifiers';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { SymbolView } from 'expo-symbols';
+import { useRouter } from 'expo-router';
 import { useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, StyleSheet, View } from 'react-native';
 
-import { secondary } from '@/components/native-form';
+import { FieldRow, LinkRow, secondary } from '@/components/native-form';
 import { Text as RNText } from '@/components/text';
 import { haptic } from '@/lib/haptics';
 import { queryClient } from '@/lib/query';
 import { useClubKey } from '@/lib/queries';
-import { getTaiSettings, saveTaiSettings, speakTai, type TaiSettings, type TaiSettingsResponse, type TaiVoiceOption } from '@/lib/tai-api';
+import { getTaiSettings, saveTaiClubBrief, saveTaiSettings, speakTai, type TaiSettings, type TaiSettingsResponse, type TaiVoiceOption } from '@/lib/tai-api';
 import { playTaiSample } from '@/lib/tai-voice';
 import { colors, space, type } from '@/lib/theme';
 
+const BRIEF_MAX = 3000;
 const SAMPLE = 'Привет, это Tai. Сегодня около сорока восьми тысяч выручки и тридцать один чек — для субботы неплохо, дожмём.';
 
 /**
- * Tai — настройки ассистента клуба: голос (с примером), скорость речи и манера
- * общения. Меняет владелец; сохраняется сразу, без кнопки «Сохранить».
+ * Tai — настройки ассистента клуба: голос (с примером), скорость речи, манера,
+ * общение с клиентами в Telegram и чаты. Меняет владелец; сохраняется сразу.
  */
 export default function TaiSettingsScreen() {
   const club = useClubKey();
+  const router = useRouter();
   const key = [club, 'ai', 'settings'];
   const query = useQuery({ queryKey: key, queryFn: getTaiSettings });
   const [previewing, setPreviewing] = useState<string | null>(null);
@@ -39,6 +42,16 @@ export default function TaiSettingsScreen() {
       Alert.alert('Не сохранилось', error instanceof Error ? error.message : String(error));
     },
     onSuccess: () => haptic.success(),
+  });
+
+  const brief = useMutation({
+    mutationFn: saveTaiClubBrief,
+    onSuccess: (clubBrief) => {
+      const previous = queryClient.getQueryData<TaiSettingsResponse>(key);
+      if (previous) queryClient.setQueryData<TaiSettingsResponse>(key, { ...previous, clubBrief });
+      haptic.success();
+    },
+    onError: (error) => Alert.alert('Не сохранилось', error instanceof Error ? error.message : String(error)),
   });
 
   const preview = async (voice: TaiVoiceOption, speed: number) => {
@@ -118,8 +131,26 @@ export default function TaiSettingsScreen() {
               ) : null}
             </Section>
 
-            <Section title="Манера" footer={<Text>Tai общается на «ты», просто и по делу. Мат — к месту и никогда в адрес гостей.</Text>}>
+            <Section title="Манера" footer={<Text>С сотрудниками в приложении и в личке Telegram. С клиентами Tai всегда на «ты» и без мата, в группах — своя настройка у каждого чата.</Text>}>
               <Toggle label="Можно материться" isOn={settings.profanity} onIsOnChange={(on) => save.mutate({ profanity: on })} />
+            </Section>
+
+            <Section
+              title="Клиенты в Telegram"
+              footer={<Text>Напоминает в игровой вечер тем, кто ещё не отметился, и тем, кто просил напомнить. Не чаще раза в 3 дня, днём, и никогда тем, кто попросил не писать.</Text>}
+            >
+              <Toggle label="Пишет клиентам первым" isOn={settings.outreach} onIsOnChange={(on) => save.mutate({ outreach: on })} />
+            </Section>
+
+            <Section
+              title="Что Tai рассказывает о клубе"
+              footer={<Text>{brief.isPending ? 'Сохраняем…' : 'Форматы игр, школа мафии, мероприятия — Tai опирается на этот текст в Telegram. Цены, адрес и расписание он берёт из HUB сам. Сохраняется, когда закончите ввод.'}</Text>}
+            >
+              <FieldRow value={data.clubBrief} placeholder="Расскажите о форматах и особенностях клуба" multiline maxLength={BRIEF_MAX} onCommit={(text) => brief.mutate(text)} />
+            </Section>
+
+            <Section footer={<Text>Режим, стиль общения, жёсткость и мат — у каждой группы свои.</Text>}>
+              <LinkRow icon="bubble.left.and.bubble.right.fill" color="#8B5CF6" title="Tai в чатах" onPress={() => router.push('/manage/tai/chats')} />
             </Section>
           </>
         )}

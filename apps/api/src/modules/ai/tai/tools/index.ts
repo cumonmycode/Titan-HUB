@@ -2,10 +2,11 @@
 import type { LlmTool } from '../llm.js'
 import { DATA_TOOLS } from './data.js'
 import { POS_TOOLS } from './pos.js'
+import { SUPPLY_TOOLS } from './supply.js'
 import type { ToolDef } from './types.js'
 import { UI_TOOLS } from './ui.js'
 
-const ALL: ToolDef[] = [...DATA_TOOLS, ...POS_TOOLS, ...UI_TOOLS]
+const ALL: ToolDef[] = [...DATA_TOOLS, ...POS_TOOLS, ...SUPPLY_TOOLS, ...UI_TOOLS]
 
 export function toolsFor(isOwner: boolean): Map<string, ToolDef> {
   return new Map(ALL.filter((tool) => isOwner || !tool.ownerOnly).map((tool) => [tool.name, tool]))
