@@ -32,6 +32,7 @@ import {
   sql,
   isNull,
   or,
+  appSettings,
 } from '@titan/database'
 import type { Database } from '@titan/database'
 import { requireAuth, requireRole } from '../../middleware/auth.js'
@@ -41,10 +42,11 @@ import { confirmAction, dismissAction } from './tai/actions.js'
 import type { TaiEvent } from './tai/blocks.js'
 import { runTai, taiErrorMessage } from './tai/engine.js'
 import { createApiCaller, forwardedHeaders } from './tai/internal.js'
-import { POLZA_BASE, resolveApiKey } from './tai/llm.js'
-import { synthesize } from './tai/speech.js'
+import { resolveApiKey } from './tai/llm.js'
+import { synthesize, transcribe } from './tai/speech.js'
 import { getTaiSettings, normalizeTaiSettings, saveTaiSettings, TAI_SPEEDS, TAI_VOICES } from './tai/settings.js'
-import { getBusinessDayStartHour } from '../../lib/appSettings.js'
+import { getBusinessDayStartHour, getStringSetting } from '../../lib/appSettings.js'
+import { DEFAULT_CLUB_BRIEF } from '../tg/dialog/client-tools.js'
 
 // Действия Tai, доступные только владельцу (зарплаты, расходы).
 const OWNER_ONLY_ACTIONS = new Set<string>(['salary_report', 'expense_analysis'])
@@ -635,11 +637,19 @@ aiRouter.post('/assistant/actions/:id/dismiss', async (c) => {
 })
 
 // Настройки Tai: голос, скорость речи, манера. Читают все, меняет владелец.
+// clubBrief — что Tai рассказывает клиентам в Telegram о форматах клуба.
+const CLUB_BRIEF_KEY = 'tai_club_brief'
 aiRouter.get('/settings', async (c) => {
-  return c.json({ settings: await getTaiSettings(c.var.db), voices: TAI_VOICES.map(({ id, label, hint, tunable }) => ({ id, label, hint, tunable })), speeds: TAI_SPEEDS })
+  const clubBrief = (await getStringSetting(CLUB_BRIEF_KEY, '', c.var.db)) || DEFAULT_CLUB_BRIEF
+  return c.json({ settings: await getTaiSettings(c.var.db), clubBrief, voices: TAI_VOICES.map(({ id, label, hint, tunable }) => ({ id, label, hint, tunable })), speeds: TAI_SPEEDS })
 })
-aiRouter.put('/settings', requireRole('owner'), zValidator('json', z.object({ voice: z.string().max(40).optional(), speed: z.number().optional(), profanity: z.boolean().optional() })), async (c) => {
-  return c.json({ settings: await saveTaiSettings(c.var.db, c.req.valid('json')) })
+aiRouter.put('/settings', requireRole('owner'), zValidator('json', z.object({ voice: z.string().max(40).optional(), speed: z.number().optional(), profanity: z.boolean().optional(), outreach: z.boolean().optional(), clubBrief: z.string().max(3000).optional() })), async (c) => {
+  const { clubBrief, ...patch } = c.req.valid('json')
+  if (clubBrief !== undefined) {
+    const value = clubBrief.trim()
+    await c.var.db.insert(appSettings).values({ key: CLUB_BRIEF_KEY, value }).onConflictDoUpdate({ target: appSettings.key, set: { value, updatedAt: new Date() } })
+  }
+  return c.json({ settings: await saveTaiSettings(c.var.db, patch), clubBrief: (await getStringSetting(CLUB_BRIEF_KEY, '', c.var.db)) || DEFAULT_CLUB_BRIEF })
 })
 
 // Озвучить короткую фразу тем же голосом Tai: итог карточки после голосового «да» и
@@ -655,29 +665,14 @@ aiRouter.post('/assistant/speech', zValidator('json', z.object({ text: z.string(
 
 // Распознавание речи на сервере — для браузеров без встроенного (в приложении речь
 // распознаёт телефон). Запись голосом — до ~минуты, поэтому свой предел тела.
-const STT_MODEL = (process.env['TAI_STT_MODEL'] ?? '').trim() || 'openai/gpt-4o-mini-transcribe'
 const MAX_AUDIO_BYTES = 8 * 1024 * 1024
 
 aiRouter.post('/assistant/transcribe', bodyLimit({ maxSize: MAX_AUDIO_BYTES }), async (c) => {
   const form = await c.req.formData().catch(() => null)
   const file = form?.get('file')
   if (!(file instanceof File) || file.size === 0) return c.json({ error: 'Нет записи' }, 400)
-  const apiKey = await resolveApiKey(c.var.db)
-  const out = new FormData()
-  out.set('model', STT_MODEL)
-  out.set('language', 'ru')
-  out.set('file', file, file.name || 'voice.webm')
-  const res = await fetch(`${POLZA_BASE}/audio/transcriptions`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${apiKey}` },
-    body: out,
-    signal: AbortSignal.timeout(30_000),
-  }).catch(() => null)
-  if (!res?.ok) {
-    console.error('[tai] transcribe failed', res?.status, res ? (await res.text().catch(() => '')).slice(0, 200) : 'network')
-    return c.json({ error: 'Не удалось распознать речь' }, 502)
-  }
-  const data = (await res.json().catch(() => ({}))) as { text?: string }
-  return c.json({ text: (data.text ?? '').trim() })
+  const text = await transcribe(await resolveApiKey(c.var.db), file, file.name || 'voice.webm')
+  if (text === null) return c.json({ error: 'Не удалось распознать речь' }, 502)
+  return c.json({ text })
 })
 

@@ -16,7 +16,8 @@ import { LlmError, resolveApiKey, streamChat, type LlmMessage, type LlmToolCall 
 import { SpeechStream } from './speech.js'
 import { getTaiSettings } from './settings.js'
 import { FOLLOW_UPS, llmTools, SCREEN_SUGGESTIONS, toolsFor } from './tools/index.js'
-import type { ToolContext, ToolResult } from './tools/types.js'
+import type { ToolContext, ToolDef, ToolResult } from './tools/types.js'
+import type { Database } from '@titan/database'
 
 export interface TaiTurn {
   role: 'user' | 'assistant'
@@ -28,7 +29,32 @@ export interface TaiTurn {
 export interface TaiRequest {
   messages: TaiTurn[]
   context?: TaiScreenContext
+  /** Ответ озвучат: модель пишет живой речью, числа словами. */
   voice?: boolean
+  /** Озвучивать по ходу ответа событиями audio (по умолчанию = voice). Telegram озвучивает сам целиком. */
+  speak?: boolean
+}
+
+/** Кто спрашивает и где: всё, что runTai брал из запроса Hono. */
+export interface TaiEnv {
+  db: Database
+  user: { sub: string; role: string; nickname: string }
+  clubKey: string
+  clubName: string
+  permissions: Record<string, boolean> | undefined
+  /** Заголовки для вызовов API от имени сотрудника (токен, Host клуба). */
+  headers: Record<string, string>
+  /** Дополнительные инструменты канала (Telegram: опрос клиенту, свой кошелёк). */
+  extraTools?: ToolDef[]
+  /** Дополнительные правила промпта для канала. */
+  extraPrompt?: string
+  /** Свой набор инструментов вместо кассовых (диалог с клиентом). */
+  tools?: ToolDef[]
+  /** Свой системный промпт вместо промпта коллеги (диалог с клиентом). */
+  prompt?: string
+  temperature?: number
+  /** Можно ли материться — для группового чата своя настройка, иначе общая Tai. */
+  profanity?: boolean
 }
 
 type Emit = (event: TaiEvent) => Promise<void>
@@ -94,28 +120,46 @@ function parseArgs(call: LlmToolCall): Record<string, unknown> {
   }
 }
 
-export async function runTai(c: Context<AppEnv>, request: TaiRequest, emit: Emit, signal: AbortSignal): Promise<void> {
-  const db = c.var.db
+export function runTai(c: Context<AppEnv>, request: TaiRequest, emit: Emit, signal: AbortSignal): Promise<void> {
   const user = c.get('user')
+  return runTaiWith(
+    {
+      db: c.var.db,
+      user: { sub: user.sub, role: user.role, nickname: user.nickname },
+      clubKey: c.var.club?.id ?? 'main',
+      clubName: c.var.club?.name ?? 'Титан',
+      permissions: c.var.permissions,
+      headers: forwardedHeaders(c),
+    },
+    request,
+    emit,
+    signal,
+  )
+}
+
+export async function runTaiWith(env: TaiEnv, request: TaiRequest, emit: Emit, signal: AbortSignal): Promise<void> {
+  const { db, user } = env
   const isOwner = user.role === 'owner'
-  const api = createApiCaller(forwardedHeaders(c))
-  const tools = toolsFor(isOwner)
+  const api = createApiCaller(env.headers)
+  const tools = env.tools ? new Map(env.tools.map((tool) => [tool.name, tool])) : toolsFor(isOwner)
+  for (const tool of env.extraTools ?? []) tools.set(tool.name, tool)
   const [apiKey, dates, screen, settings] = await Promise.all([resolveApiKey(db), businessDates(db), screenLine(api, request.context), getTaiSettings(db)])
 
   const ctx: ToolContext = {
     api,
     db,
     isOwner,
-    permissions: c.var.permissions,
+    permissions: env.permissions,
     dates,
-    clubKey: c.var.club?.id ?? 'main',
+    clubKey: env.clubKey,
     userSub: user.sub,
     screenCheckId: request.context?.checkId ?? null,
     memo: new Map(),
   }
 
+  const prompt = env.prompt ?? systemPrompt({ clubName: env.clubName, nickname: user.nickname, isOwner, dates, screenLine: screen, voice: !!request.voice, profanity: env.profanity ?? settings.profanity })
   const messages: LlmMessage[] = [
-    { role: 'system', content: systemPrompt({ clubName: c.var.club?.name ?? 'Титан', nickname: user.nickname, isOwner, dates, screenLine: screen, voice: !!request.voice, profanity: settings.profanity }) },
+    { role: 'system', content: env.extraPrompt ? `${prompt}\n${env.extraPrompt}` : prompt },
     ...history(request.messages),
   ]
 
@@ -124,14 +168,15 @@ export async function runTai(c: Context<AppEnv>, request: TaiRequest, emit: Emit
   const shown: TaiBlock[] = []
   let lastStatus = ''
   // Голосовой режим: фразы озвучиваются по ходу ответа и уходят звуком в том же потоке.
-  const speech = request.voice ? new SpeechStream(apiKey, settings, (audio) => emit({ type: 'audio', ...audio }), signal) : null
+  const speak = request.speak ?? !!request.voice
+  const speech = speak ? new SpeechStream(apiKey, settings, (audio) => emit({ type: 'audio', ...audio }), signal) : null
 
   for (let round = 0; round < MAX_ROUNDS; round += 1) {
     // Последний круг — без инструментов: модель обязана ответить текстом.
     const offerTools = round < MAX_ROUNDS - 1
     let text = ''
     let calls: LlmToolCall[] = []
-    for await (const chunk of streamChat({ apiKey, messages, tools: offerTools ? llmTools(tools) : [], maxTokens: request.voice ? 400 : 900, signal })) {
+    for await (const chunk of streamChat({ apiKey, messages, tools: offerTools ? llmTools(tools) : [], maxTokens: request.voice ? 400 : 900, signal, temperature: env.temperature })) {
       if (chunk.type === 'text') {
         text += chunk.text
         speech?.push(chunk.text)

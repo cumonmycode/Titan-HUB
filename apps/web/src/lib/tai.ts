@@ -132,11 +132,13 @@ export async function speakTai(text: string, voice?: { voice?: string; speed?: n
   return api.post<{ format: 'mp3' | 'wav'; data: string }>('/ai/assistant/speech', { text, ...voice }).catch(() => null)
 }
 
-export type TaiSettings = { voice: string; speed: number; profanity: boolean }
+export type TaiSettings = { voice: string; speed: number; profanity: boolean; outreach: boolean }
 export type TaiVoiceOption = { id: string; label: string; hint: string; tunable: boolean }
-export type TaiSettingsResponse = { settings: TaiSettings; voices: TaiVoiceOption[]; speeds: { value: number; label: string }[] }
+export type TaiSettingsResponse = { settings: TaiSettings; clubBrief: string; voices: TaiVoiceOption[]; speeds: { value: number; label: string }[] }
 export const getTaiSettings = () => api.get<TaiSettingsResponse>('/ai/settings')
 export const saveTaiSettings = (patch: Partial<TaiSettings>) => api.put<{ settings: TaiSettings }>('/ai/settings', patch).then((r) => r.settings)
+/** Что Tai рассказывает клиентам в Telegram о форматах клуба. */
+export const saveTaiClubBrief = (clubBrief: string) => api.put<{ clubBrief: string }>('/ai/settings', { clubBrief }).then((r) => r.clubBrief)
 
 export async function dismissTaiAction(id: string): Promise<void> {
   await api.post(`/ai/assistant/actions/${id}/dismiss`).catch(() => undefined)

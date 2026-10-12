@@ -5,8 +5,8 @@ import {
   eq, and, inArray, isNull, desc, gt, sql, type Database,
 } from '@titan/database'
 import { notifChannel } from '../../lib/realtime.js'
-import { TG_API } from '../../lib/telegram.js'
 import { deliverStaffApns } from './staff-calls.js'
+import { taiBot } from '../tg/club.js'
 
 // Переходный режим: пер-клубный db передаётся параметром, дефолт — модульный синглтон.
 type DbLike = Database
@@ -112,17 +112,13 @@ function getNotifRedis() {
 }
 
 // ── Telegram-канал ─────────────────────────────────────────────────────────
-// Шлём через Bot API напрямую (токен админ-бота доступен API через env_file).
-// No-op, если токен не задан. Никогда не бросает.
-const TG_TOKEN = process.env['ADMIN_BOT_TOKEN']
-async function sendTelegram(tgId: string, text: string): Promise<void> {
-  if (!TG_TOKEN || !tgId) return
+// Личное сообщение сотруднику от Tai — бота клуба (раньше был отдельный бот HUB).
+// No-op, если бот не настроен. Никогда не бросает.
+async function sendTelegram(database: DbLike, tgId: string, text: string): Promise<void> {
+  if (!tgId) return
   try {
-    await fetch(`${TG_API}/bot${TG_TOKEN}/sendMessage`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chat_id: tgId, text, disable_web_page_preview: true }),
-    })
+    const bot = await taiBot(database)
+    if (bot) await bot.send(tgId, text)
   } catch (err) {
     console.warn('[push] telegram send error:', err)
   }
@@ -319,7 +315,7 @@ export async function notify(opts: {
         if (pushEnabled) await sendWebPushToUser(targetUserId, payload, database)
         await deliverStaffApns(database, [targetUserId], { ...opts, notificationId })
         const [p] = await database.select({ tgId: profiles.tgId }).from(profiles).where(eq(profiles.id, targetUserId))
-        if (p?.tgId) await sendTelegram(p.tgId, tgText)
+        if (p?.tgId) await sendTelegram(database, p.tgId, tgText)
       }
       return notificationId
     }
@@ -362,7 +358,7 @@ export async function notify(opts: {
     const tgRecipients = enabledIds.filter(
       (uid) => isTelegramEnabledForUser(opts.type, settingsByUser.get(uid)) && tgByUser.get(uid),
     )
-    await Promise.all(tgRecipients.map((uid) => sendTelegram(tgByUser.get(uid)!, tgText)))
+    await Promise.all(tgRecipients.map((uid) => sendTelegram(database, tgByUser.get(uid)!, tgText)))
   } catch (err) {
     // notify не должен ронять вызывающий код ни при каких условиях.
     console.error('[push] notify failed:', err)

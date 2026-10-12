@@ -91,62 +91,6 @@ importers:
         specifier: ^5.8.3
         version: 5.9.3
 
-  apps/bot-admin:
-    dependencies:
-      '@anthropic-ai/sdk':
-        specifier: ^0.52.0
-        version: 0.52.0
-      '@titan/auth':
-        specifier: workspace:*
-        version: link:../../packages/auth
-      '@titan/database':
-        specifier: workspace:*
-        version: link:../../packages/database
-      '@titan/types':
-        specifier: workspace:*
-        version: link:../../packages/types
-      grammy:
-        specifier: ^1.34.0
-        version: 1.42.0
-    devDependencies:
-      '@titan/config':
-        specifier: workspace:*
-        version: link:../../packages/config
-      '@types/node':
-        specifier: ^22.15.17
-        version: 22.19.19
-      tsx:
-        specifier: ^4.19.4
-        version: 4.21.0
-      typescript:
-        specifier: ^5.8.3
-        version: 5.9.3
-
-  apps/bot-wallet:
-    dependencies:
-      '@titan/database':
-        specifier: workspace:*
-        version: link:../../packages/database
-      '@titan/types':
-        specifier: workspace:*
-        version: link:../../packages/types
-      grammy:
-        specifier: ^1.34.0
-        version: 1.42.0
-    devDependencies:
-      '@titan/config':
-        specifier: workspace:*
-        version: link:../../packages/config
-      '@types/node':
-        specifier: ^22.15.17
-        version: 22.19.19
-      tsx:
-        specifier: ^4.19.4
-        version: 4.21.0
-      typescript:
-        specifier: ^5.8.3
-        version: 5.9.3
-
   apps/wallet:
     dependencies:
       '@tanstack/react-query':

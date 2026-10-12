@@ -5,8 +5,8 @@
  *    номера нет → { status: 'register' }, приложение показывает анкету и шлёт
  *    POST /start {phone, register} → строка регистрации (mode 'register').
  * 2) POST /photo (multipart: ticket + file) — фото из анкеты.
- * 3) Клиент открывает бота t.me/<bot>?start=app_<deepCode> и подтверждает
- *    (apps/bot-wallet/src/bot.ts): бот помечает строку claimed + profile_id,
+ * 3) Клиент открывает бота Tai t.me/<bot>?start=app_<deepCode> и подтверждает
+ *    (modules/tg/login/app.ts): бот помечает строку claimed + profile_id,
  *    при регистрации — сначала создаёт профиль.
  * 4) GET /status?ticket — приложение опрашивает и получает токен.
  *
@@ -27,7 +27,7 @@ import { findProfilesByPhone, normalizePhone } from '../../lib/phone.js'
 import { appLoginBlockedUntil, reloginBanMessage } from '../../lib/app-account.js'
 import { MAX_UPLOAD_BODY_BYTES, storeImage } from '../../lib/imageStore.js'
 import { notify } from '../notifications/push.js'
-import { getWalletBotUsername } from './auth.router.js'
+import { taiUsername } from '../tg/club.js'
 import type { AppEnv } from '../../types.js'
 
 export const appLoginRouter = new Hono<AppEnv>()
@@ -120,7 +120,7 @@ appLoginRouter.post('/start', zValidator('json', StartSchema, invalid), async (c
     regData = { nickname, fullName, birthday }
   }
 
-  const botUsername = await getWalletBotUsername()
+  const botUsername = await taiUsername(db)
   if (!botUsername) return c.json({ error: 'Telegram-бот клуба сейчас недоступен. Попробуйте позже.' }, 503)
 
   // Чистим истёкшие строки (оппортунистически, как /wallet-code/start).

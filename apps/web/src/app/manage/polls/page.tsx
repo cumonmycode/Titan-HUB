@@ -2,7 +2,7 @@
 /**
  * Экран «Опросы» — настройка регулярных Telegram-опросов клуба.
  *
- * Бот опросов — отдельная интеграция (poll_bot_token), управляется по образцу
+ * Tai (бот клуба, интеграция poll_bot_token) — опросы управляются по образцу
  * вкладки «Интеграции»: маска + явная замена/удаление. Сами опросы хранятся
  * целиком как массив конфигов; бэк постит их по расписанию (дни + время МСК).
  */
@@ -108,10 +108,8 @@ export default function PollsPage() {
   const [tokenConfigured, setTokenConfigured] = useState(false)
   const [tokenMasked, setTokenMasked] = useState<string | null>(null)
 
-  // Сбор участников из чата (отдельный тумблер).
-  const [collectEnabled, setCollectEnabled] = useState(false)
+  // Токен Tai задан — без него Tai не видит чаты.
   const [collectTokenConfigured, setCollectTokenConfigured] = useState(false)
-  const [collectBusy, setCollectBusy] = useState(false)
 
   // Команды-отметки: только админы (по умолчанию) или любой участник.
   const [commandsAdminOnly, setCommandsAdminOnly] = useState(true)
@@ -149,7 +147,6 @@ export default function PollsPage() {
       // Состояние сбора участников — отдельная подписка; ошибку не роняем на весь экран.
       try {
         const c = await api.get<{ enabled: boolean; tokenConfigured: boolean }>('/system/polls/collect')
-        setCollectEnabled(c.enabled)
         setCollectTokenConfigured(c.tokenConfigured)
       } catch { /* статус сбора недоступен — оставляем дефолты */ }
       // Список «увиденных» групп/топиков — для выбора в модалке (не критичен).
@@ -231,7 +228,7 @@ export default function PollsPage() {
 
   // ── Тест: сначала сохраняем (опрос должен быть на бэке), затем отправляем ─────
   async function onTest(id: string) {
-    if (!tokenConfigured) { show('Сначала настройте токен бота опросов', 'error'); return }
+    if (!tokenConfigured) { show('Сначала настройте токен Tai', 'error'); return }
     setTestingId(id)
     try {
       const ok = await saveAll()
@@ -249,7 +246,7 @@ export default function PollsPage() {
   // День в подзаголовке = день выкладки, независимо от настройки autoDay опроса
   // (для «Спортивной»/«Городской» мафии и любого другого опроса по его заголовку).
   async function onPostToday(id: string) {
-    if (!tokenConfigured) { show('Сначала настройте токен бота опросов', 'error'); return }
+    if (!tokenConfigured) { show('Сначала настройте токен Tai', 'error'); return }
     setPostingTodayId(id)
     try {
       const ok = await saveAll()
@@ -261,27 +258,6 @@ export default function PollsPage() {
       show(e instanceof ApiError ? e.message : 'Бот не в группе или нет прав', 'error')
     } finally {
       setPostingTodayId(null)
-    }
-  }
-
-  // ── Тумблер сбора участников из чата ─────────────────────────────────────────
-  async function toggleCollect(next: boolean) {
-    if (collectBusy) return
-    setCollectBusy(true)
-    try {
-      if (next) {
-        const res = await api.post<{ ok: boolean; enabled: boolean; seeded: number }>('/system/polls/collect', {})
-        setCollectEnabled(true)
-        show(res.seeded > 0 ? `Сбор включён · добавлено ${res.seeded} админов` : 'Сбор включён', 'success')
-      } else {
-        await api.delete('/system/polls/collect')
-        setCollectEnabled(false)
-        show('Сбор выключен', 'success')
-      }
-    } catch (e) {
-      show(e instanceof ApiError ? e.message : 'Не удалось изменить сбор участников', 'error')
-    } finally {
-      setCollectBusy(false)
     }
   }
 
@@ -350,7 +326,7 @@ export default function PollsPage() {
         display: 'flex', flexDirection: 'column', gap: 24,
       }}>
 
-        {/* ─── Статус бота опросов (токен — в разделе «Интеграции») ──────── */}
+        {/* ─── Статус Tai (токен — в разделе «Интеграции») ──────── */}
         <div
           className="glass-l2"
           style={{
@@ -367,11 +343,11 @@ export default function PollsPage() {
           <div style={{ flex: 1, minWidth: 0 }}>
             {tokenConfigured ? (
               <p style={{ fontSize: 13, margin: 0, color: 'var(--on-surface)', lineHeight: 1.5 }}>
-                Бот опросов подключён{tokenMasked ? <> • <span style={{ fontFamily: "'JetBrains Mono',monospace" }}>{tokenMasked}</span></> : ''}. Бот должен быть <b>админом</b> в группах. Токен — в разделе «Интеграции».
+                Tai подключён{tokenMasked ? <> • <span style={{ fontFamily: "'JetBrains Mono',monospace" }}>{tokenMasked}</span></> : ''}. Бот должен быть <b>админом</b> в группах. Токен — в разделе «Интеграции».
               </p>
             ) : (
               <p style={{ fontSize: 13, margin: 0, color: 'var(--on-surface)', lineHeight: 1.5 }}>
-                Токен бота опросов не настроен — задайте его в <b>Настройки → Интеграции</b>, иначе опросы не отправятся. Бот также должен быть админом в группах.
+                Токен Tai не настроен — задайте его в <b>Настройки → Интеграции</b>, иначе опросы не отправятся. Бот также должен быть админом в группах.
               </p>
             )}
           </div>
@@ -381,24 +357,13 @@ export default function PollsPage() {
         </div>
 
         {/* ─── Сбор участников из чата ────────────────────────────────────── */}
-        <SectionGroup title="Сбор участников из чата">
+        <SectionGroup title="Участники чатов">
           <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <p style={{ fontSize: 14, fontWeight: 500, margin: 0, color: 'var(--on-surface)' }}>Собирать участников из чата</p>
-                {!collectTokenConfigured && (
-                  <p style={{ fontSize: 12, color: 'var(--warning)', margin: '2px 0 0' }}>Сначала задайте токен бота в «Интеграции»</p>
-                )}
-              </div>
-              <Toggle
-                value={collectEnabled}
-                onChange={v => { if (collectTokenConfigured && !collectBusy) toggleCollect(v) }}
-                ariaLabel="Собирать участников из чата"
-                color={collectTokenConfigured ? undefined : 'rgba(255,255,255,0.15)'}
-              />
-            </div>
+            {!collectTokenConfigured && (
+              <p style={{ fontSize: 12, color: 'var(--warning)', margin: 0 }}>Сначала задайте токен Tai в «Интеграции»</p>
+            )}
             <p style={{ fontSize: 11, color: 'var(--on-surface-variant)', margin: 0, lineHeight: 1.5 }}>
-              Бот собирает тех, кто голосует в опросах и пишет в чат (бот должен быть админом). Полный список участников Telegram не отдаёт — список пополняется по мере активности. Сопоставление — в карточке клиента, кнопка «Сопоставить из чата».
+              Tai всегда собирает тех, кто голосует в опросах и пишет в чат (бот должен быть админом). Полный список участников Telegram не отдаёт — список пополняется по мере активности. Сопоставление — в карточке клиента, кнопка «Сопоставить из чата».
             </p>
             <div style={{ padding: '10px 12px', borderRadius: 12, background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}>
               <p style={{ fontSize: 12, fontWeight: 600, margin: '0 0 6px', color: 'var(--on-surface)' }}>Команды бота в чате:</p>
@@ -627,7 +592,7 @@ export default function PollsPage() {
 
               {chats.length === 0 ? (
                 <p style={{ fontSize: 12, color: 'var(--on-surface-variant)', margin: 0, lineHeight: 1.5 }}>
-                  Бот пока не видел групп. Включите «Сбор участников», добавьте бота админом в группу и напишите туда сообщение — затем нажмите обновить. Telegram не отдаёт список групп заранее.
+                  Бот пока не видел групп. Добавьте Tai админом в группу и напишите туда сообщение — затем нажмите обновить. Telegram не отдаёт список групп заранее.
                 </p>
               ) : (
                 <>

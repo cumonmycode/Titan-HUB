@@ -16,7 +16,8 @@ import { getActiveFiscalProvider } from '../pay/fiscal/registry.js'
 import { getWhatsAppConfig, sendWhatsAppTemplate } from '../../lib/whatsapp.js'
 import { readPollConfigs, writePollConfigs, postPollConfig, type PollConfig } from '../../lib/polls.js'
 import { recordPollPosted } from '../../lib/pollState.js'
-import { setTelegramWebhook, deleteTelegramWebhook, getTelegramWebhookInfo, getChatAdministrators, getTelegramChat } from '../../lib/telegram.js'
+import { setTelegramWebhook, getTelegramWebhookInfo, getChatAdministrators, getTelegramChat } from '../../lib/telegram.js'
+import { TAI_ALLOWED_UPDATES } from '../tg/club.js'
 import { tgWebhookSecret, tgWebhookUrl } from '../../lib/tgWebhook.js'
 import { upsertRosterUser } from '../../lib/roster.js'
 import { listChats, recordChat } from '../../lib/tgChats.js'
@@ -658,15 +659,19 @@ systemRouter.get('/tai-chat-config', requireAuth, requireRole('owner'), async (c
   const botToken = await getClubIntegration(db, 'poll_bot_token').catch(() => null)
   const aiKey = (await getClubIntegration(db, 'ai_api_key').catch(() => null)) ?? process.env['POLZA_API_KEY']
   // Пер-групповые настройки: список «увиденных» ботом чатов + сохранённые опции.
-  let settings: Record<string, { enabled?: boolean; profanity?: boolean; harshness?: string }> = {}
+  let settings: Record<string, { enabled?: boolean; profanity?: boolean; harshness?: string; preset?: string; mode?: string }> = {}
   try { settings = JSON.parse(await getStringSetting('tai_chat_settings', '', db) || '{}') } catch { /* мусор → {} */ }
   const chats = (await listChats(db)).map((ch) => {
     const s = settings[String(ch.id)] ?? {}
+    const work = s.mode === 'work'
+    // Рабочий чат по умолчанию — без мата и мягко; игровой — как раньше.
     return {
       id: ch.id, title: ch.title, type: ch.type,
+      mode: work ? 'work' : 'game',
       enabled: s.enabled !== false,
-      profanity: s.profanity !== false,
-      harshness: (TAI_HARSHNESS as readonly string[]).includes(s.harshness ?? '') ? s.harshness : 'savage',
+      profanity: work ? s.profanity === true : s.profanity !== false,
+      harshness: (TAI_HARSHNESS as readonly string[]).includes(s.harshness ?? '') ? s.harshness : work ? 'soft' : 'savage',
+      preset: TAI_PRESETS.some((p) => p.key === s.preset) ? s.preset : work ? 'friendly' : preset,
     }
   })
   return c.json({ enabled, preset, presets: TAI_PRESETS, chats, botReady: !!botToken, aiReady: !!aiKey })
@@ -684,6 +689,8 @@ systemRouter.put(
       enabled: z.boolean(),
       profanity: z.boolean(),
       harshness: z.enum(['soft', 'medium', 'savage']),
+      preset: z.enum(['friendly', 'sarcastic', 'roast', 'nerd', 'chaos']).optional(),
+      mode: z.enum(['work', 'game']).optional(),
     })).optional(),
   })),
   async (c) => {
@@ -696,8 +703,20 @@ systemRouter.put(
     if (body.enabled !== undefined) await setKey('tai_chat_enabled', String(body.enabled))
     if (body.preset !== undefined) await setKey('tai_preset', body.preset)
     if (body.chats !== undefined) {
-      const map: Record<string, { enabled: boolean; profanity: boolean; harshness: string }> = {}
-      for (const ch of body.chats) map[String(ch.id)] = { enabled: ch.enabled, profanity: ch.profanity, harshness: ch.harshness }
+      // Сохраняем поверх текущих: режим и стиль чата, не пришедшие из старого клиента, не теряются.
+      let current: Record<string, Record<string, unknown>> = {}
+      try { current = JSON.parse(await getStringSetting('tai_chat_settings', '', db) || '{}') } catch { /* мусор → {} */ }
+      const map: Record<string, Record<string, unknown>> = { ...current }
+      for (const ch of body.chats) {
+        map[String(ch.id)] = {
+          ...current[String(ch.id)],
+          enabled: ch.enabled,
+          profanity: ch.profanity,
+          harshness: ch.harshness,
+          ...(ch.preset ? { preset: ch.preset } : {}),
+          ...(ch.mode ? { mode: ch.mode } : {}),
+        }
+      }
       await setKey('tai_chat_settings', JSON.stringify(map))
     }
     return c.json({ ok: true })
@@ -865,9 +884,7 @@ systemRouter.post('/polls/collect', requireAuth, requireRole('owner'), async (c)
   const clubId = await resolveClubId(c)
   if (!clubId) return c.json({ error: 'Клуб не зарегистрирован в реестре платформы' }, 400)
 
-  const r = await setTelegramWebhook(token, tgWebhookUrl(clubId), tgWebhookSecret(clubId), [
-    'message', 'poll_answer', 'chat_member', 'my_chat_member',
-  ])
+  const r = await setTelegramWebhook(token, tgWebhookUrl(clubId), tgWebhookSecret(clubId), TAI_ALLOWED_UPDATES)
   if (!r.ok) return c.json({ error: r.error ?? 'Не удалось включить сбор' }, 502)
 
   // Посев: администраторы настроенных чатов сразу в ростер (остальных бот добавит,
@@ -889,9 +906,8 @@ systemRouter.post('/polls/collect', requireAuth, requireRole('owner'), async (c)
   return c.json({ ok: true, enabled: true, seeded })
 })
 
-// DELETE /system/polls/collect — выключить сбор (снять вебхук).
+// DELETE /system/polls/collect — раньше снимал вебхук. Теперь через вебхук работает
+// весь Tai (личка, вход в приложения, уведомления), поэтому выключать его нельзя.
 systemRouter.delete('/polls/collect', requireAuth, requireRole('owner'), async (c) => {
-  const token = await getClubIntegration(c.var.db, 'poll_bot_token')
-  if (token) await deleteTelegramWebhook(token)
-  return c.json({ ok: true, enabled: false })
+  return c.json({ error: 'Tai работает через этот вебхук — выключить сбор нельзя' }, 409)
 })

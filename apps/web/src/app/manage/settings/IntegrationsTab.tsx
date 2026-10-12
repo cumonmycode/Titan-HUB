@@ -34,25 +34,11 @@ interface Product {
 
 const CATALOG: Product[] = [
   {
-    id: 'poll_bot', name: 'Бот опросов', icon: 'fact_check', color: '#8B5CF6',
-    blurb: 'Опросы явки в Telegram-чате клуба',
-    about: 'Бот в вашем Telegram-чате: публикует опросы «придёте сегодня?», отмечает игроков командами @all / @tvari и собирает явку — она подтягивается в кассу предчеками.',
+    id: 'poll_bot', name: 'Tai — бот клуба', icon: 'smart_toy', color: '#8B5CF6',
+    blurb: 'Один Telegram-бот на всё',
+    about: 'Tai — виртуальный администратор клуба в Telegram: опросы и команды @all / @tvari в чатах, рабочий чат персонала, вход в My Titan и Titan HUB, уведомления клиентам и сотрудникам, разговор с гостями текстом и голосом.',
     kind: 'keys',
-    fields: [{ key: 'poll_bot_token', label: 'Токен бота', type: 'password', placeholder: '123456:ABC-DEF…', hint: 'Откройте @BotFather в Telegram → /newbot (или /token у готового бота) → скопируйте токен вида 123456:ABC… Затем добавьте бота в чат клуба и сделайте администратором.' }],
-  },
-  {
-    id: 'admin_bot', name: 'Админ-бот', icon: 'badge', color: '#4cd7f6',
-    blurb: 'Уведомления владельцу и сотрудникам',
-    about: 'Telegram-бот для команды: уведомления о сменах, инкассации, расхождениях кассы; привязка аккаунта сотрудника.',
-    kind: 'keys',
-    fields: [{ key: 'admin_bot_token', label: 'Токен бота', type: 'password', placeholder: '123456:ABC-DEF…', hint: 'В @BotFather создайте отдельного бота (/newbot) → скопируйте токен. Это НЕ тот же бот, что для опросов.' }],
-  },
-  {
-    id: 'wallet_bot', name: 'Бот My Titan', icon: 'account_balance_wallet', color: '#10B981',
-    blurb: 'Telegram-бот клиентов',
-    about: 'Бот для клиентов: вход в My Titan, баланс, бонусы и депозит прямо в Telegram.',
-    kind: 'keys',
-    fields: [{ key: 'wallet_bot_token', label: 'Токен бота', type: 'password', placeholder: '123456:ABC-DEF…', hint: 'В @BotFather создайте бота → скопируйте токен.' }],
+    fields: [{ key: 'poll_bot_token', label: 'Токен бота', type: 'password', placeholder: '123456:ABC-DEF…', hint: 'Откройте @BotFather в Telegram → /newbot (или /token у готового бота) → скопируйте токен вида 123456:ABC… Затем добавьте бота в чаты клуба и сделайте администратором.' }],
   },
   {
     id: 'ai', name: 'Tai — ИИ-ассистент', icon: 'auto_awesome', color: '#A78BFA',

@@ -1,12 +1,12 @@
 'use client'
 /**
- * Блок «Tai в чате» (вкладка «Поведение»).
+ * Блок «Tai в чатах» (вкладка «Поведение»).
  *
- * Дерзкие ответы Tai на сообщения в Telegram-чате (через бота опросов). Стиль
- * собирается из: ПРЕСЕТ (1 из 5, общий) × ЖЁСТКОСТЬ × МАТ — последние два
- * настраиваются ПЕР-ГРУППУ. Tai шарит в мафии, держит контекст, отвечает коротко.
- * Рамки (без хейта/угроз/запрещёнки) — всегда. Нужен бот опросов + ИИ-ключ Tai.
- * Адресуется боту: «тай …» или реплаем на его ответ.
+ * У каждой группы свои настройки: режим (игровой чат клуба или рабочий чат
+ * персонала), стиль общения, жёсткость и мат — мат включается для каждого чата
+ * отдельно, в любом режиме. В игровом чате Tai шутит, когда к нему обращаются
+ * («тай …» или ответом на его сообщение); в рабочем — отвечает сотрудникам по работе.
+ * Рамки (без хейта/угроз/запрещёнки) — всегда. Нужен бот Tai + ИИ-ключ.
  */
 import React from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -15,16 +15,89 @@ import { Icon } from '@/components/Icon'
 import { useToast } from '@/components/Toast'
 
 type Harshness = 'soft' | 'medium' | 'savage'
+type Mode = 'game' | 'work'
 interface Preset { key: string; label: string; desc: string }
-interface ChatCfg { id: number | string; title: string; type: string; enabled: boolean; profanity: boolean; harshness: Harshness }
-interface Cfg { enabled: boolean; preset: string; presets: Preset[]; chats: ChatCfg[]; botReady: boolean; aiReady: boolean }
+interface ChatCfg { id: number | string; title: string; type: string; mode: Mode; enabled: boolean; profanity: boolean; harshness: Harshness; preset: string }
+interface Cfg { enabled: boolean; presets: Preset[]; chats: ChatCfg[]; botReady: boolean; aiReady: boolean }
 
 const HARSH: { key: Harshness; label: string }[] = [
   { key: 'soft', label: 'Мягко' },
   { key: 'medium', label: 'Средне' },
   { key: 'savage', label: 'Жёстко' },
 ]
+const MODES: { key: Mode; label: string }[] = [
+  { key: 'game', label: 'Игровой' },
+  { key: 'work', label: 'Рабочий' },
+]
 const toggleRow: React.CSSProperties = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '11px 0' }
+const rowStyle: React.CSSProperties = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }
+const labelStyle: React.CSSProperties = { fontSize: 12.5, color: 'var(--on-surface-variant)' }
+
+function Segmented<T extends string>({ items, value, disabled, onChange }: { items: { key: T; label: string }[]; value: T; disabled: boolean; onChange: (v: T) => void }) {
+  return (
+    <div style={{ display: 'flex', gap: 4, background: 'rgba(255,255,255,0.05)', borderRadius: 9, padding: 3 }}>
+      {items.map((it) => {
+        const active = value === it.key
+        return (
+          <button key={it.key} type="button" disabled={disabled} onClick={() => onChange(it.key)}
+            style={{
+              padding: '5px 11px', borderRadius: 7, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600,
+              background: active ? '#8B5CF6' : 'transparent',
+              color: active ? '#fff' : 'var(--on-surface-variant)',
+            }}>{it.label}</button>
+        )
+      })}
+    </div>
+  )
+}
+
+function ChatCard({ chat, presets, busy, onPatch }: { chat: ChatCfg; presets: Preset[]; busy: boolean; onPatch: (patch: Partial<ChatCfg>) => void }) {
+  const work = chat.mode === 'work'
+  return (
+    <div style={{ borderRadius: 14, padding: '11px 12px', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', display: 'flex', flexDirection: 'column', gap: 9 }}>
+      <div style={rowStyle}>
+        <span style={{ fontSize: 13.5, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{chat.title || `Чат ${chat.id}`}</span>
+        <Segmented items={MODES} value={chat.mode} disabled={busy} onChange={(mode) => onPatch({ mode })} />
+      </div>
+      <p style={{ fontSize: 11.5, color: 'var(--on-surface-variant)', margin: 0, lineHeight: 1.45 }}>
+        {work
+          ? 'Рабочий чат персонала: Tai отвечает сотрудникам про смену, кассу, цифры и записи — с правами того, кто спросил.'
+          : 'Игровой чат клуба: опросы, команды @all / @tvari и шутки Tai, когда к нему обращаются.'}
+      </p>
+      {!work && (
+        <div style={rowStyle}>
+          <span style={labelStyle}>Шутить в этом чате</span>
+          <input type="checkbox" checked={chat.enabled} disabled={busy} onChange={(e) => onPatch({ enabled: e.target.checked })} style={{ width: 16, height: 16, accentColor: '#8B5CF6', flexShrink: 0 }} />
+        </div>
+      )}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        <span style={labelStyle}>Стиль общения</span>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+          {presets.map((p) => {
+            const active = chat.preset === p.key
+            return (
+              <button key={p.key} type="button" title={p.desc} disabled={busy} onClick={() => onPatch({ preset: p.key })}
+                style={{
+                  padding: '6px 11px', borderRadius: 10, cursor: 'pointer', fontSize: 12, fontWeight: 600,
+                  border: active ? '1.5px solid #8B5CF6' : '1px solid rgba(255,255,255,0.1)',
+                  background: active ? 'rgba(139,92,246,0.14)' : 'rgba(255,255,255,0.03)',
+                  color: active ? '#c4b5fd' : 'var(--on-surface)',
+                }}>{p.label}</button>
+            )
+          })}
+        </div>
+      </div>
+      <div style={rowStyle}>
+        <span style={labelStyle}>Жёсткость</span>
+        <Segmented items={HARSH} value={chat.harshness} disabled={busy} onChange={(harshness) => onPatch({ harshness })} />
+      </div>
+      <div style={rowStyle}>
+        <span style={labelStyle}>Мат</span>
+        <input type="checkbox" checked={chat.profanity} disabled={busy} onChange={(e) => onPatch({ profanity: e.target.checked })} style={{ width: 16, height: 16, accentColor: '#8B5CF6', flexShrink: 0 }} />
+      </div>
+    </div>
+  )
+}
 
 export function TaiChatConfig() {
   const qc = useQueryClient()
@@ -35,7 +108,7 @@ export function TaiChatConfig() {
   React.useEffect(() => { if (data?.chats) setChats(data.chats) }, [data?.chats])
 
   const save = useMutation({
-    mutationFn: (patch: Partial<{ enabled: boolean; preset: string; chats: ChatCfg[] }>) => api.put('/system/tai-chat-config', patch),
+    mutationFn: (patch: Partial<{ enabled: boolean; chats: ChatCfg[] }>) => api.put('/system/tai-chat-config', patch),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['tai-chat-config'] }); show('Сохранено', 'success') },
     onError: () => show('Не удалось сохранить', 'error'),
   })
@@ -53,93 +126,44 @@ export function TaiChatConfig() {
     <div className="glass-l2" style={{ borderRadius: 18, padding: 16, border: '1px solid rgba(255,255,255,0.08)', display: 'flex', flexDirection: 'column', gap: 6 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <Icon name="auto_awesome" size={18} color="#a78bfa" />
-        <p style={{ fontSize: 15, fontWeight: 800, margin: 0 }}>Tai в чате</p>
+        <p style={{ fontSize: 15, fontWeight: 800, margin: 0 }}>Tai в чатах</p>
       </div>
       <p style={{ fontSize: 11.5, color: 'var(--on-surface-variant)', margin: '0 0 4px', lineHeight: 1.5 }}>
-        Tai отвечает в Telegram-чате как живой резидент клуба: коротко, в контексте беседы, шарит в мафии. Адресуйте ему: напишите «тай …» или ответьте реплаем на его сообщение.
+        Для каждой группы — свой режим, стиль общения и мат. Обращайтесь к Tai «тай …» или ответом на его сообщение. Добавите Tai в чат сотрудников — он сам станет рабочим.
       </p>
-
-      <label style={{ ...toggleRow, opacity: blocked ? 0.5 : 1 }}>
-        <span style={{ fontSize: 13.5 }}>Отвечать в чате <span style={{ color: 'var(--on-surface-variant)', fontSize: 12 }}>— главный выключатель для всех групп</span></span>
-        <input type="checkbox" checked={data.enabled} disabled={blocked || save.isPending} onChange={(e) => save.mutate({ enabled: e.target.checked })} style={{ width: 18, height: 18, accentColor: '#8B5CF6' }} />
-      </label>
 
       {blocked && (
         <div style={{ display: 'flex', gap: 8, padding: '10px 12px', borderRadius: 12, background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.28)' }}>
           <Icon name="info" size={16} color="#F59E0B" style={{ flexShrink: 0, marginTop: 1 }} />
           <span style={{ fontSize: 12.5, color: 'var(--on-surface-variant)', lineHeight: 1.5 }}>
-            {!data.botReady && 'Подключите «Бот опросов» во вкладке «Интеграции». '}
+            {!data.botReady && 'Подключите «Tai — бот клуба» во вкладке «Интеграции». '}
             {!data.aiReady && 'Нужен ключ Tai (модуль «Tai — ИИ-ассистент»).'}
           </span>
         </div>
       )}
 
-      {data.enabled && !blocked && (
+      {!blocked && (
         <>
-          {/* Пресет стиля — общий для всех групп */}
-          <p style={{ fontSize: 12, fontWeight: 700, margin: '10px 0 6px' }}>Характер Tai</p>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-            {data.presets.map((p) => {
-              const active = data.preset === p.key
-              return (
-                <button key={p.key} type="button" onClick={() => save.mutate({ preset: p.key })} disabled={save.isPending}
-                  style={{
-                    textAlign: 'left', padding: '9px 11px', borderRadius: 12, cursor: 'pointer',
-                    border: active ? '1.5px solid #8B5CF6' : '1px solid rgba(255,255,255,0.1)',
-                    background: active ? 'rgba(139,92,246,0.14)' : 'rgba(255,255,255,0.03)',
-                  }}>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: active ? '#c4b5fd' : 'var(--on-surface)' }}>{p.label}</div>
-                  <div style={{ fontSize: 11, color: 'var(--on-surface-variant)', marginTop: 2, lineHeight: 1.4 }}>{p.desc}</div>
-                </button>
-              )
-            })}
-          </div>
+          <label style={toggleRow}>
+            <span style={{ fontSize: 13.5 }}>Шутки в игровых чатах <span style={{ color: 'var(--on-surface-variant)', fontSize: 12 }}>— главный выключатель</span></span>
+            <input type="checkbox" checked={data.enabled} disabled={save.isPending} onChange={(e) => save.mutate({ enabled: e.target.checked })} style={{ width: 18, height: 18, accentColor: '#8B5CF6' }} />
+          </label>
 
-          {/* Пер-групповые настройки: мат + жёсткость */}
-          <p style={{ fontSize: 12, fontWeight: 700, margin: '14px 0 6px' }}>Настройки по группам</p>
+          <p style={{ fontSize: 12, fontWeight: 700, margin: '6px 0 6px' }}>Группы</p>
           {chats.length === 0 ? (
             <p style={{ fontSize: 11.5, color: 'var(--on-surface-variant)', margin: 0, lineHeight: 1.5 }}>
-              Группы появятся здесь, как только бот увидит сообщения в чате. Добавьте бота в группу и напишите что-нибудь.
+              Группы появятся здесь, как только Tai увидит сообщения в чате. Добавьте бота в группу и напишите что-нибудь.
             </p>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               {chats.map((ch) => (
-                <div key={String(ch.id)} style={{ borderRadius: 14, padding: '11px 12px', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
-                    <span style={{ fontSize: 13.5, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ch.title || `Чат ${ch.id}`}</span>
-                    <input type="checkbox" checked={ch.enabled} disabled={save.isPending} onChange={(e) => patchChat(ch.id, { enabled: e.target.checked })} style={{ width: 18, height: 18, accentColor: '#8B5CF6', flexShrink: 0 }} />
-                  </div>
-                  {ch.enabled && (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 10 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
-                        <span style={{ fontSize: 12.5, color: 'var(--on-surface-variant)' }}>Мат</span>
-                        <input type="checkbox" checked={ch.profanity} disabled={save.isPending} onChange={(e) => patchChat(ch.id, { profanity: e.target.checked })} style={{ width: 16, height: 16, accentColor: '#8B5CF6', flexShrink: 0 }} />
-                      </div>
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
-                        <span style={{ fontSize: 12.5, color: 'var(--on-surface-variant)' }}>Жёсткость</span>
-                        <div style={{ display: 'flex', gap: 4, background: 'rgba(255,255,255,0.05)', borderRadius: 9, padding: 3 }}>
-                          {HARSH.map((h) => {
-                            const active = ch.harshness === h.key
-                            return (
-                              <button key={h.key} type="button" disabled={save.isPending} onClick={() => patchChat(ch.id, { harshness: h.key })}
-                                style={{
-                                  padding: '5px 11px', borderRadius: 7, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600,
-                                  background: active ? '#8B5CF6' : 'transparent',
-                                  color: active ? '#fff' : 'var(--on-surface-variant)',
-                                }}>{h.label}</button>
-                            )
-                          })}
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </div>
+                <ChatCard key={String(ch.id)} chat={ch} presets={data.presets} busy={save.isPending} onPatch={(patch) => patchChat(ch.id, patch)} />
               ))}
             </div>
           )}
 
           <p style={{ fontSize: 11.5, color: 'var(--on-surface-variant)', margin: '10px 0 0', lineHeight: 1.5 }}>
-            Рамки соблюдаются всегда: без оскорблений по нац-ти/религии/полу/ориентации, без угроз и запрещёнки — только комедийные панчлайны.
+            Рамки соблюдаются всегда: без оскорблений по нац-ти/религии/полу/ориентации, без угроз и запрещёнки.
           </p>
         </>
       )}

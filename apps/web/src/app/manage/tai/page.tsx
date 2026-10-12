@@ -7,10 +7,43 @@ import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Icon } from '@/components/Icon'
 import { Chip, PageHeader, Toggle } from '@/components/manage/DesignSystem'
-import { getTaiSettings, saveTaiSettings, speakTai, type TaiSettings, type TaiSettingsResponse, type TaiVoiceOption } from '@/lib/tai'
+import { getTaiSettings, saveTaiClubBrief, saveTaiSettings, speakTai, type TaiSettings, type TaiSettingsResponse, type TaiVoiceOption } from '@/lib/tai'
 
 const SAMPLE = 'Привет, это Tai. Сегодня около сорока восьми тысяч выручки и тридцать один чек — для субботы неплохо, дожмём.'
 const KEY = ['ai', 'settings']
+const BRIEF_MAX = 3000
+
+/** Что Tai рассказывает клиентам в Telegram о клубе (форматы, школа, особенности). */
+function ClubBrief({ initial }: { initial: string }) {
+  const qc = useQueryClient()
+  const [text, setText] = useState(initial)
+  const save = useMutation({
+    mutationFn: saveTaiClubBrief,
+    onSuccess: (clubBrief) => {
+      const previous = qc.getQueryData<TaiSettingsResponse>(KEY)
+      if (previous) qc.setQueryData<TaiSettingsResponse>(KEY, { ...previous, clubBrief })
+    },
+  })
+  const dirty = text.trim() !== initial.trim()
+  return (
+    <section className="glass-l2" style={{ borderRadius: 16, padding: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <h2 style={{ margin: 0, fontSize: 15, fontWeight: 700 }}>Что Tai рассказывает о клубе</h2>
+      <p style={{ fontSize: 12, color: 'var(--on-surface-variant)', margin: 0 }}>
+        Форматы игр, школа мафии, мероприятия — Tai опирается на этот текст, когда отвечает гостям в Telegram. Цены, адрес и расписание он берёт из HUB сам.
+      </p>
+      <textarea value={text} maxLength={BRIEF_MAX} rows={7} onChange={(e) => setText(e.target.value)}
+        style={{ width: '100%', boxSizing: 'border-box', borderRadius: 12, padding: 12, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)', color: 'var(--on-surface)', fontSize: 14, lineHeight: 1.5, resize: 'vertical', fontFamily: 'inherit' }} />
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        <button type="button" disabled={!dirty || save.isPending} onClick={() => save.mutate(text)}
+          style={{ padding: '9px 16px', borderRadius: 12, border: 'none', background: dirty ? 'var(--primary-violet)' : 'rgba(255,255,255,0.08)', color: '#fff', fontWeight: 700, fontSize: 14, cursor: dirty ? 'pointer' : 'default' }}>
+          {save.isPending ? 'Сохраняем…' : 'Сохранить'}
+        </button>
+        {save.isSuccess && !dirty && <span style={{ fontSize: 12, color: 'var(--on-surface-variant)' }}>Сохранено</span>}
+        {save.isError && <span style={{ fontSize: 12, color: '#F43F5E' }}>Не сохранилось</span>}
+      </div>
+    </section>
+  )
+}
 
 export default function TaiSettingsPage() {
   const qc = useQueryClient()
@@ -97,11 +130,23 @@ export default function TaiSettingsPage() {
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
                 <div>
                   <h2 style={{ margin: 0, fontSize: 15, fontWeight: 700 }}>Можно материться</h2>
-                  <p style={caption}>Tai общается на «ты», просто и по делу. Мат — к месту и никогда в адрес гостей.</p>
+                  <p style={caption}>С сотрудниками в приложении и в личке Telegram. С клиентами Tai всегда без мата, в группах — своя настройка у каждого чата.</p>
                 </div>
                 <Toggle value={settings.profanity} onChange={(on: boolean) => save.mutate({ profanity: on })} />
               </div>
             </section>
+
+            <section className="glass-l2" style={card}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                <div>
+                  <h2 style={{ margin: 0, fontSize: 15, fontWeight: 700 }}>Пишет клиентам первым</h2>
+                  <p style={caption}>Напоминает в игровой вечер тем, кто ещё не отметился, и тем, кто просил напомнить. Не чаще раза в 3 дня, днём, и никогда тем, кто попросил не писать.</p>
+                </div>
+                <Toggle value={settings.outreach} onChange={(on: boolean) => save.mutate({ outreach: on })} />
+              </div>
+            </section>
+
+            <ClubBrief initial={data.clubBrief} />
           </>
         )}
       </div>

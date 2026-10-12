@@ -65,7 +65,7 @@ export interface TaiPart {
   to?: TaiRoute
 }
 
-export type TaiActionKind = 'open_check' | 'add_items' | 'change_item' | 'discount' | 'cancel_check'
+export type TaiActionKind = 'open_check' | 'add_items' | 'change_item' | 'discount' | 'cancel_check' | 'send_poll'
 
 export interface TaiActionCard {
   id: string

@@ -25,6 +25,7 @@ export type ActionPlan =
   | { kind: 'change_item'; checkId: string; checkItemId: string; quantity: number; name: string }
   | { kind: 'discount'; checkId: string; type: 'percent' | 'fixed'; value: number }
   | { kind: 'cancel_check'; checkId: string }
+  | { kind: 'send_poll'; playerId: string; pollKind: string | null; note: string | null; nickname: string }
 
 interface StoredAction {
   sub: string
@@ -140,6 +141,10 @@ async function execute(plan: ActionPlan, api: ApiCaller): Promise<{ result: stri
     case 'cancel_check': {
       await api.delete(`/api/pos/checks/${plan.checkId}`)
       return { result: 'Чек отменён', to: { screen: 'pos' } }
+    }
+    case 'send_poll': {
+      const r = await api.post<{ poll: string }>('/api/tai/send-poll', { playerId: plan.playerId, kind: plan.pollKind, note: plan.note })
+      return { result: `${plan.nickname} получил опрос «${r.poll}»`, to: { screen: 'player', playerId: plan.playerId } }
     }
   }
 }

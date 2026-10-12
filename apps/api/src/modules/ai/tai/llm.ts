@@ -57,6 +57,8 @@ export async function* streamChat(opts: {
   tools: LlmTool[]
   maxTokens: number
   signal: AbortSignal
+  /** 0.3 — точные ответы по цифрам; живой разговор с клиентом — выше. */
+  temperature?: number
 }): AsyncGenerator<LlmChunk> {
   const res = await fetch(`${POLZA_BASE}/chat/completions`, {
     method: 'POST',
@@ -65,7 +67,7 @@ export async function* streamChat(opts: {
       model: MODEL,
       stream: true,
       max_tokens: opts.maxTokens,
-      temperature: 0.3,
+      temperature: opts.temperature ?? 0.3,
       messages: opts.messages,
       tools: opts.tools.length ? opts.tools : undefined,
     }),

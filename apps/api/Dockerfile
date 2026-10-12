@@ -15,8 +15,6 @@ COPY packages/ui/package.json ./packages/ui/
 COPY apps/api/package.json ./apps/api/
 COPY apps/web/package.json ./apps/web/
 COPY apps/wallet/package.json ./apps/wallet/
-COPY apps/bot-admin/package.json ./apps/bot-admin/
-COPY apps/bot-wallet/package.json ./apps/bot-wallet/
 RUN pnpm install --frozen-lockfile
 
 COPY packages/ ./packages/

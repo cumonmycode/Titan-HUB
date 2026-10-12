@@ -155,40 +155,6 @@ services:
     networks:
       - titan-net
 
-  bot-admin:
-    build:
-      context: .
-      dockerfile: apps/bot-admin/Dockerfile
-    container_name: titan-bot-admin
-    restart: unless-stopped
-    logging: *default-logging
-    mem_limit: 256m
-    env_file: .env
-    environment:
-      DATABASE_URL: postgresql://titan:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/titan_hub
-    depends_on:
-      postgres:
-        condition: service_healthy
-    networks:
-      - titan-net
-
-  bot-wallet:
-    build:
-      context: .
-      dockerfile: apps/bot-wallet/Dockerfile
-    container_name: titan-bot-wallet
-    restart: unless-stopped
-    logging: *default-logging
-    mem_limit: 256m
-    env_file: .env
-    environment:
-      DATABASE_URL: postgresql://titan:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/titan_hub
-    depends_on:
-      postgres:
-        condition: service_healthy
-    networks:
-      - titan-net
-
   # Сайт клуба titanmafia.ru (Next.js). Данные и заявки — API клуба внутри сети
   # (Host клубного поддомена выбирает БД клуба). nginx ходит сюда через resolver,
   # поэтому сайт не блокирует старт nginx.

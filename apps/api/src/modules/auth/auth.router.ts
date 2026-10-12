@@ -5,8 +5,8 @@ import { visitProgress } from '../../lib/loyalty.js'
 import { clientCollections } from '../resident/resident.router.js'
 import { getActiveSbpProvider, getProvider, resolveCreds, getPaymentTestMode } from '../pay/registry.js'
 import { getClubIntegration } from '../../lib/secrets.js'
-import { TG_API } from '../../lib/telegram.js'
 import { round2 } from '../../lib/money.js'
+import { taiToken, taiUsername } from '../tg/club.js'
 // @ts-ignore
 import { passkeys } from '@titan/database'
 import { signToken, verifyPin, verifyPassword, hashPassword, hashPin, isPlaintext, verifyTelegramInitData } from '@titan/auth'
@@ -57,21 +57,6 @@ function allowedOrigins(c: any): string[] {
 
 function getRedis() {
   return new Redis(process.env['REDIS_URL'] ?? 'redis://redis:6379', { lazyConnect: true })
-}
-
-// @username бота My Titan для подсказки/диплинка на экране входа из браузера.
-// Из env (WALLET_BOT_USERNAME), иначе через getMe (кэшируем). Без '@'.
-let walletBotUsername: string | null = process.env['WALLET_BOT_USERNAME']?.replace(/^@/, '') ?? null
-export async function getWalletBotUsername(): Promise<string | null> {
-  if (walletBotUsername) return walletBotUsername
-  const token = process.env['WALLET_BOT_TOKEN']
-  if (!token) return null
-  try {
-    const r = await fetch(`${TG_API}/bot${token}/getMe`)
-    const j = (await r.json()) as { result?: { username?: string } }
-    walletBotUsername = j?.result?.username ?? null
-  } catch { /* недоступно — вернём null, экран покажет инструкцию без ссылки */ }
-  return walletBotUsername
 }
 
 export const authRouter = new Hono<AppEnv>()
@@ -485,15 +470,10 @@ authRouter.post(
 authRouter.post('/login/telegram', zValidator('json', LoginTelegramSchema), async (c) => {
   const { initData } = c.req.valid('json')
   const db = c.var.db
-  // WebApp может быть запущен из ЛЮБОГО бота (кошелёк — из wallet-бота, поэтому
-  // initData подписан токеном wallet-бота). Раньше брали ADMIN-токен первым через
-  // ?? — для wallet-WebApp подпись не сходилась → 401 и пустой кошелёк. Проверяем
-  // по обоим токенам: успех, если совпало хотя бы с одним.
-  const walletToken = process.env['WALLET_BOT_TOKEN'] ?? ''
-  const adminToken = process.env['ADMIN_BOT_TOKEN'] ?? ''
-  const valid =
-    (walletToken && verifyTelegramInitData(initData, walletToken)) ||
-    (adminToken && verifyTelegramInitData(initData, adminToken))
+  // WebApp открывают из бота Tai клуба (initData подписан его токеном). Старые
+  // боты (env) оставлены, пока живы ссылки из них.
+  const tokens = [await taiToken(db), process.env['WALLET_BOT_TOKEN'], process.env['ADMIN_BOT_TOKEN']].filter((t): t is string => !!t)
+  const valid = tokens.some((t) => verifyTelegramInitData(initData, t))
   if (!valid) {
     return c.json({ error: 'Invalid Telegram data' }, 401)
   }
@@ -563,7 +543,7 @@ authRouter.post('/wallet-code/start', async (c) => {
   const [row] = await db.insert(walletLoginCodes).values({
     code, expiresAt, deepCode, deviceName: device.deviceName ?? null, platform: device.platform ?? null,
   }).returning({ ticket: walletLoginCodes.ticket })
-  const botUsername = await getWalletBotUsername()
+  const botUsername = await taiUsername(db)
   return c.json({
     code,
     ticket: row?.ticket ?? null,

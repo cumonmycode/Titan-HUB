@@ -10,22 +10,8 @@ import { requireAuth, requireRole, invalidateProfileAuthCache } from '../../midd
 import { hashPassword, hashPin } from '@titan/auth'
 import { isPinTaken, PIN_TAKEN_ERROR } from '../auth/staff-pin.js'
 import { createHmac } from 'node:crypto'
-import { TG_API } from '../../lib/telegram.js'
+import { taiUsername } from '../tg/club.js'
 
-// Username админ-бота для диплинка привязки. Если не задан в env — берём через
-// getMe (кэшируем). Токен админ-бота доступен API через env_file (.env).
-let adminBotUsername: string | null = process.env['ADMIN_BOT_USERNAME']?.replace(/^@/, '') ?? null
-async function getAdminBotUsername(): Promise<string | null> {
-  if (adminBotUsername) return adminBotUsername
-  const token = process.env['ADMIN_BOT_TOKEN']
-  if (!token) return null
-  try {
-    const r = await fetch(`${TG_API}/bot${token}/getMe`)
-    const j: any = await r.json()
-    adminBotUsername = j?.result?.username ?? null
-  } catch { /* ignore */ }
-  return adminBotUsername
-}
 
 const CreateStaffSchema = z.object({
   nickname: z.string().min(2),
@@ -100,16 +86,16 @@ staffRouter.get('/:id', async (c) => {
   return c.json({ staff: profile })
 })
 
-// Подписанный диплинк + QR для привязки Telegram сотрудника через АДМИН-бота.
-// Формат токена совпадает с wallet-привязкой (HMAC JWT_SECRET), бот его проверяет.
+// Подписанный диплинк + QR для привязки Telegram сотрудника через бота Tai клуба.
+// Формат токена — HMAC JWT_SECRET, проверяет modules/tg/login/link.ts.
 staffRouter.post('/:id/telegram-link', async (c) => {
   const db = c.var.db
   const [profile] = await db.select().from(profiles).where(and(eq(profiles.id, c.req.param('id')), isNull(profiles.deletedAt)))
   if (!profile) return c.json({ error: 'Not found' }, 404)
   const jwtSecret = process.env['JWT_SECRET']
   if (!jwtSecret) return c.json({ error: 'JWT_SECRET is not configured' }, 500)
-  const username = await getAdminBotUsername()
-  if (!username) return c.json({ error: 'Админ-бот недоступен' }, 503)
+  const username = await taiUsername(db)
+  if (!username) return c.json({ error: 'Бот Tai клуба не настроен (Интеграции)' }, 503)
 
   const idB64 = Buffer.from(profile.id.replace(/-/g, ''), 'hex').toString('base64url')
   const exp = Math.floor(Date.now() / 1000) + 15 * 60

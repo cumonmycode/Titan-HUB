@@ -11,7 +11,6 @@ import { requireActiveSubscription } from './middleware/subscription.js'
 import { requireModule, requireAiPaid } from './middleware/module.js'
 import { clubRouter } from './modules/club/club.router.js'
 import { alertsRouter } from './modules/notifications/alerts.router.js'
-import { internalRouter } from './modules/internal/internal.router.js'
 import { tgRouter } from './modules/tg/tg.router.js'
 import { payRouter } from './modules/pay/pay.router.js'
 import { bookingsPublicRouter, bookingsRouter } from './modules/bookings/bookings.router.js'
@@ -21,6 +20,8 @@ import { geoRouter } from './modules/geo/geo.router.js'
 
 import { authRouter } from './modules/auth/auth.router.js'
 import { appLoginRouter } from './modules/auth/app-login.js'
+import { hubLoginRouter } from './modules/auth/hub-login.js'
+import { taiRouter } from './modules/tg/tai.router.js'
 import { posRouter } from './modules/pos/pos.router.js'
 import { tabletRouter, tabletsRouter } from './modules/tablet/tablet.router.js'
 import { smartHomeRouter } from './modules/smart-home/smart-home.router.js'
@@ -143,10 +144,6 @@ app.get('/api/health/ready', async (c) => {
 // заблокированный клуб мог прочитать свой статус и показать экран продления.
 app.route('/api/club', clubRouter)
 
-// Внутренний контур (бот-менеджер): конфиги ботов клубов. Защищён общим секретом,
-// не гейтится подпиской (allowlist). Не для браузера.
-app.route('/api/internal', internalRouter)
-
 // Приёмник вебхука Telegram (бот опросов: сбор участников). Защита — secret_token
 // Telegram; не гейтится подпиской (allowlist). Не для браузера.
 app.route('/api/tg', tgRouter)
@@ -201,7 +198,12 @@ app.use('/api/analytics/*', requireModule('analytics'))
 
 // Вход в My Titan по номеру телефона + регистрация (подтверждение — в боте клуба).
 app.route('/api/auth/app', appLoginRouter)
+// Первый вход сотрудника в Titan HUB — через Tai в Telegram.
+app.route('/api/auth/hub', hubLoginRouter)
 app.route('/api/auth', authRouter)
+// Действия Tai с клиентами по просьбе персонала (опрос в личку).
+app.use('/api/tai/*', requireAiPaid())
+app.route('/api/tai', taiRouter)
 // Клиентское приложение My Titan: сводка, лента, сборы, уведомления, push.
 app.route('/api/resident', residentRouter)
 // Рассылки клиентам из панели (лента приложения + push + бот My Titan).

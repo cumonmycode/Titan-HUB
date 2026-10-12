@@ -1,12 +1,12 @@
 /**
- * Уведомления КЛИЕНТАМ (приложение My Titan + Telegram-бот My Titan).
+ * Уведомления КЛИЕНТАМ (приложение My Titan + Telegram-бот клуба Tai).
  *
  * Каждое уведомление идёт по трём каналам независимо друг от друга:
  *  1) лента в приложении — строка client_notifications (всегда: история не должна
  *     теряться, даже если push выключен или приложение не установлено);
  *  2) push на телефон (если есть устройства и client_push_enabled): iPhone — напрямую
  *     через APNs (apns.ts), Android — через Expo Push;
- *  3) личное сообщение из бота My Titan (если привязан Telegram и
+ *  3) личное сообщение от Tai (если привязан Telegram и
  *     wallet_notify_enabled — прежнее поведение).
  *
  * Рассылки клуба (kind='news') дополнительно уважают client_news_enabled.
@@ -17,7 +17,9 @@ import {
   eq, and, inArray, isNotNull, sql, type Database,
 } from '@titan/database'
 import { isApnsToken, sendApns } from './apns.js'
-import { TG_API } from '../../lib/telegram.js'
+import { isBlocked } from '../../lib/tgBot.js'
+import { taiBot } from '../tg/club.js'
+import { appendMessage, markBlocked } from '../tg/dialog/memory.js'
 
 export type ClientNotifyKind = 'bonus' | 'deposit' | 'debt' | 'payment' | 'tier' | 'fund' | 'news' | 'system'
 
@@ -33,22 +35,22 @@ const KIND_EMOJI: Record<ClientNotifyKind, string> = {
   bonus: '⭐', deposit: '💰', debt: '⚠️', payment: '✅', tier: '🎉', fund: '🏛', news: '📣', system: '🔔',
 }
 
-// ── Telegram (бот My Titan) ─────────────────────────────────────────────────
-const WALLET_TOKEN = process.env['WALLET_BOT_TOKEN']
-
-export async function sendWalletTelegram(tgId: string, text: string): Promise<boolean> {
-  if (!WALLET_TOKEN || !tgId) return false
-  try {
-    const r = await fetch(`${TG_API}/bot${WALLET_TOKEN}/sendMessage`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chat_id: tgId, text, disable_web_page_preview: true }),
-    })
-    return r.ok
-  } catch (err) {
-    console.warn('[client-notify] telegram send error:', err)
-    return false
+// ── Telegram (бот Tai клуба) ────────────────────────────────────────────────
+/**
+ * Сообщение клиенту от Tai. Пишем его и в историю диалога — чтобы на «а за что
+ * бонусы?» Tai знал, о чём сообщал. Заблокировал бота — первым больше не пишем.
+ */
+export async function sendClientTelegram(database: Database, tgId: string, text: string): Promise<boolean> {
+  if (!tgId) return false
+  const bot = await taiBot(database)
+  if (!bot) return false
+  const r = await bot.send(tgId, text)
+  if (r.ok) {
+    await appendMessage(database, { chatId: tgId, role: 'assistant', content: text }).catch(() => {})
+    return true
   }
+  if (isBlocked(r)) await markBlocked(database, tgId).catch(() => {})
+  return false
 }
 
 export function telegramText(n: Pick<ClientNotice, 'kind' | 'title' | 'body'>): string {
@@ -198,7 +200,7 @@ export async function notifyClient(
       }
     }
 
-    if (p.tgId && p.tgOn !== false) await sendWalletTelegram(p.tgId, telegramText(n))
+    if (p.tgId && p.tgOn !== false) await sendClientTelegram(database, p.tgId, telegramText(n))
   } catch (err) {
     console.error('[client-notify] notifyClient failed:', err)
   }
@@ -258,7 +260,7 @@ export async function deliverToClients(
     const text = telegramText(notice)
     for (const p of targets) {
       if (!p.tgId || p.tgOn === false) continue
-      if (await sendWalletTelegram(p.tgId, text)) tgCount++
+      if (await sendClientTelegram(database, p.tgId, text)) tgCount++
       await new Promise((r) => setTimeout(r, 40))
     }
   }

@@ -23,6 +23,7 @@ import { readAliases, aliasesForProfile, addAlias, removeAlias, resolveProfileId
 import { playerDetail as gomafiaPlayer } from '../../lib/gomafia.js'
 import { getShiftCashBalance } from '../shifts/shifts.service.js'
 import { createHmac } from 'node:crypto'
+import { taiUsername } from '../tg/club.js'
 
 const GM_TAG_RE = /^gomafia:\d+$/
 
@@ -407,11 +408,8 @@ clientsRouter.patch('/:id', requireRole('owner', 'staff'), zValidator('json', Up
   return c.json({ client: safe })
 })
 
-// Подписанный диплинк + QR для привязки Telegram клиента через Wallet-бота.
-// Эндпоинт ТОЛЬКО подписывает и кодирует токен — запущенный бот не требуется.
-// Формат токена обязан совпадать с тем, что проверяет apps/bot-wallet/src/index.ts.
-const WALLET_BOT_USERNAME = process.env['WALLET_BOT_USERNAME'] ?? 'titanwalletrobot'
-
+// Подписанный диплинк + QR для привязки Telegram клиента через бота Tai клуба.
+// Формат токена обязан совпадать с тем, что проверяет modules/tg/login/link.ts.
 clientsRouter.post('/:id/telegram-link', requireRole('owner', 'staff'), async (c) => {
   const db = c.var.db
   const [client] = await db
@@ -430,7 +428,9 @@ clientsRouter.post('/:id/telegram-link', requireRole('owner', 'staff'), async (c
   const sigMsg = `${idB64}_${expB36}`
   const sig = createHmac('sha256', jwtSecret).update(sigMsg).digest().subarray(0, 12).toString('base64url')
   const payload = `link_${idB64}_${expB36}_${sig}`
-  const deepLink = `https://t.me/${WALLET_BOT_USERNAME}?start=${payload}`
+  const botUsername = await taiUsername(db)
+  if (!botUsername) return c.json({ error: 'Бот Tai клуба не настроен (Интеграции)' }, 503)
+  const deepLink = `https://t.me/${botUsername}?start=${payload}`
 
   const QRCode = await import('qrcode')
   const qrDataUrl = await QRCode.toDataURL(deepLink, { margin: 1, width: 320 })

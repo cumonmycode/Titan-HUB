@@ -43,17 +43,20 @@ export interface TaiSettings {
   voice: string
   speed: number
   profanity: boolean
+  /** Tai сам пишет клиентам в Telegram: напоминания и приглашения на игры. */
+  outreach: boolean
 }
 
 const KEY = 'tai_settings'
-export const DEFAULT_TAI_SETTINGS: TaiSettings = { voice: 'ash', speed: 1, profanity: true }
+export const DEFAULT_TAI_SETTINGS: TaiSettings = { voice: 'ash', speed: 1, profanity: true, outreach: true }
 
 /** Только допустимые значения: неизвестный голос или скорость — по умолчанию. */
 export function normalizeTaiSettings(raw: Partial<TaiSettings> | null | undefined): TaiSettings {
   const voice = TAI_VOICES.some((v) => v.id === raw?.voice) ? raw!.voice! : DEFAULT_TAI_SETTINGS.voice
   const speed = TAI_SPEEDS.some((s) => s.value === raw?.speed) ? raw!.speed! : DEFAULT_TAI_SETTINGS.speed
   const profanity = typeof raw?.profanity === 'boolean' ? raw.profanity : DEFAULT_TAI_SETTINGS.profanity
-  return { voice, speed, profanity }
+  const outreach = typeof raw?.outreach === 'boolean' ? raw.outreach : DEFAULT_TAI_SETTINGS.outreach
+  return { voice, speed, profanity, outreach }
 }
 
 export async function getTaiSettings(db: Database): Promise<TaiSettings> {

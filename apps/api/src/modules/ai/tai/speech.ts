@@ -65,6 +65,61 @@ export async function synthesize(apiKey: string, text: string, voiceSettings: Pi
   }
 }
 
+const STT_MODEL = (process.env['TAI_STT_MODEL'] ?? '').trim() || 'openai/gpt-4o-mini-transcribe'
+const STT_TIMEOUT_MS = 30_000
+
+/** Распознать речь (webm из браузера, ogg/opus из Telegram). null — не вышло. */
+export async function transcribe(apiKey: string, audio: Blob, filename: string): Promise<string | null> {
+  const form = new FormData()
+  form.set('model', STT_MODEL)
+  form.set('language', 'ru')
+  form.set('file', audio, filename)
+  const res = await fetch(`${POLZA_BASE}/audio/transcriptions`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${apiKey}` },
+    body: form,
+    signal: AbortSignal.timeout(STT_TIMEOUT_MS),
+  }).catch(() => null)
+  if (!res?.ok) {
+    console.error('[tai] transcribe failed', res?.status, res ? (await res.text().catch(() => '')).slice(0, 200) : 'network')
+    return null
+  }
+  const data = (await res.json().catch(() => ({}))) as { text?: string }
+  return (data.text ?? '').trim()
+}
+
+/**
+ * Голосовое сообщение для Telegram: весь ответ одним файлом. OpenAI-голоса сразу
+ * отдают ogg/opus — Telegram показывает его как голосовое; остальные — mp3/wav.
+ */
+export async function synthesizeVoiceNote(apiKey: string, text: string, voiceSettings: Pick<TaiSettings, 'voice' | 'speed'>): Promise<{ data: Buffer; format: 'ogg' | 'mp3' } | null> {
+  const input = speakable(text).slice(0, 2_000)
+  if (!input) return null
+  const { model, voice, tunable } = voiceById(voiceSettings.voice)
+  try {
+    const res = await fetch(`${POLZA_BASE}/audio/speech`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({ model, voice, input, ...(tunable ? { response_format: 'opus', instructions: INSTRUCTIONS, speed: voiceSettings.speed } : {}) }),
+      signal: AbortSignal.timeout(TIMEOUT_MS * 2),
+    })
+    if (!res.ok) {
+      console.error('[tai] voice note', res.status, (await res.text().catch(() => '')).slice(0, 200))
+      return null
+    }
+    const body = (await res.json()) as { audio?: string }
+    if (!body.audio) return null
+    const bytes = Buffer.from(body.audio, 'base64')
+    if (bytes.subarray(0, 4).toString() === 'OggS') return { data: bytes, format: 'ogg' }
+    if (bytes.subarray(0, 3).toString() === 'ID3' || bytes[0] === 0xff) return { data: bytes, format: 'mp3' }
+    // Microsoft отдаёт PCM/WAV — голосовым его Telegram не покажет, промолчим текстом.
+    return null
+  } catch (error) {
+    console.error('[tai] voice note failed', error)
+    return null
+  }
+}
+
 /** Конец законченной фразы в text после from; -1 — фраза ещё пишется. Короткие куски копим. */
 function sentenceEnd(text: string, from: number): number {
   const rest = text.slice(from)

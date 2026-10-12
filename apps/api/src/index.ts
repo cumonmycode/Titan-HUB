@@ -8,6 +8,9 @@ import { fiscalizePendingForDb } from './cron/fiscalize.js'
 import { purgeOldAnalyticsEvents } from './cron/analytics-retention.js'
 import { getCronTargets } from './cron/targets.js'
 import { runStaffAlerts } from './modules/notifications/staff-calls.js'
+import { ensureTaiWebhook } from './modules/tg/club.js'
+import { runOutreach } from './modules/tg/outreach.js'
+import { pruneMessages } from './modules/tg/dialog/memory.js'
 import { runMigrations, runMigrationsOn } from './migrations/runner.js'
 import { listActiveClubDbNames, buildClubConnString } from './lib/clubResolver.js'
 import { getSharedRedis } from './lib/redis.js'
@@ -223,6 +226,23 @@ function schedulePollsCron() {
 }
 
 if (!CRON_DISABLED) schedulePollsCron()
+
+// Tai — единый бот клуба: вебхук должен принимать личку и кнопки (проверяем при
+// старте и раз в час), Tai сам пишет клиентам по поводу (раз в 10 минут, днём),
+// старая переписка чистится раз в сутки.
+const TAI_OUTREACH_EVERY_MS = 10 * 60_000
+const TAI_WEBHOOK_EVERY_MS = 60 * 60_000
+const TAI_PRUNE_EVERY_MS = 24 * 60 * 60_000
+function scheduleTaiCron() {
+  const ensure = () => runForAllClubs('tai-webhook', ensureTaiWebhook).catch(console.error)
+  setTimeout(ensure, 15_000)
+  setInterval(ensure, TAI_WEBHOOK_EVERY_MS)
+  setInterval(() => runForAllClubs('tai-outreach', runOutreach).catch(console.error), TAI_OUTREACH_EVERY_MS)
+  setInterval(() => runForAllClubs('tai-prune', (database) => pruneMessages(database)).catch(console.error), TAI_PRUNE_EVERY_MS)
+  console.log('🤖 Tai cron scheduled (вебхук, сообщения первым, чистка истории)')
+}
+
+if (!CRON_DISABLED) scheduleTaiCron()
 
 // Фискализация 54-ФЗ: тик КАЖДУЮ МИНУТУ по всем клубам. Идемпотентно (один ряд
 // fiscal_receipts на чек), клубы без фискального провайдера пропускаются. НЕ трогает

@@ -5,14 +5,14 @@ import { useAuthStore } from '@/store/auth.store'
 import { api, ApiError } from '@/lib/api'
 import { startRegistration, startAuthentication } from '@simplewebauthn/browser'
 import { Icon } from '@/components/Icon'
+import { TelegramLogin } from './TelegramLogin'
 
 // ─── Screen types ─────────────────────────────────────────────────────────────
 
 type Screen =
-  | 'passkey'       // Default: passkey auto-trigger + PIN alternative
-  | 'pin'           // 4-digit PIN keypad
-  | 'password'      // Nickname + password (last resort)
-  | 'pin-setup'     // Set PIN after first password login
+  | 'telegram'      // Первый вход на устройстве — подтверждение у Tai в Telegram
+  | 'passkey'       // Повторный вход на устройстве с passkey (Face ID / Touch ID)
+  | 'pin-setup'     // Set PIN after first login
   | 'passkey-setup' // Offer passkey registration
 
 function isWebAuthnSupported() {
@@ -31,9 +31,7 @@ export default function LoginPage() {
   }, [token, user, _hasHydrated, router])
 
   const [webAuthnSupported] = useState(isWebAuthnSupported)
-  const [screen, setScreen] = useState<Screen>(() =>
-    isWebAuthnSupported() ? 'passkey' : 'pin'
-  )
+  const [screen, setScreen] = useState<Screen>('telegram')
   const [pendingAuth, setPendingAuth] = useState<{ token: string; user: any } | null>(null)
 
   function afterLogin(token: string, user: any, opts?: { needsPinSetup?: boolean; hasPasskey?: boolean }) {
@@ -79,25 +77,16 @@ export default function LoginPage() {
   // Login screens
   return (
     <LoginLayout>
+      {screen === 'telegram' && (
+        <TelegramLogin
+          onSuccess={(token, user, hasPin) => afterLogin(token, user, { needsPinSetup: !hasPin, hasPasskey: false })}
+          onPasskey={webAuthnSupported ? () => setScreen('passkey') : undefined}
+        />
+      )}
       {screen === 'passkey' && (
         <PasskeyScreen
           onSuccess={(token, user) => afterLogin(token, user, { needsPinSetup: false, hasPasskey: true })}
-          onFallbackPin={() => setScreen('pin')}
-          onFallbackPassword={() => setScreen('password')}
-        />
-      )}
-      {screen === 'pin' && (
-        <PinScreen
-          onSuccess={(token, user) => afterLogin(token, user, { needsPinSetup: false, hasPasskey: true })}
-          onFallbackPassword={() => setScreen('password')}
-          onPasskey={webAuthnSupported ? () => setScreen('passkey') : undefined}
-        />
-      )}
-      {screen === 'password' && (
-        <PasswordScreen
-          onSuccess={afterLogin}
-          onPasskey={webAuthnSupported ? () => setScreen('passkey') : undefined}
-          onPin={() => setScreen('pin')}
+          onTelegram={() => setScreen('telegram')}
         />
       )}
     </LoginLayout>
@@ -156,16 +145,14 @@ function LoginLayout({ children }: { children: React.ReactNode }) {
   )
 }
 
-// ─── Passkey Screen (primary) ─────────────────────────────────────────────────
+// ─── Passkey Screen (повторный вход на устройстве) ───────────────────────────
 
 function PasskeyScreen({
   onSuccess,
-  onFallbackPin,
-  onFallbackPassword,
+  onTelegram,
 }: {
   onSuccess: (token: string, user: any) => void
-  onFallbackPin: () => void
-  onFallbackPassword: () => void
+  onTelegram: () => void
 }) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -261,30 +248,21 @@ function PasskeyScreen({
         <div style={{ flex: 1, height: 1, background: 'rgba(255,255,255,0.07)' }} />
       </div>
 
-      {/* PIN alternative */}
+      {/* Первый вход на этом устройстве — через Telegram */}
       <button
-        onClick={onFallbackPin}
+        onClick={onTelegram}
         style={{
           width: '100%', padding: '13px', borderRadius: 14,
           border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.04)',
           color: 'rgba(255,255,255,0.75)', fontWeight: 600, fontSize: 14, cursor: 'pointer',
-          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, marginBottom: 10,
+          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
           transition: 'all 0.2s',
         }}
         onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.08)' }}
         onMouseLeave={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.04)' }}
       >
-        <Icon name="dialpad" size={18} />
-        Войти с PIN-кодом
-      </button>
-
-      <button
-        onClick={onFallbackPassword}
-        style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(255,255,255,0.3)', fontSize: 13, padding: '6px', transition: 'color 0.2s' }}
-        onMouseEnter={e => e.currentTarget.style.color = 'rgba(255,255,255,0.55)'}
-        onMouseLeave={e => e.currentTarget.style.color = 'rgba(255,255,255,0.3)'}
-      >
-        Войти по логину и паролю
+        <Icon name="send" size={18} />
+        Войти через Telegram
       </button>
 
       <style>{`
@@ -293,211 +271,6 @@ function PasskeyScreen({
           50% { box-shadow: 0 0 40px rgba(139,92,246,0.5); }
         }
       `}</style>
-    </div>
-  )
-}
-
-// ─── PIN Screen ───────────────────────────────────────────────────────────────
-
-function PinScreen({
-  onSuccess,
-  onFallbackPassword,
-  onPasskey,
-}: {
-  onSuccess: (token: string, user: any) => void
-  onFallbackPassword: () => void
-  onPasskey?: () => void
-}) {
-  const [pin, setPin] = useState('')
-  const [error, setError] = useState(false)
-  const [loading, setLoading] = useState(false)
-  const [errMsg, setErrMsg] = useState('')
-
-  async function handlePin(fullPin: string) {
-    setLoading(true)
-    try {
-      const res = await api.post<{ token: string; user: any }>('/auth/login/pin', { pin: fullPin })
-      onSuccess(res.token, res.user)
-    } catch {
-      setError(true)
-      setPin('')
-      setErrMsg('Неверный PIN')
-      setTimeout(() => { setError(false); setErrMsg('') }, 1500)
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  return (
-    <div>
-      <p style={{ fontSize: 17, fontWeight: 700, color: 'rgba(255,255,255,0.9)', margin: '0 0 6px', textAlign: 'center' }}>
-        Вход с PIN-кодом
-      </p>
-      <p style={{ fontSize: 13, color: 'rgba(255,255,255,0.4)', margin: '0 0 28px', textAlign: 'center' }}>
-        Введите ваш 4-значный PIN
-      </p>
-
-      <PinDots value={pin} error={error} />
-      <PinPad value={pin} loading={loading} onChange={(next) => { setPin(next); if (next.length === 4) setTimeout(() => handlePin(next), 80) }} />
-
-      {errMsg && <p style={{ color: '#FCA5A5', textAlign: 'center', fontSize: 13, margin: '12px 0 8px' }}>{errMsg}</p>}
-
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, marginTop: 8 }}>
-        {onPasskey && (
-          <button onClick={onPasskey} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(255,255,255,0.45)', fontSize: 13, display: 'flex', alignItems: 'center', gap: 6, padding: '4px' }}
-            onMouseEnter={e => e.currentTarget.style.color = 'rgba(255,255,255,0.7)'}
-            onMouseLeave={e => e.currentTarget.style.color = 'rgba(255,255,255,0.45)'}
-          >
-            <PasskeyIcon size={15} color="currentColor" /> Войти с Passkey
-          </button>
-        )}
-        <button onClick={onFallbackPassword} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(255,255,255,0.25)', fontSize: 12, padding: '4px' }}
-          onMouseEnter={e => e.currentTarget.style.color = 'rgba(255,255,255,0.5)'}
-          onMouseLeave={e => e.currentTarget.style.color = 'rgba(255,255,255,0.25)'}
-        >
-          Войти по логину и паролю
-        </button>
-      </div>
-
-      <style>{`
-        @keyframes pin-shake {
-          0%, 100% { transform: translateX(0); }
-          20% { transform: translateX(-8px); }
-          40% { transform: translateX(8px); }
-          60% { transform: translateX(-5px); }
-          80% { transform: translateX(5px); }
-        }
-      `}</style>
-    </div>
-  )
-}
-
-// ─── Password Screen ──────────────────────────────────────────────────────────
-
-function PasswordScreen({
-  onSuccess,
-  onPasskey,
-  onPin,
-}: {
-  onSuccess: (token: string, user: any, opts?: { needsPinSetup?: boolean; hasPasskey?: boolean }) => void
-  onPasskey?: () => void
-  onPin: () => void
-}) {
-  const [nickname, setNickname] = useState('')
-  const [password, setPassword] = useState('')
-  const [showPass, setShowPass] = useState(false)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
-  const nickRef = useRef<HTMLInputElement>(null)
-
-  useEffect(() => { nickRef.current?.focus() }, [])
-
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
-    if (!nickname || !password) return
-    setLoading(true)
-    setError('')
-    try {
-      const res = await api.post<{ token: string; user: any; needsPinSetup?: boolean; hasPasskey?: boolean }>(
-        '/auth/login/password', { nickname, password }
-      )
-      onSuccess(res.token, res.user, { needsPinSetup: res.needsPinSetup, hasPasskey: res.hasPasskey })
-    } catch (e) {
-      setError(e instanceof ApiError ? e.message : 'Неверный никнейм или пароль')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  return (
-    <div>
-      <p style={{ fontSize: 17, fontWeight: 700, color: 'rgba(255,255,255,0.9)', margin: '0 0 6px', textAlign: 'center' }}>
-        Вход по паролю
-      </p>
-      <p style={{ fontSize: 13, color: 'rgba(255,255,255,0.4)', margin: '0 0 24px', textAlign: 'center' }}>
-        Введите никнейм и пароль
-      </p>
-
-      <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-        <Field label="Никнейм" icon="person">
-          <input ref={nickRef} type="text" value={nickname} onChange={e => setNickname(e.target.value)}
-            autoComplete="username" placeholder="Ваш никнейм"
-            style={fieldInputStyle}
-            onFocus={e => e.target.style.borderColor = 'rgba(139,92,246,0.6)'}
-            onBlur={e => e.target.style.borderColor = 'rgba(255,255,255,0.1)'}
-          />
-        </Field>
-
-        <Field label="Пароль" icon="lock">
-          <input type={showPass ? 'text' : 'password'} value={password} onChange={e => setPassword(e.target.value)}
-            autoComplete="current-password" placeholder="Ваш пароль"
-            style={{ ...fieldInputStyle, paddingRight: 48 }}
-            onFocus={e => e.target.style.borderColor = 'rgba(139,92,246,0.6)'}
-            onBlur={e => e.target.style.borderColor = 'rgba(255,255,255,0.1)'}
-          />
-          <button type="button" onClick={() => setShowPass(v => !v)}
-            style={{ position: 'absolute', right: 14, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(255,255,255,0.3)', padding: 4 }}
-          >
-            <Icon name={showPass ? 'visibility_off' : 'visibility'} size={18} />
-          </button>
-        </Field>
-
-        {error && (
-          <div style={{ padding: '10px 14px', borderRadius: 12, background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.25)', color: '#FCA5A5', fontSize: 13, display: 'flex', alignItems: 'center', gap: 8 }}>
-            <Icon name="error" size={16} />{error}
-          </div>
-        )}
-
-        <button type="submit" disabled={loading || !nickname || !password}
-          style={{
-            marginTop: 4, padding: '14px', borderRadius: 14, border: 'none', cursor: 'pointer',
-            background: (loading || !nickname || !password) ? 'rgba(255,255,255,0.07)' : 'linear-gradient(135deg, #8B5CF6, #4cd7f6)',
-            color: (loading || !nickname || !password) ? 'rgba(255,255,255,0.3)' : '#fff',
-            fontWeight: 700, fontSize: 15, transition: 'all 0.2s',
-            boxShadow: (loading || !nickname || !password) ? 'none' : '0 4px 20px rgba(139,92,246,0.35)',
-          }}
-        >
-          {loading ? 'Вход...' : 'Войти'}
-        </button>
-      </form>
-
-      <div style={{ display: 'flex', justifyContent: 'center', gap: 20, marginTop: 16 }}>
-        {onPasskey && (
-          <button onClick={onPasskey} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(255,255,255,0.4)', fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}
-            onMouseEnter={e => e.currentTarget.style.color = 'rgba(255,255,255,0.7)'}
-            onMouseLeave={e => e.currentTarget.style.color = 'rgba(255,255,255,0.4)'}
-          >
-            <PasskeyIcon size={14} color="currentColor" /> Passkey
-          </button>
-        )}
-        <button onClick={onPin} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(255,255,255,0.4)', fontSize: 13 }}
-          onMouseEnter={e => e.currentTarget.style.color = 'rgba(255,255,255,0.7)'}
-          onMouseLeave={e => e.currentTarget.style.color = 'rgba(255,255,255,0.4)'}
-        >
-          PIN-код
-        </button>
-      </div>
-    </div>
-  )
-}
-
-const fieldInputStyle: React.CSSProperties = {
-  width: '100%', paddingLeft: 44, paddingRight: 16, paddingTop: 13, paddingBottom: 13,
-  borderRadius: 14, border: '1px solid rgba(255,255,255,0.1)',
-  background: 'rgba(255,255,255,0.05)', color: 'rgba(255,255,255,0.9)',
-  fontSize: 15, outline: 'none', transition: 'border-color 0.2s',
-}
-
-function Field({ label, icon, children }: { label: string; icon: string; children: React.ReactNode }) {
-  return (
-    <div>
-      <label style={{ fontSize: 11, fontWeight: 600, color: 'rgba(167,139,250,0.8)', letterSpacing: '0.06em', textTransform: 'uppercase', display: 'block', marginBottom: 6 }}>
-        {label}
-      </label>
-      <div style={{ position: 'relative' }}>
-        <Icon name={icon} size={18} color="rgba(255,255,255,0.3)" style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }} />
-        {children}
-      </div>
     </div>
   )
 }

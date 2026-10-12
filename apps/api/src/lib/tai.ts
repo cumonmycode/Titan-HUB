@@ -37,6 +37,11 @@ const HARSH_LINE: Record<string, string> = {
   savage: 'Интенсивность: МАКСИМУМ — жёстко и беспощадно, унижай смешно (строго в рамках ниже).',
 }
 
+/** Стиль и жёсткость чата одной строкой — и для шуток в игровом чате, и для рабочего. */
+export function taiStyleLine(preset: string, harshness: string): string {
+  return `${PRESET_LINE[preset] ?? PRESET_LINE['roast']!} ${HARSH_LINE[harshness] ?? HARSH_LINE['medium']!}`
+}
+
 function buildPrompt(preset: string, harshness: string, profanity: boolean): string {
   return [
     'Ты — Tai, участник Telegram-чата игрового клуба «Титан» (спортивная мафия). Веди',
