@@ -271,10 +271,14 @@ export async function searchLibrary(db: Database, text: string, opts: { limit?: 
   }))
   const perAlbum = opts.perAlbum ?? 3
   const byAlbum = new Map<string, number>()
+  // Серии почти одинаковых кадров описаны одинаково — Tai показываем по одному из серии.
+  const seen = new Set<string>()
   const out: LibraryPhoto[] = []
   for (const r of found) {
     const album = String(r['folder_id'] ?? '')
-    if ((byAlbum.get(album) ?? 0) >= perAlbum) continue
+    const key = `${album}|${String(r['description'] ?? '')}`
+    if ((byAlbum.get(album) ?? 0) >= perAlbum || seen.has(key)) continue
+    seen.add(key)
     byAlbum.set(album, (byAlbum.get(album) ?? 0) + 1)
     out.push(mapPhoto(r))
     if (out.length >= limit) break
