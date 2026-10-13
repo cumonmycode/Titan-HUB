@@ -81,14 +81,16 @@ export async function collectHistory(db: Database): Promise<Record<string, numbe
 // ─── 2. Разбор истории ───────────────────────────────────────────────────────
 
 const NotesSchema = z.object({
-  voice: z.string().max(1500),
-  rubrics: z.array(z.string().max(300)).max(15),
-  events: z.array(z.string().max(300)).max(30),
-  people: z.array(z.string().max(200)).max(20),
-  facts: z.array(z.string().max(300)).max(25),
-  hits: z.array(z.string().max(300)).max(10),
-  misses: z.array(z.string().max(300)).max(10),
+  voice: z.string().max(1200),
+  rubrics: z.array(z.string().max(240)).max(12),
+  events: z.array(z.string().max(240)).max(20),
+  people: z.array(z.string().max(200)).max(12),
+  facts: z.array(z.string().max(240)).max(15),
+  hits: z.array(z.string().max(240)).max(6),
+  misses: z.array(z.string().max(240)).max(6),
 })
+/** Заметки по части ленты — с запасом: на большой части ответ упирался в лимит и обрывался. */
+const NOTES_MAX_TOKENS = 9000
 type Notes = z.infer<typeof NotesSchema>
 
 const SummarySchema = z.object({ text: z.string().min(200).max(6000), facts: z.array(z.string().max(300)).max(30) })
@@ -132,6 +134,7 @@ const NOTES_TASK = [
   'people — люди и лица клуба, которых упоминают публично (ники игроков, ведущие, партнёры) и в какой роли;',
   'facts — факты о клубе (услуги, адреса, мерч, партнёры, традиции, цифры);',
   'hits — что набрало больше всего просмотров и реакций и почему (с цифрами); misses — что прошло слабо.',
+  'Коротко: каждый пункт — одна фраза до 150 знаков; событий — до 20 самых заметных, фактов — до 15.',
   'Ответ — JSON: {"voice": "...", "rubrics": [...], "events": [...], "people": [...], "facts": [...], "hits": [...], "misses": [...]}',
 ].join('\n')
 
@@ -150,7 +153,7 @@ export async function studySocials(db: Database): Promise<void> {
     for (let i = 0; i < parts.length; i += 1) {
       const from = 30 + Math.round((55 * i) / parts.length)
       await setDocProgress(db, 'socials', step(`Читаю посты: часть ${i + 1} из ${parts.length}`, from, from + Math.round(55 / parts.length), 25))
-      notes.push(await chatJson(db, { system: STUDY_SYSTEM, note: 'изучение соцсетей', maxTokens: 4000, temperature: 0.3, schema: NotesSchema, user: `${NOTES_TASK}\n\nПубликации:\n${parts[i]}` }))
+      notes.push(await chatJson(db, { system: STUDY_SYSTEM, note: 'изучение соцсетей', maxTokens: NOTES_MAX_TOKENS, temperature: 0.3, schema: NotesSchema, user: `${NOTES_TASK}\n\nПубликации:\n${parts[i]}` }))
     }
     await setDocProgress(db, 'socials', step('Свожу выводы', 85, 99, 25))
     const summary = await chatJson(db, {
@@ -220,7 +223,8 @@ export async function composePortrait(db: Database): Promise<void> {
         socialFacts.length ? `Факты из прошлых постов клуба:\n${socialFacts.map((f) => `- ${f}`).join('\n')}` : '',
         socials.aiText ? `Памятка по соцсетям (для контекста):\n${socials.aiText.slice(0, 3000)}` : '',
         '',
-        'Напиши портрет клуба по разделам (заголовок — отдельной строкой): «Кто мы» (город, регион, чем занимаемся, сколько лет), «Форматы и расписание», «История и традиции» (турниры клуба, события, выезды), «Достижения и сообщество» (GoMafia, рейтинг, сильные игроки по никам), «Лица клуба», «Фишки и словарь клуба», «Как о нас говорить» (что подчёркивать).',
+        'Напиши портрет клуба по разделам (заголовок — отдельной строкой): «Кто мы» (город, регион, чем занимаемся, сколько лет), «Форматы и расписание», «История и традиции» (турниры клуба, события, выезды), «Достижения и сообщество» (GoMafia, рейтинг, сильные игроки по никам), «Лица клуба» (только люди: ведущие, организаторы, сильные игроки — не боты и не сервисы), «Фишки и словарь клуба», «Как о нас говорить» (что подчёркивать).',
+        'Без оценок и преувеличений, которых нет в источниках: никаких «крупнейший центр», «мировой», «лучший» — только то, что сказано. Место в рейтинге GoMafia — как есть: «N-е место в рейтинге клубов GoMafia». Тарифы входа (Новичок, Гость, Резидент…) — это цены, а не блюда бара.',
         'Ответ — JSON: {"text": "портрет, 1500–4500 знаков"}',
       ].filter(Boolean).join('\n\n'),
     })

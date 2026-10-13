@@ -111,6 +111,8 @@ async function bar(db: Database): Promise<string[]> {
     FROM check_items ci
     JOIN checks c ON c.id = ci.check_id AND c.status = 'closed' AND c.closed_at > now() - interval '30 days'
     JOIN inventory i ON i.id = ci.item_id
+    -- Входы на вечер продаются позициями чека — это тарифы, а не бар.
+    WHERE i.name NOT IN (SELECT name FROM tariffs)
     GROUP BY i.name ORDER BY qty DESC LIMIT 8
   `).catch(() => []))
   return top.length ? [`Популярное в баре за месяц: ${top.map((t) => t['name']).join(', ')}.`] : []

@@ -172,6 +172,7 @@ export async function chatJson<T>(db: Database, opts: ChatJsonOpts<T>): Promise<
     if (!content.trim() && data.choices?.[0]?.finish_reason === 'length') {
       throw new SmmError('Ответ не уместился в лимит модели — попробуйте ещё раз', 502)
     }
+    const cut = data.choices?.[0]?.finish_reason === 'length'
     try {
       const parsed = opts.schema.safeParse(extractJson(content))
       if (parsed.success) return parsed.data
@@ -179,7 +180,9 @@ export async function chatJson<T>(db: Database, opts: ChatJsonOpts<T>): Promise<
     } catch (error) {
       lastError = error instanceof Error ? error.message : 'неверный JSON'
     }
-    messages.push({ role: 'assistant', content }, { role: 'user', content: `Ответ не прошёл проверку (${lastError}). Верни исправленный JSON целиком, без пояснений.` })
+    // Оборвался по лимиту — просить «исправить» бесполезно, нужно короче (оборванный текст не возвращаем).
+    if (cut) messages.push({ role: 'user', content: 'Ответ оборвался: слишком длинно для лимита. Верни тот же JSON заметно короче — меньше пунктов, короче формулировки.' })
+    else messages.push({ role: 'assistant', content }, { role: 'user', content: `Ответ не прошёл проверку (${lastError}). Верни исправленный JSON целиком, без пояснений.` })
   }
   console.error('[smm] модель вернула неверный JSON:', lastError)
   throw new SmmError('Tai ответил не по форме — попробуйте ещё раз', 502)
