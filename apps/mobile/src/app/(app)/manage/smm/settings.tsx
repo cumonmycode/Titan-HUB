@@ -11,7 +11,7 @@ import { ApiError } from '@/lib/api';
 import { chooseAction, promptText } from '@/lib/dialog';
 import { haptic } from '@/lib/haptics';
 import { useClubKey } from '@/lib/queries';
-import { PLATFORM_LOOK, pickMedia, saveSettings, settingsRequest, uploadAsset, useSmmSettings, type SmmAccount, type SmmSettings, type SmmSettingsPayload } from '@/lib/smm-api';
+import { PLATFORM_LOOK, pickMedia, saveSettings, settingsRequest, uploadAsset, useSmmInstagram, useSmmSettings, type SmmAccount, type SmmSettings, type SmmSettingsPayload } from '@/lib/smm-api';
 import { queryClient } from '@/lib/query';
 import { colors, space } from '@/lib/theme';
 
@@ -29,6 +29,7 @@ export default function SmmSettingsScreen() {
   const router = useRouter();
   const club = useClubKey();
   const query = useSmmSettings();
+  const instagram = useSmmInstagram();
   const [busy, setBusy] = useState(false);
   const data = query.data;
 
@@ -122,7 +123,7 @@ export default function SmmSettingsScreen() {
       <Stack.Title>Настройки СММ</Stack.Title>
       <FormHost>
         <Form modifiers={[refreshable(async () => void (await query.refetch()))]}>
-          <Section title="Площадки" footer={<Text>В канал Telegram Tai публикует сам. Instagram и сторис выкладывает человек — Tai присылает файлы и текст и ждёт ссылку. Цифры собираются раз в день.</Text>}>
+          <Section title="Площадки" footer={<Text>В канал Telegram Tai публикует сам. В Instagram — тоже сам, если он подключён по API; иначе Tai присылает файлы и текст человеку и ждёт ссылку. Цифры собираются раз в день.</Text>}>
             {data.accounts.map((a) => {
               const look = PLATFORM_LOOK[a.platform];
               const status = a.platform === 'telegram' ? (a.canPublish ? 'Tai публикует' : 'Нет прав на публикацию') : a.followers != null ? `${a.followers} подписчиков` : (a.handle ? `@${a.handle}` : (a.url ?? ''));
@@ -138,6 +139,13 @@ export default function SmmSettingsScreen() {
                 />
               );
             })}
+            <LinkRow
+              icon="camera.fill"
+              color={instagram.data?.connected ? PLATFORM_LOOK.instagram.color : '#8E8E93'}
+              title="Instagram по API"
+              subtitle={instagram.data?.state ? `@${instagram.data.state.username} · Tai выкладывает сам` : 'Подключить официально — Tai будет выкладывать сам'}
+              onPress={() => router.push('/manage/smm/instagram')}
+            />
             {!data.accounts.some((a) => a.platform === 'telegram') ? <ActionRow title="Подключить канал Telegram" icon="paperplane" disabled={busy} onPress={connectChannel} /> : null}
             {!data.accounts.some((a) => a.platform === 'instagram') ? <ActionRow title="Добавить Instagram" icon="camera" disabled={busy} onPress={() => addAccount('instagram')} /> : null}
             <ActionRow title="Добавить другую площадку" icon="plus" disabled={busy} onPress={() => chooseAction('Какая площадка?', undefined, [

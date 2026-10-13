@@ -8,7 +8,8 @@
  */
 import { sql, type Database } from '@titan/database'
 import { z } from 'zod'
-import { TG_API } from '../../lib/telegram.js'
+import { igInsights, igProfile, igRecentMedia, instagramState } from './instagram.js'
+import { webFetch } from './relay.js'
 import { chatJson } from './ai.js'
 import { mskDate } from './context.js'
 import { listAccounts, listPosts, loadPost, rows, updatePost, type AccountRow } from './db.js'
@@ -16,17 +17,6 @@ import { channelMembers, plainText } from './telegram.js'
 import type { SmmPost, SmmPostStats } from './types.js'
 
 const IG_APP_ID = '936619743392459'
-const BROWSER_UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0 Safari/537.36'
-
-/**
- * Запрос к публичной странице через шлюз Telegram (Cloudflare Worker пускает только
- * t.me и Instagram). Без шлюза (локально) — напрямую.
- */
-async function webFetch(url: string, headers: Record<string, string> = {}): Promise<Response> {
-  const viaRelay = /^https:\/\/[^/]+\/[A-Za-z0-9]{16,}$/.test(TG_API)
-  const target = viaRelay ? `${TG_API}/web/${url.replace(/^https:\/\//, '')}` : url
-  return fetch(target, { headers: { 'user-agent': BROWSER_UA, ...headers }, signal: AbortSignal.timeout(20_000) })
-}
 
 /** «1.2K» → 1200, «3,4M» → 3 400 000. */
 export function parseCount(text: string): number | null {
@@ -132,7 +122,7 @@ type IgUser = { edge_followed_by?: { count?: number }; edge_owner_to_timeline_me
 
 async function fetchIgUser(handle: string): Promise<IgUser | null> {
   try {
-    const res = await webFetch(`https://i.instagram.com/api/v1/users/web_profile_info/?username=${encodeURIComponent(handle)}`, { 'x-ig-app-id': IG_APP_ID })
+    const res = await webFetch(`https://i.instagram.com/api/v1/users/web_profile_info/?username=${encodeURIComponent(handle)}`, { headers: { 'x-ig-app-id': IG_APP_ID } })
     if (!res.ok) return null
     return ((await res.json()) as { data?: { user?: IgUser } }).data?.user ?? null
   } catch {
@@ -140,7 +130,48 @@ async function fetchIgUser(handle: string): Promise<IgUser | null> {
   }
 }
 
+const shortcode = (url: string | null | undefined) => (url ? /instagram\.com\/(?:p|reel|reels|tv)\/([\w-]+)/.exec(url)?.[1] ?? null : null)
+
+/** Официальный путь: Instagram API — подписчики, публикации со ссылками и метриками. */
+async function collectInstagramApi(db: Database, account: AccountRow): Promise<void> {
+  const profile = await igProfile(db)
+  const media = await igRecentMedia(db, 25)
+  const recent = media.slice(0, 9)
+  const avg = recent.length ? Math.round(recent.reduce((s, m) => s + (m.like_count ?? 0) + (m.comments_count ?? 0), 0) / recent.length) : null
+  const followers = profile.followers_count ?? null
+  await saveSnapshot(db, account.id, {
+    followers,
+    posts: profile.media_count ?? null,
+    views: avg,
+    engagement: followers && avg != null ? Math.round((avg / followers) * 1000) / 10 : null,
+    source: 'auto',
+  })
+  const posts = await listPosts(db, { from: new Date(Date.now() - 45 * 86_400_000).toISOString(), status: ['approved', 'published'] })
+  for (const post of posts.filter((p) => p.platform === 'instagram' && p.format !== 'story')) {
+    const code = shortcode(post.publishedUrl)
+    const head = norm(post.body)
+    const since = (post.handoffAt ? Date.parse(post.handoffAt) : Date.parse(post.publishAt ?? '')) - 3600_000
+    const node = code
+      ? media.find((m) => shortcode(m.permalink) === code)
+      : post.status === 'approved' && post.handoffAt
+        ? media.find((m) => Date.parse(m.timestamp ?? '') >= since && head.length >= 12 && norm(m.caption ?? '').startsWith(head.slice(0, 30)))
+        : undefined
+    if (!node) continue
+    const insights = await igInsights(db, node)
+    const stats: SmmPostStats = { ...post.stats, likes: node.like_count ?? post.stats.likes, comments: node.comments_count ?? post.stats.comments, ...insights, source: 'auto' }
+    await updatePost(db, post.id, {
+      stats,
+      statsAt: new Date().toISOString(),
+      ...(post.status === 'approved' ? { status: 'published', publishedUrl: node.permalink ?? null, publishedAt: node.timestamp ? new Date(node.timestamp).toISOString() : new Date().toISOString() } : {}),
+    })
+  }
+}
+
 async function collectInstagram(db: Database, account: AccountRow): Promise<void> {
+  if (await instagramState(db)) {
+    await collectInstagramApi(db, account)
+    return
+  }
   if (!account.handle) {
     await markError(db, account.id, 'Не указан @аккаунт Instagram')
     return

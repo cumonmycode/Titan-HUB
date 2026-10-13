@@ -13,8 +13,8 @@ import { applyScreenshot } from './stats.js'
 import {
   approvers, awaitedLinkPost, awaitedRemarkPost, awaitedStats, sendReviewTo, setAwaitedLink, setAwaitedRemark, setAwaitedStats, whenText,
 } from './telegram.js'
-import { SmmError, autoPublishes } from './types.js'
-import { approvePost, markPublished, skipPost, type SmmEnv } from './workflow.js'
+import { SmmError } from './types.js'
+import { approvePost, canAutoPublish, markPublished, skipPost, type SmmEnv } from './workflow.js'
 import { reviseInBackground } from './writer.js'
 
 const UUID_RE = /^[0-9a-f-]{36}$/i
@@ -56,7 +56,7 @@ export async function onSmmCallback(club: TgClub, cq: TgCallbackQuery, action: s
       case 'a': {
         const approved = await approvePost(envOf(club), postId, { id: person.profile!.id, name })
         await club.bot.answerCallback(cq.id, 'Одобрено')
-        const next = autoPublishes(approved) ? `опубликую сам ${whenText(approved.publishAt)}` : `${whenText(approved.publishAt)} пришлю файлы и текст тому, кто выкладывает`
+        const next = (await canAutoPublish(club.db, approved)) ?`опубликую сам ${whenText(approved.publishAt)}` : `${whenText(approved.publishAt)} пришлю файлы и текст тому, кто выкладывает`
         await closeButtons(`✅ «${escapeHtml(approved.topic)}» одобрено — ${next}.`)
         return
       }

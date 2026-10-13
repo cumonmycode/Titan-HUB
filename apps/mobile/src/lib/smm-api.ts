@@ -65,7 +65,12 @@ export type SmmPost = {
   error: string | null;
   media: SmmMedia[];
   updatedAt: string;
+  /** Выложит ли Tai сам (Telegram; Instagram — если подключён API и визуал на месте). */
+  autoPublish?: boolean;
 };
+
+export type SmmInstagramState = { userId: string; username: string; name: string | null; accountType: string | null; tokenSetAt: string; expiresAt: string; error: string | null };
+export type SmmInstagram = { connected: boolean; state: SmmInstagramState | null };
 
 export type SmmComment = { id: number; authorName: string | null; role: 'staff' | 'tai'; text: string; createdAt: string };
 export type SmmPillar = { key: string; title: string; share: number; about: string };
@@ -199,8 +204,9 @@ export function statusLook(post: Pick<SmmPost, 'status' | 'platform' | 'format' 
   }
 }
 
-/** Telegram-посты Tai публикует сам; остальное выкладывает человек. */
-export const autoPublishes = (p: Pick<SmmPost, 'platform' | 'format'>) => p.platform === 'telegram' && (p.format === 'post' || p.format === 'carousel');
+/** Выложит ли Tai сам: решает сервер (Instagram — по подключению API); старый ответ — только Telegram-посты. */
+export const autoPublishes = (p: Pick<SmmPost, 'platform' | 'format'> & { autoPublish?: boolean }) =>
+  p.autoPublish ?? (p.platform === 'telegram' && (p.format === 'post' || p.format === 'carousel'));
 
 const MSK_MS = 3 * 3600_000;
 const WEEKDAYS = ['вс', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб'];
@@ -330,6 +336,19 @@ export function useSmmAnalytics() {
 export function useSmmMemory() {
   const club = useClubKey();
   return useQuery({ queryKey: [club, 'smm', 'memory'], queryFn: () => api.get<{ memory: SmmMemory[] }>('/smm/memory') });
+}
+
+export function useSmmInstagram() {
+  const club = useClubKey();
+  return useQuery({ queryKey: [club, 'smm', 'instagram'], queryFn: () => api.get<SmmInstagram>('/smm/instagram') });
+}
+
+/** Подключить Instagram ключом из кабинета Meta (null — отключить). */
+export async function setInstagramToken(club: string, token: string | null): Promise<SmmInstagram> {
+  const data = token ? await api.put<SmmInstagram>('/smm/instagram', { token }) : await api.delete<SmmInstagram>('/smm/instagram');
+  queryClient.setQueryData([club, 'smm', 'instagram'], data);
+  void queryClient.invalidateQueries({ queryKey: [club, 'smm'] });
+  return data;
 }
 
 export function useSmmSettings(enabled = true) {

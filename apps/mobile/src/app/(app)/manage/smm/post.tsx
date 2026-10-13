@@ -470,9 +470,11 @@ function NextStep({ post, canApprove, acting, working, onAction }: { post: SmmPo
         );
       }
       if (!post.handoffAt) {
+        const needsVideo = post.format === 'reel' && !post.media.some((m) => m.kind === 'video' && m.status === 'done');
         return (
           <View style={styles.next}>
             <Text style={[type.subhead, styles.label, styles.center]}>{`✓ Одобрено. ${when} Tai пришлёт файлы и текст${post.assigneeName ? ` ${post.assigneeName}` : ''} в Telegram`}</Text>
+            {needsVideo ? <Text style={[type.footnote, styles.secondary, styles.center]}>Загрузите снятое видео в публикацию — если Instagram подключён по API, Tai выложит рилс сам.</Text> : null}
             <BigButton tone="plain" title="Передать сейчас" icon="tray.and.arrow.up" busy={acting === 'publish'} onPress={() => void onAction('publish', undefined, 'Не передалось')} />
           </View>
         );

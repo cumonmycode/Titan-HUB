@@ -224,7 +224,7 @@ export const reviewButtons = (postId: string): InlineButton[][] => [
 ]
 
 function reviewHeader(post: SmmPost, intro: string): string {
-  const action = autoPublishes(post) ? 'Tai опубликует сам' : 'выложит человек — Tai пришлёт файлы'
+  const action = (post.autoPublish ?? autoPublishes(post)) ? 'Tai опубликует сам' : 'выложит человек — Tai пришлёт файлы'
   return `${intro}\n<b>${escapeHtml(post.topic)}</b>\n${kindLine(post)} · ${whenText(post.publishAt)} · ${action}`
 }
 

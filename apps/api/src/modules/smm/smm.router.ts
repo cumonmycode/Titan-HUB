@@ -28,7 +28,8 @@ import { getSmmSettings, saveSmmSettings, SettingsSchema } from './settings.js'
 import { accountHistory, applyScreenshot, collectStats } from './stats.js'
 import { approvers, checkChannel } from './telegram.js'
 import { ACCOUNT_PLATFORMS, FORMATS, MEMORY_KINDS, PLATFORMS, SmmError, type SmmPost } from './types.js'
-import { approvePost, markPublished, publishNow, restorePost, skipPost, type SmmEnv } from './workflow.js'
+import { approvePost, markPublished, publishNow, restorePost, skipPost, withAuto, type SmmEnv } from './workflow.js'
+import { connectInstagram, disconnectInstagram, instagramState } from './instagram.js'
 import { reviseInBackground, suggestIdeas, writePostInBackground } from './writer.js'
 
 export const smmRouter = new Hono<AppEnv>()
@@ -53,7 +54,12 @@ async function postOr404(c: Context<AppEnv>, allMedia = false): Promise<SmmPost>
   return post
 }
 
-const fresh = async (c: Context<AppEnv>, id: string) => c.json({ post: await loadPost(c.var.db, id, true) })
+/** Пост с отметкой «выложит сам» — одна форма для всех ответов. */
+async function enriched(c: Context<AppEnv>, post: SmmPost | null): Promise<SmmPost | null> {
+  return post ? ((await withAuto(c.var.db, [post]))[0] ?? post) : null
+}
+
+const fresh = async (c: Context<AppEnv>, id: string) => c.json({ post: await enriched(c, await loadPost(c.var.db, id, true)) })
 
 // ─── Справочник ──────────────────────────────────────────────────────────────
 
@@ -96,7 +102,7 @@ smmRouter.get('/overview', async (c) => {
     return c.json({
       month,
       nextMonth,
-      upcoming: open,
+      upcoming: await withAuto(db, open),
       counts: counts ?? { review: 0, awaitingLink: 0, failed: 0, publishedWeek: 0 },
       plan,
       nextPlan: await loadPlan(db, nextMonth),
@@ -124,7 +130,7 @@ smmRouter.get('/posts', async (c) => {
   const to = c.req.query('to')
   const valid = (v?: string) => !v || !Number.isNaN(Date.parse(v))
   if (!valid(from) || !valid(to)) return c.json({ error: 'Неверный период' }, 400)
-  return c.json({ posts: await listPosts(c.var.db, { from, to }) })
+  return c.json({ posts: await withAuto(c.var.db, await listPosts(c.var.db, { from, to })) })
 })
 
 const NewPostSchema = z.object({
@@ -165,7 +171,7 @@ smmRouter.get('/posts/:id', async (c) => {
   try {
     const post = await postOr404(c, true)
     const people = await approvers(c.var.db)
-    return c.json({ post, comments: await listComments(c.var.db, { postId: post.id }), canApprove: people.some((p) => p.id === c.get('user').sub) })
+    return c.json({ post: await enriched(c, post), comments: await listComments(c.var.db, { postId: post.id }), canApprove: people.some((p) => p.id === c.get('user').sub) })
   } catch (error) {
     return fail(c, error)
   }
@@ -417,7 +423,7 @@ async function planPayload(c: Context<AppEnv>, month: string) {
   const { from, to } = monthRange(month)
   return {
     plan,
-    posts: await listPosts(db, { from, to }),
+    posts: await withAuto(db, await listPosts(db, { from, to })),
     comments: plan ? await listComments(db, { planId: plan.id }) : [],
   }
 }
@@ -675,4 +681,26 @@ smmRouter.delete('/assets/:assetId', ownerOnly, async (c) => {
   if (!UUID.test(id)) return c.json({ error: 'Не найдено' }, 404)
   await c.var.db.execute(sql`DELETE FROM smm_assets WHERE id = ${id}::uuid`)
   return c.json(await settingsPayload(c))
+})
+
+// ─── Instagram API (владелец) ────────────────────────────────────────────────
+
+smmRouter.get('/instagram', async (c) => {
+  const state = await instagramState(c.var.db)
+  return c.json({ connected: !!state, state })
+})
+
+smmRouter.put('/instagram', ownerOnly, zValidator('json', z.object({ token: z.string().trim().min(20).max(1000) })), async (c) => {
+  try {
+    const state = await connectInstagram(c.var.db, c.req.valid('json').token, c.get('user').sub)
+    await collectStats(c.var.db).catch(() => undefined)
+    return c.json({ connected: true, state })
+  } catch (error) {
+    return fail(c, error)
+  }
+})
+
+smmRouter.delete('/instagram', ownerOnly, async (c) => {
+  await disconnectInstagram(c.var.db)
+  return c.json({ connected: false, state: null })
 })

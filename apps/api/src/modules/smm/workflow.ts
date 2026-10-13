@@ -21,6 +21,7 @@ import { generateReport } from './report.js'
 import { getSmmSettings } from './settings.js'
 import { collectStats } from './stats.js'
 import { approvers, personById, publisherFor, publishToChannel, sendHandoff, sendReviewTo, setAwaitedStats, tell, whenText } from './telegram.js'
+import { instagramCanPublish, instagramState, publishToInstagram, refreshInstagramToken } from './instagram.js'
 import { SmmError, autoPublishes, type SmmPost } from './types.js'
 import { writePost } from './writer.js'
 
@@ -44,6 +45,22 @@ async function push(env: SmmEnv, userIds: string[], title: string, body: string,
   }
 }
 
+// ─── Кто выкладывает ─────────────────────────────────────────────────────────
+
+/**
+ * Выложит ли Tai сам: Telegram-пост и карусель — всегда; Instagram — если подключён
+ * API и визуал на месте (рилс — с видео). Иначе — передача человеку.
+ */
+export async function canAutoPublish(db: Database, post: SmmPost): Promise<boolean> {
+  return autoPublishes(post) || (await instagramCanPublish(db, post))
+}
+
+/** Отметить у публикаций, кто выкладывает, — приложению для статуса и кнопок. */
+export async function withAuto(db: Database, posts: SmmPost[]): Promise<SmmPost[]> {
+  const ig = !!(await instagramState(db))
+  return Promise.all(posts.map(async (p) => ({ ...p, autoPublish: autoPublishes(p) || (ig && (await instagramCanPublish(db, p))) })))
+}
+
 // ─── Действия ────────────────────────────────────────────────────────────────
 
 export interface Actor {
@@ -60,7 +77,9 @@ export async function approvePost(env: SmmEnv, postId: string, by: Actor): Promi
   if (!post.body.trim()) throw new SmmError('Сначала Tai должен написать текст', 409)
   await updatePost(env.db, postId, { status: 'approved', approvedBy: by.id, approvedAt: new Date().toISOString(), error: null })
   const approved = (await loadPost(env.db, postId))!
-  if (approved.format === 'reel') await sendFilmingTask(env, approved).catch((error) => console.warn('[smm] задача на съёмку', error))
+  // Рилс без видео — сразу задача на съёмку; снятое уже загружено — снимать нечего.
+  const hasVideo = approved.media.some((m) => m.kind === 'video' && m.status === 'done')
+  if (approved.format === 'reel' && !hasVideo) await sendFilmingTask(env, approved).catch((error) => console.warn('[smm] задача на съёмку', error))
   return approved
 }
 
@@ -95,7 +114,7 @@ export async function publishNow(env: SmmEnv, postId: string): Promise<SmmPost> 
   if (!post) throw new SmmError('Публикация не найдена', 404)
   if (post.status === 'published') throw new SmmError('Уже опубликовано', 409)
   if (!post.body.trim()) throw new SmmError('Нет текста публикации', 409)
-  if (autoPublishes(post)) {
+  if (await canAutoPublish(env.db, post)) {
     // Захват от двойной публикации (кнопка + крон в одну минуту).
     const [claimed] = rows(await env.db.execute(sql`
       UPDATE smm_posts SET status = 'published', published_at = now(), updated_at = now()
@@ -103,8 +122,13 @@ export async function publishNow(env: SmmEnv, postId: string): Promise<SmmPost> 
     `))
     if (!claimed) throw new SmmError('Уже опубликовано', 409)
     try {
-      const { messageId, url } = await publishToChannel(env.db, post)
-      await updatePost(env.db, postId, { tgMessageId: messageId, publishedUrl: url, error: null })
+      if (post.platform === 'instagram') {
+        const { url } = await publishToInstagram(env.db, post)
+        await updatePost(env.db, postId, { publishedUrl: url, error: null })
+      } else {
+        const { messageId, url } = await publishToChannel(env.db, post)
+        await updatePost(env.db, postId, { tgMessageId: messageId, publishedUrl: url, error: null })
+      }
     } catch (error) {
       await updatePost(env.db, postId, { status: 'failed', publishedAt: null, error: error instanceof Error ? error.message.slice(0, 300) : 'Не опубликовалось' })
       throw error
@@ -139,7 +163,9 @@ async function sendFilmingTask(env: SmmEnv, post: SmmPost): Promise<void> {
 const escape = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 
 /** Отправить готовый пост на одобрение: push в HUB и превью с кнопками в Telegram. */
-export async function requestReview(env: SmmEnv, post: SmmPost): Promise<void> {
+export async function requestReview(env: SmmEnv, raw: SmmPost): Promise<void> {
+  const [post] = await withAuto(env.db, [raw])
+  if (!post) return
   const people = await approvers(env.db)
   const autopilot = post.status === 'approved'
   const intro = autopilot ? '🤖 Автопилот: выйдет сам, если не остановишь' : '📝 На одобрение'
@@ -186,7 +212,8 @@ async function resetStale(db: Database): Promise<void> {
 }
 
 async function publishDue(env: SmmEnv, due: SmmPost[]): Promise<void> {
-  for (const post of due.filter(autoPublishes)) {
+  for (const post of due) {
+    if (!(await canAutoPublish(env.db, post))) continue
     const late = Date.now() - Date.parse(post.publishAt!)
     if (late > LATE_LIMIT_MS) {
       await updatePost(env.db, post.id, { status: 'failed', error: 'Время выхода прошло, пока сервер не работал — опубликуйте вручную или перенесите' })
@@ -203,7 +230,8 @@ async function publishDue(env: SmmEnv, due: SmmPost[]): Promise<void> {
 
 async function handoffDue(env: SmmEnv, posts: SmmPost[]): Promise<void> {
   const soon = Date.now() + 15 * 60_000
-  for (const post of posts.filter((p) => !autoPublishes(p) && !p.handoffAt && p.publishAt && Date.parse(p.publishAt) <= soon)) {
+  for (const post of posts.filter((p) => !p.handoffAt && p.publishAt && Date.parse(p.publishAt) <= soon)) {
+    if (await canAutoPublish(env.db, post)) continue
     await handoff(env, post).catch((error) => updatePost(env.db, post.id, { error: error instanceof Error ? error.message : 'не передано' }))
   }
 }
@@ -268,6 +296,7 @@ async function periodic(env: SmmEnv): Promise<void> {
   const marks = await readMarks(env.db)
   if (hour >= 10 && marks.stats !== today) {
     await writeMarks(env.db, { ...marks, stats: today })
+    await refreshInstagramToken(env.db).catch((error) => console.warn('[smm] ключ Instagram', error))
     await collectStats(env.db).catch((error) => console.warn('[smm] статистика', error))
   }
   if (msk.getUTCDay() === 1 && hour >= 11 && marks.report !== today && (await listPosts(env.db, { from: new Date(Date.now() - 8 * 86_400_000).toISOString(), status: ['published'] })).length) {

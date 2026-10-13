@@ -93,6 +93,8 @@ export interface SmmPost {
   media: SmmMedia[]
   createdAt: string
   updatedAt: string
+  /** Выложит ли Tai сам (Telegram, Instagram по API) — считает сервер при выдаче. */
+  autoPublish?: boolean
 }
 
 export interface SmmComment {
