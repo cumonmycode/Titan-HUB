@@ -12,6 +12,7 @@ import { runStaffAlerts } from './modules/notifications/staff-calls.js'
 import { ensureTaiWebhook } from './modules/tg/club.js'
 import { runOutreach } from './modules/tg/outreach.js'
 import { pruneMessages } from './modules/tg/dialog/memory.js'
+import { smmTick } from './modules/smm/workflow.js'
 import { runMigrations, runMigrationsOn } from './migrations/runner.js'
 import { listActiveClubDbNames, buildClubConnString } from './lib/clubResolver.js'
 import { getSharedRedis } from './lib/redis.js'
@@ -255,6 +256,19 @@ function scheduleRequestRemindersCron() {
 }
 
 if (!CRON_DISABLED) scheduleRequestRemindersCron()
+
+// СММ: тик раз в минуту по всем клубам — видео нейросети, публикация в канал в срок,
+// передача Instagram/сторис выкладывающему, напоминания о ссылке, подготовка ближайших
+// постов; раз в день — цифры площадок, по понедельникам — отчёт, 25-го — план. Клубы без
+// СММ пропускаются одним запросом; долгий тик не накладывается сам на себя (workflow.ts).
+function scheduleSmmCron() {
+  setInterval(() => {
+    runForAllClubs('smm', smmTick).catch(console.error)
+  }, 60_000)
+  console.log('📣 SMM cron scheduled (тик раз в минуту)')
+}
+
+if (!CRON_DISABLED) scheduleSmmCron()
 
 // Фискализация 54-ФЗ: тик КАЖДУЮ МИНУТУ по всем клубам. Идемпотентно (один ряд
 // fiscal_receipts на чек), клубы без фискального провайдера пропускаются. НЕ трогает

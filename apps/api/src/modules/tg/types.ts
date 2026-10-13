@@ -30,6 +30,9 @@ export interface TgMessage {
   voice?: TgFile
   audio?: TgFile
   video_note?: TgFile
+  /** Фото — размеры по возрастанию, последний — самый крупный. */
+  photo?: (TgFile & { width?: number; height?: number })[]
+  document?: TgFile & { mime_type?: string; file_name?: string }
   contact?: { phone_number: string; user_id?: number }
   reply_to_message?: TgMessage
   message_thread_id?: number

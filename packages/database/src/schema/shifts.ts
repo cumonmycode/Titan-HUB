@@ -38,7 +38,7 @@ export const shifts = pgTable('shifts', {
   closedAt: timestamp('closed_at', { withTimezone: true }),
 })
 
-// Кто работает на смене (миграция 084): выбирают при открытии, правят до закрытия.
+// Кто работает на смене (миграция 088): выбирают при открытии, правят до закрытия.
 // Зарплату за смену получают только они.
 export const shiftStaff = pgTable('shift_staff', {
   shiftId: uuid('shift_id').notNull().references(() => shifts.id, { onDelete: 'cascade' }),

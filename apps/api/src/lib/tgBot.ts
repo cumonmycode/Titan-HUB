@@ -151,6 +151,16 @@ export class TgBot {
     return { ok: true, messageId: (r.result as { message_id: number }).message_id }
   }
 
+  /**
+   * Вызов с файлами (multipart): фото, видео, альбомы, документы. Результат как есть —
+   * у sendMediaGroup это массив сообщений. Файлы до 50 МБ (предел Bot API).
+   */
+  async upload<T>(method: string, form: FormData, timeoutMs = 120_000): Promise<{ ok: true; result: T } | { ok: false; code: number; error: string }> {
+    const r = await this.raw(method, { form }, timeoutMs)
+    if (!r.ok) return { ok: false, code: r.error_code ?? 0, error: r.description ?? 'error' }
+    return { ok: true, result: r.result as T }
+  }
+
   async forward(chatId: string | number, fromChatId: string | number, messageId: number): Promise<SendResult> {
     const r = await this.raw('forwardMessage', { json: { chat_id: chatId, from_chat_id: fromChatId, message_id: messageId } })
     if (!r.ok) return { ok: false, code: r.error_code ?? 0, error: r.description ?? 'error' }

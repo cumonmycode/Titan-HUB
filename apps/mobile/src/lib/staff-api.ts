@@ -60,6 +60,7 @@ export const PERMISSIONS: { key: string; label: string; hint: string; defaultOn:
   { key: 'staff', label: 'Персонал', hint: 'Видеть команду', defaultOn: false },
   { key: 'salary', label: 'Зарплата', hint: 'Видеть выплаты', defaultOn: false },
   { key: 'about', label: 'О заведении', hint: 'Адрес, часы, контакты', defaultOn: true },
+  { key: 'smm', label: 'СММ и маркетинг', hint: 'Соцсети, план постов', defaultOn: false },
 ];
 
 export const permissionOn = (row: { permissions: Record<string, boolean> | null | undefined }, key: string) =>

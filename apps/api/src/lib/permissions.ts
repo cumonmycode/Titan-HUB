@@ -6,7 +6,7 @@
 export const DEFAULT_PERMISSIONS: Record<string, boolean> = {
   menu: true, inventory: true, supplies: true, clients: true,
   discounts: true, bonus: true, expenses: false, debtors: false,
-  staff: false, salary: false, about: true,
+  staff: false, salary: false, about: true, smm: false,
 }
 
 /** Подписи прав — для понятного текста отказа (как в карточке сотрудника). */
@@ -14,6 +14,7 @@ export const PERMISSION_LABELS: Record<string, string> = {
   menu: 'Меню', inventory: 'Склад', supplies: 'Поставки', clients: 'Клиенты',
   discounts: 'Скидки', bonus: 'Бонусы', debtors: 'Депозиты, долги и сборы',
   expenses: 'Расходы', staff: 'Персонал', salary: 'Зарплата', about: 'О заведении',
+  smm: 'СММ и маркетинг',
 }
 
 export const permissionOn = (permissions: Record<string, boolean> | null | undefined, key: string): boolean =>

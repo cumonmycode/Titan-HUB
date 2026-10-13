@@ -7,7 +7,7 @@
 import Constants from 'expo-constants';
 import * as Device from 'expo-device';
 import * as Notifications from 'expo-notifications';
-import { router } from 'expo-router';
+import { router, type Href } from 'expo-router';
 import { useEffect, useEffectEvent, useRef } from 'react';
 import { Alert, Platform } from 'react-native';
 
@@ -139,10 +139,15 @@ export async function unregisterStaffDevice(): Promise<void> {
   await api.delete('/notifications/devices', { pushToken: push, voipToken: voip }).catch(() => {});
 }
 
-type Target = { kind?: string; type?: string; checkId?: string | null };
+type Target = { kind?: string; type?: string; checkId?: string | null; url?: string | null };
 
 /** Чат кабинки — для сообщений (поверх её чека: «назад» ведёт в чек); счёт — для вызова; без счёта — касса; регистрация — клиенты. */
 function openTarget(t: Target) {
+  // СММ: пост на одобрение, пора выложить, план, отчёт — свой экран раздела.
+  if (t.type === 'smm') {
+    router.push((typeof t.url === 'string' && t.url.startsWith('/manage/smm') ? t.url : '/manage/smm') as Href);
+    return;
+  }
   // Новая регистрация из My Titan — в «Клиенты», там её подтверждают.
   if (t.type === 'client_registration') {
     router.push('/manage/clients');

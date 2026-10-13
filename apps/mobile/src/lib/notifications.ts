@@ -26,6 +26,7 @@ const LOOK: Record<string, { icon: SFSymbol; color: NamedColor }> = {
   event_completed: { icon: 'calendar.badge.checkmark', color: 'indigo' },
   new_client: { icon: 'person.badge.plus', color: 'blue' },
   client_registration: { icon: 'person.crop.circle.badge.questionmark', color: 'purple' },
+  smm: { icon: 'sparkles', color: 'purple' },
   debt_created: { icon: 'wallet.bifold', color: 'red' },
   deposit_topup: { icon: 'wallet.bifold.fill', color: 'green' },
   certificate_used: { icon: 'giftcard.fill', color: 'teal' },

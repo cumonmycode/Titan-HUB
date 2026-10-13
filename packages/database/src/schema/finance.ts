@@ -286,7 +286,7 @@ export const salaryPayments = pgTable('salary_payments', {
   amount: numeric('amount', { precision: 12, scale: 2 }).notNull(),
   paymentMethod: paymentMethodEnum('payment_method').notNull().default('cash'),
   note: text('note'),
-  // Смена, за которую выплата (миграция 084), и сумма по формуле до правки владельцем.
+  // Смена, за которую выплата (миграция 088), и сумма по формуле до правки владельцем.
   shiftId: uuid('shift_id'),
   calculated: numeric('calculated', { precision: 12, scale: 2 }),
   createdBy: uuid('created_by')
@@ -295,7 +295,7 @@ export const salaryPayments = pgTable('salary_payments', {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 })
 
-// Формулы зарплаты (миграция 084). rules — см. apps/api/src/lib/salary.ts (SalaryRules).
+// Формулы зарплаты (миграция 088). rules — см. apps/api/src/lib/salary.ts (SalaryRules).
 export const salarySchemes = pgTable('salary_schemes', {
   id: uuid('id').primaryKey().defaultRandom(),
   name: text('name').notNull(),
