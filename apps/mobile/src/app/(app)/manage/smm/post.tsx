@@ -1,15 +1,16 @@
 import { Image } from 'expo-image';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
-import { useState } from 'react';
+import { useEffect, useReducer, useState } from 'react';
 import { ActivityIndicator, Alert, Linking, Pressable, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 
 import Animated from 'react-native-reanimated';
 
 import { AppRefreshControl } from '@/components/refresh-control';
-import { Appear, Sheen, glide } from '@/components/smm/motion';
+import { Appear, glide } from '@/components/smm/motion';
 import { BigButton, Card, ChipButton, Composer, ErrorBanner, PlatformBadge, ProgressBanner, StatusPill, Thread } from '@/components/smm/parts';
+import { TaiGenerating, TaiRevealImage } from '@/components/tai/generating';
 import { Text } from '@/components/text';
 import { ToolbarMenu, ToolbarMenuAction } from '@/components/toolbar';
 import { ApiError } from '@/lib/api';
@@ -311,14 +312,22 @@ function MediaBlock({ post, disabled, acting, onRun }: { post: SmmPost; disabled
   );
 }
 
+/**
+ * Медиа, которые на глазах у человека были «в работе»: готовая картинка один раз
+ * проступает из-под инея. Открытые позже — сразу обычной картинкой.
+ */
+const thawing = new Set<string>();
+const thawed = new Set<string>();
+
 function MediaItem({ media, width, height }: { media: SmmMedia; width: number; height: number }) {
+  const [, rerender] = useReducer((n: number) => n + 1, 0);
+  useEffect(() => {
+    if (media.status === 'pending') thawing.add(media.id);
+  }, [media.id, media.status]);
+
   if (media.status === 'pending') {
-    return (
-      <View style={[styles.mediaItem, styles.mediaPending, { width, height }]}>
-        <Sheen color="rgba(255,255,255,0.12)" duration={1300} />
-        <Text style={[type.subhead, styles.onDark]}>{media.kind === 'video' ? 'Видео делается — пара минут' : media.source === 'archive' ? 'Беру фото из архива…' : 'Рисую…'}</Text>
-      </View>
-    );
+    const label = media.kind === 'video' ? 'Снимаю видео' : media.source === 'archive' ? 'Беру фото из архива' : 'Рисую картинку';
+    return <TaiGenerating width={width} height={height} label={label} hint={media.kind === 'video' ? 'Пара минут — пришлю уведомление' : undefined} />;
   }
   if (media.kind === 'video') {
     return (
@@ -326,6 +335,20 @@ function MediaItem({ media, width, height }: { media: SmmMedia; width: number; h
         <SymbolView name="play.circle.fill" size={64} tintColor="white" />
         <Text style={[type.subhead, styles.onDark]}>{media.source === 'ai' ? 'Видео нейросети' : 'Ваше видео'}</Text>
       </Pressable>
+    );
+  }
+  if (media.url && thawing.has(media.id) && !thawed.has(media.id)) {
+    return (
+      <TaiRevealImage
+        uri={media.url}
+        width={width}
+        height={height}
+        onDone={() => {
+          thawed.add(media.id);
+          thawing.delete(media.id);
+          rerender();
+        }}
+      />
     );
   }
   return <Image source={{ uri: media.url ?? undefined }} style={[styles.mediaItem, { width, height }]} contentFit="cover" transition={250} recyclingKey={media.id} />;

@@ -95,7 +95,8 @@ function AndroidToolbarMenuAction(_props: MenuActionProps) {
 }
 
 function AndroidToolbarButton({ icon, ...rest }: ButtonProps) {
-  const source = useMaterialIcon(icon as string | undefined);
+  const symbol = useMaterialIcon(typeof icon === 'string' ? icon : undefined);
+  const source = typeof icon === 'string' || !icon ? symbol : icon;
   // Кнопку без иконки expo-router на Android не рисует вовсе — подставляем свою.
   if (!icon && typeof rest.children === 'string') {
     return <ToolbarTextButton title={rest.children} variant={rest.variant} disabled={rest.disabled} onPress={rest.onPress} />;

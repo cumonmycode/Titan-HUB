@@ -8,6 +8,7 @@ import type { SFSymbol } from 'sf-symbols-typescript';
 import { BarChart } from '@/components/charts/bar-chart';
 import { ShareChart } from '@/components/charts/donut-chart';
 import { Avatar, GlassCard, PrimaryButton } from '@/components/new-check-parts';
+import { TaiGlass } from '@/components/tai/aura';
 import { Text } from '@/components/text';
 import { SupplyBlock } from '@/components/tai/supply-block';
 import { formatMoney } from '@/lib/format';
@@ -66,7 +67,7 @@ function LinkLine({ label, onPress }: { label: string; onPress: () => void }) {
 function MetricsBlock({ block }: { block: Extract<TaiBlock, { type: 'metrics' }> }) {
   const open = useOpen();
   return (
-    <GlassCard style={styles.card}>
+    <TaiGlass style={styles.card}>
       {block.title ? <Text style={[type.footnote, styles.secondary]}>{block.title}</Text> : null}
       <View style={styles.grid}>
         {block.items.map((item) => {
@@ -91,7 +92,7 @@ function MetricsBlock({ block }: { block: Extract<TaiBlock, { type: 'metrics' }>
         })}
       </View>
       {block.link ? <LinkLine label={block.link.label} onPress={() => open(block.link!.to)} /> : null}
-    </GlassCard>
+    </TaiGlass>
   );
 }
 
@@ -102,7 +103,7 @@ function ChartBlock({ block }: { block: Extract<TaiBlock, { type: 'chart' }> }) 
   const point = block.points.find((p) => p.key === selected) ?? null;
   const best = block.points.reduce<(typeof block.points)[number] | null>((max, p) => (!max || p.value > max.value ? p : max), null);
   return (
-    <GlassCard style={styles.card}>
+    <TaiGlass style={styles.card}>
       <Text style={[type.footnote, styles.secondary]}>{block.title}</Text>
       <View style={styles.selection}>
         {point ? (
@@ -119,7 +120,7 @@ function ChartBlock({ block }: { block: Extract<TaiBlock, { type: 'chart' }> }) 
         )}
       </View>
       <BarChart points={block.points} color={accent} selected={selected} onSelect={setSelected} height={130} highlightKey={best?.key} />
-    </GlassCard>
+    </TaiGlass>
   );
 }
 
@@ -128,7 +129,7 @@ function BreakdownBlock({ block }: { block: Extract<TaiBlock, { type: 'breakdown
   const [selected, setSelected] = useState<string | null>(null);
   const accent = useAccentHex();
   return (
-    <GlassCard style={styles.card}>
+    <TaiGlass style={styles.card}>
       <Text style={[type.footnote, styles.secondary]}>{block.title}</Text>
       <ShareChart
         parts={block.parts.map((p) => ({ key: p.key, label: p.label, value: p.value, color: p.color ?? accent }))}
@@ -146,14 +147,14 @@ function BreakdownBlock({ block }: { block: Extract<TaiBlock, { type: 'breakdown
         }
         openLabel={(part) => `Чеки: ${part.label}`}
       />
-    </GlassCard>
+    </TaiGlass>
   );
 }
 
 function ListBlock({ block }: { block: Extract<TaiBlock, { type: 'list' }> }) {
   const open = useOpen();
   return (
-    <GlassCard style={styles.card}>
+    <TaiGlass style={styles.card}>
       <Text style={[type.footnote, styles.secondary]}>{block.title}</Text>
       {block.rows.length === 0 ? (
         <Text style={[type.subhead, styles.tertiary]}>{block.empty ?? 'Пусто'}</Text>
@@ -189,7 +190,7 @@ function ListBlock({ block }: { block: Extract<TaiBlock, { type: 'list' }> }) {
         </View>
       )}
       {block.more ? <LinkLine label={block.more.label} onPress={() => open(block.more!.to)} /> : null}
-    </GlassCard>
+    </TaiGlass>
   );
 }
 
@@ -213,7 +214,7 @@ function ActionBlock({ card }: { card: TaiActionCard }) {
   const tint = card.destructive ? colors.red : colors.accent;
 
   return (
-    <GlassCard style={[styles.card, cancelled && styles.cancelled]}>
+    <TaiGlass proposal decided={card.status !== 'pending'} style={[styles.card, cancelled && styles.cancelled]}>
       <View style={styles.actionHeader}>
         <SymbolView
           name={done ? 'checkmark.circle.fill' : failed ? 'exclamationmark.triangle.fill' : ACTION_ICON[card.kind] ?? 'bolt'}
@@ -288,7 +289,7 @@ function ActionBlock({ card }: { card: TaiActionCard }) {
           {done && card.to ? <LinkLine label={card.to.screen === 'check' ? 'Перейти к чеку' : 'Открыть'} onPress={() => open(card.to!)} /> : null}
         </Animated.View>
       )}
-    </GlassCard>
+    </TaiGlass>
   );
 }
 

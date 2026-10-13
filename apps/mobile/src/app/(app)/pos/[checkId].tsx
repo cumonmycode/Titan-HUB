@@ -16,6 +16,7 @@ import { useTabBarClearance } from '@/lib/tab-bar';
 import { colors, space, type } from '@/lib/theme';
 import { useCheckActions } from '@/lib/use-check-actions';
 import { useNow } from '@/lib/use-now';
+import { TAI_TOOLBAR_ICON } from '@/lib/tai-aura';
 
 /**
  * Экран чека на iPhone — стеклянные карточки на фирменном фоне, как сетка кассы.
@@ -52,7 +53,7 @@ export default function CheckScreen() {
         <Stack.Toolbar placement="right">
           {/* Tai знает этот чек: «добавь колу» — сюда. */}
           {isOpen && (
-            <ToolbarButton icon="sparkles" accessibilityLabel="Спросить Tai" onPress={() => router.push({ pathname: '/tai', params: { screen: 'check', checkId } })} />
+            <ToolbarButton icon={TAI_TOOLBAR_ICON} iconRenderingMode="original" accessibilityLabel="Спросить Tai" onPress={() => router.push({ pathname: '/tai', params: { screen: 'check', checkId } })} />
           )}
           {hasMenu && (
           <ToolbarMenu icon="ellipsis" accessibilityLabel="Действия с чеком">

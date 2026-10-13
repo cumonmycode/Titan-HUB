@@ -3,7 +3,8 @@ import { SymbolView } from 'expo-symbols';
 import { useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Switch, View } from 'react-native';
 
-import { GlassCard, PrimaryButton } from '@/components/new-check-parts';
+import { PrimaryButton } from '@/components/new-check-parts';
+import { TaiGlass } from '@/components/tai/aura';
 import { Text } from '@/components/text';
 import { promptText } from '@/lib/dialog';
 import { formatMoney } from '@/lib/format';
@@ -56,7 +57,7 @@ export function SupplyBlock({ card: initial }: { card: TaiSupplyCard }) {
   const title = card.status === 'posted' ? 'Поставка принята' : card.status === 'cancelled' ? 'Черновик удалён' : 'Поставка';
 
   return (
-    <GlassCard style={[styles.card, card.status === 'cancelled' && styles.faded]}>
+    <TaiGlass proposal decided={!draft} style={[styles.card, card.status === 'cancelled' && styles.faded]}>
       <View style={styles.header}>
         <SymbolView name={card.status === 'posted' ? 'checkmark.circle.fill' : 'shippingbox.fill'} size={20} weight="semibold" tintColor={card.status === 'posted' ? colors.green : colors.accent} />
         <Text style={[type.headline, styles.label, styles.flex]}>{title}</Text>
@@ -105,7 +106,7 @@ export function SupplyBlock({ card: initial }: { card: TaiSupplyCard }) {
           <Text style={[type.subhead, styles.link]}>{draft ? 'Открыть в редакторе прихода' : 'Открыть приход'}</Text>
         </Pressable>
       )}
-    </GlassCard>
+    </TaiGlass>
   );
 }
 

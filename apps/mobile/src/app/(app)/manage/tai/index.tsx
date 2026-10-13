@@ -1,14 +1,14 @@
 import { ContentUnavailableView, Form, Host, ProgressView, RNHostView, Section, Text, Toggle } from '@expo/ui/swift-ui';
 import { refreshable } from '@expo/ui/swift-ui/modifiers';
 import { Stack, useRouter } from 'expo-router';
-import { SymbolView } from 'expo-symbols';
 import { StyleSheet, View } from 'react-native';
 
 import { LinkRow } from '@/components/native-form';
+import { TaiMark } from '@/components/tai/mark';
 import { Text as RNText } from '@/components/text';
 import type { TaiChat, TaiChatPreset } from '@/lib/tai-api';
 import { useTaiChatsEditor, useTaiSettingsEditor } from '@/lib/tai-settings';
-import { colors, space, type, useAccentHex } from '@/lib/theme';
+import { colors, space, type } from '@/lib/theme';
 
 const MODE_LABEL = { game: 'Игровой', work: 'Рабочий' } as const;
 
@@ -113,12 +113,9 @@ export default function TaiSettingsScreen() {
 
 /** Заголовок раздела: кто такой Tai и работает ли он сейчас. */
 function Hero({ botReady, aiReady }: { botReady?: boolean; aiReady?: boolean }) {
-  const accent = useAccentHex();
   return (
     <View style={styles.hero}>
-      <View style={[styles.logo, { backgroundColor: accent }]}>
-        <SymbolView name="sparkles" size={26} weight="semibold" tintColor="white" />
-      </View>
+      <TaiMark size={56} breathe />
       <View style={styles.flex}>
         <RNText style={[type.title3, styles.label]}>Tai</RNText>
         <RNText style={[type.footnote, styles.secondary]}>Администратор клуба в Telegram и помощник в кассе</RNText>
@@ -143,7 +140,6 @@ function Status({ ok, label }: { ok?: boolean; label: string }) {
 
 const styles = StyleSheet.create({
   hero: { flexDirection: 'row', alignItems: 'center', gap: space.lg, paddingHorizontal: space.lg, paddingVertical: space.md },
-  logo: { width: 56, height: 56, borderRadius: 16, borderCurve: 'continuous', alignItems: 'center', justifyContent: 'center' },
   flex: { flex: 1, minWidth: 0, gap: 2 },
   label: { color: colors.label },
   secondary: { color: colors.secondaryLabel },

@@ -9,6 +9,8 @@ import { GlassView } from '@/components/glass';
 import { Avatar, BalanceChips } from '@/components/new-check-parts';
 import { RollingText } from '@/components/rolling-text';
 import { SwipeToDelete } from '@/components/swipe-to-delete';
+import { TaiGlass } from '@/components/tai/aura';
+import { TaiMark } from '@/components/tai/mark';
 import type { CheckTotals } from '@/lib/checks';
 import { promptText } from '@/lib/dialog';
 import { eventErrorMessage, eventTitle, updateEvent, useEvent, useEventRates } from '@/lib/events-api';
@@ -37,8 +39,6 @@ import { useNow } from '@/lib/use-now';
 
 const rowLayout = LinearTransition.springify().damping(22).stiffness(220);
 const ORDER_TINT = 'rgba(255,149,0,0.20)';
-/** Фиолетовое стекло Tai — как карточки предчеков. */
-const TAI_TINT = 'rgba(139,92,246,0.18)';
 
 type Props = {
   check: CheckDetail;
@@ -355,8 +355,15 @@ function TaiSuggestions({ checkId, itemIds }: { checkId: string; itemIds: Set<st
 
   return (
     <Animated.View entering={FadeIn} exiting={FadeOut} layout={rowLayout}>
-      <GlassView tintColor={TAI_TINT} style={styles.card}>
-        <CardHeader icon="sparkles" iconColor={colors.accent} title="Tai предлагает" detail="обычно берёт" />
+      <TaiGlass proposal style={styles.card}>
+        <View style={styles.cardHeader}>
+          <TaiMark size={20} />
+          <Text style={[type.headline, styles.label, styles.cardTitle]}>Tai предлагает</Text>
+          <View style={styles.flex} />
+          <Text style={[type.subhead, styles.secondary]} numberOfLines={1}>
+            обычно берёт
+          </Text>
+        </View>
         <View style={styles.chips}>
           {list.map((s) => (
             <Animated.View key={s.itemId} entering={FadeIn} exiting={FadeOut} layout={rowLayout}>
@@ -379,7 +386,7 @@ function TaiSuggestions({ checkId, itemIds }: { checkId: string; itemIds: Set<st
             </Animated.View>
           ))}
         </View>
-      </GlassView>
+      </TaiGlass>
     </Animated.View>
   );
 }

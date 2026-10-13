@@ -7,12 +7,13 @@ import type { SFSymbol } from 'sf-symbols-typescript';
 import { AppRefreshControl } from '@/components/refresh-control';
 import { Appear, PressScale } from '@/components/smm/motion';
 import { BigButton, Card, PlatformBadge, PostRow, ProgressBanner, SectionTitle } from '@/components/smm/parts';
+import { TaiMark } from '@/components/tai/mark';
 import { Text } from '@/components/text';
 import { ToolbarButton } from '@/components/toolbar';
 import { usePageGutter } from '@/lib/layout';
 import { useSession } from '@/lib/session';
 import { PLATFORM_LOOK, busyText, dayTitle, monthTitle, msk, todayMsk, useSmmOverview, type SmmOverview, type SmmPost } from '@/lib/smm-api';
-import { colors, space, type, useAccentHex } from '@/lib/theme';
+import { colors, space, type } from '@/lib/theme';
 
 /**
  * «СММ» — штаб соцсетей клуба. Сверху — что требует человека (одобрить, прислать
@@ -88,16 +89,13 @@ export default function SmmScreen() {
 
 /** Шапка: кто ведёт соцсети и всё ли подключено. */
 function Hero({ data, isOwner, onSetup }: { data: SmmOverview; isOwner: boolean; onSetup: () => void }) {
-  const accent = useAccentHex();
   const channel = data.accounts.find((a) => a.platform === 'telegram' && a.isActive);
   const insta = data.accounts.find((a) => a.platform === 'instagram' && a.isActive);
   const missing = [!data.ready.channel && 'канал Telegram', !data.ready.instagram && 'Instagram', !data.ready.publisher && 'кто выкладывает Instagram'].filter(Boolean) as string[];
   return (
     <Card style={styles.hero}>
       <View style={styles.heroTop}>
-        <View style={[styles.heroLogo, { backgroundColor: accent }]}>
-          <SymbolView name="sparkles" size={24} weight="semibold" tintColor="white" />
-        </View>
+        <TaiMark size={52} breathe />
         <View style={styles.flex}>
           <Text style={[type.title3, styles.label]}>Tai ведёт соцсети</Text>
           <Text style={[type.footnote, styles.secondary]}>
@@ -256,7 +254,6 @@ const styles = StyleSheet.create({
   muted: { opacity: 0.55 },
   hero: { gap: space.md },
   heroTop: { flexDirection: 'row', alignItems: 'center', gap: space.md },
-  heroLogo: { width: 48, height: 48, borderRadius: 14, borderCurve: 'continuous', alignItems: 'center', justifyContent: 'center' },
   accounts: { flexDirection: 'row', gap: space.sm },
   account: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: space.sm, padding: space.sm, borderRadius: 14, borderCurve: 'continuous', backgroundColor: colors.fill },
   setup: { flexDirection: 'row', alignItems: 'center', gap: space.sm, paddingTop: space.xs },

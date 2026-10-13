@@ -353,8 +353,8 @@ function Message({ message, open }: { message: TaiMessage; open: (to: TaiRoute) 
       {text && <RichText text={text} />}
       {blocks.map((block, i) => <TaiBlockView key={i} block={block} open={open} />)}
       {(message.streaming || message.gate) && status && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: 'var(--on-surface-variant)', animation: 'tai-blink 1.4s ease-in-out infinite' }} aria-live="polite">
-          <TaiLogo size={18} thinking float={false} /> {status}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14 }} aria-live="polite">
+          <TaiLogo size={20} thinking float={false} /> <span className="tai-shimmer">{status}</span>
         </div>
       )}
       {message.error && <p style={{ margin: 0, fontSize: 14, color: '#F59E0B' }}>{message.error}</p>}

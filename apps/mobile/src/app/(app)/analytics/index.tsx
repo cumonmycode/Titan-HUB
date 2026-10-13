@@ -42,6 +42,7 @@ import { useSession } from '@/lib/session';
 import { openRoute } from '@/lib/tai-navigate';
 import { FONT_SCALE_MAX } from '@/lib/text-scale';
 import { colors, space, type, useAccentHex } from '@/lib/theme';
+import { TAI_TOOLBAR_ICON } from '@/lib/tai-aura';
 
 const WEEKDAYS = ['понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота', 'воскресенье'];
 const WEEKDAYS_SHORT = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
@@ -98,7 +99,8 @@ export default function AnalyticsScreen() {
       <Stack.Title large>Аналитика</Stack.Title>
       <PeriodMenu period={period}>
         <ToolbarButton
-          icon="sparkles"
+          icon={TAI_TOOLBAR_ICON}
+          iconRenderingMode="original"
           accessibilityLabel="Спросить Tai"
           onPress={() => router.push({ pathname: '/tai', params: { screen: 'analytics', from: period.from, to: period.to } })}
         />

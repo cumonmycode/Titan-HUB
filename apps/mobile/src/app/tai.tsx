@@ -3,12 +3,14 @@ import { SymbolView } from 'expo-symbols';
 import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
-import Animated, { FadeIn, FadeOut, useAnimatedStyle, withSpring } from 'react-native-reanimated';
+import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { SFSymbol } from 'sf-symbols-typescript';
 
 import { CircleButton, GlassCard } from '@/components/new-check-parts';
+import { TaiAuraBackdrop } from '@/components/tai/aura';
 import { TaiHistoryDrawer } from '@/components/tai/history-drawer';
+import { TaiMark } from '@/components/tai/mark';
 import { TaiMessageView } from '@/components/tai/message';
 import { Text, TextInput, type TextInputRef } from '@/components/text';
 import { haptic } from '@/lib/haptics';
@@ -17,7 +19,7 @@ import { useSession } from '@/lib/session';
 import type { TaiContext } from '@/lib/tai-api';
 import { useTaiStore, type TaiReply } from '@/lib/tai-store';
 import { useTaiVoice } from '@/lib/tai-voice';
-import { colors, space, springs, type, useAccentHex } from '@/lib/theme';
+import { colors, space, type, useAccentHex } from '@/lib/theme';
 
 type Screen = NonNullable<TaiContext['screen']>;
 type Starter = { icon: SFSymbol; text: string; /** Только подставить в поле — дальше допишет человек. */ draft?: boolean };
@@ -60,6 +62,7 @@ const CONTEXT_LABEL: Record<Screen, { icon: SFSymbol; text: string } | null> = {
 /**
  * Tai на весь экран — как Gemini на iPhone: история чатов слева (☰), приветствие и
  * подсказки в новом чате, ответы потоком с карточками, большое поле ввода и голос.
+ * Оформление «Аура»: под чатом медленно плывёт свечение, пока Tai работает — ярче.
  * Помнит, откуда открыт: в чеке «добавь колу» — в этот чек. Чаты хранит сервер.
  */
 export default function TaiScreen() {
@@ -131,6 +134,7 @@ export default function TaiScreen() {
 
   return (
     <View style={styles.screen}>
+      <TaiAuraBackdrop active={busy || opening || voice.active} />
       <View style={[styles.header, { paddingTop: insets.top + space.xs }]}>
         <CircleButton
           icon="line.3.horizontal"
@@ -166,6 +170,7 @@ export default function TaiScreen() {
           </View>
         ) : empty ? (
           <Animated.View entering={FadeIn.duration(240)} style={styles.welcome}>
+            <TaiMark size={72} breathe style={styles.welcomeMark} />
             <Text style={[type.largeTitle, { color: accent }]}>{nickname ? `Привет, ${nickname}` : 'Привет'}</Text>
             <Text style={[type.largeTitle, styles.tertiary]}>Чем помочь?</Text>
           </Animated.View>
@@ -303,20 +308,13 @@ export default function TaiScreen() {
   );
 }
 
-/** Голосовой режим: живой текст, «дыхание» под громкость голоса и кнопки «Готово»/«Стоп». */
+/** Голосовой режим: живой текст, сфера Tai в такт голосу и кнопки «Готово»/«Стоп». */
 function VoiceBar({ phase, transcript, level, onDone, onStop }: { phase: string; transcript: string; level: number; onDone: () => void; onStop: () => void }) {
   const accent = useAccentHex();
-  const orb = useAnimatedStyle(() => ({
-    transform: [{ scale: withSpring(phase === 'listening' ? 1 + level * 0.6 : phase === 'speaking' ? 1.15 : 0.9, springs.snappy) }],
-    opacity: withSpring(phase === 'thinking' ? 0.5 : 1, springs.smooth),
-  }));
   const caption = phase === 'listening' ? transcript || 'Говорите…' : phase === 'thinking' ? 'Tai думает…' : 'Tai отвечает…';
   return (
     <GlassCard style={styles.voice}>
-      <View style={styles.orbBox}>
-        <Animated.View style={[styles.orb, { backgroundColor: accent }, orb]} />
-        <SymbolView name={phase === 'speaking' ? 'speaker.wave.2.fill' : 'mic.fill'} size={16} tintColor="white" style={styles.orbIcon} />
-      </View>
+      <TaiMark size={44} state={phase === 'thinking' ? 'think' : 'speak'} level={phase === 'listening' ? level : undefined} />
       <Text style={[type.body, transcript && phase === 'listening' ? styles.label : styles.secondary, styles.flex]} numberOfLines={3}>
         {caption}
       </Text>
@@ -344,6 +342,7 @@ const styles = StyleSheet.create({
   tertiary: { color: colors.tertiaryLabel },
   messages: { paddingHorizontal: space.lg, paddingTop: space.md, paddingBottom: space.xl, gap: space.xxl },
   welcome: { flex: 1, justifyContent: 'center', paddingHorizontal: space.xxl, gap: 2 },
+  welcomeMark: { marginBottom: space.md, marginLeft: -10 },
   chips: { gap: space.sm, paddingHorizontal: space.lg, paddingBottom: space.sm },
   chip: { flexDirection: 'row', alignItems: 'center', gap: space.sm, paddingHorizontal: space.lg, paddingVertical: 10, borderRadius: 20 },
   bottom: { paddingHorizontal: space.md, paddingTop: space.xs },
@@ -359,13 +358,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: space.md,
-    paddingLeft: space.md,
+    paddingLeft: 6,
     paddingRight: 6,
     paddingVertical: 8,
     borderRadius: 28,
     minHeight: 56,
   },
-  orbBox: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
-  orb: { position: 'absolute', width: 30, height: 30, borderRadius: 15 },
-  orbIcon: { width: 16, height: 16 },
 });

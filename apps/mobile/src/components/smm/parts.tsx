@@ -5,7 +5,9 @@ import { ActivityIndicator, Pressable, StyleSheet, View, type ColorValue, type S
 import Animated, { Easing, FadeIn, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import type { SFSymbol } from 'sf-symbols-typescript';
 
-import { PressScale, Pulse, Sheen } from '@/components/smm/motion';
+import { PressScale, Sheen } from '@/components/smm/motion';
+import { ShimmerText } from '@/components/tai/aura';
+import { TaiMark } from '@/components/tai/mark';
 import { Text, TextInput } from '@/components/text';
 import { haptic } from '@/lib/haptics';
 import {
@@ -209,12 +211,10 @@ export function ProgressBanner({ progress, text }: { progress: SmmProgress | nul
   return (
     <Animated.View entering={FadeIn.duration(220)} style={[styles.progressBox, { backgroundColor: `${accent}14` }]} accessibilityLiveRegion="polite" accessibilityLabel={`${progress.label}, ${Math.round(pct)} процентов`}>
       <View style={styles.progressHead}>
-        <Pulse>
-          <SymbolView name="sparkles" size={18} tintColor={accent} />
-        </Pulse>
-        <Text style={[type.subhead, styles.label, styles.flex]} numberOfLines={2}>
-          {progress.label}
-        </Text>
+        <TaiMark size={26} state="think" />
+        <View style={styles.flex}>
+          <ShimmerText text={progress.label} style={type.subhead} />
+        </View>
         <Text style={[type.subhead, styles.bold, { color: accent }]}>{`${Math.round(pct)}%`}</Text>
       </View>
       <ProgressBar value={pct} />
@@ -338,7 +338,7 @@ export function Thread({ comments }: { comments: SmmComment[] }) {
       {comments.map((c) => (
         <Animated.View key={c.id} entering={FadeIn.duration(260)} style={[styles.bubble, c.role === 'tai' ? styles.bubbleTai : styles.bubbleStaff]}>
           <View style={styles.bubbleHead}>
-            {c.role === 'tai' ? <SymbolView name="sparkles" size={13} tintColor={accent} /> : null}
+            {c.role === 'tai' ? <TaiMark size={16} /> : null}
             <Text style={[type.caption1, { color: c.role === 'tai' ? accent : colors.secondaryLabel }]}>{c.role === 'tai' ? 'Tai' : (c.authorName ?? 'Сотрудник')}</Text>
           </View>
           <Text style={[type.subhead, styles.label]} selectable>

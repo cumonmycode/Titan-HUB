@@ -38,7 +38,15 @@ export type TaiReply = {
   voice: boolean;
   /** Голосовой режим: сколько текста и блоков уже озвучено — показываем вместе со звуком. null — всё. */
   gate: { chars: number; blocks: number } | null;
+  /**
+   * Когда пришли последние куски текста (с какого символа и во сколько): свежие слова
+   * проступают цветом и «остывают» до обычного. Старые куски отбрасываются.
+   */
+  reveal?: { at: number; t: number }[];
 };
+
+/** Сколько слово «остывает» после появления, мс. */
+export const REVEAL_MS = 650;
 export type TaiMessage = TaiUserMessage | TaiReply;
 
 type TaiState = {
@@ -208,7 +216,11 @@ export const useTaiStore = create<TaiState>((set, get) => ({
               patchReply(reply.id, () => ({ status: event.text }));
               break;
             case 'delta':
-              patchReply(reply.id, (m) => ({ text: m.text + event.text, status: null }));
+              patchReply(reply.id, (m) => {
+                const t = Date.now();
+                const fresh = (m.reveal ?? []).filter((chunk) => t - chunk.t < REVEAL_MS);
+                return { text: m.text + event.text, status: null, reveal: [...fresh, { at: m.text.length, t }] };
+              });
               break;
             case 'block':
               patchReply(reply.id, (m) => ({ blocks: [...m.blocks, event.block], status: null }));

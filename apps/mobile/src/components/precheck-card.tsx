@@ -1,4 +1,3 @@
-import { SymbolView } from 'expo-symbols';
 import { useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import Animated, { cancelAnimation, Easing, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
@@ -7,6 +6,7 @@ import { Text } from '@/components/text';
 import { GlassView } from '@/components/glass';
 import { cardStyles } from '@/components/check-card';
 import { Avatar } from '@/components/new-check-parts';
+import { TaiMark } from '@/components/tai/mark';
 import { formatMoney, toNumber } from '@/lib/format';
 import { haptic } from '@/lib/haptics';
 import type { Precheck } from '@/lib/pos-api';
@@ -59,7 +59,7 @@ export function PrecheckCard({ precheck, busy, onOpen, glassKey, compact }: { pr
               {precheck.vote === 'опоздаю' ? 'Опоздает' : 'Придёт'} · предчек
             </Text>
           </View>
-          <SymbolView name="sparkles" size={18} tintColor={colors.accent} animationSpec={{ effect: { type: 'pulse' }, repeating: true }} />
+          <TaiMark size={compact ? 20 : 24} />
         </View>
 
         <View style={styles.lines}>

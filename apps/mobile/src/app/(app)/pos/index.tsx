@@ -24,6 +24,7 @@ import { CheckPanel } from '@/components/check-panel';
 import { Dissolve, type DissolveFrame } from '@/components/dissolve';
 import { HEM_RADIUS, HEM_SPACE, HomeShade, useHomeShade } from '@/components/home/home-shade';
 import { PrecheckCard } from '@/components/precheck-card';
+import { TaiMark } from '@/components/tai/mark';
 import { Unavailable } from '@/components/unavailable';
 import { cardLines, checkTitle, checkTotals, openedLabel } from '@/lib/checks';
 import { createAccessoryScrollHandler } from '@/lib/chrome';
@@ -310,7 +311,7 @@ export default function PosScreen() {
             }}
             accessibilityRole="button"
             accessibilityLabel="Спросить Tai">
-            <SymbolView name="sparkles" size={19} weight="medium" tintColor={colors.accent} />
+            <TaiMark size={26} breathe />
           </Pressable>
         </GlassView>
         <GlassView isInteractive style={styles.bell}>
