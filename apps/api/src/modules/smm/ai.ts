@@ -74,6 +74,10 @@ type PolzaError = { error?: { code?: string; message?: string } }
 function polzaFailure(status: number, body: PolzaError): SmmError {
   const message = body.error?.message ?? ''
   console.error('[smm] polza', status, body.error?.code ?? '', message.slice(0, 300))
+  // У ключа Polza бывает свой лимит трат — денег на аккаунте хватает, а ключу нельзя.
+  if ((status === 402 || body.error?.code === 'INSUFFICIENT_BALANCE') && /лимит/i.test(message)) {
+    return new SmmError('У ключа Polza закончился лимит трат — увеличьте или снимите лимит этого ключа на polza.ai (раздел «API-ключи»)', 402)
+  }
   if (status === 402 || body.error?.code === 'INSUFFICIENT_BALANCE') return new SmmError('На балансе Polza не хватает денег — пополните баланс на polza.ai', 402)
   if (status === 401 || status === 403) return new SmmError('Ключ Polza не принят — проверьте его в «Интеграциях»', 400)
   if (status === 400 && message) return new SmmError(`Нейросеть отклонила запрос: ${message.slice(0, 160)}`, 502)
