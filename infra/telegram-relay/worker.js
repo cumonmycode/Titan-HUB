@@ -20,7 +20,8 @@ const BOT_PATH = /^\/(file\/)?bot\d+:[A-Za-z0-9_-]+\//
 //      GET /<RELAY_KEY>/web/t.me/s/<канал>  → https://t.me/s/<канал>
 //      GET /<RELAY_KEY>/web/i.instagram.com/api/v1/users/web_profile_info/?username=…
 //      GET|POST /<RELAY_KEY>/web/graph.instagram.com/v25.0/…  → Instagram API (данные и публикация)
-const WEB_PATH = /^\/web\/(t\.me|www\.instagram\.com|i\.instagram\.com|graph\.instagram\.com)(\/[^?#]*)$/
+const WEB_PATH =
+  /^\/web\/(t\.me|www\.instagram\.com|i\.instagram\.com|graph\.instagram\.com)(\/[^?#]*)$/
 const WEB_HEADERS = ['user-agent', 'accept', 'accept-language', 'x-ig-app-id', 'content-type']
 // 4) Файлы СММ для серверов Meta (публикация в Instagram берёт картинку по ссылке):
 //      GET /media/smm-<файл> → https://<ORIGIN_HOST>/media/smm-<файл>. Только наши файлы СММ.
@@ -62,7 +63,10 @@ export default {
       const rest = url.pathname.slice(key.length + 1)
       const web = WEB_PATH.exec(rest)
       // POST — только Instagram API (публикация); страницы — только чтение.
-      const allowed = web && (request.method === 'GET' || (request.method === 'POST' && web[1] === 'graph.instagram.com'))
+      const allowed =
+        web &&
+        (request.method === 'GET' ||
+          (request.method === 'POST' && web[1] === 'graph.instagram.com'))
       if (allowed) {
         const headers = new Headers()
         for (const name of WEB_HEADERS) {
@@ -88,12 +92,23 @@ export default {
       return forward(request, `https://${env.ORIGIN_HOST}${url.pathname}`)
     }
 
-    if ((request.method === 'GET' || request.method === 'HEAD') && MEDIA_PATH.test(url.pathname) && env.ORIGIN_HOST) {
-      const res = await fetch(`https://${env.ORIGIN_HOST}${url.pathname}`, { method: request.method })
+    if (
+      (request.method === 'GET' || request.method === 'HEAD') &&
+      MEDIA_PATH.test(url.pathname) &&
+      env.ORIGIN_HOST
+    ) {
+      const res = await fetch(`https://${env.ORIGIN_HOST}${url.pathname}`, {
+        method: request.method,
+      })
       if (!res.ok) return notFound()
-      const headers = { 'content-type': res.headers.get('content-type') || 'application/octet-stream' }
+      const headers = {
+        'content-type': res.headers.get('content-type') || 'application/octet-stream',
+      }
       const length = res.headers.get('content-length')
-      return new Response(res.body, { status: 200, headers: length ? { ...headers, 'content-length': length } : headers })
+      return new Response(res.body, {
+        status: 200,
+        headers: length ? { ...headers, 'content-length': length } : headers,
+      })
     }
 
     return notFound()
