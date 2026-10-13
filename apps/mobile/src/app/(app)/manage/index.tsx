@@ -5,6 +5,8 @@ import { Alert } from 'react-native';
 
 import { ActionRow, LinkRow, primary, secondary, tertiary } from '@/components/native-form';
 import { Avatar } from '@/components/new-check-parts';
+import { SmmCard } from '@/components/smm/menu-card';
+import { permissionOn } from '@/lib/admin-api';
 import { haptic } from '@/lib/haptics';
 import { visibleManageGroups, type ManageSectionKey } from '@/lib/manage-sections';
 import { signOutEverywhere, useMe } from '@/lib/queries';
@@ -46,6 +48,7 @@ export default function ManageScreen() {
   const nickname = me.data?.nickname ?? sessionUser?.nickname ?? '';
   const role = me.data?.role ?? sessionUser?.role ?? 'staff';
   const groups = visibleManageGroups(role, me.data?.permissions ?? null);
+  const smmAllowed = role === 'owner' || (role === 'staff' && permissionOn({ permissions: me.data?.permissions ?? null }, 'smm'));
 
   const changeClub = () =>
     Alert.alert('Сменить клуб?', 'Вы выйдете из текущего клуба.', [
@@ -97,6 +100,8 @@ export default function ManageScreen() {
               </HStack>
             </Button>
           </Section>
+
+          {smmAllowed ? <SmmCard onPress={() => router.push('/manage/smm')} /> : null}
 
           {groups.map((group) => (
             <Section key={group.title} title={group.title}>

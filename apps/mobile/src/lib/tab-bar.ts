@@ -57,5 +57,8 @@ export const SHEET_ROUTES: Record<string, ReadonlySet<string>> = {
     'settings/home/devices',
     'settings/home/reorder',
     'polls/edit',
+    'smm/new',
+    'smm/edit-text',
+    'smm/when',
   ]),
 };

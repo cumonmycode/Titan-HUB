@@ -255,6 +255,7 @@ export const PERMISSIONS: { key: string; label: string; defaultOn: boolean }[] =
   { key: 'staff', label: 'Персонал', defaultOn: false },
   { key: 'salary', label: 'Зарплата', defaultOn: false },
   { key: 'about', label: 'О заведении', defaultOn: true },
+  { key: 'smm', label: 'СММ и маркетинг', defaultOn: false },
 ];
 
 export const permissionOn = (row: Pick<StaffRow, 'permissions'>, key: string) => row.permissions?.[key] ?? PERMISSIONS.find((p) => p.key === key)?.defaultOn ?? true;

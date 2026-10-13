@@ -121,6 +121,18 @@ export default function ManageLayout() {
       <Stack.Screen name="polls/index" options={formHeader({ title: 'Опросы' })} />
       <Stack.Screen name="polls/edit" options={editorModal} />
 
+      {/* «СММ»: Tai ведёт Telegram-канал и Instagram — лента, публикация, план, аналитика. */}
+      <Stack.Screen name="smm/index" options={formHeader({ title: 'СММ' })} />
+      <Stack.Screen name="smm/post" options={formHeader()} />
+      <Stack.Screen name="smm/plan" options={formHeader({ title: 'План' })} />
+      <Stack.Screen name="smm/ideas" options={formHeader({ title: 'Идеи' })} />
+      <Stack.Screen name="smm/analytics" options={formHeader({ title: 'Аналитика' })} />
+      <Stack.Screen name="smm/memory" options={formHeader({ title: 'Память Tai' })} />
+      <Stack.Screen name="smm/settings" options={formHeader({ title: 'Настройки СММ' })} />
+      <Stack.Screen name="smm/new" options={editorModal} />
+      <Stack.Screen name="smm/edit-text" options={editorModal} />
+      <Stack.Screen name="smm/when" options={editorModal} />
+
       <Stack.Screen name="tai/index" options={formHeader({ title: 'Tai' })} />
       <Stack.Screen name="tai/voice" options={formHeader({ title: 'Голос' })} />
       <Stack.Screen name="tai/chat" options={formHeader()} />
