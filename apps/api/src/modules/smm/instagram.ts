@@ -162,7 +162,11 @@ export interface IgMedia {
   media_product_type?: string
   like_count?: number
   comments_count?: number
+  media_url?: string
+  thumbnail_url?: string
 }
+
+type InsightRow = { name: string; values?: { value: unknown; end_time?: string }[]; total_value?: { value?: number; breakdowns?: { results?: { dimension_values?: string[]; value?: number }[] }[] } }
 
 export async function igProfile(db: Database): Promise<Me & { id: string }> {
   const state = await instagramState(db)
@@ -171,30 +175,137 @@ export async function igProfile(db: Database): Promise<Me & { id: string }> {
   return { ...me, id: me.user_id ?? state.userId }
 }
 
+const MEDIA_FIELDS = 'id,caption,permalink,timestamp,media_type,media_product_type,like_count,comments_count,media_url,thumbnail_url'
+
 export async function igRecentMedia(db: Database, limit = 25): Promise<IgMedia[]> {
   const state = await instagramState(db)
   if (!state) return []
-  const r = await graph<{ data?: IgMedia[] }>(await token(db), `/${state.userId}/media`, {
-    fields: 'id,caption,permalink,timestamp,media_type,media_product_type,like_count,comments_count',
-    limit,
-  })
+  const r = await graph<{ data?: IgMedia[] }>(await token(db), `/${state.userId}/media`, { fields: MEDIA_FIELDS, limit })
   return r.data ?? []
 }
 
-/** Метрики публикации; у карусели Instagram их не отдаёт — тогда пусто. */
+/** Живые сторис (Instagram отдаёт их только сутки — цифры снимаем, пока висят). */
+export async function igStories(db: Database): Promise<IgMedia[]> {
+  const state = await instagramState(db)
+  if (!state) return []
+  const r = await graph<{ data?: IgMedia[] }>(await token(db), `/${state.userId}/stories`, { fields: MEDIA_FIELDS }).catch(() => ({ data: [] }))
+  return (r.data ?? []).map((m) => ({ ...m, media_product_type: 'STORY' }))
+}
+
+/** Метрики публикации: просмотры, охват, лайки, комментарии, сохранения, репосты, взаимодействия. */
 export async function igInsights(db: Database, media: IgMedia): Promise<Record<string, number>> {
-  if (media.media_type === 'CAROUSEL_ALBUM') return {}
-  const metric = media.media_product_type === 'STORY' ? 'views,reach,shares' : 'views,reach,likes,comments,saved,shares'
+  const metric = media.media_product_type === 'STORY' ? 'views,reach,replies,shares,total_interactions' : 'views,reach,likes,comments,saved,shares,total_interactions'
   try {
-    const r = await graph<{ data?: { name: string; values?: { value: number }[]; total_value?: { value: number } }[] }>(await token(db), `/${media.id}/insights`, { metric })
+    const r = await graph<{ data?: InsightRow[] }>(await token(db), `/${media.id}/insights`, { metric })
     const out: Record<string, number> = {}
     for (const m of r.data ?? []) {
       const v = m.total_value?.value ?? m.values?.[0]?.value
-      if (typeof v === 'number') out[m.name === 'saved' ? 'saves' : m.name] = v
+      if (typeof v === 'number') out[m.name === 'saved' ? 'saves' : m.name === 'total_interactions' ? 'interactions' : m.name] = v
     }
     return out
   } catch {
     return {}
+  }
+}
+
+/** Профиль за период: охват, просмотры, вовлечённые, взаимодействия, визиты, переходы, подписки. */
+export interface IgPeriod {
+  reach: number | null
+  views: number | null
+  engaged: number | null
+  interactions: number | null
+  likes: number | null
+  comments: number | null
+  shares: number | null
+  saves: number | null
+  replies: number | null
+  profileViews: number | null
+  linkTaps: number | null
+  follows: number | null
+  unfollows: number | null
+}
+
+const PERIOD_METRICS: Record<string, keyof IgPeriod> = {
+  reach: 'reach',
+  views: 'views',
+  accounts_engaged: 'engaged',
+  total_interactions: 'interactions',
+  likes: 'likes',
+  comments: 'comments',
+  shares: 'shares',
+  saves: 'saves',
+  replies: 'replies',
+  profile_views: 'profileViews',
+  website_clicks: 'linkTaps',
+}
+
+export async function igPeriod(db: Database, days: number): Promise<IgPeriod> {
+  const state = await instagramState(db)
+  if (!state) throw new SmmError('Instagram не подключён', 400)
+  const tok = await token(db)
+  const until = Math.floor(Date.now() / 1000)
+  const since = until - days * 86_400
+  const out: IgPeriod = { reach: null, views: null, engaged: null, interactions: null, likes: null, comments: null, shares: null, saves: null, replies: null, profileViews: null, linkTaps: null, follows: null, unfollows: null }
+  const read = (list: InsightRow[] | undefined) => {
+    for (const m of list ?? []) {
+      const key = PERIOD_METRICS[m.name]
+      if (key && typeof m.total_value?.value === 'number') out[key] = m.total_value.value
+    }
+  }
+  const base = { period: 'day', metric_type: 'total_value', since, until }
+  try {
+    read((await graph<{ data?: InsightRow[] }>(tok, `/${state.userId}/insights`, { ...base, metric: Object.keys(PERIOD_METRICS).join(',') })).data)
+  } catch {
+    // Одна метрика не прошла — берём по одной.
+    for (const name of Object.keys(PERIOD_METRICS)) {
+      read((await graph<{ data?: InsightRow[] }>(tok, `/${state.userId}/insights`, { ...base, metric: name }).catch(() => ({ data: [] }))).data)
+    }
+  }
+  const follows = await graph<{ data?: InsightRow[] }>(tok, `/${state.userId}/insights`, { ...base, metric: 'follows_and_unfollows', breakdown: 'follow_type' }).catch(() => ({ data: [] }))
+  for (const r of follows.data?.[0]?.total_value?.breakdowns?.[0]?.results ?? []) {
+    if (r.dimension_values?.[0] === 'FOLLOWER') out.follows = r.value ?? null
+    if (r.dimension_values?.[0] === 'NON_FOLLOWER') out.unfollows = r.value ?? null
+  }
+  return out
+}
+
+/** Метрика по дням (охват, новые подписчики) за последние `days` дней (до 30). */
+export async function igDaily(db: Database, metric: 'reach' | 'follower_count', days: number): Promise<{ day: string; value: number }[]> {
+  const state = await instagramState(db)
+  if (!state) return []
+  const until = Math.floor(Date.now() / 1000)
+  const r = await graph<{ data?: InsightRow[] }>(await token(db), `/${state.userId}/insights`, { metric, period: 'day', since: until - Math.min(days, 30) * 86_400, until }).catch(() => ({ data: [] }))
+  return (r.data?.[0]?.values ?? [])
+    .filter((v) => typeof v.value === 'number' && v.end_time)
+    // end_time — конец суток по тихоокеанскому времени: относим к предыдущему дню.
+    .map((v) => ({ day: new Date(Date.parse(v.end_time!) - 86_400_000).toISOString().slice(0, 10), value: v.value as number }))
+}
+
+export interface IgAudience {
+  ages: { label: string; value: number }[]
+  genders: { label: string; value: number }[]
+  cities: { label: string; value: number }[]
+}
+
+const GENDER_LABEL: Record<string, string> = { F: 'Женщины', M: 'Мужчины', U: 'Не указан' }
+
+/** Аудитория подписчиков: возраст, пол, города. */
+export async function igAudience(db: Database): Promise<IgAudience | null> {
+  const state = await instagramState(db)
+  if (!state) return null
+  const tok = await token(db)
+  const part = async (breakdown: 'age' | 'gender' | 'city') => {
+    const r = await graph<{ data?: InsightRow[] }>(tok, `/${state.userId}/insights`, { metric: 'follower_demographics', period: 'lifetime', metric_type: 'total_value', breakdown }).catch(() => ({ data: [] }))
+    return (r.data?.[0]?.total_value?.breakdowns?.[0]?.results ?? [])
+      .map((x) => ({ label: x.dimension_values?.[0] ?? '?', value: x.value ?? 0 }))
+      .sort((a, b) => b.value - a.value)
+  }
+  const [ages, genders, cities] = await Promise.all([part('age'), part('gender'), part('city')])
+  if (!ages.length && !genders.length && !cities.length) return null
+  return {
+    ages: ages.sort((a, b) => a.label.localeCompare(b.label)),
+    genders: genders.map((g) => ({ ...g, label: GENDER_LABEL[g.label] ?? g.label })),
+    cities: cities.slice(0, 8).map((c) => ({ ...c, label: c.label.split(',')[0]!.trim() })),
   }
 }
 

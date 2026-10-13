@@ -1,7 +1,7 @@
 import { Image } from 'expo-image';
 import { SymbolView } from 'expo-symbols';
-import { useState, type ReactNode } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
+import { useEffect, useState, type ReactNode } from 'react';
+import { ActivityIndicator, Pressable, StyleSheet, View, type ColorValue, type StyleProp, type ViewStyle } from 'react-native';
 import type { SFSymbol } from 'sf-symbols-typescript';
 
 import { Text, TextInput } from '@/components/text';
@@ -11,10 +11,13 @@ import {
   FORMAT_LABEL,
   PLATFORM_LOOK,
   msk,
+  progressLeft,
+  progressPercent,
   selectedMedia,
   statusLook,
   type SmmComment,
   type SmmPost,
+  type SmmProgress,
 } from '@/lib/smm-api';
 import { colors, radius, space, type, useAccentHex } from '@/lib/theme';
 
@@ -100,21 +103,37 @@ export function PostThumb({ post, size, width, height }: { post: SmmPost; size?:
   );
 }
 
-/** Строка ленты: картинка, тема, площадка/формат/время и статус. */
-export function PostRow({ post, onPress, showDay }: { post: SmmPost; onPress: () => void; showDay?: boolean }) {
+const fmt = (n: number) => n.toLocaleString('ru-RU');
+
+/** Прогноз и факт одной строкой: «👁 310 · прогноз 220» или «Прогноз ~220 просмотров». */
+export function forecastLine(post: Pick<SmmPost, 'status' | 'stats' | 'forecast'>): { text: string; color: ColorValue } | null {
+  const views = post.stats.views;
+  const f = post.forecast;
+  if (post.status === 'published' && typeof views === 'number') {
+    if (!f) return { text: `👁 ${fmt(views)}`, color: colors.secondaryLabel };
+    const color = views > f.high ? colors.green : views < f.low ? colors.orange : colors.secondaryLabel;
+    return { text: `👁 ${fmt(views)} · прогноз ${fmt(f.expected)}`, color };
+  }
+  if (post.status === 'skipped' || !f) return null;
+  return { text: `Прогноз ~${fmt(f.expected)} просмотров`, color: colors.secondaryLabel };
+}
+
+/** Строка ленты: картинка, тема, площадка/формат/время, статус, прогноз и шкала работы Tai. */
+export function PostRow({ post, onPress, showDay, trailing }: { post: SmmPost; onPress: () => void; showDay?: boolean; trailing?: ReactNode }) {
   const when = msk(post.publishAt);
   const meta = [PLATFORM_LOOK[post.platform].label, FORMAT_LABEL[post.format], when ? (showDay ? `${when.day}.${String(when.month + 1).padStart(2, '0')} ${when.time}` : when.time) : null]
     .filter(Boolean)
     .join(' · ');
+  const result = forecastLine(post);
   return (
     <Pressable
       onPress={() => {
         haptic.selection();
         onPress();
       }}
-      style={({ pressed }) => [styles.row, pressed && styles.pressed]}
+      style={({ pressed }) => [styles.row, post.status === 'skipped' && styles.skipped, pressed && styles.pressed]}
       accessibilityRole="button"
-      accessibilityLabel={`${post.topic}. ${meta}. ${statusLook(post).label}`}>
+      accessibilityLabel={`${post.topic}. ${meta}. ${statusLook(post).label}${result ? `. ${result.text}` : ''}`}>
       <PostThumb post={post} size={64} />
       <View style={styles.rowText}>
         <View style={styles.rowMeta}>
@@ -123,14 +142,79 @@ export function PostRow({ post, onPress, showDay }: { post: SmmPost; onPress: ()
             {meta}
           </Text>
         </View>
-        <Text style={[type.headline, styles.label]} numberOfLines={2}>
+        <Text style={[type.headline, styles.label, post.status === 'skipped' && styles.struck]} numberOfLines={2}>
           {post.topic}
         </Text>
-        <StatusPill post={post} />
+        <View style={styles.rowMeta}>
+          <StatusPill post={post} />
+          {result ? (
+            <Text style={[type.caption1, { color: result.color }]} numberOfLines={1}>
+              {result.text}
+            </Text>
+          ) : null}
+        </View>
+        {post.busy && post.progress ? <MiniProgress progress={post.progress} /> : null}
       </View>
+      {trailing}
     </Pressable>
   );
 }
+
+/** Текущее время, пока идёт работа (шкала двигается между опросами сервера). */
+function useNow(active: boolean, every = 250): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!active) return;
+    const id = setInterval(() => setNow(Date.now()), every);
+    return () => clearInterval(id);
+  }, [active, every]);
+  return now;
+}
+
+/** Шкала без подписей — в строке ленты. */
+function MiniProgress({ progress }: { progress: SmmProgress }) {
+  const now = useNow(true, 500);
+  return <ProgressBar value={progressPercent(progress, now)} thin />;
+}
+
+export function ProgressBar({ value, thin }: { value: number; thin?: boolean }) {
+  const accent = useAccentHex();
+  return (
+    <View style={[styles.track, thin && styles.trackThin]}>
+      <View style={[styles.fill, { width: `${Math.max(2, Math.min(100, value))}%`, backgroundColor: accent }]} />
+    </View>
+  );
+}
+
+const leftText = (sec: number) => (sec >= 90 ? `${Math.round(sec / 60)} мин` : `${sec} с`);
+
+/**
+ * Шкала готовности: что делает Tai, процент и сколько примерно осталось. Без шкалы
+ * (старая задача) — просто строка с крутилкой.
+ */
+export function ProgressBanner({ progress, text }: { progress: SmmProgress | null; text?: string }) {
+  const accent = useAccentHex();
+  const now = useNow(!!progress);
+  if (!progress) return text ? <BusyBanner text={text} /> : null;
+  const pct = progressPercent(progress, now);
+  const left = progressLeft(progress, now);
+  return (
+    <View style={[styles.progressBox, { backgroundColor: `${accent}14` }]} accessibilityLiveRegion="polite" accessibilityLabel={`${progress.label}, ${Math.round(pct)} процентов`}>
+      <View style={styles.progressHead}>
+        <ActivityIndicator size="small" color={accent} />
+        <Text style={[type.subhead, styles.label, styles.flex]} numberOfLines={2}>
+          {progress.label}
+        </Text>
+        <Text style={[type.subhead, styles.bold, { color: accent }]}>{`${Math.round(pct)}%`}</Text>
+      </View>
+      <ProgressBar value={pct} />
+      <Text style={[type.caption1, styles.secondary]}>{left > 3 ? `Осталось около ${leftText(left)}` : 'Почти готово…'}</Text>
+    </View>
+  );
+}
+
+/** Шкала для запроса, который приложение ждёт само (идеи, отчёт): этап начинается сейчас. */
+export const estimate = (label: string, eta: number): SmmProgress => ({ label, pct: 2, next: 96, eta, at: new Date().toISOString() });
 
 export function BusyBanner({ text }: { text: string }) {
   const accent = useAccentHex();
@@ -272,6 +356,14 @@ const styles = StyleSheet.create({
   secondary: { color: colors.secondaryLabel },
   center: { textAlign: 'center' },
   pressed: { opacity: 0.6 },
+  skipped: { opacity: 0.5 },
+  struck: { textDecorationLine: 'line-through' },
+  bold: { fontWeight: '600' },
+  track: { height: 6, borderRadius: 3, overflow: 'hidden', backgroundColor: colors.fill },
+  trackThin: { height: 3, borderRadius: 1.5, marginTop: 2 },
+  fill: { height: '100%', borderRadius: 3 },
+  progressBox: { gap: space.sm, padding: space.md, borderRadius: 14, borderCurve: 'continuous' },
+  progressHead: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
   card: { backgroundColor: colors.card, borderRadius: radius.card, borderCurve: 'continuous', padding: space.lg, gap: space.md },
   sectionTitle: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', marginTop: space.md },
   pill: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', gap: 4, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10 },

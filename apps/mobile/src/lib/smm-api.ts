@@ -12,7 +12,9 @@ import { useClubKey } from './queries';
  * «СММ» — Tai ведёт Telegram-канал и Instagram клуба (сервер: apps/api/src/modules/smm).
  * План месяца → Tai готовит пост за сутки (рилс — за трое) → одобрение → Telegram выходит
  * сам, Instagram/сторис/рилс Tai передаёт выкладывающему и ждёт ссылку. Долгую работу Tai
- * делает в фоне — экраны перечитывают данные, пока у поста или плана есть `busy`.
+ * делает в фоне — экраны перечитывают данные, пока у поста или плана есть `busy`, и
+ * ведут шкалу готовности по `progress`. Цифры площадок — по API; у поста — прогноз и факт.
+ * Фото для постов Tai берёт и из архива клуба на Google Диске (поиск по описаниям).
  */
 
 export type SmmPlatform = 'telegram' | 'instagram';
@@ -20,10 +22,17 @@ export type SmmFormat = 'post' | 'carousel' | 'story' | 'reel';
 export type SmmStatus = 'idea' | 'draft' | 'review' | 'approved' | 'published' | 'skipped' | 'failed';
 export type SmmBusy = 'text' | 'image' | 'video' | 'revise' | 'plan' | 'report';
 
+/** Шкала готовности: этап и куда он ведёт за `eta` секунд с момента `at`. */
+export type SmmProgress = { label: string; pct: number; next: number; eta: number; at: string };
+
+/** Прогноз просмотров по похожим постам площадки; `frozen` — зафиксирован при выходе. */
+export type SmmForecast = { metric: 'views'; expected: number; low: number; high: number; basis: number; likes: number | null; at: string; frozen?: boolean };
+
 export type SmmMedia = {
   id: string;
   kind: 'image' | 'video';
-  source: 'ai' | 'upload';
+  /** archive — фото из фотоархива клуба. */
+  source: 'ai' | 'upload' | 'archive';
   status: 'pending' | 'done' | 'failed';
   url: string | null;
   aspect: string | null;
@@ -38,7 +47,7 @@ export type SmmMedia = {
 
 export type SmmShot = { text: string; seconds?: number; overlay?: string; sticker?: string };
 export type SmmScript = { hook: string; formula?: string; shots: SmmShot[]; audio?: string; cast?: string; tips?: string };
-export type SmmStats = { views?: number; likes?: number; comments?: number; shares?: number; saves?: number; reach?: number; source?: string };
+export type SmmStats = { views?: number; likes?: number; comments?: number; shares?: number; saves?: number; reach?: number; reactions?: number; interactions?: number; source?: string };
 
 export type SmmPost = {
   id: string;
@@ -62,8 +71,10 @@ export type SmmPost = {
   publishedUrl: string | null;
   stats: SmmStats;
   busy: SmmBusy | null;
+  progress: SmmProgress | null;
   error: string | null;
   media: SmmMedia[];
+  forecast: SmmForecast | null;
   updatedAt: string;
   /** Выложит ли Tai сам (Telegram; Instagram — если подключён API и визуал на месте). */
   autoPublish?: boolean;
@@ -74,7 +85,7 @@ export type SmmInstagram = { connected: boolean; state: SmmInstagramState | null
 
 export type SmmComment = { id: number; authorName: string | null; role: 'staff' | 'tai'; text: string; createdAt: string };
 export type SmmPillar = { key: string; title: string; share: number; about: string };
-export type SmmPlan = { id: string; month: string; status: 'draft' | 'active'; summary: string; goals: string[]; pillars: SmmPillar[]; busy: SmmBusy | null; error: string | null; updatedAt: string };
+export type SmmPlan = { id: string; month: string; status: 'draft' | 'active'; summary: string; goals: string[]; pillars: SmmPillar[]; busy: SmmBusy | null; progress: SmmProgress | null; error: string | null; updatedAt: string };
 
 export type SmmAccount = {
   id: string;
@@ -85,10 +96,38 @@ export type SmmAccount = {
   canPublish: boolean;
   isActive: boolean;
   followers: number | null;
-  stats: { views?: number | null; posts?: number | null; engagement?: number | null; source?: string };
+  stats: {
+    views?: number | null;
+    posts?: number | null;
+    engagement?: number | null;
+    source?: string;
+    /** Telegram: просмотров на пост, ERR, посты/просмотры/реакции за 30 дней. */
+    tg?: { avgViews: number | null; err: number | null; posts30: number; views30: number; reactions30: number; avgReactions: number | null };
+    /** Instagram: профиль за 7 и 30 дней и аудитория подписчиков. */
+    period7?: SmmIgPeriod | null;
+    period30?: SmmIgPeriod | null;
+    audience?: SmmAudience | null;
+  };
   statsAt: string | null;
   statsError: string | null;
 };
+
+export type SmmIgPeriod = {
+  reach: number | null;
+  views: number | null;
+  engaged: number | null;
+  interactions: number | null;
+  likes: number | null;
+  comments: number | null;
+  shares: number | null;
+  saves: number | null;
+  replies: number | null;
+  profileViews: number | null;
+  linkTaps: number | null;
+  follows: number | null;
+  unfollows: number | null;
+};
+export type SmmAudience = { ages: { label: string; value: number }[]; genders: { label: string; value: number }[]; cities: { label: string; value: number }[] };
 
 export type SmmReport = {
   id: string;
@@ -144,13 +183,45 @@ export type SmmSettingsPayload = {
 };
 
 export type SmmIdea = { topic: string; brief: string; platform: SmmPlatform; format: SmmFormat; direction: string };
+export type SmmTopPost = {
+  extId: string;
+  format: SmmFormat;
+  publishedAt: string | null;
+  caption: string;
+  permalink: string | null;
+  thumb: string | null;
+  views: number | null;
+  reach: number | null;
+  likes: number | null;
+  comments: number | null;
+  shares: number | null;
+  saves: number | null;
+  postId: string | null;
+};
+export type SmmPlatformInsight = {
+  accountId: string;
+  platform: string;
+  posts: number;
+  formats: { format: SmmFormat; posts: number; avgViews: number; avgLikes: number | null }[];
+  weekdays: { weekday: number; posts: number; avgViews: number }[];
+  hours: { from: number; to: number; posts: number; avgViews: number }[];
+  top: SmmTopPost[];
+};
+export type SmmAccuracy = { posts: number; inside: number; above: number; below: number; ratio: number | null };
 export type SmmAnalytics = {
   accounts: SmmAccount[];
-  history: { accountId: string; day: string; followers: number | null; views: number | null }[];
+  history: { accountId: string; day: string; followers: number | null; views: number | null; reach: number | null; newFollowers: number | null }[];
+  platforms: SmmPlatformInsight[];
   posts: SmmPost[];
+  accuracy: SmmAccuracy;
   reports: SmmReport[];
   spend: { month: number; budget: number };
 };
+
+export type SmmLibraryPhoto = { id: string; path: string; name: string; kind: string; description: string; tags: string; people: number | null; quality: number | null; orientation: string | null; usedCount: number; thumb: string };
+export type SmmAlbum = { id: string; path: string; title: string; kind: string; about: string; files: number; described: number; cover: string | null };
+export type SmmLibraryState = { folderId: string; url: string; title: string; connectedAt: string; syncedAt: string | null; error: string | null; progress: SmmProgress | null };
+export type SmmLibrary = { connected: boolean; state: SmmLibraryState | null; counts: { albums: number; files: number; described: number }; albums: SmmAlbum[] };
 
 // ─── Подписи ─────────────────────────────────────────────────────────────────
 
@@ -198,7 +269,7 @@ export function statusLook(post: Pick<SmmPost, 'status' | 'platform' | 'format' 
     case 'published':
       return { label: 'Вышло', color: '#007AFF' };
     case 'skipped':
-      return { label: 'Не выходит', color: '#8E8E93' };
+      return { label: 'Не выкладываем', color: '#8E8E93' };
     case 'failed':
       return { label: 'Не вышло', color: '#FF3B30' };
   }
@@ -281,6 +352,24 @@ export function plainText(body: string): string {
 export const selectedMedia = (post: Pick<SmmPost, 'media'>) =>
   post.media.filter((m) => m.selected && (m.status === 'done' || m.status === 'pending')).sort((a, b) => a.sort - b.sort);
 
+/**
+ * Где сейчас шкала: от `pct` к `next` — быстро в начале этапа и всё медленнее к концу
+ * (к `eta` проходит ~95% пути и дальше почти стоит, пока сервер не назовёт новый этап).
+ */
+export function progressPercent(p: SmmProgress, now: number): number {
+  const elapsed = Math.max(0, (now - Date.parse(p.at)) / 1000);
+  const share = 1 - Math.exp((-3 * elapsed) / Math.max(p.eta, 1));
+  return Math.min(99, p.pct + (p.next - p.pct) * share);
+}
+
+/** Сколько секунд примерно осталось до конца этапа (для подписи). */
+export function progressLeft(p: SmmProgress, now: number): number {
+  return Math.max(0, Math.round(p.eta - (now - Date.parse(p.at)) / 1000));
+}
+
+/** Видео Veo делается около двух минут — шкала по времени с запуска. */
+export const VIDEO_ETA_SEC = 150;
+
 export const busyText: Record<SmmBusy, string> = {
   text: 'Tai пишет текст и рисует картинку…',
   image: 'Tai рисует картинку…',
@@ -306,6 +395,29 @@ export function useSmmOverview() {
 export type SmmPostPayload = { post: SmmPost; comments: SmmComment[]; canApprove: boolean };
 
 const isWorking = (post?: SmmPost) => !!post && (!!post.busy || post.media.some((m) => m.status === 'pending'));
+
+export function useSmmLibrary() {
+  const club = useClubKey();
+  return useQuery({
+    queryKey: [club, 'smm', 'library'],
+    queryFn: () => api.get<SmmLibrary>('/smm/library'),
+    refetchInterval: (q) => (q.state.data?.state?.progress ? POLL_MS : false),
+  });
+}
+
+export function useSmmAlbum(id: string) {
+  const club = useClubKey();
+  return useQuery({ queryKey: [club, 'smm', 'album', id], queryFn: () => api.get<{ photos: SmmLibraryPhoto[] }>(`/smm/library/albums/${id}`), enabled: !!id });
+}
+
+export function useSmmLibrarySearch(q: string) {
+  const club = useClubKey();
+  return useQuery({
+    queryKey: [club, 'smm', 'library-search', q],
+    queryFn: () => api.get<{ photos: SmmLibraryPhoto[] }>(`/smm/library/search?q=${encodeURIComponent(q)}`),
+    enabled: q.trim().length >= 2,
+  });
+}
 
 export function useSmmPost(id: string) {
   const club = useClubKey();
@@ -399,6 +511,34 @@ export async function mediaAction(club: string, postId: string, mediaId: string,
       : await api.patch<{ post: SmmPost }>(`/smm/posts/${postId}/media/${mediaId}`, { selected });
   storePost(club, post);
   void queryClient.invalidateQueries({ queryKey: [club, 'smm', 'post', postId] });
+}
+
+/** Новый порядок позиций: прежние номера `sort` в нужном порядке. */
+export async function reorderMedia(club: string, postId: string, sorts: number[]): Promise<void> {
+  const { post } = await api.post<{ post: SmmPost }>(`/smm/posts/${postId}/media/order`, { sorts });
+  storePost(club, post);
+  void queryClient.invalidateQueries({ queryKey: [club, 'smm', 'post', postId] });
+}
+
+/** Фото из архива клуба — в публикацию как есть. */
+export async function addArchivePhoto(club: string, postId: string, photoId: string): Promise<void> {
+  const { post } = await api.post<{ post: SmmPost }>(`/smm/posts/${postId}/media/archive`, { photoId });
+  storePost(club, post);
+  void queryClient.invalidateQueries({ queryKey: [club, 'smm', 'post', postId] });
+}
+
+/** Поменять местами время выхода двух публикаций. */
+export async function swapPosts(club: string, a: string, b: string): Promise<void> {
+  await api.post('/smm/posts/swap', { a, b });
+  await queryClient.invalidateQueries({ queryKey: [club, 'smm', 'plan'] });
+  void queryClient.invalidateQueries({ queryKey: [club, 'smm', 'overview'] });
+}
+
+/** Фотоархив: подключить ссылкой, отключить, перечитать. */
+export async function libraryRequest(club: string, method: 'put' | 'delete' | 'post', path: string, body?: unknown): Promise<SmmLibrary> {
+  const data = method === 'put' ? await api.put<SmmLibrary>(path, body ?? {}) : method === 'post' ? await api.post<SmmLibrary>(path, body ?? {}) : await api.delete<SmmLibrary>(path);
+  queryClient.setQueryData([club, 'smm', 'library'], data);
+  return data;
 }
 
 export async function createPost(club: string, body: Record<string, unknown>): Promise<SmmPost> {

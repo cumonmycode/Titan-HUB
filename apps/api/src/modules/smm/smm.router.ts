@@ -4,7 +4,8 @@
  * сотрудники с правом «СММ»; площадки, бюджет и настройки — только владелец.
  *
  * Долгие задачи Tai (план, пост, правка, картинка) идут в фоне: ответ сразу,
- * приложение следит за полем busy и перечитывает пост/план.
+ * приложение следит за полем busy (и шкалой progress) и перечитывает пост/план.
+ * Цифры площадок — только по API; у публикаций — прогноз и факт.
  */
 import { Hono, type Context } from 'hono'
 import { bodyLimit } from 'hono/body-limit'
@@ -17,15 +18,18 @@ import { MAX_MEDIA_BODY_BYTES } from '../../lib/imageStore.js'
 import { monthSpend, polzaBalance, SMM_MODELS } from './ai.js'
 import { mskDate, mskToIso } from './context.js'
 import {
-  deleteMedia, deletePost, forget, insertPost, listAccounts, listComments, listMemory, listPosts, listReports, loadMedia, loadPlan, loadPost,
-  claimPost, remember, rows, updateMedia, updatePlan, updatePost,
+  deletePost, deleteSlot, forget, insertPost, listAccounts, listComments, listMemory, listPosts, listReports, loadMedia, loadPlan, loadPost,
+  claimPost, remember, reorderSlots, rows, updateMedia, updatePlan, updatePost,
 } from './db.js'
-import { addClubPhoto, addUpload, clubPhotos, regenerateImage, startPostVideo } from './media.js'
+import { analyticsPayload } from './analytics.js'
+import { withForecast } from './forecast.js'
+import { albumPhotos, connectLibrary, disconnectLibrary, libraryAlbums, libraryCounts, libraryState, searchLibrary, syncLibrary } from './library.js'
+import { addArchivePhoto, addClubPhoto, addUpload, clubPhotos, regenerateImage, startPostVideo } from './media.js'
 import { generatePlanInBackground, isMonth, monthRange, revisePlanInBackground } from './planner.js'
 import { DIRECTIONS, FORMAT_LABEL, PLATFORM_LABEL } from './prompts.js'
 import { generateReport } from './report.js'
 import { getSmmSettings, saveSmmSettings, SettingsSchema } from './settings.js'
-import { accountHistory, applyScreenshot, collectStats } from './stats.js'
+import { collectStats } from './stats.js'
 import { approvers, checkChannel } from './telegram.js'
 import { ACCOUNT_PLATFORMS, FORMATS, MEMORY_KINDS, PLATFORMS, SmmError, type SmmPost } from './types.js'
 import { approvePost, markPublished, publishNow, restorePost, skipPost, withAuto, type SmmEnv } from './workflow.js'
@@ -54,9 +58,11 @@ async function postOr404(c: Context<AppEnv>, allMedia = false): Promise<SmmPost>
   return post
 }
 
-/** Пост с отметкой «выложит сам» — одна форма для всех ответов. */
+/** Публикации для приложения: «выложит сам» и прогноз просмотров — одна форма для всех ответов. */
+const decorate = async (c: Context<AppEnv>, posts: SmmPost[]): Promise<SmmPost[]> => withForecast(c.var.db, await withAuto(c.var.db, posts))
+
 async function enriched(c: Context<AppEnv>, post: SmmPost | null): Promise<SmmPost | null> {
-  return post ? ((await withAuto(c.var.db, [post]))[0] ?? post) : null
+  return post ? ((await decorate(c, [post]))[0] ?? post) : null
 }
 
 const fresh = async (c: Context<AppEnv>, id: string) => c.json({ post: await enriched(c, await loadPost(c.var.db, id, true)) })
@@ -88,7 +94,8 @@ smmRouter.get('/overview', async (c) => {
       monthSpend(db),
       approvers(db),
     ])
-    const open = posts.filter((p) => p.status !== 'skipped' && (p.status !== 'published' || Date.parse(p.publishedAt ?? '') > now - 86_400_000))
+    // «Не выкладываем» остаются в ленте (серыми) — их видно и можно вернуть.
+    const open = posts.filter((p) => p.status !== 'published' || Date.parse(p.publishedAt ?? '') > now - 86_400_000)
     const [counts] = rows<Record<string, number>>(await db.execute(sql`
       SELECT
         count(*) FILTER (WHERE status = 'review')::int AS review,
@@ -102,7 +109,7 @@ smmRouter.get('/overview', async (c) => {
     return c.json({
       month,
       nextMonth,
-      upcoming: await withAuto(db, open),
+      upcoming: await decorate(c, open),
       counts: counts ?? { review: 0, awaitingLink: 0, failed: 0, publishedWeek: 0 },
       plan,
       nextPlan: await loadPlan(db, nextMonth),
@@ -130,7 +137,27 @@ smmRouter.get('/posts', async (c) => {
   const to = c.req.query('to')
   const valid = (v?: string) => !v || !Number.isNaN(Date.parse(v))
   if (!valid(from) || !valid(to)) return c.json({ error: 'Неверный период' }, 400)
-  return c.json({ posts: await withAuto(c.var.db, await listPosts(c.var.db, { from, to })) })
+  return c.json({ posts: await decorate(c, await listPosts(c.var.db, { from, to })) })
+})
+
+const SwapSchema = z.object({ a: z.string().uuid(), b: z.string().uuid() })
+
+/** Поменять местами время выхода двух публикаций (порядок выкладки в плане). */
+smmRouter.post('/posts/swap', zValidator('json', SwapSchema), async (c) => {
+  try {
+    const { a, b } = c.req.valid('json')
+    const [first, second] = await Promise.all([loadPost(c.var.db, a), loadPost(c.var.db, b)])
+    if (!first || !second) return c.json({ error: 'Публикация не найдена' }, 404)
+    if (first.status === 'published' || second.status === 'published') return c.json({ error: 'Вышедшую публикацию не двигаем' }, 409)
+    if (!first.publishAt || !second.publishAt) return c.json({ error: 'У публикации нет даты' }, 400)
+    // Время сменилось — ручную передачу человеку делаем заново в новое время.
+    const reset = (p: SmmPost) => (p.handoffAt && !p.publishedUrl ? { handoffAt: null, remindCount: 0 } : {})
+    await updatePost(c.var.db, first.id, { publishAt: second.publishAt, ...reset(first) })
+    await updatePost(c.var.db, second.id, { publishAt: first.publishAt, ...reset(second) })
+    return c.json({ ok: true })
+  } catch (error) {
+    return fail(c, error)
+  }
 })
 
 const NewPostSchema = z.object({
@@ -322,12 +349,39 @@ smmRouter.patch('/posts/:id/media/:mediaId', zValidator('json', z.object({ selec
   }
 })
 
+/** Убрать позицию из публикации: файл и все его варианты (картинка, видео, своё фото). */
 smmRouter.delete('/posts/:id/media/:mediaId', async (c) => {
   try {
     const post = await postOr404(c)
+    if (post.status === 'published') return c.json({ error: 'Публикация уже вышла — меняется только в самой соцсети' }, 409)
     const media = await loadMedia(c.var.db, c.req.param('mediaId'))
     if (!media || media.postId !== post.id) return c.json({ error: 'Файл не найден' }, 404)
-    await deleteMedia(c.var.db, media.id)
+    if (media.status === 'pending') return c.json({ error: 'Файл ещё делается — уберите, когда будет готов' }, 409)
+    await deleteSlot(c.var.db, post.id, media.kind, media.sort)
+    return fresh(c, post.id)
+  } catch (error) {
+    return fail(c, error)
+  }
+})
+
+/** Порядок слайдов карусели и кадров сторис: прежние номера позиций в новом порядке. */
+smmRouter.post('/posts/:id/media/order', zValidator('json', z.object({ sorts: z.array(z.number().int().min(0).max(999)).min(1).max(50) })), async (c) => {
+  try {
+    const post = await postOr404(c)
+    if (post.status === 'published') return c.json({ error: 'Публикация уже вышла — меняется только в самой соцсети' }, 409)
+    await reorderSlots(c.var.db, post.id, c.req.valid('json').sorts)
+    return fresh(c, post.id)
+  } catch (error) {
+    return fail(c, error)
+  }
+})
+
+/** Фото из архива клуба — в публикацию как есть (кадр под формат). */
+smmRouter.post('/posts/:id/media/archive', zValidator('json', z.object({ photoId: z.string().min(10).max(80) })), async (c) => {
+  try {
+    const post = await postOr404(c)
+    if (post.status === 'published') return c.json({ error: 'Публикация уже вышла — меняется только в самой соцсети' }, 409)
+    await addArchivePhoto(c.var.db, post.id, c.req.valid('json').photoId)
     return fresh(c, post.id)
   } catch (error) {
     return fail(c, error)
@@ -390,25 +444,6 @@ smmRouter.post('/posts/:id/link', zValidator('json', LinkSchema), async (c) => {
   }
 })
 
-const StatsSchema = z.object({
-  views: z.number().int().min(0).optional(),
-  likes: z.number().int().min(0).optional(),
-  comments: z.number().int().min(0).optional(),
-  shares: z.number().int().min(0).optional(),
-  saves: z.number().int().min(0).optional(),
-  reach: z.number().int().min(0).optional(),
-})
-
-smmRouter.post('/posts/:id/stats', zValidator('json', StatsSchema), async (c) => {
-  try {
-    const post = await postOr404(c)
-    await updatePost(c.var.db, post.id, { stats: { ...post.stats, ...c.req.valid('json'), source: 'manual' }, statsAt: new Date().toISOString() })
-    return fresh(c, post.id)
-  } catch (error) {
-    return fail(c, error)
-  }
-})
-
 // ─── План месяца ─────────────────────────────────────────────────────────────
 
 const monthParam = (c: Context<AppEnv>): string => {
@@ -423,7 +458,7 @@ async function planPayload(c: Context<AppEnv>, month: string) {
   const { from, to } = monthRange(month)
   return {
     plan,
-    posts: await withAuto(db, await listPosts(db, { from, to })),
+    posts: await decorate(c, await listPosts(db, { from, to })),
     comments: plan ? await listComments(db, { planId: plan.id }) : [],
   }
 }
@@ -505,22 +540,15 @@ smmRouter.delete('/memory/:memoryId', async (c) => {
 
 // ─── Аналитика ───────────────────────────────────────────────────────────────
 
-async function analyticsPayload(c: Context<AppEnv>) {
+async function analyticsResponse(c: Context<AppEnv>) {
   const db = c.var.db
-  const settings = await getSmmSettings(db)
-  const [accounts, history, posts, reports, spent] = await Promise.all([
-    listAccounts(db),
-    accountHistory(db, 60),
-    listPosts(db, { from: new Date(Date.now() - 60 * 86_400_000).toISOString(), status: ['published'] }),
-    listReports(db, 12),
-    monthSpend(db),
-  ])
-  return { accounts, history, posts: posts.reverse(), reports, spend: { month: Math.round(spent), budget: settings.monthlyBudget } }
+  const [payload, settings, spent] = await Promise.all([analyticsPayload(db), getSmmSettings(db), monthSpend(db)])
+  return { ...payload, spend: { month: Math.round(spent), budget: settings.monthlyBudget } }
 }
 
 smmRouter.get('/analytics', async (c) => {
   try {
-    return c.json(await analyticsPayload(c))
+    return c.json(await analyticsResponse(c))
   } catch (error) {
     return fail(c, error)
   }
@@ -529,23 +557,7 @@ smmRouter.get('/analytics', async (c) => {
 smmRouter.post('/analytics/collect', async (c) => {
   try {
     await collectStats(c.var.db)
-    return c.json(await analyticsPayload(c))
-  } catch (error) {
-    return fail(c, error)
-  }
-})
-
-smmRouter.post('/analytics/screenshot', uploadLimit, async (c) => {
-  try {
-    const form = await c.req.formData()
-    const file = form.get('file')
-    if (!(file instanceof File)) return c.json({ error: 'Нет файла' }, 400)
-    const buffer = Buffer.from(await file.arrayBuffer())
-    const mime = buffer[0] === 0x89 ? 'image/png' : 'image/jpeg'
-    const postId = String(form.get('postId') ?? '')
-    const accountId = String(form.get('accountId') ?? '')
-    const result = await applyScreenshot(c.var.db, buffer, mime, { postId: UUID.test(postId) ? postId : undefined, accountId: UUID.test(accountId) ? accountId : undefined })
-    return c.json({ ...result, ...(await analyticsPayload(c)) })
+    return c.json(await analyticsResponse(c))
   } catch (error) {
     return fail(c, error)
   }
@@ -703,4 +715,65 @@ smmRouter.put('/instagram', ownerOnly, zValidator('json', z.object({ token: z.st
 smmRouter.delete('/instagram', ownerOnly, async (c) => {
   await disconnectInstagram(c.var.db)
   return c.json({ connected: false, state: null })
+})
+
+// ─── Фотоархив (Google Диск) ─────────────────────────────────────────────────
+
+async function libraryPayload(c: Context<AppEnv>) {
+  const db = c.var.db
+  const [state, counts, albums] = await Promise.all([libraryState(db), libraryCounts(db), libraryAlbums(db)])
+  return { connected: !!state, state, counts, albums: state ? albums : [] }
+}
+
+smmRouter.get('/library', async (c) => {
+  try {
+    return c.json(await libraryPayload(c))
+  } catch (error) {
+    return fail(c, error)
+  }
+})
+
+smmRouter.put('/library', ownerOnly, zValidator('json', z.object({ link: z.string().trim().min(10).max(500) })), async (c) => {
+  try {
+    await connectLibrary(c.var.db, c.req.valid('json').link)
+    return c.json(await libraryPayload(c))
+  } catch (error) {
+    return fail(c, error)
+  }
+})
+
+smmRouter.delete('/library', ownerOnly, async (c) => {
+  await disconnectLibrary(c.var.db)
+  return c.json(await libraryPayload(c))
+})
+
+/** Перечитать архив сейчас (новые альбомы и фото) — в фоне, шкала в состоянии. */
+smmRouter.post('/library/sync', ownerOnly, async (c) => {
+  try {
+    void syncLibrary(c.var.db).catch((error) => console.error('[smm] архив', error))
+    return c.json(await libraryPayload(c))
+  } catch (error) {
+    return fail(c, error)
+  }
+})
+
+smmRouter.get('/library/albums/:albumId', async (c) => {
+  try {
+    const id = c.req.param('albumId')
+    if (!/^[\w-]{10,80}$/.test(id)) return c.json({ error: 'Альбом не найден' }, 404)
+    return c.json({ photos: await albumPhotos(c.var.db, id) })
+  } catch (error) {
+    return fail(c, error)
+  }
+})
+
+/** Поиск по описаниям архива — то же, чем пользуется Tai. */
+smmRouter.get('/library/search', async (c) => {
+  try {
+    const q = (c.req.query('q') ?? '').trim().slice(0, 200)
+    if (q.length < 2) return c.json({ photos: [] })
+    return c.json({ photos: await searchLibrary(c.var.db, q, { limit: 60, kinds: ['photo', 'template', 'logo', 'design'], perAlbum: 60, minQuality: 1 }) })
+  } catch (error) {
+    return fail(c, error)
+  }
 })

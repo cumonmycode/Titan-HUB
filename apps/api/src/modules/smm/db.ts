@@ -8,7 +8,7 @@
 import { sql, type Database } from '@titan/database'
 import type { SQL } from 'drizzle-orm'
 import type {
-  ReelScript, SmmAccount, SmmBusy, SmmComment, SmmMedia, SmmMemory, SmmMemoryKind, SmmPlan, SmmPost, SmmPostStats, SmmReport,
+  ReelScript, SmmAccount, SmmBusy, SmmComment, SmmForecast, SmmMedia, SmmMemory, SmmMemoryKind, SmmPlan, SmmPost, SmmPostStats, SmmProgress, SmmReport,
 } from './types.js'
 
 export function rows<T = Record<string, unknown>>(res: unknown): T[] {
@@ -42,7 +42,7 @@ function mapMedia(r: Row): SmmMedia {
   return {
     id: String(r['id']),
     kind: r['kind'] === 'video' ? 'video' : 'image',
-    source: r['source'] === 'upload' ? 'upload' : 'ai',
+    source: r['source'] === 'upload' || r['source'] === 'archive' ? r['source'] : 'ai',
     status: (r['status'] as SmmMedia['status']) ?? 'done',
     url: str(r['url']),
     aspect: str(r['aspect']),
@@ -82,8 +82,11 @@ function mapPost(r: Row, media: SmmMedia[]): SmmPost {
     stats: json<SmmPostStats>(r['stats'], {}),
     statsAt: iso(r['stats_at']),
     busy: (r['busy'] as SmmBusy | null) ?? null,
+    progress: r['busy'] ? json<SmmProgress | null>(r['progress'], null) : null,
     error: str(r['error']),
     media,
+    forecast: json<SmmForecast | null>(r['forecast'], null),
+    extId: str(r['ext_id']),
     createdAt: iso(r['created_at']) ?? '',
     updatedAt: iso(r['updated_at']) ?? '',
   }
@@ -159,6 +162,9 @@ export interface PostPatch {
   stats?: SmmPostStats
   statsAt?: string | null
   busy?: SmmBusy | null
+  progress?: SmmProgress | null
+  forecast?: SmmForecast | null
+  extId?: string | null
   error?: string | null
 }
 
@@ -189,6 +195,9 @@ const COLUMNS: Record<keyof PostPatch, { col: string; cast?: string; json?: bool
   stats: { col: 'stats', json: true },
   statsAt: { col: 'stats_at', cast: 'timestamptz' },
   busy: { col: 'busy' },
+  progress: { col: 'progress', json: true },
+  forecast: { col: 'forecast', json: true },
+  extId: { col: 'ext_id' },
   error: { col: 'error' },
 }
 
@@ -209,6 +218,8 @@ function assignments(patch: PostPatch): SQL[] {
 export async function updatePost(db: Database, id: string, patch: PostPatch): Promise<void> {
   const sets = assignments(patch)
   if (patch.busy !== undefined) sets.push(patch.busy ? sql`busy_at = now()` : sql`busy_at = NULL`)
+  // Работа закончилась — шкала уходит вместе с ней.
+  if (patch.busy === null && patch.progress === undefined) sets.push(sql`progress = NULL`)
   if (!sets.length) return
   await db.execute(sql`UPDATE smm_posts SET ${sql.join(sets, sql`, `)}, updated_at = now() WHERE id = ${id}::uuid`)
 }
@@ -245,10 +256,15 @@ export async function deletePost(db: Database, id: string): Promise<void> {
   await db.execute(sql`DELETE FROM smm_posts WHERE id = ${id}::uuid`)
 }
 
+/** Шкала готовности поста (без смены остального). */
+export async function setPostProgress(db: Database, id: string, progress: SmmProgress): Promise<void> {
+  await db.execute(sql`UPDATE smm_posts SET progress = ${JSON.stringify(progress)}::jsonb WHERE id = ${id}::uuid AND busy IS NOT NULL`)
+}
+
 /** Занять пост под работу Tai. false — уже занят (свежая работа идёт). */
 export async function claimPost(db: Database, id: string, busy: SmmBusy): Promise<boolean> {
   const res = rows(await db.execute(sql`
-    UPDATE smm_posts SET busy = ${busy}, busy_at = now(), error = NULL, updated_at = now()
+    UPDATE smm_posts SET busy = ${busy}, busy_at = now(), progress = NULL, error = NULL, updated_at = now()
     WHERE id = ${id}::uuid AND (busy IS NULL OR busy_at < now() - interval '10 minutes')
     RETURNING id
   `))
@@ -260,7 +276,7 @@ export async function claimPost(db: Database, id: string, busy: SmmBusy): Promis
 export interface NewMedia {
   postId: string
   kind: 'image' | 'video'
-  source: 'ai' | 'upload'
+  source: 'ai' | 'upload' | 'archive'
   status: 'pending' | 'done' | 'failed'
   url?: string | null
   aspect?: string | null
@@ -318,6 +334,29 @@ export async function deleteMedia(db: Database, id: string): Promise<void> {
   await db.execute(sql`DELETE FROM smm_media WHERE id = ${id}::uuid`)
 }
 
+/** Следующая свободная позиция в публикации (новый файл встаёт последним). */
+export async function nextSort(db: Database, postId: string): Promise<number> {
+  const [row] = rows<{ next: number }>(await db.execute(sql`SELECT coalesce(max(sort), -1) + 1 AS next FROM smm_media WHERE post_id = ${postId}::uuid`))
+  return Number(row?.next ?? 0)
+}
+
+/** Убрать позицию целиком: выбранный файл и все его варианты. */
+export async function deleteSlot(db: Database, postId: string, kind: 'image' | 'video', sort: number): Promise<void> {
+  await db.execute(sql`DELETE FROM smm_media WHERE post_id = ${postId}::uuid AND kind = ${kind} AND sort = ${sort}`)
+}
+
+/**
+ * Новый порядок позиций: `sorts` — прежние номера позиций в нужном порядке. Варианты
+ * картинки переезжают вместе со своей позицией; не названные позиции встают в конец.
+ */
+export async function reorderSlots(db: Database, postId: string, sorts: number[]): Promise<void> {
+  const all = rows<{ sort: number }>(await db.execute(sql`SELECT DISTINCT sort FROM smm_media WHERE post_id = ${postId}::uuid ORDER BY sort`)).map((r) => Number(r.sort))
+  const order = [...new Set(sorts.filter((n) => all.includes(n))), ...all.filter((n) => !sorts.includes(n))]
+  if (order.every((n, i) => n === all[i])) return
+  const cases = sql.join(order.map((n, i) => sql`WHEN ${n}::int THEN ${i}::int`), sql` `)
+  await db.execute(sql`UPDATE smm_media SET sort = CASE sort ${cases} END, updated_at = now() WHERE post_id = ${postId}::uuid`)
+}
+
 // ─── Планы ───────────────────────────────────────────────────────────────────
 
 function mapPlan(r: Row): SmmPlan {
@@ -329,6 +368,7 @@ function mapPlan(r: Row): SmmPlan {
     goals: json<string[]>(r['goals'], []),
     pillars: json<SmmPlan['pillars']>(r['pillars'], []),
     busy: (r['busy'] as SmmBusy | null) ?? null,
+    progress: r['busy'] ? json<SmmProgress | null>(r['progress'], null) : null,
     error: str(r['error']),
     updatedAt: iso(r['updated_at']) ?? '',
   }
@@ -350,13 +390,14 @@ export async function ensurePlan(db: Database, month: string): Promise<SmmPlan> 
   return (await loadPlan(db, month))!
 }
 
-export async function updatePlan(db: Database, id: string, patch: { status?: string; summary?: string; goals?: string[]; pillars?: SmmPlan['pillars']; busy?: SmmBusy | null; error?: string | null }): Promise<void> {
+export async function updatePlan(db: Database, id: string, patch: { status?: string; summary?: string; goals?: string[]; pillars?: SmmPlan['pillars']; busy?: SmmBusy | null; progress?: SmmProgress; error?: string | null }): Promise<void> {
   const sets: SQL[] = []
+  if (patch.progress !== undefined) sets.push(sql`progress = ${JSON.stringify(patch.progress)}::jsonb`)
   if (patch.status !== undefined) sets.push(sql`status = ${patch.status}`)
   if (patch.summary !== undefined) sets.push(sql`summary = ${patch.summary}`)
   if (patch.goals !== undefined) sets.push(sql`goals = ${JSON.stringify(patch.goals)}::jsonb`)
   if (patch.pillars !== undefined) sets.push(sql`pillars = ${JSON.stringify(patch.pillars)}::jsonb`)
-  if (patch.busy !== undefined) sets.push(patch.busy ? sql`busy = ${patch.busy}, busy_at = now()` : sql`busy = NULL, busy_at = NULL`)
+  if (patch.busy !== undefined) sets.push(patch.busy ? sql`busy = ${patch.busy}, busy_at = now()` : sql`busy = NULL, busy_at = NULL, progress = NULL`)
   if (patch.error !== undefined) sets.push(sql`error = ${patch.error}`)
   if (!sets.length) return
   await db.execute(sql`UPDATE smm_plans SET ${sql.join(sets, sql`, `)}, updated_at = now() WHERE id = ${id}::uuid`)
@@ -364,7 +405,7 @@ export async function updatePlan(db: Database, id: string, patch: { status?: str
 
 export async function claimPlan(db: Database, id: string, busy: SmmBusy): Promise<boolean> {
   const res = rows(await db.execute(sql`
-    UPDATE smm_plans SET busy = ${busy}, busy_at = now(), error = NULL, updated_at = now()
+    UPDATE smm_plans SET busy = ${busy}, busy_at = now(), progress = NULL, error = NULL, updated_at = now()
     WHERE id = ${id}::uuid AND (busy IS NULL OR busy_at < now() - interval '15 minutes')
     RETURNING id
   `))

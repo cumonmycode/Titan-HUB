@@ -220,7 +220,7 @@ export async function publishToChannel(db: Database, post: SmmPost): Promise<{ m
 
 export const reviewButtons = (postId: string): InlineButton[][] => [
   [{ text: '✅ Одобрить', callback_data: `sm:a:${postId}` }, { text: '✏️ Поправить', callback_data: `sm:e:${postId}` }],
-  [{ text: '🚫 Не выпускать', callback_data: `sm:x:${postId}` }],
+  [{ text: '🚫 Не выкладывать', callback_data: `sm:x:${postId}` }],
 ]
 
 function reviewHeader(post: SmmPost, intro: string): string {
@@ -305,18 +305,6 @@ export async function setAwaitedRemark(clubKey: string, tgId: string, postId: st
 
 export async function awaitedRemarkPost(clubKey: string, tgId: string): Promise<string | null> {
   return getSharedRedis().get(remarkKey(clubKey, tgId)).catch(() => null)
-}
-
-const statsKey = (clubKey: string, tgId: string) => `smm:stats:${clubKey}:${tgId}`
-
-export async function setAwaitedStats(clubKey: string, tgId: string, target: string | null): Promise<void> {
-  const redis = getSharedRedis()
-  if (target) await redis.set(statsKey(clubKey, tgId), target, 'EX', 2 * 86_400).catch(() => undefined)
-  else await redis.del(statsKey(clubKey, tgId)).catch(() => undefined)
-}
-
-export async function awaitedStats(clubKey: string, tgId: string): Promise<string | null> {
-  return getSharedRedis().get(statsKey(clubKey, tgId)).catch(() => null)
 }
 
 /** Личное сообщение от Tai (без кнопок). */

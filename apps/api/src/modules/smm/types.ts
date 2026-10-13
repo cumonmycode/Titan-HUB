@@ -26,10 +26,39 @@ export type SmmMemoryKind = (typeof MEMORY_KINDS)[number]
 /** Что Tai сейчас делает с постом или планом — приложение показывает и ждёт. */
 export type SmmBusy = 'text' | 'image' | 'video' | 'revise' | 'plan' | 'report'
 
+/**
+ * Шкала готовности: этап и куда он ведёт. Приложение плавно ведёт полосу от `pct` к
+ * `next` за `eta` секунд с момента `at` — между опросами сервера шкала не стоит.
+ */
+export interface SmmProgress {
+  label: string
+  pct: number
+  next: number
+  eta: number
+  at: string
+}
+
+/**
+ * Прогноз просмотров публикации по похожим постам площадки (медиана и разброс).
+ * В момент выхода замораживается (`frozen`) — с ним сравнивается факт.
+ */
+export interface SmmForecast {
+  metric: 'views'
+  expected: number
+  low: number
+  high: number
+  /** На скольких постах площадки посчитан. */
+  basis: number
+  likes: number | null
+  at: string
+  frozen?: boolean
+}
+
 export interface SmmMedia {
   id: string
   kind: 'image' | 'video'
-  source: 'ai' | 'upload'
+  /** archive — фото из фотоархива клуба (Google Диск), как есть. */
+  source: 'ai' | 'upload' | 'archive'
   status: 'pending' | 'done' | 'failed'
   url: string | null
   aspect: string | null
@@ -61,7 +90,8 @@ export interface SmmPostStats {
   saves?: number
   reach?: number
   reactions?: number
-  source?: 'auto' | 'screenshot' | 'manual'
+  interactions?: number
+  source?: 'auto'
 }
 
 export interface SmmPost {
@@ -89,8 +119,13 @@ export interface SmmPost {
   stats: SmmPostStats
   statsAt: string | null
   busy: SmmBusy | null
+  progress: SmmProgress | null
   error: string | null
   media: SmmMedia[]
+  /** Прогноз: замороженный при выходе или посчитанный сейчас (сервер добавляет при выдаче). */
+  forecast: SmmForecast | null
+  /** id в соцсети (Instagram media id). */
+  extId: string | null
   createdAt: string
   updatedAt: string
   /** Выложит ли Tai сам (Telegram, Instagram по API) — считает сервер при выдаче. */
@@ -122,6 +157,7 @@ export interface SmmPlan {
   goals: string[]
   pillars: SmmPillar[]
   busy: SmmBusy | null
+  progress: SmmProgress | null
   error: string | null
   updatedAt: string
 }
@@ -169,6 +205,9 @@ export class SmmError extends Error {
 /** Площадка и формат, которые Tai выкладывает сам (остальное передаёт человеку). */
 export const autoPublishes = (p: Pick<SmmPost, 'platform' | 'format'>): boolean =>
   p.platform === 'telegram' && (p.format === 'post' || p.format === 'carousel')
+
+/** Этап шкалы готовности с отметкой времени. */
+export const step = (label: string, pct: number, next: number, eta: number): SmmProgress => ({ label, pct, next, eta, at: new Date().toISOString() })
 
 /** Соотношение сторон картинки: лента — 4:5 (Instagram и Telegram), сторис и рилс — 9:16. */
 export const aspectFor = (format: SmmFormat): '4:5' | '9:16' => (format === 'story' || format === 'reel' ? '9:16' : '4:5')

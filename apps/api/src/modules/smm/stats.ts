@@ -1,22 +1,30 @@
 /**
- * Цифры площадок: подписчики и охват.
- *  - Telegram: подписчики — через бота (getChatMemberCount), просмотры постов — с
- *    публичной страницы t.me/s/<канал> (через шлюз: из РФ Telegram закрыт).
- *  - Instagram без входа почти ничего не отдаёт: пробуем публичный профиль (тоже
- *    через шлюз) — если пустили, подтягиваем подписчиков, лайки и находим вышедшие
- *    посты; если нет — Tai просит скриншот статистики и разбирает его нейросетью.
+ * Цифры площадок — только по API, без скриншотов.
+ *  - Telegram: подписчики — getChatMemberCount (Tai — администратор канала); посты
+ *    канала с просмотрами, реакциями и временем — публичная страница t.me/s/<канал>
+ *    (через шлюз: из РФ Telegram закрыт), до пяти страниц назад.
+ *  - Instagram (официальный API): профиль, охват, просмотры, вовлечённость, визиты и
+ *    переходы за 7 и 30 дней, охват и новые подписчики по дням, аудитория, все
+ *    публикации с метриками и живые сторис.
+ * Публикации площадок — в smm_platform_posts (из них прогноз, лучшее время, сравнение
+ * форматов, топ); снимок дня — smm_account_stats; сводка — smm_accounts.stats.
+ * Раз в день — полный сбор, раз в час — свежие посты (первые двое суток).
  */
 import { sql, type Database } from '@titan/database'
-import { z } from 'zod'
-import { igInsights, igProfile, igRecentMedia, instagramState } from './instagram.js'
-import { webFetch } from './relay.js'
-import { chatJson } from './ai.js'
 import { mskDate } from './context.js'
-import { listAccounts, listPosts, loadPost, rows, updatePost, type AccountRow } from './db.js'
+import { listAccounts, listPosts, rows, updatePost, type AccountRow } from './db.js'
+import { freezeForecast } from './forecast.js'
+import { igAudience, igDaily, igInsights, igPeriod, igProfile, igRecentMedia, igStories, instagramState, type IgMedia } from './instagram.js'
+import { webFetch } from './relay.js'
 import { channelMembers, plainText } from './telegram.js'
-import type { SmmPost, SmmPostStats } from './types.js'
+import type { SmmFormat, SmmPost, SmmPostStats } from './types.js'
 
-const IG_APP_ID = '936619743392459'
+const TG_PAGES = 5
+const HISTORY_DAYS = 120
+const IG_MEDIA_LIMIT = 50
+const IG_MEDIA_FRESH_LIMIT = 10
+const FRESH_MS = 48 * 3600_000
+const DAY_MS = 86_400_000
 
 /** «1.2K» → 1200, «3,4M» → 3 400 000. */
 export function parseCount(text: string): number | null {
@@ -28,266 +36,338 @@ export function parseCount(text: string): number | null {
   return Math.round(n * mult)
 }
 
-/** Просмотры постов с t.me/s/<канал>: id сообщения → просмотры. */
-export function parseChannelPage(html: string, handle: string): Map<number, number> {
-  const views = new Map<number, number>()
-  for (const block of html.split('tgme_widget_message_wrap').slice(1)) {
-    const id = new RegExp(`data-post="${handle}/(\\d+)"`, 'i').exec(block)?.[1]
-    const v = /tgme_widget_message_views">([^<]+)</.exec(block)?.[1]
-    if (id && v) {
-      const n = parseCount(v)
-      if (n != null) views.set(Number(id), n)
-    }
-  }
-  return views
+export interface ChannelPost {
+  id: number
+  views: number | null
+  reactions: number
+  at: string | null
+  text: string
+  format: SmmFormat
+  thumb: string | null
 }
 
-async function saveSnapshot(db: Database, accountId: string, s: { followers?: number | null; views?: number | null; posts?: number | null; engagement?: number | null; source: string; raw?: unknown }): Promise<void> {
+/** Посты с t.me/s/<канал>: просмотры, реакции, время, начало текста; `before` — следующая страница. */
+export function parseChannelPage(html: string, handle: string): { posts: ChannelPost[]; before: number | null } {
+  const posts: ChannelPost[] = []
+  for (const block of html.split('tgme_widget_message_wrap').slice(1)) {
+    const id = new RegExp(`data-post="${handle}/(\\d+)"`, 'i').exec(block)?.[1]
+    if (!id) continue
+    const views = /tgme_widget_message_views">([^<]+)</.exec(block)?.[1]
+    let reactions = 0
+    for (const m of block.matchAll(/class="tgme_reaction[^"]*">[\s\S]*?<\/i>\s*([\d.,]+[KkMm]?)\s*<\/span>/g)) reactions += parseCount(m[1]!) ?? 0
+    const text = /tgme_widget_message_text[^>]*>([\s\S]*?)<\/div>/.exec(block)?.[1] ?? ''
+    posts.push({
+      id: Number(id),
+      views: views ? parseCount(views) : null,
+      reactions,
+      at: /<time datetime="([^"]+)"/.exec(block)?.[1] ?? null,
+      text: plainText(text.replace(/<br\s*\/?>/gi, '\n')).slice(0, 200),
+      format: /tgme_widget_message_grouped/.test(block) ? 'carousel' : 'post',
+      thumb: /tgme_widget_message_photo_wrap[^>]*background-image:url\('([^']+)'\)/.exec(block)?.[1] ?? null,
+    })
+  }
+  const before = /tme_messages_more[^>]*data-before="(\d+)"/.exec(html)?.[1]
+  return { posts, before: before ? Number(before) : null }
+}
+
+// ─── Запись ──────────────────────────────────────────────────────────────────
+
+interface PlatformPost {
+  extId: string
+  format: SmmFormat
+  publishedAt: string | null
+  caption: string
+  permalink: string | null
+  thumb: string | null
+  views?: number | null
+  reach?: number | null
+  likes?: number | null
+  comments?: number | null
+  shares?: number | null
+  saves?: number | null
+  reactions?: number | null
+  interactions?: number | null
+}
+
+async function upsertPlatformPost(db: Database, account: AccountRow, p: PlatformPost): Promise<void> {
+  const n = (v: number | null | undefined) => (v == null ? null : Math.round(v))
   await db.execute(sql`
-    INSERT INTO smm_account_stats (account_id, day, followers, views, posts, engagement, source, raw)
-    VALUES (${accountId}::uuid, ${mskDate()}::date, ${s.followers ?? null}, ${s.views ?? null}, ${s.posts ?? null}, ${s.engagement ?? null}, ${s.source}, ${JSON.stringify(s.raw ?? {})}::jsonb)
+    INSERT INTO smm_platform_posts (account_id, ext_id, platform, format, published_at, caption, permalink, thumb_url, views, reach, likes, comments, shares, saves, reactions, interactions, stats_at)
+    VALUES (${account.id}::uuid, ${p.extId}, ${account.platform}, ${p.format}, ${p.publishedAt}::timestamptz, ${p.caption.slice(0, 300)}, ${p.permalink}, ${p.thumb},
+      ${n(p.views)}, ${n(p.reach)}, ${n(p.likes)}, ${n(p.comments)}, ${n(p.shares)}, ${n(p.saves)}, ${n(p.reactions)}, ${n(p.interactions)}, now())
+    ON CONFLICT (account_id, ext_id) DO UPDATE SET
+      format = EXCLUDED.format, published_at = coalesce(EXCLUDED.published_at, smm_platform_posts.published_at),
+      caption = EXCLUDED.caption, permalink = coalesce(EXCLUDED.permalink, smm_platform_posts.permalink), thumb_url = coalesce(EXCLUDED.thumb_url, smm_platform_posts.thumb_url),
+      views = coalesce(EXCLUDED.views, smm_platform_posts.views), reach = coalesce(EXCLUDED.reach, smm_platform_posts.reach),
+      likes = coalesce(EXCLUDED.likes, smm_platform_posts.likes), comments = coalesce(EXCLUDED.comments, smm_platform_posts.comments),
+      shares = coalesce(EXCLUDED.shares, smm_platform_posts.shares), saves = coalesce(EXCLUDED.saves, smm_platform_posts.saves),
+      reactions = coalesce(EXCLUDED.reactions, smm_platform_posts.reactions), interactions = coalesce(EXCLUDED.interactions, smm_platform_posts.interactions),
+      stats_at = now()
+  `)
+}
+
+interface Snapshot {
+  followers?: number | null
+  views?: number | null
+  posts?: number | null
+  engagement?: number | null
+  summary: Record<string, unknown>
+}
+
+async function saveSnapshot(db: Database, accountId: string, s: Snapshot): Promise<void> {
+  await db.execute(sql`
+    INSERT INTO smm_account_stats (account_id, day, followers, views, posts, engagement, source)
+    VALUES (${accountId}::uuid, ${mskDate()}::date, ${s.followers ?? null}, ${s.views ?? null}, ${s.posts ?? null}, ${s.engagement ?? null}, 'auto')
     ON CONFLICT (account_id, day) DO UPDATE SET
       followers = coalesce(EXCLUDED.followers, smm_account_stats.followers),
       views = coalesce(EXCLUDED.views, smm_account_stats.views),
       posts = coalesce(EXCLUDED.posts, smm_account_stats.posts),
       engagement = coalesce(EXCLUDED.engagement, smm_account_stats.engagement),
-      source = EXCLUDED.source, raw = EXCLUDED.raw
+      source = 'auto'
   `)
   await db.execute(sql`
     UPDATE smm_accounts SET
       followers = coalesce(${s.followers ?? null}::int, followers),
-      stats = ${JSON.stringify({ views: s.views ?? null, posts: s.posts ?? null, engagement: s.engagement ?? null, source: s.source })}::jsonb,
+      stats = ${JSON.stringify({ ...s.summary, views: s.views ?? null, posts: s.posts ?? null, engagement: s.engagement ?? null, source: 'auto' })}::jsonb,
       stats_at = now(), stats_error = NULL, updated_at = now()
     WHERE id = ${accountId}::uuid
   `)
+}
+
+/** Метрика по дням в историю площадки (охват, новые подписчики Instagram). */
+async function saveDaily(db: Database, accountId: string, column: 'reach' | 'new_followers', series: { day: string; value: number }[]): Promise<void> {
+  const col = sql.raw(column)
+  for (const point of series) {
+    await db.execute(sql`
+      INSERT INTO smm_account_stats (account_id, day, ${col}, source) VALUES (${accountId}::uuid, ${point.day}::date, ${point.value}, 'auto')
+      ON CONFLICT (account_id, day) DO UPDATE SET ${col} = EXCLUDED.${col}
+    `)
+  }
 }
 
 async function markError(db: Database, accountId: string, error: string): Promise<void> {
   await db.execute(sql`UPDATE smm_accounts SET stats_error = ${error.slice(0, 300)}, stats_at = now() WHERE id = ${accountId}::uuid`)
 }
 
-async function collectTelegram(db: Database, account: AccountRow): Promise<void> {
+const median = (list: number[]): number | null => {
+  if (!list.length) return null
+  const s = [...list].sort((a, b) => a - b)
+  const mid = Math.floor(s.length / 2)
+  return s.length % 2 ? s[mid]! : Math.round((s[mid - 1]! + s[mid]!) / 2)
+}
+
+/** Средние по зрелым постам (старше суток): просмотры и реакции на пост. */
+async function matureAverages(db: Database, accountId: string): Promise<{ views: number | null; posts30: number; views30: number; reactions30: number }> {
+  const list = rows<Record<string, unknown>>(await db.execute(sql`
+    SELECT views, coalesce(likes, reactions, 0) AS likes, published_at FROM smm_platform_posts
+    WHERE account_id = ${accountId}::uuid AND format <> 'story' AND published_at > now() - interval '30 days'
+    ORDER BY published_at DESC
+  `))
+  const mature = list.filter((r) => Date.parse(String(r['published_at'])) < Date.now() - DAY_MS && r['views'] != null)
+  return {
+    views: median(mature.slice(0, 10).map((r) => Number(r['views']))),
+    posts30: list.length,
+    views30: list.reduce((s, r) => s + Number(r['views'] ?? 0), 0),
+    reactions30: list.reduce((s, r) => s + Number(r['likes'] ?? 0), 0),
+  }
+}
+
+// ─── Telegram ────────────────────────────────────────────────────────────────
+
+async function collectTelegram(db: Database, account: AccountRow, fresh: boolean): Promise<void> {
   const followers = account.tgChatId ? await channelMembers(db, account.tgChatId) : null
-  let views: Map<number, number> = new Map()
+  let pages = 0
+  let before: number | null = null
+  let seen = 0
   if (account.handle) {
-    try {
-      const res = await webFetch(`https://t.me/s/${account.handle}`)
-      if (res.ok) views = parseChannelPage(await res.text(), account.handle)
-    } catch (error) {
-      console.warn('[smm] страница канала не открылась', error instanceof Error ? error.message : error)
+    const handle = account.handle
+    while (pages < (fresh ? 1 : TG_PAGES)) {
+      const res = await webFetch(`https://t.me/s/${handle}${before ? `?before=${before}` : ''}`).catch(() => null)
+      if (!res?.ok) break
+      const page = parseChannelPage(await res.text(), handle)
+      pages += 1
+      for (const p of page.posts) {
+        seen += 1
+        await upsertPlatformPost(db, account, {
+          extId: String(p.id),
+          format: p.format,
+          publishedAt: p.at,
+          caption: p.text,
+          permalink: `https://t.me/${handle}/${p.id}`,
+          thumb: p.thumb,
+          views: p.views,
+          reactions: p.reactions,
+        })
+      }
+      const oldest = page.posts[0]?.at
+      if (!page.before || !page.posts.length || (oldest && Date.parse(oldest) < Date.now() - HISTORY_DAYS * DAY_MS)) break
+      before = page.before
     }
   }
-  const recent = [...views.entries()].sort((a, b) => b[0] - a[0]).slice(0, 10).map(([, v]) => v)
-  const avg = recent.length ? Math.round(recent.reduce((s, v) => s + v, 0) / recent.length) : null
-  if (followers == null && avg == null) {
+  if (followers == null && !seen) {
     await markError(db, account.id, 'Не удалось получить цифры: проверьте, что Tai — администратор канала')
     return
   }
-  await saveSnapshot(db, account.id, { followers, views: avg, posts: views.size || null, engagement: followers && avg ? Math.round((avg / followers) * 1000) / 10 : null, source: 'auto' })
-  if (!views.size) return
-  const published = rows<{ id: string; tg_message_id: string | number; stats: SmmPostStats | null }>(await db.execute(sql`
-    SELECT id, tg_message_id, stats FROM smm_posts WHERE platform = 'telegram' AND tg_message_id IS NOT NULL AND published_at > now() - interval '60 days'
+  // Наши посты: цифры и связь с постами канала по номеру сообщения.
+  await db.execute(sql`
+    UPDATE smm_platform_posts pp SET post_id = p.id FROM smm_posts p
+    WHERE pp.account_id = ${account.id}::uuid AND p.platform = 'telegram' AND p.tg_message_id IS NOT NULL AND p.tg_message_id::text = pp.ext_id
+  `)
+  const ours = rows<Record<string, unknown>>(await db.execute(sql`
+    SELECT p.id, p.stats, pp.views, pp.reactions FROM smm_posts p JOIN smm_platform_posts pp ON pp.post_id = p.id AND pp.account_id = ${account.id}::uuid
+    WHERE p.published_at > now() - interval '60 days'
   `))
-  for (const p of published) {
-    const v = views.get(Number(p.tg_message_id))
-    if (v != null) await updatePost(db, p.id, { stats: { ...(p.stats ?? {}), views: v, source: 'auto' }, statsAt: new Date().toISOString() })
+  for (const r of ours) {
+    const prev = (r['stats'] ?? {}) as SmmPostStats
+    await updatePost(db, String(r['id']), {
+      stats: { ...prev, views: r['views'] == null ? prev.views : Number(r['views']), reactions: Number(r['reactions'] ?? 0), source: 'auto' },
+      statsAt: new Date().toISOString(),
+    })
   }
+  const avg = await matureAverages(db, account.id)
+  const err = followers && avg.views != null ? Math.round((avg.views / followers) * 1000) / 10 : null
+  await saveSnapshot(db, account.id, {
+    followers,
+    views: avg.views,
+    posts: avg.posts30,
+    engagement: err,
+    summary: { tg: { avgViews: avg.views, err, posts30: avg.posts30, views30: avg.views30, reactions30: avg.reactions30, avgReactions: avg.posts30 ? Math.round((avg.reactions30 / avg.posts30) * 10) / 10 : null } },
+  })
 }
 
-type IgNode = {
-  shortcode?: string
-  taken_at_timestamp?: number
-  video_view_count?: number
-  edge_liked_by?: { count?: number }
-  edge_media_preview_like?: { count?: number }
-  edge_media_to_comment?: { count?: number }
-  edge_media_to_caption?: { edges?: { node?: { text?: string } }[] }
-}
-
-const norm = (s: string) => plainText(s).toLowerCase().replace(/[^a-zа-яё0-9]+/gi, ' ').trim().slice(0, 60)
-
-/** Вышедший пост ищем по началу подписи и времени после передачи человеку. */
-function matchNode(post: SmmPost, nodes: IgNode[]): IgNode | null {
-  const head = norm(post.body)
-  if (head.length < 12) return null
-  const since = (post.handoffAt ? Date.parse(post.handoffAt) : Date.parse(post.publishAt ?? '')) - 3600_000
-  return nodes.find((n) => {
-    const caption = norm(n.edge_media_to_caption?.edges?.[0]?.node?.text ?? '')
-    const at = (n.taken_at_timestamp ?? 0) * 1000
-    return at >= since && caption.length >= 12 && (caption.startsWith(head.slice(0, 30)) || head.startsWith(caption.slice(0, 30)))
-  }) ?? null
-}
-
-type IgUser = { edge_followed_by?: { count?: number }; edge_owner_to_timeline_media?: { count?: number; edges?: { node: IgNode }[] } }
-
-async function fetchIgUser(handle: string): Promise<IgUser | null> {
-  try {
-    const res = await webFetch(`https://i.instagram.com/api/v1/users/web_profile_info/?username=${encodeURIComponent(handle)}`, { headers: { 'x-ig-app-id': IG_APP_ID } })
-    if (!res.ok) return null
-    return ((await res.json()) as { data?: { user?: IgUser } }).data?.user ?? null
-  } catch {
-    return null
-  }
-}
+// ─── Instagram ───────────────────────────────────────────────────────────────
 
 const shortcode = (url: string | null | undefined) => (url ? /instagram\.com\/(?:p|reel|reels|tv)\/([\w-]+)/.exec(url)?.[1] ?? null : null)
+const norm = (s: string) => plainText(s).toLowerCase().replace(/[^a-zа-яё0-9]+/gi, ' ').trim().slice(0, 60)
 
-/** Официальный путь: Instagram API — подписчики, публикации со ссылками и метриками. */
-async function collectInstagramApi(db: Database, account: AccountRow): Promise<void> {
+function igFormat(m: IgMedia): SmmFormat {
+  if (m.media_product_type === 'STORY') return 'story'
+  if (m.media_product_type === 'REELS') return 'reel'
+  return m.media_type === 'CAROUSEL_ALBUM' ? 'carousel' : 'post'
+}
+
+/** Наш пост к публикации Instagram: по id, по ссылке или (передан человеку) по началу подписи. */
+function matchOurs(posts: SmmPost[], m: IgMedia): SmmPost | undefined {
+  const code = shortcode(m.permalink)
+  return posts.find((p) => p.extId === m.id)
+    ?? (code ? posts.find((p) => shortcode(p.publishedUrl) === code) : undefined)
+    ?? posts.find((p) => {
+      if (p.extId || p.publishedUrl || !p.handoffAt) return false
+      const head = norm(p.body)
+      const since = Date.parse(p.handoffAt) - 3600_000
+      return head.length >= 12 && Date.parse(m.timestamp ?? '') >= since && norm(m.caption ?? '').startsWith(head.slice(0, 30))
+    })
+}
+
+async function collectInstagram(db: Database, account: AccountRow, fresh: boolean): Promise<void> {
+  if (!(await instagramState(db))) {
+    await markError(db, account.id, 'Подключите Instagram по API в настройках СММ — цифры придут сами')
+    return
+  }
+  const known = new Map(rows<{ ext_id: string; stats_at: string }>(await db.execute(sql`SELECT ext_id, stats_at FROM smm_platform_posts WHERE account_id = ${account.id}::uuid`)).map((r) => [r.ext_id, Date.parse(String(r.stats_at))]))
+  const media = [...(await igRecentMedia(db, fresh ? IG_MEDIA_FRESH_LIMIT : IG_MEDIA_LIMIT)), ...(await igStories(db))]
+  const ours = (await listPosts(db, { from: new Date(Date.now() - 45 * DAY_MS).toISOString(), status: ['approved', 'published'] })).filter((p) => p.platform === 'instagram')
+  for (const m of media) {
+    const at = Date.parse(m.timestamp ?? '')
+    if (Number.isFinite(at) && at < Date.now() - HISTORY_DAYS * DAY_MS) continue
+    const age = Date.now() - at
+    const last = known.get(m.id)
+    // Метрики: новые — всегда; свежие (до 2 суток) — раз в час; до двух недель — раз в сутки.
+    const due = last == null || (age < FRESH_MS && Date.now() - last > 50 * 60_000) || (!fresh && age < 14 * DAY_MS && Date.now() - last > 20 * 3600_000)
+    const insights = due ? await igInsights(db, m) : {}
+    const format = igFormat(m)
+    await upsertPlatformPost(db, account, {
+      extId: m.id,
+      format,
+      publishedAt: m.timestamp ? new Date(m.timestamp).toISOString() : null,
+      caption: plainText(m.caption ?? '').slice(0, 300),
+      permalink: m.permalink ?? null,
+      thumb: m.thumbnail_url ?? m.media_url ?? null,
+      views: insights['views'],
+      reach: insights['reach'],
+      likes: insights['likes'] ?? m.like_count ?? null,
+      comments: insights['comments'] ?? m.comments_count ?? null,
+      shares: insights['shares'],
+      saves: insights['saves'],
+      interactions: insights['interactions'],
+    })
+    const post = matchOurs(ours, m)
+    if (!post) continue
+    await db.execute(sql`UPDATE smm_platform_posts SET post_id = ${post.id}::uuid WHERE account_id = ${account.id}::uuid AND ext_id = ${m.id}`)
+    const stats: SmmPostStats = { ...post.stats, likes: insights['likes'] ?? m.like_count ?? post.stats.likes, comments: insights['comments'] ?? m.comments_count ?? post.stats.comments, source: 'auto' }
+    for (const key of ['views', 'reach', 'shares', 'saves', 'interactions'] as const) if (insights[key] != null) stats[key] = insights[key]
+    await updatePost(db, post.id, {
+      stats,
+      statsAt: new Date().toISOString(),
+      extId: m.id,
+      // Вышло руками — Tai сам нашёл публикацию: ссылка и статус.
+      ...(post.status === 'approved' ? { status: 'published', publishedUrl: m.permalink ?? null, publishedAt: m.timestamp ? new Date(m.timestamp).toISOString() : new Date().toISOString() } : {}),
+    })
+    if (post.status === 'approved') await freezeForecast(db, post.id)
+  }
+
   const profile = await igProfile(db)
-  const media = await igRecentMedia(db, 25)
-  const recent = media.slice(0, 9)
-  const avg = recent.length ? Math.round(recent.reduce((s, m) => s + (m.like_count ?? 0) + (m.comments_count ?? 0), 0) / recent.length) : null
-  const followers = profile.followers_count ?? null
+  if (fresh) {
+    await db.execute(sql`UPDATE smm_accounts SET followers = coalesce(${profile.followers_count ?? null}::int, followers), stats_at = now() WHERE id = ${account.id}::uuid`)
+    return
+  }
+  const [period7, period30, audience, reach, follows] = await Promise.all([
+    igPeriod(db, 7).catch(() => null),
+    igPeriod(db, 30).catch(() => null),
+    igAudience(db).catch(() => null),
+    igDaily(db, 'reach', 30),
+    igDaily(db, 'follower_count', 30),
+  ])
+  await saveDaily(db, account.id, 'reach', reach)
+  await saveDaily(db, account.id, 'new_followers', follows)
+  const avg = await matureAverages(db, account.id)
+  const engagement = period30?.reach && period30.engaged != null ? Math.round((period30.engaged / period30.reach) * 1000) / 10 : null
   await saveSnapshot(db, account.id, {
-    followers,
+    followers: profile.followers_count ?? null,
+    views: avg.views,
     posts: profile.media_count ?? null,
-    views: avg,
-    engagement: followers && avg != null ? Math.round((avg / followers) * 1000) / 10 : null,
-    source: 'auto',
+    engagement,
+    summary: { period7, period30, audience },
   })
-  const posts = await listPosts(db, { from: new Date(Date.now() - 45 * 86_400_000).toISOString(), status: ['approved', 'published'] })
-  for (const post of posts.filter((p) => p.platform === 'instagram' && p.format !== 'story')) {
-    const code = shortcode(post.publishedUrl)
-    const head = norm(post.body)
-    const since = (post.handoffAt ? Date.parse(post.handoffAt) : Date.parse(post.publishAt ?? '')) - 3600_000
-    const node = code
-      ? media.find((m) => shortcode(m.permalink) === code)
-      : post.status === 'approved' && post.handoffAt
-        ? media.find((m) => Date.parse(m.timestamp ?? '') >= since && head.length >= 12 && norm(m.caption ?? '').startsWith(head.slice(0, 30)))
-        : undefined
-    if (!node) continue
-    const insights = await igInsights(db, node)
-    const stats: SmmPostStats = { ...post.stats, likes: node.like_count ?? post.stats.likes, comments: node.comments_count ?? post.stats.comments, ...insights, source: 'auto' }
-    await updatePost(db, post.id, {
-      stats,
-      statsAt: new Date().toISOString(),
-      ...(post.status === 'approved' ? { status: 'published', publishedUrl: node.permalink ?? null, publishedAt: node.timestamp ? new Date(node.timestamp).toISOString() : new Date().toISOString() } : {}),
-    })
-  }
 }
 
-async function collectInstagram(db: Database, account: AccountRow): Promise<void> {
-  if (await instagramState(db)) {
-    await collectInstagramApi(db, account)
-    return
-  }
-  if (!account.handle) {
-    await markError(db, account.id, 'Не указан @аккаунт Instagram')
-    return
-  }
-  const user = await fetchIgUser(account.handle)
-  if (!user) {
-    await markError(db, account.id, 'Instagram не отдаёт цифры без входа — Tai попросит скриншот статистики')
-    return
-  }
-  const nodes = (user.edge_owner_to_timeline_media?.edges ?? []).map((e) => e.node)
-  const likes = (n: IgNode) => n.edge_liked_by?.count ?? n.edge_media_preview_like?.count ?? 0
-  const followers = user.edge_followed_by?.count ?? null
-  const recent = nodes.slice(0, 9)
-  const avgLikes = recent.length ? Math.round(recent.reduce((s, n) => s + likes(n) + (n.edge_media_to_comment?.count ?? 0), 0) / recent.length) : null
-  await saveSnapshot(db, account.id, {
-    followers,
-    posts: user.edge_owner_to_timeline_media?.count ?? null,
-    views: avgLikes,
-    engagement: followers && avgLikes != null ? Math.round((avgLikes / followers) * 1000) / 10 : null,
-    source: 'auto',
-  })
-  const posts = await listPosts(db, { from: new Date(Date.now() - 45 * 86_400_000).toISOString(), status: ['approved', 'published'] })
-  for (const post of posts.filter((p) => p.platform === 'instagram' && p.format !== 'story')) {
-    const shortcode = post.publishedUrl ? /instagram\.com\/(?:p|reel|reels|tv)\/([\w-]+)/.exec(post.publishedUrl)?.[1] : null
-    const node = shortcode ? nodes.find((n) => n.shortcode === shortcode) : post.status === 'approved' && post.handoffAt ? matchNode(post, nodes) : null
-    if (!node?.shortcode) continue
-    const stats: SmmPostStats = { ...post.stats, likes: likes(node), comments: node.edge_media_to_comment?.count ?? 0, ...(node.video_view_count ? { views: node.video_view_count } : {}), source: 'auto' }
-    await updatePost(db, post.id, {
-      stats,
-      statsAt: new Date().toISOString(),
-      ...(post.status === 'approved' ? { status: 'published', publishedUrl: `https://www.instagram.com/p/${node.shortcode}/`, publishedAt: new Date((node.taken_at_timestamp ?? Date.now() / 1000) * 1000).toISOString() } : {}),
-    })
-  }
-}
-
-/** Обойти площадки клуба и обновить цифры. Ошибка одной площадки не мешает остальным. */
-export async function collectStats(db: Database): Promise<void> {
+/**
+ * Обойти площадки клуба и обновить цифры. `fresh` — лёгкий заход раз в час: только
+ * свежие посты и подписчики. Ошибка одной площадки не мешает остальным.
+ */
+export async function collectStats(db: Database, opts: { fresh?: boolean } = {}): Promise<void> {
   for (const account of (await listAccounts(db)).filter((a) => a.isActive)) {
     try {
-      if (account.platform === 'telegram') await collectTelegram(db, account)
-      else if (account.platform === 'instagram') await collectInstagram(db, account)
+      if (account.platform === 'telegram') await collectTelegram(db, account, !!opts.fresh)
+      else if (account.platform === 'instagram') await collectInstagram(db, account, !!opts.fresh)
     } catch (error) {
       console.warn('[smm] статистика площадки', account.title, error instanceof Error ? error.message : error)
-      await markError(db, account.id, 'Не удалось обновить цифры').catch(() => undefined)
+      if (!opts.fresh) await markError(db, account.id, 'Не удалось обновить цифры').catch(() => undefined)
     }
   }
 }
 
-// ─── Скриншот статистики ─────────────────────────────────────────────────────
-
-const ScreenshotSchema = z.object({
-  platform: z.enum(['instagram', 'telegram', 'vk', 'other']).optional(),
-  scope: z.enum(['account', 'post', 'unknown']),
-  followers: z.number().int().nullable().optional(),
-  reach: z.number().int().nullable().optional(),
-  views: z.number().int().nullable().optional(),
-  likes: z.number().int().nullable().optional(),
-  comments: z.number().int().nullable().optional(),
-  saves: z.number().int().nullable().optional(),
-  shares: z.number().int().nullable().optional(),
-  profileVisits: z.number().int().nullable().optional(),
-  periodDays: z.number().int().nullable().optional(),
-  captionHint: z.string().max(200).nullable().optional(),
-  summary: z.string().max(400),
-})
-
-export interface ScreenshotResult {
-  summary: string
-  applied: 'account' | 'post' | null
+export interface HistoryPoint {
+  accountId: string
+  day: string
+  followers: number | null
+  views: number | null
+  reach: number | null
+  newFollowers: number | null
 }
 
-/** Разобрать скриншот статистики (Instagram и др.) и записать цифры в профиль или пост. */
-export async function applyScreenshot(db: Database, image: Buffer, mime: string, target: { postId?: string; accountId?: string } = {}): Promise<ScreenshotResult> {
-  const r = await chatJson(db, {
-    kind: 'vision',
-    note: 'скриншот статистики',
-    maxTokens: 800,
-    temperature: 0,
-    schema: ScreenshotSchema,
-    system: 'Ты разбираешь скриншоты статистики соцсетей (Instagram, Telegram, VK). Достаёшь только видимые на экране числа, ничего не выдумываешь. Ответ — один JSON.',
-    user: [
-      { type: 'text', text: 'Что за статистика на скриншоте: профиль за период (scope "account") или одна публикация ("post")? Верни JSON: {"platform", "scope", "followers", "reach", "views", "likes", "comments", "saves", "shares", "profileVisits", "periodDays", "captionHint": "начало подписи поста, если видно", "summary": "1–2 фразы по-русски, что видно"}. Числа «1,2 тыс.» → 1200. Чего нет — null.' },
-      { type: 'image_url', image_url: { url: `data:${mime};base64,${image.toString('base64')}` } },
-    ],
-  })
-  const accounts = await listAccounts(db)
-  if (r.scope === 'post' || target.postId) {
-    const posts = target.postId ? [] : await listPosts(db, { from: new Date(Date.now() - 60 * 86_400_000).toISOString(), status: ['published'] })
-    const hint = norm(r.captionHint ?? '')
-    const post = target.postId
-      ? await loadPost(db, target.postId)
-      : posts.find((p) => p.platform === (r.platform === 'telegram' ? 'telegram' : 'instagram') && hint.length > 10 && norm(p.body).startsWith(hint.slice(0, 25)))
-    if (post) {
-      const stats: SmmPostStats = { ...post.stats, source: 'screenshot' }
-      for (const key of ['views', 'likes', 'comments', 'saves', 'shares', 'reach'] as const) if (r[key] != null) stats[key] = r[key]!
-      await updatePost(db, post.id, { stats, statsAt: new Date().toISOString() })
-      return { summary: `${r.summary} Записал к публикации «${post.topic}».`, applied: 'post' }
-    }
-  }
-  const account = (target.accountId && accounts.find((a) => a.id === target.accountId)) || accounts.find((a) => a.isActive && a.platform === (r.platform ?? 'instagram'))
-  if (account && (r.followers != null || r.reach != null || r.views != null)) {
-    await saveSnapshot(db, account.id, { followers: r.followers ?? null, views: r.reach ?? r.views ?? null, engagement: null, source: 'screenshot', raw: r })
-    return { summary: `${r.summary} Записал в статистику «${account.title}».`, applied: 'account' }
-  }
-  return { summary: `${r.summary} Не понял, к чему это отнести — пришли скрин статистики профиля или конкретного поста.`, applied: null }
-}
-
-/** История подписчиков площадок за N дней — для графиков. */
-export async function accountHistory(db: Database, days = 60): Promise<{ accountId: string; day: string; followers: number | null; views: number | null }[]> {
+/** История площадок за N дней — для графиков. */
+export async function accountHistory(db: Database, days = 60): Promise<HistoryPoint[]> {
+  const num = (v: unknown) => (v == null ? null : Number(v))
   return rows<Record<string, unknown>>(await db.execute(sql`
-    SELECT account_id, day, followers, views FROM smm_account_stats
+    SELECT account_id, day, followers, views, reach, new_followers FROM smm_account_stats
     WHERE day >= (now() AT TIME ZONE 'Europe/Moscow')::date - ${days}::int ORDER BY day
   `)).map((r) => ({
     accountId: String(r['account_id']),
     day: r['day'] instanceof Date ? (r['day'] as Date).toISOString().slice(0, 10) : String(r['day']).slice(0, 10),
-    followers: r['followers'] == null ? null : Number(r['followers']),
-    views: r['views'] == null ? null : Number(r['views']),
+    followers: num(r['followers']),
+    views: num(r['views']),
+    reach: num(r['reach']),
+    newFollowers: num(r['new_followers']),
   }))
 }

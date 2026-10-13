@@ -5,14 +5,14 @@ import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, View } fro
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 
 import { AppRefreshControl } from '@/components/refresh-control';
-import { BigButton, BusyBanner, Card, Composer, EmptyNote, ErrorBanner, PostRow, SectionTitle, Thread } from '@/components/smm/parts';
+import { BigButton, Card, Composer, EmptyNote, ErrorBanner, PostRow, ProgressBanner, SectionTitle, Thread } from '@/components/smm/parts';
 import { Text } from '@/components/text';
 import { ApiError } from '@/lib/api';
 import { promptText } from '@/lib/dialog';
 import { haptic } from '@/lib/haptics';
 import { usePageGutter } from '@/lib/layout';
 import { useClubKey } from '@/lib/queries';
-import { FORMAT_LABEL, busyText, monthTitle, msk, planAction, shiftMonth, todayMsk, useSmmPlan, type SmmPost } from '@/lib/smm-api';
+import { FORMAT_LABEL, busyText, monthTitle, msk, planAction, shiftMonth, swapPosts, todayMsk, useSmmPlan, type SmmPost } from '@/lib/smm-api';
 import { colors, space, type, useAccentHex } from '@/lib/theme';
 
 const PILLAR_COLORS = ['#8B5CF6', '#30B0C7', '#FF9F0A', '#34C759', '#FF375F', '#5E5CE6', '#A2845E'];
@@ -20,7 +20,8 @@ const PILLAR_COLORS = ['#8B5CF6', '#30B0C7', '#FF9F0A', '#34C759', '#FF375F', '#
 /**
  * План месяца: стратегия, цели, рубрики и календарь публикаций по неделям. План
  * утверждают — после этого Tai начинает готовить посты. Замечание к плану (перенеси,
- * добавь, убери, больше рилс) Tai применяет сам и отвечает, что поменял.
+ * добавь, убери, больше рилс) Tai применяет сам и отвечает, что поменял. «Порядок» —
+ * поменять публикации местами (время выхода). Невыкладываемые остаются серыми.
  */
 export default function SmmPlanScreen() {
   const params = useLocalSearchParams<{ month?: string }>();
@@ -32,8 +33,11 @@ export default function SmmPlanScreen() {
   const query = useSmmPlan(month);
   const [pulling, setPulling] = useState(false);
   const [acting, setActing] = useState<string | null>(null);
+  const [ordering, setOrdering] = useState(false);
+  const [swapping, setSwapping] = useState<string | null>(null);
   const plan = query.data?.plan;
-  const posts = (query.data?.posts ?? []).filter((p) => p.status !== 'skipped');
+  const posts = query.data?.posts ?? [];
+  const live = posts.filter((p) => p.status !== 'skipped');
   const busy = plan?.busy ?? null;
   const pastMonth = month < todayMsk().slice(0, 7);
 
@@ -59,7 +63,38 @@ export default function SmmPlanScreen() {
       ],
     );
 
-  const counts = countBy(posts);
+  const counts = countBy(live);
+
+  /** Поменять с соседней невышедшей публикацией (выше или ниже по времени). */
+  const movable = posts.filter((p) => p.status !== 'published' && p.publishAt);
+  const move = async (post: SmmPost, delta: -1 | 1) => {
+    const i = movable.findIndex((p) => p.id === post.id);
+    const other = movable[i + delta];
+    if (!other) return;
+    haptic.selection();
+    setSwapping(post.id);
+    try {
+      await swapPosts(club, post.id, other.id);
+    } catch (error) {
+      Alert.alert('Не поменялось', error instanceof ApiError ? error.message : String(error));
+    } finally {
+      setSwapping(null);
+    }
+  };
+  const arrows = (post: SmmPost) => {
+    if (!ordering || post.status === 'published' || !post.publishAt) return null;
+    const i = movable.findIndex((p) => p.id === post.id);
+    return (
+      <View style={styles.arrows}>
+        <Pressable onPress={() => void move(post, -1)} disabled={i <= 0 || !!swapping} hitSlop={4} style={[styles.arrow, (i <= 0 || !!swapping) && styles.off]} accessibilityRole="button" accessibilityLabel="Раньше">
+          <SymbolView name="chevron.up" size={16} tintColor={accent} />
+        </Pressable>
+        <Pressable onPress={() => void move(post, 1)} disabled={i >= movable.length - 1 || !!swapping} hitSlop={4} style={[styles.arrow, (i >= movable.length - 1 || !!swapping) && styles.off]} accessibilityRole="button" accessibilityLabel="Позже">
+          <SymbolView name="chevron.down" size={16} tintColor={accent} />
+        </Pressable>
+      </View>
+    );
+  };
 
   return (
     <View style={styles.screen}>
@@ -89,7 +124,7 @@ export default function SmmPlanScreen() {
             </Pressable>
           </View>
 
-          {busy ? <BusyBanner text={busyText[busy]} /> : null}
+          {busy ? <ProgressBanner progress={plan?.progress ?? null} text={busyText[busy]} /> : null}
           {plan?.error && !busy ? <ErrorBanner text={plan.error} /> : null}
 
           {query.isLoading ? (
@@ -150,13 +185,26 @@ export default function SmmPlanScreen() {
 
               {plan.status === 'draft' && !pastMonth ? <BigButton title="Утвердить план" icon="checkmark.seal" busy={acting === 'approve'} disabled={!!busy} onPress={() => void act('approve')} /> : null}
 
-              <SectionTitle title={`Публикации · ${posts.length}`} action={pastMonth || busy ? undefined : 'Пересоставить'} onAction={generate} />
-              <Text style={[type.footnote, styles.secondary]}>{counts}</Text>
+              <SectionTitle title={`Публикации · ${live.length}`} action={pastMonth || busy || ordering ? undefined : 'Пересоставить'} onAction={generate} />
+              <View style={styles.countsRow}>
+                <Text style={[type.footnote, styles.secondary, styles.flex]}>{ordering ? 'Стрелки меняют публикацию местами с соседней: время выхода переходит к ней.' : counts}</Text>
+                {!pastMonth && movable.length > 1 ? (
+                  <Pressable
+                    onPress={() => {
+                      haptic.selection();
+                      setOrdering((v) => !v);
+                    }}
+                    hitSlop={8}
+                    accessibilityRole="button">
+                    <Text style={[type.subhead, styles.bold, { color: accent }]}>{ordering ? 'Готово' : 'Порядок'}</Text>
+                  </Pressable>
+                ) : null}
+              </View>
               {weeks(posts).map(([label, list]) => (
                 <View key={label} style={styles.week}>
                   <Text style={[type.footnote, styles.weekTitle]}>{label.toUpperCase()}</Text>
                   {list.map((post) => (
-                    <PostRow key={post.id} post={post} showDay onPress={() => router.push({ pathname: '/manage/smm/post', params: { id: post.id } })} />
+                    <PostRow key={post.id} post={post} showDay trailing={arrows(post)} onPress={() => router.push({ pathname: '/manage/smm/post', params: { id: post.id } })} />
                   ))}
                 </View>
               ))}
@@ -213,4 +261,8 @@ const styles = StyleSheet.create({
   week: { gap: space.sm },
   weekTitle: { color: colors.secondaryLabel, fontWeight: '600', marginTop: space.xs, marginLeft: space.xs },
   remarks: { marginTop: space.md },
+  countsRow: { flexDirection: 'row', alignItems: 'center', gap: space.md },
+  arrows: { gap: space.xs },
+  arrow: { width: 36, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.fill },
+  off: { opacity: 0.3 },
 });

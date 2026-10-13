@@ -60,5 +60,6 @@ export const SHEET_ROUTES: Record<string, ReadonlySet<string>> = {
     'smm/new',
     'smm/edit-text',
     'smm/when',
+    'smm/order',
   ]),
 };

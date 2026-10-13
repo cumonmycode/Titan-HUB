@@ -10,7 +10,7 @@ import { clubFacts, clubTitle, marketingContext, mskDate, mskToIso } from './con
 import { addComment, claimPlan, deletePost, ensurePlan, insertPost, listComments, listPosts, loadPlan, remember, updatePlan, updatePost } from './db.js'
 import { CONTENT_TYPES, DIRECTIONS, DIRECTION_KEYS, FORMAT_LABEL, systemPrompt, todayLine } from './prompts.js'
 import type { Author } from './writer.js'
-import { MEMORY_KINDS, SmmError, type SmmPlan, type SmmPost } from './types.js'
+import { MEMORY_KINDS, SmmError, step, type SmmPlan, type SmmPost } from './types.js'
 
 const PostSchema = z.object({
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
@@ -101,8 +101,10 @@ export async function generatePlan(db: Database, month: string, opts: { wishes?:
   const days = planDays(month)
   if (!days.length) throw new SmmError('Этот месяц уже закончился', 400)
   try {
+    await updatePlan(db, plan.id, { progress: step('Изучаю клуб и прошлые цифры', 2, 8, 4) })
     const { from, to } = monthRange(month)
     const [name, facts, marketing, existing] = await Promise.all([clubTitle(db), clubFacts(db, 75), marketingContext(db), listPosts(db, { from, to })])
+    await updatePlan(db, plan.id, { progress: step('Составляю стратегию и календарь', 8, 90, 70) })
     const kept = existing.filter((p) => !REPLACEABLE.has(p.status) && p.status !== 'skipped')
     const { cadence, postTime } = marketing.settings
     const weeks = Math.max(1, Math.round((days.length / 7) * 10) / 10)
@@ -135,6 +137,7 @@ export async function generatePlan(db: Database, month: string, opts: { wishes?:
       ].filter((line) => line !== '').join('\n'),
     })
 
+    await updatePlan(db, plan.id, { progress: step('Раскладываю публикации по дням', 90, 99, 4) })
     const replaceable = existing.filter((p) => REPLACEABLE.has(p.status) && !p.busy)
     for (const p of replaceable) await deletePost(db, p.id)
     let added = 0
@@ -163,6 +166,7 @@ export async function revisePlan(db: Database, month: string, remark: string, au
   if (!plan) throw new SmmError('Плана на этот месяц ещё нет', 404)
   try {
     await addComment(db, { planId: plan.id, authorId: author.id, authorName: author.name, role: 'staff', text: remark })
+    await updatePlan(db, plan.id, { progress: step('Вношу правки в план', 3, 92, 30) })
     const { from, to } = monthRange(month)
     const [name, facts, marketing, posts, comments] = await Promise.all([clubTitle(db), clubFacts(db, 75), marketingContext(db), listPosts(db, { from, to }), listComments(db, { planId: plan.id }, 10)])
     const active = posts.filter((p) => p.status !== 'skipped')

@@ -123,7 +123,7 @@ export default function SmmSettingsScreen() {
       <Stack.Title>Настройки СММ</Stack.Title>
       <FormHost>
         <Form modifiers={[refreshable(async () => void (await query.refetch()))]}>
-          <Section title="Площадки" footer={<Text>В канал Telegram Tai публикует сам. В Instagram — тоже сам, если он подключён по API; иначе Tai присылает файлы и текст человеку и ждёт ссылку. Цифры собираются раз в день.</Text>}>
+          <Section title="Площадки" footer={<Text>В канал Telegram Tai публикует сам. В Instagram — тоже сам, если он подключён по API; иначе Tai присылает файлы и текст человеку и ждёт ссылку. Цифры — по API площадок: свежие посты каждый час, остальное раз в день.</Text>}>
             {data.accounts.map((a) => {
               const look = PLATFORM_LOOK[a.platform];
               const status = a.platform === 'telegram' ? (a.canPublish ? 'Tai публикует' : 'Нет прав на публикацию') : a.followers != null ? `${a.followers} подписчиков` : (a.handle ? `@${a.handle}` : (a.url ?? ''));

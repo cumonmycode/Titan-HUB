@@ -21,6 +21,16 @@ const ReportSchema = z.object({
 
 const day = (offset: number) => mskDate(Date.now() + offset * 86_400_000)
 
+/** Сводка площадки по API одной строкой: Instagram — неделя, Telegram — посты за месяц. */
+function accountLine(a: { platform: string; title: string; followers: number | null; stats: Record<string, unknown> }): string {
+  const parts = [`${a.platform} ${a.title}: подписчиков ${a.followers ?? '?'}`]
+  const week = a.stats['period7'] as Record<string, number | null> | undefined
+  if (week) parts.push(`за 7 дней охват ${week['reach'] ?? '?'}, просмотры ${week['views'] ?? '?'}, вовлечённые ${week['engaged'] ?? '?'}, визиты профиля ${week['profileViews'] ?? '?'}, переходы ${week['linkTaps'] ?? '?'}, новых подписчиков ${week['follows'] ?? '?'}`)
+  const tg = a.stats['tg'] as Record<string, number | null> | undefined
+  if (tg) parts.push(`просмотров на пост ~${tg['avgViews'] ?? '?'}, ERR ${tg['err'] ?? '?'}%, постов за 30 дней ${tg['posts30'] ?? '?'}, реакций на пост ${tg['avgReactions'] ?? '?'}`)
+  return parts.join('; ')
+}
+
 /** Отчёт за период (по умолчанию — прошлые 7 дней). */
 export async function generateReport(db: Database, period?: { from: string; to: string }): Promise<SmmReport> {
   const from = period?.from ?? day(-7)
@@ -33,7 +43,7 @@ export async function generateReport(db: Database, period?: { from: string; to: 
     listAccounts(db),
     listPosts(db, { from: fromIso, to: toIso }),
     db.execute(sql`
-      SELECT a.title, a.platform, s.day, s.followers, s.views FROM smm_account_stats s JOIN smm_accounts a ON a.id = s.account_id
+      SELECT a.title, a.platform, s.day, s.followers, s.reach, s.new_followers FROM smm_account_stats s JOIN smm_accounts a ON a.id = s.account_id
       WHERE s.day BETWEEN ${from}::date - 7 AND ${to}::date ORDER BY s.day
     `).then((r) => rows<Record<string, unknown>>(r)),
     db.execute(sql`
@@ -59,8 +69,8 @@ export async function generateReport(db: Database, period?: { from: string; to: 
       `Маркетинг:\n${marketing.text}`,
       '',
       `Отчёт за ${from}..${to}.`,
-      `Площадки сейчас: ${accounts.map((a) => `${a.platform} ${a.title}: подписчиков ${a.followers ?? '?'}${a.statsError ? ` (${a.statsError})` : ''}`).join('; ') || 'не подключены'}`,
-      history.length ? `Динамика площадок по дням:\n${history.map((h) => `${fmtDay(h['day'])} ${h['title']}: подписчики ${h['followers'] ?? '?'}, охват/просмотры ${h['views'] ?? '?'}`).join('\n')}` : 'Истории цифр площадок пока нет.',
+      `Площадки сейчас:\n${accounts.filter((a) => a.isActive).map(accountLine).join('\n') || 'не подключены'}`,
+      history.length ? `Динамика площадок по дням:\n${history.map((h) => `${fmtDay(h['day'])} ${h['title']}: подписчики ${h['followers'] ?? '?'}, охват ${h['reach'] ?? '?'}, новых ${h['new_followers'] ?? '?'}`).join('\n')}` : 'Истории цифр площадок пока нет.',
       postLines.length ? `Публикации периода:\n${postLines.join('\n')}` : 'Публикаций за период нет.',
       visits.length ? `Гостей (закрытых чеков) по дням, включая неделю до периода:\n${visits.map((v) => `${fmtDay(v['d'])}: ${v['n']}`).join(', ')}` : '',
       '',

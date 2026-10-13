@@ -6,7 +6,7 @@ import { ActivityIndicator, Alert, Linking, Pressable, ScrollView, StyleSheet, u
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 
 import { AppRefreshControl } from '@/components/refresh-control';
-import { BigButton, BusyBanner, Card, ChipButton, Composer, ErrorBanner, PlatformBadge, StatusPill, Thread } from '@/components/smm/parts';
+import { BigButton, Card, ChipButton, Composer, ErrorBanner, PlatformBadge, ProgressBanner, StatusPill, Thread } from '@/components/smm/parts';
 import { Text } from '@/components/text';
 import { ToolbarMenu, ToolbarMenuAction } from '@/components/toolbar';
 import { ApiError } from '@/lib/api';
@@ -17,6 +17,7 @@ import { useClubKey } from '@/lib/queries';
 import {
   FORMAT_LABEL,
   PLATFORM_LOOK,
+  VIDEO_ETA_SEC,
   autoPublishes,
   busyText,
   deletePost,
@@ -32,13 +33,24 @@ import {
   uploadAsset,
   useSmmPost,
   whenLabel,
+  type SmmForecast,
   type SmmMedia,
   type SmmPost,
+  type SmmProgress,
+  type SmmStats,
 } from '@/lib/smm-api';
 import { colors, space, type } from '@/lib/theme';
 
 const MAX_MEDIA_HEIGHT = 520;
 const fail = (title: string) => (error: unknown) => Alert.alert(title, error instanceof ApiError || error instanceof Error ? error.message : String(error));
+const fmt = (n: number) => n.toLocaleString('ru-RU');
+
+/** Шкала работы над постом; видео — по времени с запуска (Veo ~2,5 мин). */
+function postProgress(post: SmmPost): SmmProgress | null {
+  if (post.progress) return post.progress;
+  const video = post.media.find((m) => m.kind === 'video' && m.status === 'pending');
+  return video ? { label: 'Нейросеть снимает видео', pct: 2, next: 97, eta: VIDEO_ETA_SEC, at: video.createdAt } : null;
+}
 
 /**
  * Публикация: как она будет выглядеть, текст, сценарий (рилс и сторис), что с ней
@@ -111,7 +123,7 @@ export default function SmmPostScreen() {
             </ToolbarMenuAction>
           ) : post.status !== 'published' ? (
             <ToolbarMenuAction icon="nosign" onPress={() => void action('skip')}>
-              Не выпускать
+              Не выкладывать
             </ToolbarMenuAction>
           ) : null}
           {post.status !== 'published' ? (
@@ -136,14 +148,14 @@ export default function SmmPostScreen() {
               }}
             />
           }>
-          {post.busy ? <BusyBanner text={busyText[post.busy]} /> : null}
+          {post.busy || post.media.some((m) => m.status === 'pending') ? <ProgressBanner progress={postProgress(post)} text={post.busy ? busyText[post.busy] : undefined} /> : null}
           {post.error && !post.busy ? <ErrorBanner text={post.error} /> : null}
           <Header post={post} />
           <MediaBlock post={post} disabled={working} acting={acting} onRun={run} />
           <BodyBlock post={post} onEdit={() => router.push({ pathname: '/manage/smm/edit-text', params: { postId: post.id } })} />
           {post.script ? <ScriptBlock post={post} /> : null}
           <IdeaBlock post={post} />
-          {post.status === 'published' ? <StatsBlock post={post} onRun={run} /> : null}
+          <ResultBlock post={post} />
           <NextStep post={post} canApprove={data.canApprove} acting={acting} working={working} onAction={action} />
           <Text style={[type.title3, styles.label, styles.remarksTitle]}>Замечания для Tai</Text>
           <Thread comments={data.comments} />
@@ -182,6 +194,7 @@ function Header({ post }: { post: SmmPost }) {
 /** Картинки и видео: листаются, у каждой позиции — варианты и действия. */
 function MediaBlock({ post, disabled, acting, onRun }: { post: SmmPost; disabled: boolean; acting: string | null; onRun: (name: string, job: () => Promise<unknown>, title?: string) => Promise<void> }) {
   const club = useClubKey();
+  const router = useRouter();
   const { width } = useWindowDimensions();
   const gutter = usePageGutter();
   const [page, setPage] = useState(0);
@@ -206,10 +219,25 @@ function MediaBlock({ post, disabled, acting, onRun }: { post: SmmPost; disabled
       { text: 'Нарисовать', onPress: (text?: string) => void (text?.trim() ? onRun('image', () => postAction(club, post.id, 'image', { prompt: text.trim(), mediaId: current?.kind === 'image' ? current.id : undefined }), 'Картинка не получилась') : undefined) },
     ]);
   const video = () =>
-    Alert.alert('Видео нейросетью', 'Veo 3.1: 8 секунд со звуком, вертикально. Стоит около 45 ₽, готово через несколько минут.', [
+    Alert.alert('Видео нейросетью', 'Veo 3.1: 8 секунд со звуком, вертикально. Стоит около 45 ₽, готово за пару минут.', [
       { text: 'Отмена', style: 'cancel' },
       { text: 'Сделать', onPress: () => void onRun('video', () => postAction(club, post.id, 'video', {}), 'Видео не запустилось') },
     ]);
+  const remove = () =>
+    current &&
+    Alert.alert(current.kind === 'video' ? 'Убрать видео?' : media.length > 1 ? `Убрать слайд ${page + 1}?` : 'Убрать картинку?', 'Файл и его варианты уйдут из публикации.', [
+      { text: 'Отмена', style: 'cancel' },
+      {
+        text: 'Убрать',
+        style: 'destructive',
+        onPress: () =>
+          void onRun('remove', async () => {
+            await mediaAction(club, post.id, current.id, null);
+            setPage((p) => Math.max(0, Math.min(p, media.length - 2)));
+          }, 'Не убралось'),
+      },
+    ]);
+  const editable = post.status !== 'published';
 
   return (
     <View style={styles.mediaBlock}>
@@ -249,12 +277,12 @@ function MediaBlock({ post, disabled, acting, onRun }: { post: SmmPost; disabled
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
         <ChipButton title={acting === 'image' ? 'Рисую…' : 'Новый вариант'} icon="wand.and.stars" disabled={disabled || !!acting} onPress={() => void regenerate()} />
         <ChipButton title="Описать картинку" icon="text.bubble" disabled={disabled || !!acting} onPress={describe} />
-        <ChipButton title={acting === 'upload' ? 'Загружаю…' : 'Своё фото/видео'} icon="square.and.arrow.up.on.square" disabled={!!acting} onPress={() => void upload()} />
+        <ChipButton title="Из архива" icon="photo.stack" disabled={!editable || !!acting} onPress={() => router.push({ pathname: '/manage/smm/library', params: { postId: post.id } })} />
+        <ChipButton title={acting === 'upload' ? 'Загружаю…' : 'Своё фото/видео'} icon="square.and.arrow.up.on.square" disabled={!editable || !!acting} onPress={() => void upload()} />
         <ChipButton title="Видео ИИ" icon="film" disabled={disabled || !!acting || post.media.some((m) => m.kind === 'video' && m.status === 'pending')} onPress={video} />
+        {media.length > 1 && editable ? <ChipButton title="Порядок" icon="arrow.up.arrow.down" disabled={disabled || !!acting} onPress={() => router.push({ pathname: '/manage/smm/order', params: { postId: post.id } })} /> : null}
         {current?.url && current.status === 'done' ? <ChipButton title="Сохранить" icon="square.and.arrow.down" onPress={() => void shareMedia(current.url!)} /> : null}
-        {current && current.source === 'upload' ? (
-          <ChipButton title="Убрать" icon="trash" onPress={() => void onRun('remove', () => mediaAction(club, post.id, current.id, null))} />
-        ) : null}
+        {current && current.status !== 'pending' && editable ? <ChipButton title={acting === 'remove' ? 'Убираю…' : 'Убрать'} icon="trash" disabled={disabled || !!acting} onPress={remove} /> : null}
       </ScrollView>
     </View>
   );
@@ -265,7 +293,7 @@ function MediaItem({ media, width, height }: { media: SmmMedia; width: number; h
     return (
       <View style={[styles.mediaItem, styles.mediaPending, { width, height }]}>
         <ActivityIndicator color="white" />
-        <Text style={[type.subhead, styles.onDark]}>{media.kind === 'video' ? 'Видео делается — несколько минут' : 'Рисую…'}</Text>
+        <Text style={[type.subhead, styles.onDark]}>{media.kind === 'video' ? 'Видео делается — пара минут' : media.source === 'archive' ? 'Беру фото из архива…' : 'Рисую…'}</Text>
       </View>
     );
   }
@@ -273,7 +301,7 @@ function MediaItem({ media, width, height }: { media: SmmMedia; width: number; h
     return (
       <Pressable onPress={() => media.url && void Linking.openURL(media.url)} style={[styles.mediaItem, styles.mediaPending, { width, height }]} accessibilityRole="button" accessibilityLabel="Смотреть видео">
         <SymbolView name="play.circle.fill" size={64} tintColor="white" />
-        <Text style={[type.subhead, styles.onDark]}>{media.source === 'upload' ? 'Ваше видео' : 'Видео нейросети'}</Text>
+        <Text style={[type.subhead, styles.onDark]}>{media.source === 'ai' ? 'Видео нейросети' : 'Ваше видео'}</Text>
       </Pressable>
     );
   }
@@ -362,64 +390,87 @@ function IdeaBlock({ post }: { post: SmmPost }) {
   );
 }
 
-const STAT_LABELS: [keyof SmmPost['stats'], string][] = [
+const STAT_LABELS: [keyof SmmStats, string][] = [
   ['views', 'Просмотры'],
   ['reach', 'Охват'],
   ['likes', 'Лайки'],
+  ['reactions', 'Реакции'],
   ['comments', 'Комменты'],
   ['shares', 'Репосты'],
   ['saves', 'Сохранения'],
 ];
 
-function StatsBlock({ post, onRun }: { post: SmmPost; onRun: (name: string, job: () => Promise<unknown>, title?: string) => Promise<void> }) {
-  const club = useClubKey();
+/** Шкала: коридор прогноза (обычно) и где оказался факт. */
+function ForecastScale({ forecast, actual }: { forecast: SmmForecast; actual?: number }) {
+  const max = Math.max(forecast.high * 1.35, (actual ?? 0) * 1.1, 1);
+  const pos = (v: number) => `${Math.min(100, (v / max) * 100)}%` as const;
+  return (
+    <View style={styles.scale} accessible accessibilityLabel={`Обычно от ${forecast.low} до ${forecast.high}${actual != null ? `, факт ${actual}` : ''}`}>
+      <View style={[styles.scaleBand, { left: pos(forecast.low), width: `${Math.max(2, ((forecast.high - forecast.low) / max) * 100)}%` }]} />
+      <View style={[styles.scaleMark, { left: pos(forecast.expected) }]} />
+      {actual != null ? <View style={[styles.scaleActual, { left: pos(actual) }]} /> : null}
+    </View>
+  );
+}
+
+/**
+ * Прогноз и результат: сколько просмотров ждём (по похожим постам площадки), что
+ * вышло на деле и все цифры публикации. Цифры приходят по API сами.
+ */
+function ResultBlock({ post }: { post: SmmPost }) {
+  const published = post.status === 'published';
+  const f = post.forecast;
+  if (!published && (!f || post.status === 'skipped')) return null;
+  const views = post.stats.views;
   const items = STAT_LABELS.filter(([key]) => typeof post.stats[key] === 'number');
-  const screenshot = async () => {
-    const asset = await pickMedia('Скриншот статистики', ['images']);
-    if (!asset) return;
-    await onRun(
-      'screenshot',
-      async () => {
-        const r = await uploadAsset<{ summary: string }>('/smm/analytics/screenshot', asset, { postId: post.id });
-        await refreshPost(club, post.id);
-        Alert.alert('Tai разобрал скриншот', r.summary);
-      },
-      'Скриншот не разобрался',
-    );
-  };
-  const views = () =>
-    promptText('Просмотры', 'Сколько просмотров у публикации?', [
-      { text: 'Отмена', style: 'cancel' },
-      { text: 'Сохранить', onPress: (v?: string) => void (Number(v) >= 0 ? onRun('stats', () => postAction(club, post.id, 'stats', { views: Math.round(Number(v)) })) : undefined) },
-    ], 'plain-text', String(post.stats.views ?? ''), 'number-pad');
+  const diff = published && f && typeof views === 'number' && f.expected > 0 ? Math.round((views / f.expected - 1) * 100) : null;
+  const verdictColor = diff == null ? colors.secondaryLabel : views! > f!.high ? colors.green : views! < f!.low ? colors.orange : colors.label;
+  const where = post.platform === 'telegram' ? 'канала' : 'Instagram';
   return (
     <Card>
       <View style={styles.cardHead}>
-        <Text style={[type.headline, styles.label, styles.flex]}>Результат</Text>
-        {post.publishedUrl ? (
+        <Text style={[type.headline, styles.label, styles.flex]}>{published ? 'Прогноз и результат' : 'Прогноз'}</Text>
+        {published && post.publishedUrl ? (
           <Pressable onPress={() => void Linking.openURL(post.publishedUrl!)} hitSlop={8} accessibilityRole="link">
             <Text style={[type.subhead, { color: colors.accent }]}>Открыть</Text>
           </Pressable>
         ) : null}
       </View>
-      {items.length ? (
+      {f ? (
+        <View style={styles.forecastRow}>
+          <View style={styles.flex}>
+            <Text style={[type.caption1, styles.secondary]}>ПРОГНОЗ</Text>
+            <Text style={[type.title2, styles.label, type.amount]}>{`~${fmt(f.expected)}`}</Text>
+            <Text style={[type.caption1, styles.secondary]}>{`просмотров · обычно ${fmt(f.low)}–${fmt(f.high)}`}</Text>
+          </View>
+          {published ? (
+            <View style={styles.flex}>
+              <Text style={[type.caption1, styles.secondary]}>ФАКТ</Text>
+              <Text style={[type.title2, type.amount, { color: verdictColor }]}>{typeof views === 'number' ? fmt(views) : '—'}</Text>
+              <Text style={[type.caption1, { color: verdictColor }]}>{diff == null ? 'цифры придут в течение часа' : diff >= 0 ? `на ${diff}% больше прогноза` : `на ${-diff}% меньше прогноза`}</Text>
+            </View>
+          ) : null}
+        </View>
+      ) : null}
+      {f ? <ForecastScale forecast={f} actual={published && typeof views === 'number' ? views : undefined} /> : null}
+      {published && items.length ? (
         <View style={styles.stats}>
           {items.map(([key, label]) => (
             <View key={key} style={styles.stat}>
-              <Text style={[type.title3, styles.label, type.amount]}>{(post.stats[key] as number).toLocaleString('ru-RU')}</Text>
+              <Text style={[type.title3, styles.label, type.amount]}>{fmt(post.stats[key] as number)}</Text>
               <Text style={[type.caption1, styles.secondary]}>{label}</Text>
             </View>
           ))}
         </View>
-      ) : (
-        <Text style={[type.subhead, styles.secondary]}>
-          {post.platform === 'telegram' ? 'Просмотры Tai подтянет с канала раз в день.' : 'Instagram без входа цифры не отдаёт — пришли скриншот статистики поста, Tai разберёт.'}
-        </Text>
-      )}
-      <View style={styles.row}>
-        <ChipButton title="Скриншот статистики" icon="camera.viewfinder" onPress={() => void screenshot()} />
-        <ChipButton title="Просмотры вручную" icon="number" onPress={views} />
-      </View>
+      ) : null}
+      <Text style={[type.footnote, styles.secondary]}>
+        {[
+          f ? `Прогноз — по ${f.basis} похожим постам ${where}${f.frozen ? ', зафиксирован в момент выхода' : ''}.` : `Прогноза пока нет — у ${where} мало истории.`,
+          published ? 'Цифры Tai берёт по API: первые двое суток — каждый час, потом раз в день.' : null,
+        ]
+          .filter(Boolean)
+          .join(' ')}
+      </Text>
     </Card>
   );
 }
@@ -488,7 +539,12 @@ function NextStep({ post, canApprove, acting, working, onAction }: { post: SmmPo
     case 'published':
       return null;
     case 'skipped':
-      return <BigButton tone="plain" title="Вернуть в работу" icon="arrow.uturn.backward" busy={acting === 'restore'} onPress={() => void onAction('restore')} />;
+      return (
+        <View style={styles.next}>
+          <Text style={[type.subhead, styles.secondary, styles.center]}>Не выкладываем — публикация осталась в плане серой.</Text>
+          <BigButton tone="plain" title="Вернуть в работу" icon="arrow.uturn.backward" busy={acting === 'restore'} onPress={() => void onAction('restore')} />
+        </View>
+      );
     case 'failed':
       return (
         <View style={styles.next}>
@@ -530,6 +586,11 @@ const styles = StyleSheet.create({
   shotNumber: { width: 22, height: 22, borderRadius: 11, backgroundColor: colors.accent, alignItems: 'center', justifyContent: 'center', marginTop: 1 },
   stats: { flexDirection: 'row', flexWrap: 'wrap', gap: space.lg },
   stat: { minWidth: 72 },
+  forecastRow: { flexDirection: 'row', gap: space.lg },
+  scale: { height: 14, justifyContent: 'center' },
+  scaleBand: { position: 'absolute', height: 8, borderRadius: 4, backgroundColor: colors.fill },
+  scaleMark: { position: 'absolute', width: 2, height: 14, marginLeft: -1, backgroundColor: colors.secondaryLabel },
+  scaleActual: { position: 'absolute', width: 12, height: 12, marginLeft: -6, borderRadius: 6, backgroundColor: colors.accent, borderWidth: 2, borderColor: colors.card },
   next: { gap: space.sm, marginTop: space.xs },
   remarksTitle: { marginTop: space.md },
 });

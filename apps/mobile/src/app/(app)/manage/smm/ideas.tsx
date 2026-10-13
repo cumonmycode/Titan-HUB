@@ -3,12 +3,12 @@ import { useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 
-import { BigButton, Card, ChipButton, PlatformBadge } from '@/components/smm/parts';
+import { BigButton, Card, ChipButton, PlatformBadge, ProgressBanner, estimate } from '@/components/smm/parts';
 import { Text, TextInput } from '@/components/text';
 import { api, ApiError } from '@/lib/api';
 import { haptic } from '@/lib/haptics';
 import { usePageGutter } from '@/lib/layout';
-import { DIRECTIONS, FORMAT_LABEL, PLATFORM_LOOK, directionLabel, type SmmIdea } from '@/lib/smm-api';
+import { DIRECTIONS, FORMAT_LABEL, PLATFORM_LOOK, directionLabel, type SmmIdea, type SmmProgress } from '@/lib/smm-api';
 import { colors, space, type, useAccentHex } from '@/lib/theme';
 
 /**
@@ -23,9 +23,11 @@ export default function SmmIdeasScreen() {
   const [wish, setWish] = useState('');
   const [ideas, setIdeas] = useState<SmmIdea[]>([]);
   const [loading, setLoading] = useState(false);
+  const [progress, setProgress] = useState<SmmProgress | null>(null);
 
   const generate = async () => {
     setLoading(true);
+    setProgress(estimate('Tai придумывает идеи по жизни клуба', 20));
     try {
       const r = await api.post<{ ideas: SmmIdea[] }>('/smm/ideas', { direction: direction ?? undefined, wish: wish.trim() || undefined });
       setIdeas(r.ideas);
@@ -34,6 +36,7 @@ export default function SmmIdeasScreen() {
       Alert.alert('Идеи не пришли', error instanceof ApiError ? error.message : String(error));
     } finally {
       setLoading(false);
+      setProgress(null);
     }
   };
 
@@ -77,6 +80,7 @@ export default function SmmIdeasScreen() {
             />
           </View>
           <BigButton title={loading ? 'Tai думает…' : ideas.length ? 'Ещё идеи' : 'Придумать идеи'} icon="lightbulb" busy={loading} onPress={() => void generate()} />
+          {progress ? <ProgressBanner progress={progress} /> : null}
           {ideas.map((idea) => (
             <Card key={`${idea.topic}-${idea.format}`}>
               <View style={styles.meta}>

@@ -5,7 +5,7 @@ import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View } from 'reac
 import type { SFSymbol } from 'sf-symbols-typescript';
 
 import { AppRefreshControl } from '@/components/refresh-control';
-import { BigButton, BusyBanner, Card, PlatformBadge, PostRow, SectionTitle } from '@/components/smm/parts';
+import { BigButton, Card, PlatformBadge, PostRow, ProgressBanner, SectionTitle } from '@/components/smm/parts';
 import { Text } from '@/components/text';
 import { ToolbarButton } from '@/components/toolbar';
 import { haptic } from '@/lib/haptics';
@@ -63,8 +63,11 @@ export default function SmmScreen() {
             <PlanCard data={data} onOpen={(month) => router.push({ pathname: '/manage/smm/plan', params: { month } })} />
             <SectionTitle title="Инструменты" />
             <View style={styles.tiles}>
+              <Tile icon="chart.xyaxis.line" color="#30B0C7" title="Аналитика" text={data.lastReport ? 'Есть свежий отчёт' : 'Цифры, прогноз и факт'} onPress={() => router.push('/manage/smm/analytics')} />
               <Tile icon="lightbulb.fill" color="#FF9F0A" title="Идеи" text="По всем направлениям" onPress={() => router.push('/manage/smm/ideas')} />
-              <Tile icon="chart.xyaxis.line" color="#30B0C7" title="Аналитика" text={data.lastReport ? 'Есть свежий отчёт' : 'Цифры и отчёты'} onPress={() => router.push('/manage/smm/analytics')} />
+            </View>
+            <View style={styles.tiles}>
+              <Tile icon="photo.stack.fill" color="#34A853" title="Фотоархив" text="Фото клуба для постов" onPress={() => router.push('/manage/smm/library')} />
               <Tile icon="brain.head.profile" color="#AF52DE" title="Память Tai" text="Правила и выводы" onPress={() => router.push('/manage/smm/memory')} />
             </View>
             <Footer data={data} />
@@ -136,7 +139,7 @@ function Attention({ data, onOpen }: { data: SmmOverview; onOpen: (post: SmmPost
   return (
     <>
       <SectionTitle title="Нужно твоё внимание" />
-      {busy ? <BusyBanner text={`«${busy.topic}»: ${busyText[busy.busy!].toLowerCase()}`} /> : null}
+      {busy ? <ProgressBanner progress={busy.progress ? { ...busy.progress, label: `«${busy.topic}»: ${busy.progress.label.toLowerCase()}` } : null} text={`«${busy.topic}»: ${busyText[busy.busy!].toLowerCase()}`} /> : null}
       {items.map((post) => (
         <PostRow key={post.id} post={post} onPress={() => onOpen(post)} showDay />
       ))}
@@ -194,7 +197,7 @@ function PlanCard({ data, onOpen }: { data: SmmOverview; onOpen: (month: string)
           </View>
           <SymbolView name="calendar" size={26} tintColor={colors.accent} />
         </View>
-        {plan?.busy ? <BusyBanner text={busyText[plan.busy]} /> : null}
+        {plan?.busy ? <ProgressBanner progress={plan.progress} text={busyText[plan.busy]} /> : null}
         <Text style={[type.subhead, styles.label]} numberOfLines={4}>
           {plan?.summary || 'Tai составит стратегию на месяц: цели, рубрики и календарь публикаций по всем направлениям клуба — турниры, вечера, дни рождения, школа, бар.'}
         </Text>

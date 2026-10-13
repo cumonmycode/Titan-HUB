@@ -1,7 +1,7 @@
 /**
- * СММ в Telegram: кнопки под превью («Одобрить», «Поправить», «Не выпускать»,
+ * СММ в Telegram: кнопки под превью («Одобрить», «Поправить», «Не выкладывать»,
  * «Выложил») и личка Tai — замечание к посту текстом или голосом, ссылка на
- * вышедшую публикацию, скриншот статистики. Работает только с сотрудниками.
+ * вышедшую публикацию. Цифры Tai берёт по API площадок. Работает только с сотрудниками.
  */
 import { sql } from '@titan/database'
 import { escapeHtml } from '../../lib/tgBot.js'
@@ -9,9 +9,8 @@ import type { TgClub } from '../tg/club.js'
 import { whoIs, type TgPerson } from '../tg/identity.js'
 import type { TgCallbackQuery, TgMessage } from '../tg/types.js'
 import { loadPost, rows } from './db.js'
-import { applyScreenshot } from './stats.js'
 import {
-  approvers, awaitedLinkPost, awaitedRemarkPost, awaitedStats, sendReviewTo, setAwaitedLink, setAwaitedRemark, setAwaitedStats, whenText,
+  approvers, awaitedLinkPost, awaitedRemarkPost, sendReviewTo, setAwaitedLink, setAwaitedRemark, whenText,
 } from './telegram.js'
 import { SmmError } from './types.js'
 import { approvePost, canAutoPublish, markPublished, skipPost, type SmmEnv } from './workflow.js'
@@ -19,7 +18,6 @@ import { reviseInBackground } from './writer.js'
 
 const UUID_RE = /^[0-9a-f-]{36}$/i
 const LINK_RE = /https?:\/\/(?:www\.)?(?:instagram\.com|instagr\.am|t\.me|vk\.com|vk\.ru)\/[^\s<>"]+/i
-const MAX_SCREENSHOT_BYTES = 10 * 1024 * 1024
 
 const envOf = (club: TgClub): SmmEnv => ({ db: club.db, clubId: club.id })
 
@@ -67,8 +65,8 @@ export async function onSmmCallback(club: TgClub, cq: TgCallbackQuery, action: s
         return
       case 'x':
         await skipPost(envOf(club), postId)
-        await club.bot.answerCallback(cq.id, 'Не выпускаем')
-        await closeButtons(`🚫 «${escapeHtml(post.topic)}» не выйдет. Вернуть можно в HUB → СММ.`)
+        await club.bot.answerCallback(cq.id, 'Не выкладываем')
+        await closeButtons(`🚫 «${escapeHtml(post.topic)}» не выкладываем — осталась в плане серой. Вернуть можно в HUB → СММ.`)
         return
       case 'd':
         await setAwaitedLink(club.key, String(cq.from.id), postId)
@@ -121,24 +119,6 @@ async function onLink(club: TgClub, person: TgPerson, chatId: number, url: strin
   return true
 }
 
-async function onScreenshot(club: TgClub, person: TgPerson, chatId: number, fileId: string, target: string | null): Promise<void> {
-  await club.bot.chatAction(chatId, 'typing')
-  const file = await club.bot.download(fileId)
-  if (!file || file.data.length > MAX_SCREENSHOT_BYTES) {
-    await club.bot.send(chatId, 'Не смог скачать скриншот 🙈 Пришли ещё раз.')
-    return
-  }
-  const mime = file.path.endsWith('.png') ? 'image/png' : 'image/jpeg'
-  const [kind, id] = (target ?? '').split(':')
-  try {
-    const result = await applyScreenshot(club.db, file.data, mime, kind === 'post' ? { postId: id } : kind === 'account' ? { accountId: id } : {})
-    if (result.applied) await setAwaitedStats(club.key, person.tgId, null)
-    await club.bot.send(chatId, `📊 ${escapeHtml(result.summary)}`, { html: true })
-  } catch (error) {
-    await club.bot.send(chatId, `😕 ${escapeHtml(error instanceof SmmError ? error.message : 'Не получилось разобрать скриншот')}`, { html: true })
-  }
-}
-
 /**
  * Личное сообщение сотрудника, которое касается СММ. true — обработано здесь,
  * Tai-собеседнику дальше не передаём.
@@ -152,15 +132,5 @@ export async function onSmmPrivate(club: TgClub, person: TgPerson, msg: TgMessag
     return true
   }
   const link = LINK_RE.exec(text)?.[0]
-  if (link && (await onLink(club, person, chatId, link))) return true
-
-  const photo = msg.photo?.[msg.photo.length - 1] ?? (msg.document?.mime_type?.startsWith('image/') ? msg.document : undefined)
-  if (photo) {
-    const target = await awaitedStats(club.key, person.tgId)
-    if (target || /стат|охват|инсайт|insight/i.test(msg.caption ?? '')) {
-      await onScreenshot(club, person, chatId, photo.file_id, target)
-      return true
-    }
-  }
-  return false
+  return !!link && (await onLink(club, person, chatId, link))
 }

@@ -7,20 +7,22 @@
  *  файлы и текст выкладывающему и ждёт ссылку (напоминает, пока не пришлют).
  *
  * Крон раз в минуту: доводит видео, публикует, передаёт, напоминает, готовит
- * ближайшие посты. Раз в день — цифры площадок, по понедельникам — отчёт, 25-го —
- * черновик плана на следующий месяц.
+ * ближайшие посты. Раз в час — цифры свежих постов, раз в день — все цифры площадок
+ * и фотоархив, по понедельникам — отчёт, 25-го — черновик плана на следующий месяц.
  */
 import { appSettings, sql, type Database } from '@titan/database'
 import { getStringSetting } from '../../lib/appSettings.js'
 import { notify } from '../notifications/push.js'
 import { mskDate } from './context.js'
-import { addComment, claimPost, listAccounts, listPosts, loadPlan, loadPlanById, loadPost, rows, updatePost } from './db.js'
+import { addComment, claimPost, listPosts, loadPlan, loadPlanById, loadPost, rows, updatePost } from './db.js'
+import { freezeForecast } from './forecast.js'
+import { describePending, syncLibrary } from './library.js'
 import { pollVideos } from './media.js'
 import { generatePlan } from './planner.js'
 import { generateReport } from './report.js'
 import { getSmmSettings } from './settings.js'
 import { collectStats } from './stats.js'
-import { approvers, personById, publisherFor, publishToChannel, sendHandoff, sendReviewTo, setAwaitedStats, tell, whenText } from './telegram.js'
+import { approvers, publisherFor, publishToChannel, sendHandoff, sendReviewTo, tell, whenText } from './telegram.js'
 import { instagramCanPublish, instagramState, publishToInstagram, refreshInstagramToken } from './instagram.js'
 import { SmmError, autoPublishes, type SmmPost } from './types.js'
 import { writePost } from './writer.js'
@@ -102,6 +104,7 @@ export async function markPublished(env: SmmEnv, postId: string, url: string | n
   const post = await loadPost(env.db, postId)
   if (!post) throw new SmmError('Публикация не найдена', 404)
   await updatePost(env.db, postId, { status: 'published', publishedUrl: url ?? post.publishedUrl, publishedAt: post.publishedAt ?? new Date().toISOString(), error: null })
+  await freezeForecast(env.db, postId).catch(() => undefined)
   return (await loadPost(env.db, postId))!
 }
 
@@ -123,8 +126,8 @@ export async function publishNow(env: SmmEnv, postId: string): Promise<SmmPost> 
     if (!claimed) throw new SmmError('Уже опубликовано', 409)
     try {
       if (post.platform === 'instagram') {
-        const { url } = await publishToInstagram(env.db, post)
-        await updatePost(env.db, postId, { publishedUrl: url, error: null })
+        const { mediaId, url } = await publishToInstagram(env.db, post)
+        await updatePost(env.db, postId, { publishedUrl: url, extId: mediaId, error: null })
       } else {
         const { messageId, url } = await publishToChannel(env.db, post)
         await updatePost(env.db, postId, { tgMessageId: messageId, publishedUrl: url, error: null })
@@ -133,6 +136,7 @@ export async function publishNow(env: SmmEnv, postId: string): Promise<SmmPost> 
       await updatePost(env.db, postId, { status: 'failed', publishedAt: null, error: error instanceof Error ? error.message.slice(0, 300) : 'Не опубликовалось' })
       throw error
     }
+    await freezeForecast(env.db, postId).catch(() => undefined)
     return (await loadPost(env.db, postId))!
   }
   await handoff(env, post)
@@ -178,7 +182,7 @@ export async function requestReview(env: SmmEnv, raw: SmmPost): Promise<void> {
 
 const running = new WeakSet<Database>()
 
-type CronMarks = { stats?: string; report?: string; plan?: string }
+type CronMarks = { stats?: string; fresh?: string; report?: string; plan?: string }
 const MARKS_KEY = 'smm_cron'
 
 async function readMarks(db: Database): Promise<CronMarks> {
@@ -288,16 +292,24 @@ async function prepareNext(env: SmmEnv): Promise<void> {
   }
 }
 
-/** Цифры площадок раз в день (с 10:00 МСК), отчёт по понедельникам (с 11:00), план 25-го (с 12:00). */
+/**
+ * Раз в час — цифры свежих постов; раз в день (с 10:00 МСК) — все цифры площадок,
+ * ключ Instagram и фотоархив; отчёт по понедельникам (с 11:00), план 25-го (с 12:00).
+ */
 async function periodic(env: SmmEnv): Promise<void> {
   const msk = new Date(Date.now() + 3 * 3600_000)
   const hour = msk.getUTCHours()
   const today = mskDate()
   const marks = await readMarks(env.db)
   if (hour >= 10 && marks.stats !== today) {
-    await writeMarks(env.db, { ...marks, stats: today })
+    await writeMarks(env.db, { ...marks, stats: today, fresh: msk.toISOString().slice(0, 13) })
     await refreshInstagramToken(env.db).catch((error) => console.warn('[smm] ключ Instagram', error))
     await collectStats(env.db).catch((error) => console.warn('[smm] статистика', error))
+    // Архив: новые альбомы и фото, затем описание новых (понемногу — дёшево).
+    void syncLibrary(env.db).then(() => describePending(env.db)).catch((error) => console.warn('[smm] архив', error))
+  } else if (marks.fresh !== msk.toISOString().slice(0, 13)) {
+    await writeMarks(env.db, { ...marks, fresh: msk.toISOString().slice(0, 13) })
+    await collectStats(env.db, { fresh: true }).catch((error) => console.warn('[smm] свежие цифры', error))
   }
   if (msk.getUTCDay() === 1 && hour >= 11 && marks.report !== today && (await listPosts(env.db, { from: new Date(Date.now() - 8 * 86_400_000).toISOString(), status: ['published'] })).length) {
     await writeMarks(env.db, { ...(await readMarks(env.db)), report: today })
@@ -305,7 +317,6 @@ async function periodic(env: SmmEnv): Promise<void> {
       const report = await generateReport(env.db)
       const people = (await approvers(env.db)).filter((p) => p.role === 'owner')
       await push(env, people.map((p) => p.id), report.title, report.summary.slice(0, 160), '/manage/smm/analytics')
-      await askInstagramScreenshot(env)
     } catch (error) {
       console.warn('[smm] отчёт', error instanceof Error ? error.message : error)
     }
@@ -325,17 +336,6 @@ async function periodic(env: SmmEnv): Promise<void> {
       }
     }
   }
-}
-
-/** Instagram без входа цифр не отдаёт — раз в неделю просим скриншот статистики. */
-async function askInstagramScreenshot(env: SmmEnv): Promise<void> {
-  const ig = (await listAccounts(env.db)).find((a) => a.platform === 'instagram' && a.isActive && a.statsError)
-  if (!ig) return
-  const settings = await getSmmSettings(env.db)
-  const person = (await personById(env.db, settings.publisherId)) ?? (await approvers(env.db)).find((p) => p.role === 'owner') ?? null
-  if (!person?.tgId) return
-  const ok = await tell(env.db, person.tgId, `📊 Пришли, пожалуйста, скриншот статистики Instagram за неделю (профиль → профессиональная панель → обзор) — я разберу цифры и учту в стратегии.`)
-  if (ok) await setAwaitedStats(clubKeyOf(env.clubId), person.tgId, `account:${ig.id}`)
 }
 
 export async function smmTick(db: Database, clubId: string | null): Promise<void> {

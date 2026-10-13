@@ -135,9 +135,12 @@ export default function ManageLayout() {
       <Stack.Screen name="smm/memory" options={formHeader({ title: 'Память Tai' })} />
       <Stack.Screen name="smm/settings" options={formHeader({ title: 'Настройки СММ' })} />
       <Stack.Screen name="smm/instagram" options={formHeader({ title: 'Instagram' })} />
+      <Stack.Screen name="smm/library" options={formHeader({ title: 'Фотоархив' })} />
+      <Stack.Screen name="smm/album" options={formHeader()} />
       <Stack.Screen name="smm/new" options={editorModal} />
       <Stack.Screen name="smm/edit-text" options={editorModal} />
       <Stack.Screen name="smm/when" options={editorModal} />
+      <Stack.Screen name="smm/order" options={editorModal} />
 
       <Stack.Screen name="tai/index" options={formHeader({ title: 'Tai' })} />
       <Stack.Screen name="tai/voice" options={formHeader({ title: 'Голос' })} />
