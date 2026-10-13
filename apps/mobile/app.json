@@ -9,7 +9,7 @@
     "ios": {
       "icon": "./assets/titan.icon",
       "bundleIdentifier": "ru.titan.hub",
-      "buildNumber": "41",
+      "buildNumber": "42",
       "appleTeamId": "G99YH9UK8C",
       "supportsTablet": true,
       "infoPlist": {
@@ -41,7 +41,7 @@
     },
     "android": {
       "package": "ru.titanpos.hub",
-      "versionCode": 25,
+      "versionCode": 26,
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/titan-android-foreground.png",
         "monochromeImage": "./assets/images/titan-android-monochrome.png",
