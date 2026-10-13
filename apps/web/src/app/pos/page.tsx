@@ -405,6 +405,9 @@ function PosPageInner() {
   // Предвыбор тарифа по СТАТУСУ клиента (тариф = статус, матч по key; фолбэк по имени).
   useEffect(() => {
     if (newCheckStep !== 'tariff' || !tariffsData || !selectedPlayer) return
+    // Сотрудник на чеке — без игрового тарифа (предвыбор «Без тарифа»).
+    const role = (selectedPlayer as { role?: string }).role
+    if (role === 'staff' || role === 'owner') { setSelectedTariffId(null); return }
     const byKey = tariffItems.find(t => t.key && t.key === selectedPlayer.clientTier)
     const fallbackName = TIER_TO_TARIFF_NAME[selectedPlayer.clientTier]
     const match = byKey ?? (fallbackName ? tariffItems.find(t => t.name.toLowerCase() === fallbackName.toLowerCase()) : undefined)

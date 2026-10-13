@@ -50,6 +50,8 @@ export const profiles = pgTable('profiles', {
   gomafiaPhotoUrl: text('gomafia_photo_url'),
   permissions: jsonb('permissions').$type<Record<string, boolean>>().default({}),
   linkedSpaceId: uuid('linked_space_id'),
+  // Своя формула зарплаты (миграция 084); null — формула клуба по умолчанию.
+  salarySchemeId: uuid('salary_scheme_id'),
   searchTags: text('search_tags').array().default([]),
   isResident: boolean('is_resident').notNull().default(false),
   // Ручные («виртуальные») посещения: ± к счётчику визитов (Новичок→Резидент)

@@ -2,7 +2,7 @@ import type { AppEnv } from '../../types.js'
 import { Hono } from 'hono'
 import { zValidator } from '@hono/zod-validator'
 import { z } from 'zod'
-import { profiles, eq, and, isNull, desc, sql } from '@titan/database'
+import { profiles, shifts, shiftStaff, clientTiers, eq, and, isNull, desc, sql, or, ilike, inArray } from '@titan/database'
 import type { Database } from '@titan/database'
 // @ts-ignore
 import { passkeys } from '@titan/database'
@@ -27,7 +27,17 @@ const UpdateStaffSchema = z.object({
   role: z.enum(['owner', 'staff']).optional(),
   password: z.string().min(4).optional(),
   permissions: z.record(z.boolean()).optional(),
+  salarySchemeId: z.string().uuid().nullable().optional(),
 })
+
+// Сотрудник = клиент клуба с правами: выбираем человека из клиентов и выдаём роль.
+const PromoteSchema = z.object({
+  profileId: z.string().uuid(),
+  role: z.enum(['owner', 'staff']).default('staff'),
+  permissions: z.record(z.boolean()).optional(),
+})
+
+const photoSql = sql<string | null>`coalesce(${profiles.photoUrl}, ${profiles.tgPhotoUrl}, ${profiles.gomafiaPhotoUrl})`
 
 // Последнего активного владельца нельзя понизить или уволить — иначе клуб
 // остаётся без управления (назначить владельца из приложения уже некому).
@@ -46,26 +56,79 @@ staffRouter.use('*', requireAuth, requireRole('owner'))
 
 staffRouter.get('/', async (c) => {
   const db = c.var.db
+  const [open] = await db.select({ id: shifts.id }).from(shifts).where(eq(shifts.status, 'open')).limit(1)
+  const onShift = open
+    ? new Set((await db.select({ id: shiftStaff.profileId }).from(shiftStaff).where(eq(shiftStaff.shiftId, open.id))).map((r) => r.id))
+    : new Set<string>()
   const rows = await db
     .select({
       id: profiles.id,
       nickname: profiles.nickname,
+      fullName: profiles.fullName,
       phone: profiles.phone,
       role: profiles.role,
       permissions: profiles.permissions,
       tgId: profiles.tgId,
       tgUsername: profiles.tgUsername,
-      photoUrl: sql<string | null>`coalesce(${profiles.photoUrl}, ${profiles.tgPhotoUrl}, ${profiles.gomafiaPhotoUrl})`,
+      photoUrl: photoSql,
+      clientTier: profiles.clientTier,
+      salarySchemeId: profiles.salarySchemeId,
+      hasPin: sql<boolean>`${profiles.pin} is not null`,
       createdAt: profiles.createdAt,
     })
     .from(profiles)
-    .where(and(
-      isNull(profiles.deletedAt),
-    ))
-    .orderBy(desc(profiles.createdAt))
+    .where(and(isNull(profiles.deletedAt), inArray(profiles.role, ['owner', 'staff'])))
+    .orderBy(sql`${profiles.role} = 'owner' desc`, profiles.nickname)
 
-  const staff = rows.filter(r => r.role === 'owner' || r.role === 'staff')
-  return c.json({ staff })
+  return c.json({ staff: rows.map((r) => ({ ...r, onShift: onShift.has(r.id) })) })
+})
+
+// Кандидаты в сотрудники — клиенты клуба (поиск по нику, имени, телефону).
+staffRouter.get('/candidates', async (c) => {
+  const db = c.var.db
+  const q = (c.req.query('q') ?? '').trim().slice(0, 60)
+  const digits = q.replace(/\D/g, '')
+  const match = q
+    ? or(
+        ilike(profiles.nickname, `%${q}%`),
+        ilike(profiles.fullName, `%${q}%`),
+        ...(digits.length >= 3 ? [sql`regexp_replace(coalesce(${profiles.phone}, ''), '\\D', '', 'g') like ${'%' + digits + '%'}`] : []),
+      )
+    : undefined
+  const rows = await db
+    .select({
+      id: profiles.id,
+      nickname: profiles.nickname,
+      fullName: profiles.fullName,
+      phone: profiles.phone,
+      photoUrl: photoSql,
+      clientTier: profiles.clientTier,
+      tierLabel: clientTiers.label,
+      tierColor: clientTiers.color,
+      tgLinked: sql<boolean>`${profiles.tgId} is not null`,
+    })
+    .from(profiles)
+    .leftJoin(clientTiers, eq(clientTiers.key, profiles.clientTier))
+    .where(and(isNull(profiles.deletedAt), eq(profiles.role, 'client'), match))
+    .orderBy(profiles.nickname)
+    .limit(q ? 30 : 60)
+  return c.json({ candidates: rows })
+})
+
+// Клиент → сотрудник (или владелец). Тот же профиль: история, баланс и Telegram остаются.
+staffRouter.post('/promote', zValidator('json', PromoteSchema), async (c) => {
+  const db = c.var.db
+  const body = c.req.valid('json')
+  const [p] = await db.select({ role: profiles.role, deletedAt: profiles.deletedAt }).from(profiles).where(eq(profiles.id, body.profileId))
+  if (!p || p.deletedAt) return c.json({ error: 'Клиент не найден' }, 404)
+  if (p.role === 'owner' || p.role === 'staff') return c.json({ error: 'Он уже в команде' }, 409)
+  if (p.role !== 'client') return c.json({ error: 'Этот профиль нельзя сделать сотрудником' }, 400)
+  const [updated] = await db.update(profiles)
+    .set({ role: body.role, permissions: body.permissions ?? {} })
+    .where(eq(profiles.id, body.profileId))
+    .returning({ id: profiles.id, nickname: profiles.nickname, role: profiles.role, permissions: profiles.permissions })
+  await invalidateProfileAuthCache(c.var.club?.id ?? null, body.profileId)
+  return c.json({ staff: updated }, 201)
 })
 
 staffRouter.get('/:id', async (c) => {
@@ -190,16 +253,20 @@ staffRouter.delete('/:id', async (c) => {
     return c.json({ error: LAST_OWNER_ERROR }, 409)
   }
 
-  await db
-    .update(profiles)
-    .set({ deletedAt: new Date() })
-    .where(eq(profiles.id, c.req.param('id')))
-
-  // Уволенный сотрудник не должен входить по passkey — удаляем его ключи.
-  // (Дополнительно auth-verify проверяет deletedAt, см. auth.router.ts.)
-  await db.delete(passkeys).where(eq(passkeys.userId, c.req.param('id')))
-  // Его ещё живые JWT отбиваются requireAuth (deletedAt) — сразу, без ожидания кэша.
-  await invalidateProfileAuthCache(c.var.club?.id ?? null, c.req.param('id'))
+  // Сотрудник = клиент с правами: «убрать из команды» возвращает его в клиенты — история,
+  // баланс, бонусы и Telegram остаются. Вход в HUB, PIN, права и формула зарплаты — снимаются.
+  const id = c.req.param('id')
+  await db.transaction(async (tx) => {
+    await tx.update(profiles)
+      .set({ role: 'client', permissions: {}, pin: null, passwordHash: null, needsPinSetup: false, salarySchemeId: null })
+      .where(and(eq(profiles.id, id), inArray(profiles.role, ['owner', 'staff'])))
+    const [open] = await tx.select({ id: shifts.id }).from(shifts).where(eq(shifts.status, 'open')).limit(1)
+    if (open) await tx.delete(shiftStaff).where(and(eq(shiftStaff.shiftId, open.id), eq(shiftStaff.profileId, id)))
+  })
+  // Бывший сотрудник не должен входить по passkey — удаляем его ключи.
+  await db.delete(passkeys).where(eq(passkeys.userId, id))
+  // Его ещё живые JWT отбиваются requireAuth (роль из БД) — сразу, без ожидания кэша.
+  await invalidateProfileAuthCache(c.var.club?.id ?? null, id)
 
   return c.json({ ok: true })
 })

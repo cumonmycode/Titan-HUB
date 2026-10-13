@@ -63,6 +63,10 @@ export async function getBusinessDayStartHour(database: DbLike): Promise<number>
 }
 
 export const STAFF_DISCOUNT_KEY = 'staff_discount_enabled'
+// Кому списание на персонал: 'shift' — только тем, кто сегодня на смене; 'all' — всей команде.
+export const STAFF_COMP_SCOPE_KEY = 'staff_comp_scope'
+// Владельцам тоже списывать (по умолчанию — да, как было).
+export const STAFF_COMP_OWNERS_KEY = 'staff_comp_owners'
 
 // Ключи настроек порогов (валидны под regex /^[a-z][a-z0-9_]{0,63}$/).
 export const LARGE_CHECK_KEY = 'large_check_threshold'

@@ -5,7 +5,7 @@ import { z } from 'zod'
 import {
   checks, checkItems, checkItemModifiers, checkPayments, checkDiscounts, pendingOrders, chatMessages, guestFeedback,
   inventory, profiles, spaces, certificates, bonusHistory, transactions, modifiers as modifiersTable,
-  appSettings, events, discounts, clientDiscountRules, shifts,
+  appSettings, events, discounts, clientDiscountRules, shifts, shiftStaff,
   eq, and, ne, inArray, desc, asc, sql, isNull,
 } from '@titan/database'
 import type { Database } from '@titan/database'
@@ -22,7 +22,8 @@ import { getPrecheckCandidates } from '../../lib/prechecks.js'
 import { getCheckSuggestions, learnFromCheckClose } from '../../lib/suggestions.js'
 import { accrueBonusLot, spendBonusLots, getBonusExpiryDays } from '../../lib/bonusLots.js'
 import { isRegistrationPending } from '../../lib/registration.js'
-import { getNumericSetting, LARGE_CHECK_KEY, DEFAULT_LARGE_CHECK, getBoolSetting, STAFF_DISCOUNT_KEY, STAFF_MAX_DISCOUNT_KEY, DEFAULT_STAFF_MAX_DISCOUNT } from '../../lib/appSettings.js'
+import { getNumericSetting, getStringSetting, LARGE_CHECK_KEY, DEFAULT_LARGE_CHECK, getBoolSetting, STAFF_DISCOUNT_KEY, STAFF_COMP_SCOPE_KEY, STAFF_COMP_OWNERS_KEY, STAFF_MAX_DISCOUNT_KEY, DEFAULT_STAFF_MAX_DISCOUNT } from '../../lib/appSettings.js'
+import { shiftWorkers } from '../../lib/salary.js'
 import { round2, computeRental, computeTotals } from '../../lib/money.js'
 import { publishEvent, updatesChannel } from '../../lib/realtime.js'
 import { getClubIntegration } from '../../lib/secrets.js'
@@ -339,12 +340,19 @@ async function applyAutoDiscounts(exec: DbOrTx, checkId: string) {
 // чека — owner/staff, чек помечается списанием на персонал (staffCompId = плательщик),
 // иначе метка снимается. Применяется автоматически (без ручной кнопки).
 async function applyStaffComp(exec: DbOrTx, checkId: string) {
-  const [check] = await exec.select({ playerId: checks.playerId, staffCompId: checks.staffCompId }).from(checks).where(eq(checks.id, checkId))
+  const [check] = await exec.select({ playerId: checks.playerId, staffCompId: checks.staffCompId, shiftId: checks.shiftId }).from(checks).where(eq(checks.id, checkId))
   if (!check) return
   let target: string | null = null
-  if (check.playerId && await getBoolSetting(STAFF_DISCOUNT_KEY, false, exec)) {
+  if (check.playerId && await getBoolSetting(STAFF_DISCOUNT_KEY, false, exec as Database)) {
     const [p] = await exec.select({ role: profiles.role }).from(profiles).where(eq(profiles.id, check.playerId))
-    if (p && (p.role === 'owner' || p.role === 'staff')) target = check.playerId
+    const owners = await getBoolSetting(STAFF_COMP_OWNERS_KEY, true, exec as Database)
+    const eligible = p?.role === 'staff' || (p?.role === 'owner' && owners)
+    // «Только тем, кто на смене»: владелец списывается и без смены (если владельцам можно).
+    const onShiftOnly = (await getStringSetting(STAFF_COMP_SCOPE_KEY, 'all', exec as Database)) === 'shift'
+    const onShift = !onShiftOnly || p?.role === 'owner' || (check.shiftId
+      ? (await exec.select({ id: shiftStaff.profileId }).from(shiftStaff).where(and(eq(shiftStaff.shiftId, check.shiftId), eq(shiftStaff.profileId, check.playerId)))).length > 0
+      : false)
+    if (eligible && onShift) target = check.playerId
   }
   if ((check.staffCompId ?? null) !== target) {
     await exec.update(checks).set({ staffCompId: target }).where(eq(checks.id, checkId))
@@ -407,6 +415,8 @@ posRouter.get('/players/search', requireRole('owner', 'staff'), async (c) => {
   const playerFields = {
     id: profiles.id,
     nickname: profiles.nickname,
+    // Роль: на чек сотрудника касса не ставит игровой тариф.
+    role: profiles.role,
     clientTier: profiles.clientTier,
     balance: profiles.balance,
     bonusPoints: profiles.bonusPoints,
@@ -450,6 +460,7 @@ posRouter.get('/players/:id', requireRole('owner', 'staff', 'tablet'), async (c)
   const [player] = await db.select({
     id: profiles.id,
     nickname: profiles.nickname,
+    role: profiles.role,
     clientTier: profiles.clientTier,
     balance: profiles.balance,
     bonusPoints: profiles.bonusPoints,
@@ -465,14 +476,16 @@ posRouter.get('/shift-summary', requireRole('owner', 'staff'), async (c) => {
   const db = c.var.db
   const shift = await getCurrentShift(db)
   if (!shift) return c.json({ shift: null })
-  const [{ expected }, forecast] = await Promise.all([
+  const [{ expected }, forecast, staff] = await Promise.all([
     getShiftCashBalance(shift.id, db),
     computeShiftForecast(db, shift.id),
+    shiftWorkers(db, shift.id),
   ])
   // ИИ-прогноз вечера (Tai) — только при подписке; открытые чеки и касса доступны всегда.
   const tai = aiAllowed(c.var.club)
   return c.json({
     shift: { id: shift.id, openedAt: shift.openedAt, eveningType: shift.eveningType },
+    staff,
     openChecks: { count: forecast.perCheck.length, total: forecast.currentTotal },
     cashInRegister: expected,
     taiEnabled: tai,

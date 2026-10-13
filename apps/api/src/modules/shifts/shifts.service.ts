@@ -1,5 +1,6 @@
-import { db, shifts, checks, checkPayments, cashOperations, refunds, profiles, eq, and, isNull, sql, desc, sum, gte, lt, type Database } from '@titan/database'
+import { db, shifts, shiftStaff, checks, checkPayments, cashOperations, refunds, profiles, eq, and, isNull, notInArray, sql, desc, sum, gte, lt, type Database } from '@titan/database'
 import { notify } from '../notifications/push.js'
+import { validWorkerIds } from '../../lib/salary.js'
 
 // Переходный режим: пер-клубный db передаётся параметром, дефолт — модульный синглтон.
 type DbLike = Database
@@ -14,12 +15,18 @@ export async function getCurrentShift(database: DbLike) {
   return shift ?? null
 }
 
+export interface OpeningCashOp { type: 'deposit' | 'withdrawal'; amount: number; description?: string }
+
 export async function openShift(data: {
   openedBy: string
   cashStart: number
   eveningType: string
   note?: string
   adjustmentReason?: string
+  /** Кто работает на смене; не передали — открывший, если он сотрудник. */
+  staffIds?: string[]
+  /** Внесения и изъятия сразу после пересчёта (размен, инкассация). */
+  operations?: OpeningCashOp[]
 }, database: DbLike, clubId: string | null) {
   const existing = await getCurrentShift(database)
   if (existing) throw new Error('Shift already open')
@@ -37,6 +44,14 @@ export async function openShift(data: {
   if (hadPriorShift && diff !== 0 && !data.adjustmentReason?.trim()) {
     throw new Error('Требуется причина расхождения наличных при открытии смены')
   }
+  // Изъятие при открытии не может увести кассу в минус (как и обычное изъятие).
+  const ops = data.operations ?? []
+  const afterOps = counted + ops.reduce((s, op) => s + (op.type === 'deposit' ? op.amount : -op.amount), 0)
+  if (afterOps < -0.005) throw new Error(`Изъятие больше, чем есть в кассе: в кассе ${counted} ₽`)
+
+  const workers = data.staffIds
+    ? await validWorkerIds(database, data.staffIds)
+    : await validWorkerIds(database, [data.openedBy])
 
   let shift
   try {
@@ -61,6 +76,18 @@ export async function openShift(data: {
           shiftId: created.id,
           createdBy: data.openedBy,
         })
+      }
+      for (const op of ops) {
+        await tx.insert(cashOperations).values({
+          type: op.type,
+          amount: String(op.amount),
+          description: op.description?.trim() || (op.type === 'deposit' ? 'Внесение при открытии' : 'Изъятие при открытии'),
+          shiftId: created.id,
+          createdBy: data.openedBy,
+        })
+      }
+      if (workers.length) {
+        await tx.insert(shiftStaff).values(workers.map((profileId) => ({ shiftId: created.id, profileId }))).onConflictDoNothing()
       }
 
       return created
@@ -264,6 +291,24 @@ export async function getLastShiftCashEnd(database: DbLike): Promise<number | nu
   // 0 — валидный остаток (касса пустая), не «нет прошлой смены».
   const n = parseFloat(String(row.cashEnd))
   return Number.isFinite(n) ? n : null
+}
+
+/**
+ * Состав смены. Открытую смену правит персонал, закрытую — только владелец (для расчёта
+ * зарплаты задним числом). Выплаченного сотрудника из смены не убрать.
+ */
+export async function setShiftStaff(shiftId: string, staffIds: string[], database: DbLike): Promise<string[]> {
+  const workers = await validWorkerIds(database, staffIds)
+  await database.transaction(async (tx) => {
+    const paid = await tx.execute(sql`SELECT profile_id FROM salary_payments WHERE shift_id = ${shiftId}`)
+    const paidIds = ((paid as { rows?: unknown[] }).rows ?? (paid as unknown[])) as { profile_id: string }[]
+    const keep = new Set([...workers, ...paidIds.map((p) => p.profile_id)])
+    await tx.delete(shiftStaff).where(keep.size
+      ? and(eq(shiftStaff.shiftId, shiftId), notInArray(shiftStaff.profileId, [...keep]))
+      : eq(shiftStaff.shiftId, shiftId))
+    if (keep.size) await tx.insert(shiftStaff).values([...keep].map((profileId) => ({ shiftId, profileId }))).onConflictDoNothing()
+  })
+  return workers
 }
 
 export async function getShiftHistory(page = 1, limit = 20, database: DbLike) {

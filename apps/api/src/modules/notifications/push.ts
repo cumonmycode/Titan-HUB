@@ -21,6 +21,7 @@ export function resolveNotifUrl(type: string, meta: Record<string, unknown> = {}
     case 'low_stock': return typeof meta['itemId'] === 'string' ? `/manage/goods/item/${meta['itemId']}` : '/manage/goods?tab=warehouse'
     case 'supply_received': return typeof meta['supplyId'] === 'string' ? `/manage/goods/doc?type=supply&id=${meta['supplyId']}` : '/manage/goods?tab=warehouse'
     case 'shift_open': case 'shift_close': case 'cash_discrepancy': return '/shifts'
+    case 'salary_due': return '/manage/salary'
     case 'event_created': case 'event_completed': return '/events'
     case 'new_client': case 'client_registration': case 'birthday': return '/manage/clients'
     case 'staff_call': return checkId ? `/pos/${checkId}` : '/pos'
@@ -83,6 +84,7 @@ export const NOTIFICATION_TYPES: NotificationTypeDef[] = [
   { key: 'shift_open', label: 'Открытие смены', description: 'Смена открыта', defaultEnabled: true },
   { key: 'shift_close', label: 'Закрытие смены', description: 'Смена закрыта', defaultEnabled: true },
   { key: 'cash_discrepancy', label: 'Расхождение в кассе', description: 'Излишек или недостача наличных', defaultEnabled: true },
+  { key: 'salary_due', label: 'Зарплата к выдаче', description: 'Сотрудник закрыл смену — кому и сколько выдать (только владельцам)', defaultEnabled: true },
   { key: 'check_paid', label: 'Оплата чека', description: 'Чек оплачен и закрыт', defaultEnabled: false },
   { key: 'large_check', label: 'Крупный чек', description: 'Оплачен чек на крупную сумму', defaultEnabled: true },
   { key: 'low_stock', label: 'Низкий остаток на складе', description: 'Остаток товара упал ниже порога', defaultEnabled: true },

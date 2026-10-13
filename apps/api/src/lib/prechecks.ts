@@ -72,6 +72,7 @@ export async function getPrecheckCandidates(db: Database): Promise<PrecheckCandi
   const profs = await db.select({
     id: profiles.id,
     nickname: profiles.nickname,
+    role: profiles.role,
     clientTier: profiles.clientTier,
     photoUrl: sql<string | null>`coalesce(${profiles.photoUrl}, ${profiles.tgPhotoUrl}, ${profiles.gomafiaPhotoUrl})`,
   }).from(profiles).where(inArray(profiles.id, profileIds))
@@ -84,7 +85,8 @@ export async function getPrecheckCandidates(db: Database): Promise<PrecheckCandi
   const out: PrecheckCandidate[] = []
   for (const p of profs) {
     if (openSet.has(p.id)) continue
-    const t = tByKey.get(p.clientTier)
+    // Сотрудник на игре не платит игровой тариф — предчек без тарифа.
+    const t = p.role === 'staff' || p.role === 'owner' ? undefined : tByKey.get(p.clientTier)
     out.push({
       playerId: p.id,
       nickname: p.nickname,

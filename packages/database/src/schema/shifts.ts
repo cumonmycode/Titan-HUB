@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, numeric, timestamp, boolean, integer, pgEnum } from 'drizzle-orm/pg-core'
+import { pgTable, uuid, text, numeric, timestamp, boolean, integer, pgEnum, primaryKey } from 'drizzle-orm/pg-core'
 import { profiles } from './profiles.js'
 
 export const shiftStatusEnum = pgEnum('shift_status', ['open', 'closed'])
@@ -37,6 +37,14 @@ export const shifts = pgTable('shifts', {
   openedAt: timestamp('opened_at', { withTimezone: true }).notNull().defaultNow(),
   closedAt: timestamp('closed_at', { withTimezone: true }),
 })
+
+// Кто работает на смене (миграция 084): выбирают при открытии, правят до закрытия.
+// Зарплату за смену получают только они.
+export const shiftStaff = pgTable('shift_staff', {
+  shiftId: uuid('shift_id').notNull().references(() => shifts.id, { onDelete: 'cascade' }),
+  profileId: uuid('profile_id').notNull().references(() => profiles.id),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [primaryKey({ columns: [t.shiftId, t.profileId] })])
 
 export type Shift = typeof shifts.$inferSelect
 export type NewShift = typeof shifts.$inferInsert

@@ -14,7 +14,7 @@ import { cached, type ToolContext, type ToolDef, type ToolResult } from './types
 type MenuItem = { id: string; name: string; price: string | number; category: string | null; trackStock: boolean; stockQuantity: number; searchTags: string[] | null }
 type Tariff = { id: string; name: string; key: string | null; price: string | number; isActive: boolean; itemId: string | null }
 type Space = { id: string; name: string; hourlyRate: string | number; isActive: boolean }
-type Player = { id: string; nickname: string; clientTier: string; balance: string | number; bonusPoints: string | number; photoUrl: string | null }
+type Player = { id: string; nickname: string; role?: string; clientTier: string; balance: string | number; bonusPoints: string | number; photoUrl: string | null }
 
 const menu = (ctx: ToolContext) => cached(ctx, 'menu', () => ctx.api.get<{ items: MenuItem[] }>('/api/menu/items').then((r) => r.items))
 const tariffs = (ctx: ToolContext) => cached(ctx, 'tariffs', () => ctx.api.get<{ tariffs: Tariff[] }>('/api/pricing/tariffs').then((r) => r.tariffs.filter((t) => t.isActive !== false)))
@@ -264,7 +264,9 @@ const proposeOpenCheck: ToolDef = {
 
     // Тариф как в кассе: по статусу гостя; гость без карточки — тариф «Гость».
     const tier = player?.clientTier ?? 'guest'
-    const tariffArg = typeof args['tariff'] === 'string' ? args['tariff'].trim() : 'auto'
+    // Чек сотрудника — без игрового тарифа (он работает, а не играет), как и в кассе.
+    const isTeam = player?.role === 'staff' || player?.role === 'owner'
+    const tariffArg = isTeam && args['tariff'] === 'auto' ? 'none' : typeof args['tariff'] === 'string' ? args['tariff'].trim() : isTeam ? 'none' : 'auto'
     const allTariffs = await tariffs(ctx)
     let tariff: Tariff | null = null
     if (tariffArg && tariffArg !== 'none') {
