@@ -73,7 +73,7 @@ if ! xcodebuild \
   -archivePath "$OUT/TitanHUB.xcarchive" \
   -allowProvisioningUpdates \
   "${AUTH[@]}" \
-  "${DERIVED[@]}" \
+  ${DERIVED[@]+"${DERIVED[@]}"} \
   archive >"$OUT/archive.log" 2>&1; then
   grep -E "error:|Provisioning|No profiles|No signing certificate" "$OUT/archive.log" | head -20 || true
   echo "Архив не собрался, подробности в apps/mobile/$OUT/archive.log"
