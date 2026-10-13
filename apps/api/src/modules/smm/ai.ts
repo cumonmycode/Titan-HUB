@@ -1,7 +1,8 @@
 /**
  * Нейросети раздела «СММ» через Polza (тот же ключ, что у Tai):
- *  - тексты, планы, отчёты и разбор скриншотов — Claude Sonnet 5.5 (лучший русский
- *    копирайтинг; ответ строго JSON по схеме);
+ *  - тексты, планы, отчёты и разбор скриншотов — Gemini 3.8 Flash (ответ строго JSON
+ *    по схеме; план месяца ~1 мин и ~3 ₽). Claude Sonnet 5.5 в Polza всегда «думает» и на
+ *    плане месяца тратил весь лимит ответа на рассуждения — ответ приходил пустым;
  *  - картинки — Nano Banana 2.1 в 2K (точный русский текст на картинке, до 10
  *    референсов — фото клуба), запасная — GPT Image 2.5;
  *  - видео — Veo 3.1 Fast: 8 с со звуком, 9:16, ~45 ₽ — лучшее качество за деньги.
@@ -19,7 +20,7 @@ import { SmmError } from './types.js'
 const clean = (v: string | undefined): string => (v ?? '').trim().replace(/^["']|["']$/g, '')
 
 export const SMM_MODELS = {
-  text: clean(process.env['SMM_TEXT_MODEL']) || 'anthropic/claude-sonnet-5.5',
+  text: clean(process.env['SMM_TEXT_MODEL']) || 'google/gemini-3.8-flash',
   image: clean(process.env['SMM_IMAGE_MODEL']) || 'google/gemini-nano-banana-2.1',
   imageFallback: 'openai/gpt-image-2.5-flare',
   video: clean(process.env['SMM_VIDEO_MODEL']) || 'google/veo3_fast',
@@ -151,7 +152,7 @@ export async function chatJson<T>(db: Database, opts: ChatJsonOpts<T>): Promise<
   ]
   let lastError = ''
   for (let attempt = 0; attempt < 2; attempt += 1) {
-    const data = await polza<{ choices?: { message?: { content?: string | null } }[]; usage?: { cost_rub?: number } }>(
+    const data = await polza<{ choices?: { finish_reason?: string; message?: { content?: string | null } }[]; usage?: { cost_rub?: number } }>(
       apiKey,
       '/chat/completions',
       {
@@ -165,6 +166,10 @@ export async function chatJson<T>(db: Database, opts: ChatJsonOpts<T>): Promise<
     )
     await recordSpend(db, kind, SMM_MODELS.text, Number(data.usage?.cost_rub ?? 0), opts.note)
     const content = data.choices?.[0]?.message?.content ?? ''
+    // Пустой ответ из-за лимита: повтор с тем же лимитом не поможет.
+    if (!content.trim() && data.choices?.[0]?.finish_reason === 'length') {
+      throw new SmmError('Ответ не уместился в лимит модели — попробуйте ещё раз', 502)
+    }
     try {
       const parsed = opts.schema.safeParse(extractJson(content))
       if (parsed.success) return parsed.data

@@ -148,7 +148,7 @@ API-ключ для AI может быть задан двумя способа�
 | `POLZA_API_KEY` | Нет | — | Платформенный API-ключ провайдера Polza (OpenAI-совместимый endpoint). Используется как фолбэк, если в таблице `integrations` клуба нет ключа `ai_api_key`. Без ключа `/api/ai/chat` вернёт ошибку. <!-- VERIFY: актуальный prod-ключ --> |
 | `POLZA_BASE_URL` | Нет | `https://polza.ai/api/v1` | Базовый URL Polza API. Совместим с OpenAI `chat/completions`. |
 | `POLZA_MODEL` | Нет | `google/gemini-3.1-flash-lite` | Идентификатор модели. Формат: `<provider>/<model>`. |
-| `SMM_TEXT_MODEL` | Нет | `anthropic/claude-sonnet-5.5` | Раздел «СММ»: планы, посты, сценарии рилс, отчёты, разбор скриншотов статистики. |
+| `SMM_TEXT_MODEL` | Нет | `google/gemini-3.8-flash` | Раздел «СММ»: планы, посты, сценарии рилс, отчёты, разбор скриншотов статистики. |
 | `SMM_IMAGE_MODEL` | Нет | `google/gemini-nano-banana-2.1` | Раздел «СММ»: картинки (2K, фото клуба — референсы). Запасная — `openai/gpt-image-2.5-flare`. |
 | `SMM_VIDEO_MODEL` | Нет | `google/veo3_fast` | Раздел «СММ»: видео 8 с со звуком, 9:16 (~45 ₽). |
 
