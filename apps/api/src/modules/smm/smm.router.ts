@@ -24,7 +24,9 @@ import {
 import { analyticsPayload } from './analytics.js'
 import { withForecast } from './forecast.js'
 import { albumPhotos, connectLibrary, disconnectLibrary, libraryAlbums, libraryCounts, libraryState, searchLibrary, syncLibrary } from './library.js'
-import { addArchivePhoto, addClubPhoto, addUpload, clubPhotos, regenerateImage, startPostVideo } from './media.js'
+import { datesBetween } from './holidays.js'
+import { knowledgeRouter } from './knowledge.router.js'
+import { addArchivePhoto, addUpload, regenerateImage } from './media.js'
 import { generatePlanInBackground, isMonth, monthRange, revisePlanInBackground } from './planner.js'
 import { DIRECTIONS, FORMAT_LABEL, PLATFORM_LABEL } from './prompts.js'
 import { generateReport } from './report.js'
@@ -34,10 +36,12 @@ import { approvers, checkChannel } from './telegram.js'
 import { ACCOUNT_PLATFORMS, FORMATS, MEMORY_KINDS, PLATFORMS, SmmError, type SmmPost } from './types.js'
 import { approvePost, markPublished, publishNow, restorePost, skipPost, withAuto, type SmmEnv } from './workflow.js'
 import { connectInstagram, disconnectInstagram, instagramState } from './instagram.js'
+import { makePostVideoInBackground } from './video.js'
 import { reviseInBackground, suggestIdeas, writePostInBackground } from './writer.js'
 
 export const smmRouter = new Hono<AppEnv>()
 smmRouter.use('*', requireAuth, requireRole('owner', 'staff'), requirePermission('smm'))
+smmRouter.route('/', knowledgeRouter)
 const ownerOnly = requireRole('owner')
 const uploadLimit = bodyLimit({ maxSize: MAX_MEDIA_BODY_BYTES, onError: (c) => c.json({ error: 'Файл больше 60 МБ' }, 413) })
 
@@ -304,15 +308,13 @@ smmRouter.post('/posts/:id/image', zValidator('json', ImageSchema), async (c) =>
   }
 })
 
-/** Видео нейросетью (Veo 3.1 Fast, ~45 ₽): готово через несколько минут. */
+/** Видео нейросетью (Veo 3.1 Fast, ~45 ₽): Tai продумывает сцену, делает первый кадр и запускает Veo; готово через несколько минут. */
 smmRouter.post('/posts/:id/video', zValidator('json', z.object({ prompt: z.string().trim().min(10).max(1900).optional() })), async (c) => {
   try {
     const post = await postOr404(c)
-    const prompt = c.req.valid('json').prompt || [post.visual, post.script?.hook, post.topic].filter(Boolean).join('. ')
-    if (prompt.length < 10) return c.json({ error: 'Опишите, что должно быть в видео' }, 400)
     if (post.media.some((m) => m.kind === 'video' && m.status === 'pending')) return c.json({ error: 'Видео уже делается' }, 409)
-    await startPostVideo(c.var.db, post, prompt)
-    await updatePost(c.var.db, post.id, { busy: 'video' })
+    if (!(await claimPost(c.var.db, post.id, 'video'))) return c.json({ error: 'Tai уже работает над публикацией' }, 409)
+    makePostVideoInBackground(c.var.db, post.id, c.req.valid('json').prompt)
     return fresh(c, post.id)
   } catch (error) {
     return fail(c, error)
@@ -456,10 +458,14 @@ async function planPayload(c: Context<AppEnv>, month: string) {
   const db = c.var.db
   const plan = await loadPlan(db, month)
   const { from, to } = monthRange(month)
+  const [y, m] = month.split('-').map(Number) as [number, number]
+  const last = new Date(Date.UTC(y, m, 0)).getUTCDate()
   return {
     plan,
     posts: await decorate(c, await listPosts(db, { from, to })),
     comments: plan ? await listComments(db, { planId: plan.id }) : [],
+    // Праздники и поводы месяца — подписи к дням плана.
+    dates: await datesBetween(db, `${month}-01`, `${month}-${String(last).padStart(2, '0')}`).catch(() => []),
   }
 }
 
@@ -583,15 +589,15 @@ smmRouter.get('/reports/:reportId', async (c) => {
 
 async function settingsPayload(c: Context<AppEnv>) {
   const db = c.var.db
-  const [settings, accounts, photos, staff, spent, balance] = await Promise.all([
+  const [settings, accounts, staff, spent, balance] = await Promise.all([
     getSmmSettings(db),
     listAccounts(db),
-    clubPhotos(db),
     db.execute(sql`SELECT id, nickname, role, tg_id IS NOT NULL AS "hasTelegram" FROM profiles WHERE role IN ('owner', 'staff') AND deleted_at IS NULL ORDER BY nickname`).then((r) => rows(r)),
     monthSpend(db),
     polzaBalance(db),
   ])
-  return { settings, accounts, photos, staff, spend: { month: Math.round(spent), budget: settings.monthlyBudget }, balance, models: SMM_MODELS }
+  // photos — пустой список для старых сборок приложения: фото клуба теперь в «Базе знаний» по зонам.
+  return { settings, accounts, photos: [], staff, spend: { month: Math.round(spent), budget: settings.monthlyBudget }, balance, models: SMM_MODELS }
 }
 
 smmRouter.get('/settings', ownerOnly, async (c) => c.json(await settingsPayload(c)))
@@ -671,27 +677,6 @@ smmRouter.delete('/accounts/:accountId', ownerOnly, async (c) => {
   const id = c.req.param('accountId')
   if (!UUID.test(id)) return c.json({ error: 'Не найдено' }, 404)
   await c.var.db.execute(sql`DELETE FROM smm_accounts WHERE id = ${id}::uuid`)
-  return c.json(await settingsPayload(c))
-})
-
-/** Фото клуба — опора для картинок Tai (интерьер, логотип, игры). */
-smmRouter.post('/assets', ownerOnly, uploadLimit, async (c) => {
-  try {
-    const form = await c.req.formData()
-    const file = form.get('file')
-    if (!(file instanceof File)) return c.json({ error: 'Нет файла' }, 400)
-    const kind = form.get('kind') === 'logo' ? 'logo' : 'photo'
-    await addClubPhoto(c.var.db, Buffer.from(await file.arrayBuffer()), String(form.get('title') ?? ''), kind)
-    return c.json(await settingsPayload(c))
-  } catch (error) {
-    return fail(c, error)
-  }
-})
-
-smmRouter.delete('/assets/:assetId', ownerOnly, async (c) => {
-  const id = c.req.param('assetId')
-  if (!UUID.test(id)) return c.json({ error: 'Не найдено' }, 404)
-  await c.var.db.execute(sql`DELETE FROM smm_assets WHERE id = ${id}::uuid`)
   return c.json(await settingsPayload(c))
 })
 

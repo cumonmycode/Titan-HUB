@@ -22,6 +22,7 @@ import { generatePlan } from './planner.js'
 import { generateReport } from './report.js'
 import { getSmmSettings } from './settings.js'
 import { collectStats } from './stats.js'
+import { studyInBackground } from './study.js'
 import { approvers, publisherFor, publishToChannel, sendHandoff, sendReviewTo, tell, whenText } from './telegram.js'
 import { instagramCanPublish, instagramState, publishToInstagram, refreshInstagramToken } from './instagram.js'
 import { SmmError, autoPublishes, type SmmPost } from './types.js'
@@ -182,7 +183,7 @@ export async function requestReview(env: SmmEnv, raw: SmmPost): Promise<void> {
 
 const running = new WeakSet<Database>()
 
-type CronMarks = { stats?: string; fresh?: string; report?: string; plan?: string }
+type CronMarks = { stats?: string; fresh?: string; report?: string; plan?: string; study?: string }
 const MARKS_KEY = 'smm_cron'
 
 async function readMarks(db: Database): Promise<CronMarks> {
@@ -294,7 +295,8 @@ async function prepareNext(env: SmmEnv): Promise<void> {
 
 /**
  * Раз в час — цифры свежих постов; раз в день (с 10:00 МСК) — все цифры площадок,
- * ключ Instagram и фотоархив; отчёт по понедельникам (с 11:00), план 25-го (с 12:00).
+ * ключ Instagram и фотоархив; отчёт по понедельникам (с 11:00), план 25-го (с 12:00);
+ * по средам ночью (с 04:00) Tai заново изучает соцсети клуба и обновляет его портрет.
  */
 async function periodic(env: SmmEnv): Promise<void> {
   const msk = new Date(Date.now() + 3 * 3600_000)
@@ -320,6 +322,10 @@ async function periodic(env: SmmEnv): Promise<void> {
     } catch (error) {
       console.warn('[smm] отчёт', error instanceof Error ? error.message : error)
     }
+  }
+  if (msk.getUTCDay() === 3 && hour >= 4 && marks.study !== today) {
+    await writeMarks(env.db, { ...(await readMarks(env.db)), study: today })
+    await studyInBackground(env.db, 'socials').catch((error) => console.warn('[smm] изучение клуба', error instanceof Error ? error.message : error))
   }
   const nextMonth = new Date(Date.UTC(msk.getUTCFullYear(), msk.getUTCMonth() + 1, 1)).toISOString().slice(0, 7)
   if (msk.getUTCDate() >= 25 && hour >= 12 && marks.plan !== nextMonth) {

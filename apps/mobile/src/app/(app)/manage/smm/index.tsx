@@ -5,10 +5,10 @@ import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View } from 'reac
 import type { SFSymbol } from 'sf-symbols-typescript';
 
 import { AppRefreshControl } from '@/components/refresh-control';
+import { Appear, PressScale } from '@/components/smm/motion';
 import { BigButton, Card, PlatformBadge, PostRow, ProgressBanner, SectionTitle } from '@/components/smm/parts';
 import { Text } from '@/components/text';
 import { ToolbarButton } from '@/components/toolbar';
-import { haptic } from '@/lib/haptics';
 import { usePageGutter } from '@/lib/layout';
 import { useSession } from '@/lib/session';
 import { PLATFORM_LOOK, busyText, dayTitle, monthTitle, msk, todayMsk, useSmmOverview, type SmmOverview, type SmmPost } from '@/lib/smm-api';
@@ -57,19 +57,27 @@ export default function SmmScreen() {
           )
         ) : (
           <>
-            <Hero data={data} isOwner={isOwner} onSetup={() => router.push('/manage/smm/settings')} />
+            <Appear index={0}>
+              <Hero data={data} isOwner={isOwner} onSetup={() => router.push('/manage/smm/settings')} />
+            </Appear>
             <Attention data={data} onOpen={open} />
-            <Feed posts={data.upcoming} onOpen={open} onNew={() => router.push('/manage/smm/new')} />
-            <PlanCard data={data} onOpen={(month) => router.push({ pathname: '/manage/smm/plan', params: { month } })} />
-            <SectionTitle title="Инструменты" />
-            <View style={styles.tiles}>
-              <Tile icon="chart.xyaxis.line" color="#30B0C7" title="Аналитика" text={data.lastReport ? 'Есть свежий отчёт' : 'Цифры, прогноз и факт'} onPress={() => router.push('/manage/smm/analytics')} />
-              <Tile icon="lightbulb.fill" color="#FF9F0A" title="Идеи" text="По всем направлениям" onPress={() => router.push('/manage/smm/ideas')} />
-            </View>
-            <View style={styles.tiles}>
-              <Tile icon="photo.stack.fill" color="#34A853" title="Фотоархив" text="Фото клуба для постов" onPress={() => router.push('/manage/smm/library')} />
-              <Tile icon="brain.head.profile" color="#AF52DE" title="Память Tai" text="Правила и выводы" onPress={() => router.push('/manage/smm/memory')} />
-            </View>
+            <Appear index={2} style={styles.section}>
+              <Feed posts={data.upcoming} onOpen={open} onNew={() => router.push('/manage/smm/new')} />
+            </Appear>
+            <Appear index={3} style={styles.section}>
+              <PlanCard data={data} onOpen={(month) => router.push({ pathname: '/manage/smm/plan', params: { month } })} />
+            </Appear>
+            <Appear index={4} style={styles.section}>
+              <SectionTitle title="Инструменты" />
+              <View style={styles.tiles}>
+                <Tile icon="chart.xyaxis.line" color="#30B0C7" title="Аналитика" text={data.lastReport ? 'Есть свежий отчёт' : 'Цифры, прогноз и факт'} onPress={() => router.push('/manage/smm/analytics')} />
+                <Tile icon="lightbulb.fill" color="#FF9F0A" title="Идеи" text="По всем направлениям и праздникам" onPress={() => router.push('/manage/smm/ideas')} />
+              </View>
+              <View style={styles.tiles}>
+                <Tile icon="photo.stack.fill" color="#34A853" title="Фотоархив" text="Фото клуба для постов" onPress={() => router.push('/manage/smm/library')} />
+                <Tile icon="books.vertical.fill" color="#AF52DE" title="База знаний" text="Клуб, интерьер, даты, память" onPress={() => router.push('/manage/smm/knowledge')} />
+              </View>
+            </Appear>
             <Footer data={data} />
           </>
         )}
@@ -137,13 +145,13 @@ function Attention({ data, onOpen }: { data: SmmOverview; onOpen: (post: SmmPost
   const items = [...failed, ...link, ...review];
   if (!items.length && !busy) return null;
   return (
-    <>
+    <Appear index={1} style={styles.section}>
       <SectionTitle title="Нужно твоё внимание" />
       {busy ? <ProgressBanner progress={busy.progress ? { ...busy.progress, label: `«${busy.topic}»: ${busy.progress.label.toLowerCase()}` } : null} text={`«${busy.topic}»: ${busyText[busy.busy!].toLowerCase()}`} /> : null}
       {items.map((post) => (
         <PostRow key={post.id} post={post} onPress={() => onOpen(post)} showDay />
       ))}
-    </>
+    </Appear>
   );
 }
 
@@ -183,13 +191,7 @@ function PlanCard({ data, onOpen }: { data: SmmOverview; onOpen: (month: string)
   return (
     <>
       <SectionTitle title="Стратегия" />
-      <Pressable
-        onPress={() => {
-          haptic.selection();
-          onOpen(data.month);
-        }}
-        style={({ pressed }) => [styles.planCard, pressed && styles.pressed]}
-        accessibilityRole="button">
+      <PressScale onPress={() => onOpen(data.month)} style={styles.planCard} accessibilityRole="button">
         <View style={styles.planHead}>
           <View style={styles.flex}>
             <Text style={[type.caption1, styles.secondary]}>ПЛАН НА МЕСЯЦ</Text>
@@ -202,7 +204,7 @@ function PlanCard({ data, onOpen }: { data: SmmOverview; onOpen: (month: string)
           {plan?.summary || 'Tai составит стратегию на месяц: цели, рубрики и календарь публикаций по всем направлениям клуба — турниры, вечера, дни рождения, школа, бар.'}
         </Text>
         <Text style={[type.footnote, { color: plan?.status === 'active' ? colors.green : colors.orange }]}>{status}</Text>
-      </Pressable>
+      </PressScale>
       {data.nextPlan?.summary ? (
         <Pressable onPress={() => onOpen(data.nextMonth)} style={({ pressed }) => [styles.nextPlan, pressed && styles.pressed]} accessibilityRole="button">
           <SymbolView name="calendar.badge.clock" size={18} tintColor={colors.accent} />
@@ -217,14 +219,7 @@ function PlanCard({ data, onOpen }: { data: SmmOverview; onOpen: (month: string)
 
 function Tile({ icon, color, title, text, onPress }: { icon: SFSymbol; color: string; title: string; text: string; onPress: () => void }) {
   return (
-    <Pressable
-      onPress={() => {
-        haptic.selection();
-        onPress();
-      }}
-      style={({ pressed }) => [styles.tile, pressed && styles.pressed]}
-      accessibilityRole="button"
-      accessibilityLabel={title}>
+    <PressScale onPress={onPress} style={styles.tile} accessibilityRole="button" accessibilityLabel={title}>
       <View style={[styles.tileIcon, { backgroundColor: color }]}>
         <SymbolView name={icon} size={17} tintColor="white" />
       </View>
@@ -234,7 +229,7 @@ function Tile({ icon, color, title, text, onPress }: { icon: SFSymbol; color: st
       <Text style={[type.caption1, styles.secondary]} numberOfLines={2}>
         {text}
       </Text>
-    </Pressable>
+    </PressScale>
   );
 }
 
@@ -271,6 +266,7 @@ const styles = StyleSheet.create({
   planHead: { flexDirection: 'row', alignItems: 'center' },
   nextPlan: { flexDirection: 'row', alignItems: 'center', gap: space.sm, padding: space.md, borderRadius: 16, borderCurve: 'continuous', backgroundColor: colors.card },
   tiles: { flexDirection: 'row', gap: space.sm },
+  section: { gap: space.md },
   tile: { flex: 1, padding: space.md, gap: 4, borderRadius: 18, borderCurve: 'continuous', backgroundColor: colors.card },
   tileIcon: { width: 32, height: 32, borderRadius: 9, alignItems: 'center', justifyContent: 'center', marginBottom: space.xs },
   footer: { marginTop: space.md },

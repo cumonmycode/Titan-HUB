@@ -137,6 +137,9 @@ export default function ManageLayout() {
       <Stack.Screen name="smm/instagram" options={formHeader({ title: 'Instagram' })} />
       <Stack.Screen name="smm/library" options={formHeader({ title: 'Фотоархив' })} />
       <Stack.Screen name="smm/album" options={formHeader()} />
+      <Stack.Screen name="smm/knowledge" options={formHeader({ title: 'База знаний' })} />
+      <Stack.Screen name="smm/zone" options={formHeader()} />
+      <Stack.Screen name="smm/date" options={editorModal} />
       <Stack.Screen name="smm/new" options={editorModal} />
       <Stack.Screen name="smm/edit-text" options={editorModal} />
       <Stack.Screen name="smm/when" options={editorModal} />

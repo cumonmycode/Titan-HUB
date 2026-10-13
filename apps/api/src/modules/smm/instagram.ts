@@ -184,6 +184,22 @@ export async function igRecentMedia(db: Database, limit = 25): Promise<IgMedia[]
   return r.data ?? []
 }
 
+/** Вся лента профиля постранично (до `max` публикаций) — для изучения истории. */
+export async function igAllMedia(db: Database, max = 600): Promise<IgMedia[]> {
+  const state = await instagramState(db)
+  if (!state) return []
+  const key = await token(db)
+  const out: IgMedia[] = []
+  let after: string | undefined
+  while (out.length < max) {
+    const r = await graph<{ data?: IgMedia[]; paging?: { cursors?: { after?: string }; next?: string } }>(key, `/${state.userId}/media`, { fields: MEDIA_FIELDS, limit: 100, after })
+    out.push(...(r.data ?? []))
+    after = r.paging?.next ? r.paging.cursors?.after : undefined
+    if (!after || !r.data?.length) break
+  }
+  return out.slice(0, max)
+}
+
 /** Живые сторис (Instagram отдаёт их только сутки — цифры снимаем, пока висят). */
 export async function igStories(db: Database): Promise<IgMedia[]> {
   const state = await instagramState(db)

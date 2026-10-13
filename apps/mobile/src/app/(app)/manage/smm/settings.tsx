@@ -1,19 +1,17 @@
-import { ContentUnavailableView, Form, Picker, ProgressView, RNHostView, Section, Text, Toggle } from '@expo/ui/swift-ui';
+import { ContentUnavailableView, Form, Picker, ProgressView, Section, Text, Toggle } from '@expo/ui/swift-ui';
 import { pickerStyle, refreshable, tag } from '@expo/ui/swift-ui/modifiers';
-import { Image } from 'expo-image';
 import { Stack, useRouter } from 'expo-router';
-import { SymbolView } from 'expo-symbols';
 import { useState } from 'react';
-import { Alert, Pressable, StyleSheet, View } from 'react-native';
+import { Alert } from 'react-native';
 
 import { ActionRow, FormHost, LinkRow, TimeRow } from '@/components/native-form';
 import { ApiError } from '@/lib/api';
 import { chooseAction, promptText } from '@/lib/dialog';
 import { haptic } from '@/lib/haptics';
 import { useClubKey } from '@/lib/queries';
-import { PLATFORM_LOOK, pickMedia, saveSettings, settingsRequest, uploadAsset, useSmmInstagram, useSmmSettings, type SmmAccount, type SmmSettings, type SmmSettingsPayload } from '@/lib/smm-api';
+import { PLATFORM_LOOK, saveSettings, settingsRequest, useSmmInstagram, useSmmSettings, type SmmAccount, type SmmSettings, type SmmSettingsPayload } from '@/lib/smm-api';
 import { queryClient } from '@/lib/query';
-import { colors, space } from '@/lib/theme';
+import { colors } from '@/lib/theme';
 
 const WEEK_COUNTS = [0, 1, 2, 3, 4, 5, 6, 7, 10, 14];
 const LEAD_HOURS = [6, 12, 24, 48, 72];
@@ -100,22 +98,6 @@ export default function SmmSettingsScreen() {
       { text: 'Удалить', style: 'destructive' as const, onPress: () => void request('delete', `/smm/accounts/${a.id}`) },
       { text: 'Отмена', style: 'cancel' as const },
     ]);
-  const addPhoto = async (kind: 'photo' | 'logo') => {
-    const asset = await pickMedia(kind === 'logo' ? 'Логотип клуба' : 'Фото клуба', ['images']);
-    if (!asset) return;
-    const title = kind === 'logo' ? 'Логотип' : await askTitle();
-    setBusy(true);
-    try {
-      const r = await uploadAsset<SmmSettingsPayload>('/smm/assets', asset, { kind, title });
-      queryClient.setQueryData([club, 'smm', 'settings'], r);
-      haptic.success();
-    } catch (error) {
-      fail(error);
-    } finally {
-      setBusy(false);
-    }
-  };
-
   const publisher = data.staff.find((p) => p.id === s.publisherId);
 
   return (
@@ -192,29 +174,8 @@ export default function SmmSettingsScreen() {
             </Picker>
           </Section>
 
-          <Section title="Фото клуба" footer={<Text>Интерьер, столы, логотип — Tai берёт их за основу картинок, чтобы на них был ваш клуб, а не выдуманный.</Text>}>
-            {data.photos.length ? (
-              <RNHostView matchContents>
-                <View style={styles.photos}>
-                  {data.photos.map((p) => (
-                    <Pressable
-                      key={p.id}
-                      onLongPress={() => Alert.alert('Убрать фото?', p.title, [{ text: 'Отмена', style: 'cancel' }, { text: 'Убрать', style: 'destructive', onPress: () => void request('delete', `/smm/assets/${p.id}`) }])}
-                      accessibilityRole="imagebutton"
-                      accessibilityLabel={`${p.title}. Удерживайте, чтобы убрать`}>
-                      <Image source={{ uri: p.url }} style={styles.photo} contentFit="cover" />
-                      {p.kind === 'logo' ? (
-                        <View style={styles.logoMark}>
-                          <SymbolView name="star.fill" size={10} tintColor="white" />
-                        </View>
-                      ) : null}
-                    </Pressable>
-                  ))}
-                </View>
-              </RNHostView>
-            ) : null}
-            <ActionRow title="Добавить фото клуба" icon="photo.badge.plus" disabled={busy} onPress={() => void addPhoto('photo')} />
-            <ActionRow title="Добавить логотип" icon="star.square" disabled={busy} onPress={() => void addPhoto('logo')} />
+          <Section title="Клуб для Tai" footer={<Text>Интерьер по зонам, портрет клуба, свои даты и справка по мафии — Tai опирается на них в постах, картинках и видео.</Text>}>
+            <LinkRow icon="books.vertical.fill" color="#AF52DE" title="База знаний" subtitle="Клуб, интерьер, соцсети, даты" onPress={() => router.push('/manage/smm/knowledge')} />
           </Section>
 
           <Section title="Нейросети" footer={<Text>{`Тексты — ${short(data.models.text)}, картинки — ${short(data.models.image)}, видео — ${short(data.models.video)}. Ключ Polza — в «Интеграциях».`}</Text>}>
@@ -250,17 +211,4 @@ function CountPicker({ label, value, onChange }: { label: string; value: number;
 /** «anthropic/claude-sonnet-5.5» → «claude-sonnet-5.5». */
 const short = (model: string) => model.split('/').pop() ?? model;
 
-function askTitle(): Promise<string> {
-  return new Promise((resolve) =>
-    promptText('Что на фото?', 'Например: «Игровой зал», «Бар», «Стол спортивной мафии».', [
-      { text: 'Пропустить', style: 'cancel', onPress: () => resolve('') },
-      { text: 'Готово', onPress: (text?: string) => resolve(text?.trim() ?? '') },
-    ]),
-  );
-}
 
-const styles = StyleSheet.create({
-  photos: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm, paddingVertical: space.sm },
-  photo: { width: 72, height: 72, borderRadius: 12 },
-  logoMark: { position: 'absolute', right: 4, top: 4, width: 18, height: 18, borderRadius: 9, backgroundColor: colors.accent, alignItems: 'center', justifyContent: 'center' },
-});

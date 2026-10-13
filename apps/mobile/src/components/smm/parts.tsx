@@ -2,8 +2,10 @@ import { Image } from 'expo-image';
 import { SymbolView } from 'expo-symbols';
 import { useEffect, useState, type ReactNode } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, View, type ColorValue, type StyleProp, type ViewStyle } from 'react-native';
+import Animated, { Easing, FadeIn, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import type { SFSymbol } from 'sf-symbols-typescript';
 
+import { PressScale, Pulse, Sheen } from '@/components/smm/motion';
 import { Text, TextInput } from '@/components/text';
 import { haptic } from '@/lib/haptics';
 import {
@@ -96,7 +98,7 @@ export function PostThumb({ post, size, width, height }: { post: SmmPost; size?:
       ) : null}
       {pending ? (
         <View style={styles.thumbBusy}>
-          <ActivityIndicator color="white" />
+          <Sheen color="rgba(255,255,255,0.28)" duration={1100} />
         </View>
       ) : null}
     </View>
@@ -126,12 +128,9 @@ export function PostRow({ post, onPress, showDay, trailing }: { post: SmmPost; o
     .join(' · ');
   const result = forecastLine(post);
   return (
-    <Pressable
-      onPress={() => {
-        haptic.selection();
-        onPress();
-      }}
-      style={({ pressed }) => [styles.row, post.status === 'skipped' && styles.skipped, pressed && styles.pressed]}
+    <PressScale
+      onPress={onPress}
+      style={[styles.row, post.status === 'skipped' && styles.skipped]}
       accessibilityRole="button"
       accessibilityLabel={`${post.topic}. ${meta}. ${statusLook(post).label}${result ? `. ${result.text}` : ''}`}>
       <PostThumb post={post} size={64} />
@@ -156,7 +155,7 @@ export function PostRow({ post, onPress, showDay, trailing }: { post: SmmPost; o
         {post.busy && post.progress ? <MiniProgress progress={post.progress} /> : null}
       </View>
       {trailing}
-    </Pressable>
+    </PressScale>
   );
 }
 
@@ -177,11 +176,20 @@ function MiniProgress({ progress }: { progress: SmmProgress }) {
   return <ProgressBar value={progressPercent(progress, now)} thin />;
 }
 
+/** Шкала: заполнение догоняет значение плавно, по заполненной части бежит блик. */
 export function ProgressBar({ value, thin }: { value: number; thin?: boolean }) {
   const accent = useAccentHex();
+  const target = Math.max(2, Math.min(100, value));
+  const width = useSharedValue(target);
+  useEffect(() => {
+    width.set(withTiming(target, { duration: 450, easing: Easing.out(Easing.cubic) }));
+  }, [target, width]);
+  const fill = useAnimatedStyle(() => ({ width: `${width.get()}%` }));
   return (
     <View style={[styles.track, thin && styles.trackThin]}>
-      <View style={[styles.fill, { width: `${Math.max(2, Math.min(100, value))}%`, backgroundColor: accent }]} />
+      <Animated.View style={[styles.fill, { backgroundColor: accent }, fill]}>
+        <Sheen />
+      </Animated.View>
     </View>
   );
 }
@@ -199,9 +207,11 @@ export function ProgressBanner({ progress, text }: { progress: SmmProgress | nul
   const pct = progressPercent(progress, now);
   const left = progressLeft(progress, now);
   return (
-    <View style={[styles.progressBox, { backgroundColor: `${accent}14` }]} accessibilityLiveRegion="polite" accessibilityLabel={`${progress.label}, ${Math.round(pct)} процентов`}>
+    <Animated.View entering={FadeIn.duration(220)} style={[styles.progressBox, { backgroundColor: `${accent}14` }]} accessibilityLiveRegion="polite" accessibilityLabel={`${progress.label}, ${Math.round(pct)} процентов`}>
       <View style={styles.progressHead}>
-        <ActivityIndicator size="small" color={accent} />
+        <Pulse>
+          <SymbolView name="sparkles" size={18} tintColor={accent} />
+        </Pulse>
         <Text style={[type.subhead, styles.label, styles.flex]} numberOfLines={2}>
           {progress.label}
         </Text>
@@ -209,7 +219,7 @@ export function ProgressBanner({ progress, text }: { progress: SmmProgress | nul
       </View>
       <ProgressBar value={pct} />
       <Text style={[type.caption1, styles.secondary]}>{left > 3 ? `Осталось около ${leftText(left)}` : 'Почти готово…'}</Text>
-    </View>
+    </Animated.View>
   );
 }
 
@@ -243,20 +253,21 @@ export function BigButton({ title, icon, tone = 'accent', busy, disabled, onPres
   const bg = tone === 'accent' ? accent : colors.fill;
   const fg = tone === 'accent' ? 'white' : tone === 'destructive' ? colors.red : accent;
   return (
-    <Pressable
+    <PressScale
+      feedback={busy || disabled ? false : 'light'}
+      scaleTo={0.96}
       onPress={() => {
         if (busy || disabled) return;
-        haptic.light();
         onPress();
       }}
-      style={({ pressed }) => [styles.bigButton, { backgroundColor: bg }, (pressed || disabled) && styles.pressed, style]}
+      style={[styles.bigButton, { backgroundColor: bg }, disabled && styles.pressed, style]}
       accessibilityRole="button"
       accessibilityState={{ disabled: !!disabled, busy: !!busy }}>
       {busy ? <ActivityIndicator color={fg as string} /> : icon ? <SymbolView name={icon} size={17} tintColor={fg} /> : null}
       <Text style={[type.headline, { color: fg }]} numberOfLines={1}>
         {title}
       </Text>
-    </Pressable>
+    </PressScale>
   );
 }
 
@@ -264,20 +275,21 @@ export function BigButton({ title, icon, tone = 'accent', busy, disabled, onPres
 export function ChipButton({ title, icon, onPress, disabled }: { title: string; icon: SFSymbol; onPress: () => void; disabled?: boolean }) {
   const accent = useAccentHex();
   return (
-    <Pressable
+    <PressScale
+      feedback={disabled ? false : 'selection'}
+      scaleTo={0.94}
       onPress={() => {
         if (disabled) return;
-        haptic.selection();
         onPress();
       }}
-      style={({ pressed }) => [styles.chip, (pressed || disabled) && styles.pressed]}
+      style={[styles.chip, disabled && styles.pressed]}
       accessibilityRole="button"
       accessibilityState={{ disabled: !!disabled }}>
       <SymbolView name={icon} size={15} tintColor={accent} />
       <Text style={[type.subhead, { color: accent }]} numberOfLines={1}>
         {title}
       </Text>
-    </Pressable>
+    </PressScale>
   );
 }
 
@@ -324,7 +336,7 @@ export function Thread({ comments }: { comments: SmmComment[] }) {
   return (
     <View style={styles.thread}>
       {comments.map((c) => (
-        <View key={c.id} style={[styles.bubble, c.role === 'tai' ? styles.bubbleTai : styles.bubbleStaff]}>
+        <Animated.View key={c.id} entering={FadeIn.duration(260)} style={[styles.bubble, c.role === 'tai' ? styles.bubbleTai : styles.bubbleStaff]}>
           <View style={styles.bubbleHead}>
             {c.role === 'tai' ? <SymbolView name="sparkles" size={13} tintColor={accent} /> : null}
             <Text style={[type.caption1, { color: c.role === 'tai' ? accent : colors.secondaryLabel }]}>{c.role === 'tai' ? 'Tai' : (c.authorName ?? 'Сотрудник')}</Text>
@@ -332,7 +344,7 @@ export function Thread({ comments }: { comments: SmmComment[] }) {
           <Text style={[type.subhead, styles.label]} selectable>
             {c.text}
           </Text>
-        </View>
+        </Animated.View>
       ))}
     </View>
   );
@@ -361,7 +373,7 @@ const styles = StyleSheet.create({
   bold: { fontWeight: '600' },
   track: { height: 6, borderRadius: 3, overflow: 'hidden', backgroundColor: colors.fill },
   trackThin: { height: 3, borderRadius: 1.5, marginTop: 2 },
-  fill: { height: '100%', borderRadius: 3 },
+  fill: { height: '100%', borderRadius: 3, overflow: 'hidden' },
   progressBox: { gap: space.sm, padding: space.md, borderRadius: 14, borderCurve: 'continuous' },
   progressHead: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
   card: { backgroundColor: colors.card, borderRadius: radius.card, borderCurve: 'continuous', padding: space.lg, gap: space.md },
@@ -372,7 +384,7 @@ const styles = StyleSheet.create({
   badge: { alignItems: 'center', justifyContent: 'center' },
   thumb: { borderRadius: 12, borderCurve: 'continuous', overflow: 'hidden', backgroundColor: colors.fill, alignItems: 'center', justifyContent: 'center' },
   play: { position: 'absolute', right: 5, bottom: 5, width: 22, height: 22, borderRadius: 11, backgroundColor: 'rgba(0,0,0,0.55)', alignItems: 'center', justifyContent: 'center' },
-  thumbBusy: { ...StyleSheet.absoluteFill, backgroundColor: 'rgba(0,0,0,0.35)', alignItems: 'center', justifyContent: 'center' },
+  thumbBusy: { ...StyleSheet.absoluteFill, backgroundColor: 'rgba(0,0,0,0.3)', overflow: 'hidden' },
   row: { flexDirection: 'row', gap: space.md, padding: space.md, borderRadius: 18, borderCurve: 'continuous', backgroundColor: colors.card, alignItems: 'center' },
   rowText: { flex: 1, minWidth: 0, gap: 4 },
   rowMeta: { flexDirection: 'row', alignItems: 'center', gap: 6 },

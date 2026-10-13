@@ -5,6 +5,7 @@ import { useState } from 'react';
 import { ActivityIndicator, Alert, Linking, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { AppRefreshControl } from '@/components/refresh-control';
+import { Appear } from '@/components/smm/motion';
 import { DayBars, HBar, MetricGrid } from '@/components/smm/charts';
 import { BigButton, Card, ChipButton, PlatformBadge, PostRow, ProgressBanner, SectionTitle, estimate } from '@/components/smm/parts';
 import { Text } from '@/components/text';
@@ -116,8 +117,10 @@ export default function SmmAnalyticsScreen() {
             </View>
             {progress ? <ProgressBanner progress={progress} /> : null}
 
-            {data.accounts.filter((a) => a.isActive).map((a) => (
-              <PlatformCard key={a.id} account={a} days={days} history={data.history.filter((h) => h.accountId === a.id)} insight={data.platforms.find((p) => p.accountId === a.id)} onOpenPost={openPost} />
+            {data.accounts.filter((a) => a.isActive).map((a, i) => (
+              <Appear key={a.id} index={i}>
+              <PlatformCard account={a} days={days} history={data.history.filter((h) => h.accountId === a.id)} insight={data.platforms.find((p) => p.accountId === a.id)} onOpenPost={openPost} />
+              </Appear>
             ))}
             {!data.accounts.length ? (
               <Card>

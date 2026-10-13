@@ -6,8 +6,11 @@
 import { sql, type Database } from '@titan/database'
 import { z } from 'zod'
 import { chatJson } from './ai.js'
+import { insightsText } from './analytics.js'
 import { clubFacts, clubTitle, marketingContext, mskDate, mskToIso } from './context.js'
 import { addComment, claimPlan, deletePost, ensurePlan, insertPost, listComments, listPosts, loadPlan, remember, updatePlan, updatePost } from './db.js'
+import { datesBetween, datesText, mourningDays, mustCover, type ClubDate } from './holidays.js'
+import { knowledgeText } from './knowledge.js'
 import { CONTENT_TYPES, DIRECTIONS, DIRECTION_KEYS, FORMAT_LABEL, systemPrompt, todayLine } from './prompts.js'
 import type { Author } from './writer.js'
 import { MEMORY_KINDS, SmmError, step, type SmmPlan, type SmmPost } from './types.js'
@@ -22,7 +25,21 @@ const PostSchema = z.object({
   direction: z.string().max(40).optional(),
   brief: z.string().max(800),
   visual: z.string().max(400).optional(),
+  /** Праздник или повод, под который пост (для проверки, что важные даты не пропущены). */
+  occasion: z.string().max(120).nullable().optional(),
 })
+type PlannedPost = z.infer<typeof PostSchema>
+
+/** Как планировать под праздники и поводы. */
+const DATES_RULES = [
+  'Праздники и поводы — часть плана:',
+  '- на каждую дату с важностью 3 — тематическая публикация в этот день (утром или днём), а если повод вечерний или выходной — можно накануне; в день праздника ещё и сторис; в "occasion" — название повода;',
+  '- важность 2 — тематический пост, если он вписывается в ритм; важность 1 — по возможности, хотя бы упоминанием;',
+  '- «повод продать» (корпоративы, 23 февраля, 8 марта, детские праздники) — серия продающих постов за 2–4 недели до даты, а не только в сам день;',
+  '- тематический пост связывает повод с клубом: тематическая игра, традиция клуба, предложение, юмор мафии к месту;',
+  '- «уважительно» — без шуток и продаж; «траур» — в этот день никаких развлекательных публикаций и анонсов, допустимы только слова памяти;',
+  '- свои даты клуба (день рождения клуба, традиционные турниры) — так же важны, как государственные праздники.',
+].join('\n')
 const PillarSchema = z.object({ key: z.string().min(1).max(40), title: z.string().min(1).max(80), share: z.number().min(0).max(100), about: z.string().max(400) })
 
 const PlanSchema = z.object({
@@ -77,7 +94,50 @@ function postLine(p: SmmPost, n?: number): string {
 
 const directionOf = (v: string | undefined) => (v && DIRECTION_KEYS.includes(v) ? v : null)
 
-async function insertFromPlan(db: Database, plan: SmmPlan, p: z.infer<typeof PostSchema>, authorId: string | null): Promise<boolean> {
+const shiftDay = (date: string, days: number): string => new Date(Date.parse(`${date}T12:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10)
+
+/** Тема уже готового поста про этот повод? — по общему корню значимого слова. */
+const mentions = (topic: string, title: string): boolean =>
+  title.toLowerCase().split(/[^а-яёa-z]+/i).filter((w) => w.length >= 5).some((w) => topic.toLowerCase().includes(w.slice(0, 5)))
+
+/** Важные даты из дней плана, на которые нет тематической публикации (в день или накануне). */
+function uncovered(dates: ClubDate[], days: string[], planned: PlannedPost[], kept: SmmPost[]): ClubDate[] {
+  return mustCover(dates).filter((d) => {
+    if (!days.includes(d.date)) return false
+    const near = [d.date, shiftDay(d.date, -1)]
+    return !planned.some((p) => near.includes(p.date) && (p.occasion || mentions(p.topic, d.title))) && !kept.some((p) => near.includes(mskDay(p.publishAt)) && mentions(p.topic, d.title))
+  })
+}
+
+/** Траурный день: публикация не про память переезжает на следующий день. */
+function respectMourning(posts: PlannedPost[], dates: ClubDate[]): PlannedPost[] {
+  const mourning = new Set(mourningDays(dates))
+  return posts.map((p) => (mourning.has(p.date) && !p.occasion ? { ...p, date: shiftDay(p.date, 1) } : p))
+}
+
+const OccasionPostsSchema = z.object({ posts: z.array(PostSchema).min(1).max(12) })
+
+/** Догнать пропущенные важные даты: тематические публикации к ним (второй короткий заход). */
+async function occasionPosts(db: Database, name: string, missing: ClubDate[], planned: PlannedPost[], postTime: string): Promise<PlannedPost[]> {
+  const r = await chatJson(db, {
+    system: systemPrompt(name),
+    note: 'праздники в план',
+    maxTokens: 3000,
+    temperature: 0.7,
+    schema: OccasionPostsSchema,
+    user: [
+      todayLine(),
+      `В плане нет тематических публикаций к этим датам:\n${datesText(missing)}`,
+      `Уже в плане (не повторяй темы):\n${planned.map((p) => `${p.date} ${p.platform}/${p.format}: ${p.topic}`).join('\n')}`,
+      DATES_RULES,
+      `К каждой дате — пост в Telegram или Instagram в этот день (около ${postTime}, если повод не вечерний) и сторис в сам день; "occasion" — название повода. Угол — как повод связан с клубом мафии.`,
+      'Ответ — JSON: {"posts": [{"date": "YYYY-MM-DD", "time": "HH:MM", "platform": "telegram|instagram", "format": "post|carousel|story|reel", "topic": "...", "pillar": "...", "direction": "...", "brief": "...", "visual": "...", "occasion": "..."}]}',
+    ].join('\n'),
+  })
+  return r.posts
+}
+
+async function insertFromPlan(db: Database, plan: SmmPlan, p: PlannedPost, authorId: string | null): Promise<boolean> {
   const publishAt = mskToIso(p.date, p.time)
   if (!publishAt || Date.parse(publishAt) < Date.now()) return false
   await insertPost(db, {
@@ -101,10 +161,20 @@ export async function generatePlan(db: Database, month: string, opts: { wishes?:
   const days = planDays(month)
   if (!days.length) throw new SmmError('Этот месяц уже закончился', 400)
   try {
-    await updatePlan(db, plan.id, { progress: step('Изучаю клуб и прошлые цифры', 2, 8, 4) })
+    await updatePlan(db, plan.id, { progress: step('Изучаю клуб, праздники и прошлые цифры', 2, 8, 5) })
     const { from, to } = monthRange(month)
-    const [name, facts, marketing, existing] = await Promise.all([clubTitle(db), clubFacts(db, 75), marketingContext(db), listPosts(db, { from, to })])
-    await updatePlan(db, plan.id, { progress: step('Составляю стратегию и календарь', 8, 90, 70) })
+    // Праздники месяца и первых двух недель следующего — под них продают заранее.
+    const datesTo = shiftDay(days[days.length - 1]!, 14)
+    const [name, facts, marketing, existing, knowledge, dates, insights] = await Promise.all([
+      clubTitle(db),
+      clubFacts(db, 75),
+      marketingContext(db),
+      listPosts(db, { from, to }),
+      knowledgeText(db, { mafia: 'brief' }),
+      datesBetween(db, days[0]!, datesTo),
+      insightsText(db).catch(() => ''),
+    ])
+    await updatePlan(db, plan.id, { progress: step('Составляю стратегию и календарь', 8, 88, 70) })
     const kept = existing.filter((p) => !REPLACEABLE.has(p.status) && p.status !== 'skipped')
     const { cadence, postTime } = marketing.settings
     const weeks = Math.max(1, Math.round((days.length / 7) * 10) / 10)
@@ -117,13 +187,17 @@ export async function generatePlan(db: Database, month: string, opts: { wishes?:
       user: [
         todayLine(),
         `Факты о клубе:\n${facts}`,
+        `Что ты знаешь:\n${knowledge}`,
         `Маркетинг:\n${marketing.text}`,
+        insights ? `Что заходит у нас по цифрам:\n${insights}` : '',
+        dates.length ? `Праздники и поводы (этот месяц и начало следующего — для анонсов заранее):\n${datesText(dates)}` : '',
         '',
         `Задача: составь контент-план на ${month} (дни ${days[0]}…${days[days.length - 1]}, это ~${weeks} нед.).`,
         `Частота в неделю: Telegram-постов ${cadence.telegram}, Instagram-постов ${cadence.instagram}, сторис ${cadence.stories} (Instagram, иногда Telegram), рилс ${cadence.reels} (Instagram).`,
         `Время по умолчанию ${postTime}; ставь время под аудиторию: анонс вечера — днём в день игры или накануне вечером, рилс — вечером.`,
         `Направления клуба (каждое должно прозвучать за месяц, по весу бизнеса): ${DIRECTIONS.map((d) => `${d.key} — ${d.label}`).join('; ')}.`,
-        'Используй инфоповоды: турниры и игровые вечера из фактов, праздники и значимые даты месяца, сезон; продавай мероприятия (ДР, корпоративы) заранее; подогревай пустые дни недели.',
+        'Используй инфоповоды: турниры и игровые вечера из фактов, традиции и события клуба из портрета, сезон; продавай мероприятия (ДР, корпоративы) заранее; подогревай пустые дни недели. Опирайся на цифры: больше того, что заходит, лучшие дни и часы.',
+        DATES_RULES,
         `Типы контента (скилл ig-plan) — каждую неделю есть все, два одинаковых подряд не ставь:\n${CONTENT_TYPES}`,
         'Плюс анонсы вечеров и турниров, закулисье и люди клуба, юмор и мемы мафии, интерактив (опросы, вопросы), отзывы.',
         'Каждой публикации — угол, а не тема: не «мафия», а «как ведущий за 3 секунды вычисляет новичка-мафию». В brief — конкретная история или цифра клуба, которую можно рассказать.',
@@ -133,15 +207,26 @@ export async function generatePlan(db: Database, month: string, opts: { wishes?:
         opts.wishes ? `Пожелания владельца: ${opts.wishes}` : '',
         '',
         'Ответ — JSON:',
-        '{"summary": "стратегия месяца: 3–6 коротких абзацев — главный фокус, инфоповоды, как растим охват и заявки", "goals": ["измеримые цели месяца"], "pillars": [{"key": "латиница", "title": "рубрика", "share": доля %, "about": "о чём"}], "posts": [{"date": "YYYY-MM-DD", "time": "HH:MM", "platform": "telegram|instagram", "format": "post|carousel|story|reel", "topic": "тема-заголовок", "pillar": "key рубрики", "direction": "key направления", "brief": "идея и цель публикации, конкретно (1–3 фразы)", "visual": "что на картинке или в кадре"}]}',
+        '{"summary": "стратегия месяца: 3–6 коротких абзацев — главный фокус, инфоповоды, как растим охват и заявки", "goals": ["измеримые цели месяца"], "pillars": [{"key": "латиница", "title": "рубрика", "share": доля %, "about": "о чём"}], "posts": [{"date": "YYYY-MM-DD", "time": "HH:MM", "platform": "telegram|instagram", "format": "post|carousel|story|reel", "topic": "тема-заголовок", "pillar": "key рубрики", "direction": "key направления", "brief": "идея и цель публикации, конкретно (1–3 фразы)", "visual": "что на картинке или в кадре", "occasion": "праздник или повод, если пост под него, иначе null"}]}',
       ].filter((line) => line !== '').join('\n'),
     })
 
-    await updatePlan(db, plan.id, { progress: step('Раскладываю публикации по дням', 90, 99, 4) })
+    let planned = r.posts
+    const missing = uncovered(dates, days, planned, kept)
+    if (missing.length) {
+      await updatePlan(db, plan.id, { progress: step(`Добавляю тематические посты к праздникам: ${missing.length}`, 88, 95, 20) })
+      planned = [...planned, ...(await occasionPosts(db, name, missing, planned, postTime).catch((error) => {
+        console.warn('[smm] праздники в план', error instanceof Error ? error.message : error)
+        return [] as PlannedPost[]
+      }))]
+    }
+    planned = respectMourning(planned, dates)
+
+    await updatePlan(db, plan.id, { progress: step('Раскладываю публикации по дням', 95, 99, 4) })
     const replaceable = existing.filter((p) => REPLACEABLE.has(p.status) && !p.busy)
     for (const p of replaceable) await deletePost(db, p.id)
     let added = 0
-    for (const p of r.posts) if (await insertFromPlan(db, plan, p, opts.author.id)) added += 1
+    for (const p of planned) if (await insertFromPlan(db, plan, p, opts.author.id)) added += 1
     await updatePlan(db, plan.id, { summary: r.summary, goals: r.goals, pillars: r.pillars, status: 'draft', busy: null, error: null })
     await addComment(db, { planId: plan.id, role: 'tai', text: `Составил план: ${added} публикаций. Посмотри стратегию и темы — утверди план, и я начну готовить посты за ${marketing.settings.reviewLeadHours} ч до выхода.` })
     return (await loadPlan(db, month))!
@@ -168,7 +253,15 @@ export async function revisePlan(db: Database, month: string, remark: string, au
     await addComment(db, { planId: plan.id, authorId: author.id, authorName: author.name, role: 'staff', text: remark })
     await updatePlan(db, plan.id, { progress: step('Вношу правки в план', 3, 92, 30) })
     const { from, to } = monthRange(month)
-    const [name, facts, marketing, posts, comments] = await Promise.all([clubTitle(db), clubFacts(db, 75), marketingContext(db), listPosts(db, { from, to }), listComments(db, { planId: plan.id }, 10)])
+    const [name, facts, marketing, posts, comments, knowledge, dates] = await Promise.all([
+      clubTitle(db),
+      clubFacts(db, 75),
+      marketingContext(db),
+      listPosts(db, { from, to }),
+      listComments(db, { planId: plan.id }, 10),
+      knowledgeText(db, { mafia: 'brief' }),
+      datesBetween(db, from.slice(0, 10), shiftDay(to.slice(0, 10), 14)),
+    ])
     const active = posts.filter((p) => p.status !== 'skipped')
     const r = await chatJson(db, {
       system: systemPrompt(name),
@@ -179,7 +272,9 @@ export async function revisePlan(db: Database, month: string, remark: string, au
       user: [
         todayLine(),
         `Факты о клубе:\n${facts}`,
+        `Что ты знаешь:\n${knowledge}`,
         `Маркетинг:\n${marketing.text}`,
+        dates.length ? `Праздники и поводы:\n${datesText(dates)}\n${DATES_RULES}` : '',
         '',
         `План на ${month}. Стратегия:\n${plan.summary}`,
         `Цели: ${plan.goals.join('; ')}`,

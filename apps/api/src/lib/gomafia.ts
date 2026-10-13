@@ -142,11 +142,11 @@ export async function searchPlayers(query: string, opts: { limit?: number; offse
 }
 
 // Состав клуба по id (представители). Публично, постранично.
-export async function clubResidents(clubId: string, opts: { page?: number } = {}): Promise<{ club: { id: string; title: string | null; city: string | null } | null; residents: GomafiaPlayer[]; total: number }> {
+export async function clubResidents(clubId: string, opts: { page?: number } = {}): Promise<{ club: { id: string; title: string | null; city: string | null; description: string | null; rank: number | null } | null; residents: GomafiaPlayer[]; total: number }> {
   const sd = await nextData(`club/${encodeURIComponent(clubId)}.json?page=${opts.page ?? 1}`)
   if (!sd) return { club: null, residents: [], total: 0 }
   const club = sd.club
-    ? { id: String(sd.club.id ?? clubId), title: sd.club.title ?? null, city: sd.club.city ?? null }
+    ? { id: String(sd.club.id ?? clubId), title: sd.club.title ?? null, city: sd.club.city ?? null, description: sd.club.description ?? null, rank: num(sd.club.rank) }
     : null
   const residents = (Array.isArray(sd.residents) ? sd.residents : []).map(normalize).filter(Boolean) as GomafiaPlayer[]
   const total = Number(sd.residentsTotal ?? residents.length) || residents.length

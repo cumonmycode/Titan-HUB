@@ -23,6 +23,8 @@ const TG_PAGES = 5
 const HISTORY_DAYS = 120
 const IG_MEDIA_LIMIT = 50
 const IG_MEDIA_FRESH_LIMIT = 10
+/** Подпись поста целиком (лимит Instagram — 2200 знаков): по ней Tai изучает, как писал клуб. */
+const CAPTION_MAX = 2200
 const FRESH_MS = 48 * 3600_000
 const DAY_MS = 86_400_000
 
@@ -61,7 +63,7 @@ export function parseChannelPage(html: string, handle: string): { posts: Channel
       views: views ? parseCount(views) : null,
       reactions,
       at: /<time datetime="([^"]+)"/.exec(block)?.[1] ?? null,
-      text: plainText(text.replace(/<br\s*\/?>/gi, '\n')).slice(0, 200),
+      text: plainText(text.replace(/<br\s*\/?>/gi, '\n')).slice(0, CAPTION_MAX),
       format: /tgme_widget_message_grouped/.test(block) ? 'carousel' : 'post',
       thumb: /tgme_widget_message_photo_wrap[^>]*background-image:url\('([^']+)'\)/.exec(block)?.[1] ?? null,
     })
@@ -72,7 +74,7 @@ export function parseChannelPage(html: string, handle: string): { posts: Channel
 
 // ─── Запись ──────────────────────────────────────────────────────────────────
 
-interface PlatformPost {
+export interface PlatformPost {
   extId: string
   format: SmmFormat
   publishedAt: string | null
@@ -89,11 +91,11 @@ interface PlatformPost {
   interactions?: number | null
 }
 
-async function upsertPlatformPost(db: Database, account: AccountRow, p: PlatformPost): Promise<void> {
+export async function upsertPlatformPost(db: Database, account: AccountRow, p: PlatformPost): Promise<void> {
   const n = (v: number | null | undefined) => (v == null ? null : Math.round(v))
   await db.execute(sql`
     INSERT INTO smm_platform_posts (account_id, ext_id, platform, format, published_at, caption, permalink, thumb_url, views, reach, likes, comments, shares, saves, reactions, interactions, stats_at)
-    VALUES (${account.id}::uuid, ${p.extId}, ${account.platform}, ${p.format}, ${p.publishedAt}::timestamptz, ${p.caption.slice(0, 300)}, ${p.permalink}, ${p.thumb},
+    VALUES (${account.id}::uuid, ${p.extId}, ${account.platform}, ${p.format}, ${p.publishedAt}::timestamptz, ${p.caption.slice(0, CAPTION_MAX)}, ${p.permalink}, ${p.thumb},
       ${n(p.views)}, ${n(p.reach)}, ${n(p.likes)}, ${n(p.comments)}, ${n(p.shares)}, ${n(p.saves)}, ${n(p.reactions)}, ${n(p.interactions)}, now())
     ON CONFLICT (account_id, ext_id) DO UPDATE SET
       format = EXCLUDED.format, published_at = coalesce(EXCLUDED.published_at, smm_platform_posts.published_at),
@@ -240,7 +242,7 @@ async function collectTelegram(db: Database, account: AccountRow, fresh: boolean
 const shortcode = (url: string | null | undefined) => (url ? /instagram\.com\/(?:p|reel|reels|tv)\/([\w-]+)/.exec(url)?.[1] ?? null : null)
 const norm = (s: string) => plainText(s).toLowerCase().replace(/[^a-zа-яё0-9]+/gi, ' ').trim().slice(0, 60)
 
-function igFormat(m: IgMedia): SmmFormat {
+export function igFormat(m: IgMedia): SmmFormat {
   if (m.media_product_type === 'STORY') return 'story'
   if (m.media_product_type === 'REELS') return 'reel'
   return m.media_type === 'CAROUSEL_ALBUM' ? 'carousel' : 'post'
@@ -280,7 +282,7 @@ async function collectInstagram(db: Database, account: AccountRow, fresh: boolea
       extId: m.id,
       format,
       publishedAt: m.timestamp ? new Date(m.timestamp).toISOString() : null,
-      caption: plainText(m.caption ?? '').slice(0, 300),
+      caption: plainText(m.caption ?? '').slice(0, CAPTION_MAX),
       permalink: m.permalink ?? null,
       thumb: m.thumbnail_url ?? m.media_url ?? null,
       views: insights['views'],

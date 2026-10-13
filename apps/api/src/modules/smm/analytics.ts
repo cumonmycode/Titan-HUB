@@ -95,7 +95,7 @@ function insightOf(accountId: string, platform: string, list: Row[]): PlatformIn
       extId: String(r['ext_id']),
       format: String(r['format']) as SmmFormat,
       publishedAt: r['published_at'] ? new Date(String(r['published_at'])).toISOString() : null,
-      caption: String(r['caption'] ?? ''),
+      caption: String(r['caption'] ?? '').slice(0, 300),
       permalink: r['permalink'] ? String(r['permalink']) : null,
       thumb: r['thumb_url'] ? String(r['thumb_url']) : null,
       views: num(r['views']),
@@ -120,6 +120,33 @@ export function accuracyOf(posts: SmmPost[]): ForecastAccuracy {
     below: judged.filter((p) => p.stats.views! < p.forecast!.low).length,
     ratio: ratios.length ? Math.round((ratios.reduce((s, v) => s + v, 0) / ratios.length) * 100) / 100 : null,
   }
+}
+
+const WEEKDAY_SHORT = ['вс', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб']
+const FORMAT_RU: Record<SmmFormat, string> = { post: 'пост', carousel: 'карусель', reel: 'рилс', story: 'сторис' }
+/** Окно для выводов к плану: дольше, чем для экрана, — у клуба постов немного. */
+const PLAN_WINDOW_DAYS = 180
+
+/** Что заходит у клуба по цифрам (форматы, дни, часы, топ) — коротко, для плана и идей. */
+export async function insightsText(db: Database): Promise<string> {
+  const [accounts, platformRows] = await Promise.all([
+    listAccounts(db),
+    db.execute(sql`SELECT * FROM smm_platform_posts WHERE published_at > now() - make_interval(days => ${PLAN_WINDOW_DAYS}) ORDER BY published_at DESC`).then((r) => rows<Row>(r)),
+  ])
+  const lines: string[] = []
+  for (const a of accounts.filter((x) => x.isActive && (x.platform === 'telegram' || x.platform === 'instagram'))) {
+    const i = insightOf(a.id, a.platform, platformRows.filter((r) => r['account_id'] === a.id))
+    if (!i.posts) continue
+    const best = <T extends { avgViews: number }>(list: T[]) => [...list].sort((x, y) => y.avgViews - x.avgViews).slice(0, 3)
+    lines.push([
+      `${a.platform === 'telegram' ? 'Telegram' : 'Instagram'} (${i.posts} постов за полгода):`,
+      i.formats.length ? `форматы — ${i.formats.map((f) => `${FORMAT_RU[f.format]} ~${f.avgViews} 👁 (${f.posts})`).join(', ')};` : '',
+      i.weekdays.length ? `лучшие дни — ${best(i.weekdays).map((w) => `${WEEKDAY_SHORT[w.weekday]} ~${w.avgViews}`).join(', ')};` : '',
+      i.hours.length ? `лучшее время — ${best(i.hours).map((h) => `${h.from}–${h.to} ч ~${h.avgViews}`).join(', ')};` : '',
+      i.top.length ? `топ — ${i.top.slice(0, 3).map((t) => `«${t.caption.replace(/\s+/g, ' ').slice(0, 70)}» ${t.views} 👁`).join('; ')}.` : '',
+    ].filter(Boolean).join(' '))
+  }
+  return lines.join('\n')
 }
 
 export async function analyticsPayload(db: Database) {

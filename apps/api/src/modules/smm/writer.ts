@@ -6,17 +6,20 @@
 import { sql, type Database } from '@titan/database'
 import { z } from 'zod'
 import { chatJson } from './ai.js'
-import { clubFacts, clubTitle, marketingContext, mskToIso } from './context.js'
+import { clubFacts, clubTitle, marketingContext, mskDate, mskToIso } from './context.js'
 import { addComment, claimPost, listComments, listPosts, loadPost, remember, setPostProgress, updatePost } from './db.js'
+import { datesBetween, datesText } from './holidays.js'
+import { knowledgeText, listZones, similarPastPosts, usableZones, zoneByCode, type Zone } from './knowledge.js'
 import { archiveCandidates, archiveLine, type LibraryPhoto } from './library.js'
-import { clubPhotos, generateImages, photosLine, type ImageJob } from './media.js'
+import { generateImages, type ImageJob } from './media.js'
 import { DIRECTIONS, FORMAT_LABEL, FORMAT_RULES, HOOK_FORMULAS, PLATFORM_LABEL, PLATFORM_RULES, VISUAL_RULES, systemPrompt, todayLine, whenLine } from './prompts.js'
 import { humanize, lintText } from './style.js'
 import { MEMORY_KINDS, SmmError, step, type ReelScript, type SmmPost } from './types.js'
 
 const ImageSchema = z.object({
   prompt: z.string().max(6000).optional(),
-  refs: z.array(z.number().int()).max(4).optional(),
+  zone: z.string().max(8).nullable().optional(),
+  logo: z.boolean().optional(),
   photo: z.string().max(8).optional(),
   mode: z.enum(['as_is', 'edit', 'inspire']).optional(),
 })
@@ -49,15 +52,27 @@ const ARCHIVE_RULES = [
   'Живые фото людей клуба цепляют сильнее нарисованных: анонсы вечеров, итоги турниров, атмосфера, отзывы, люди клуба — сначала архив. С нуля рисуй, только если в архиве нет подходящего (правила, инфографика, мемы). Одно фото — в одну позицию.',
 ].join('\n')
 
-/** Картинки из ответа модели — в задания: код «Ф3» — третье найденное фото архива. */
-function toJobs(images: ImageSpec[], candidates: LibraryPhoto[], sortOf: (image: ImageSpec & { slot?: number }, i: number) => number): ImageJob[] {
+/** Картинки из ответа модели — в задания: «Ф3» — третье найденное фото архива, «З2» — вторая зона клуба. */
+function toJobs(images: ImageSpec[], candidates: LibraryPhoto[], zones: Zone[], sortOf: (image: ImageSpec & { slot?: number }, i: number) => number): ImageJob[] {
   return images
     .map((image, i) => {
       const photo = image.photo ? candidates[Number(image.photo.replace(/\D/g, '')) - 1] : undefined
-      const job: ImageJob = { prompt: image.prompt ?? '', refs: image.refs, sort: sortOf(image, i) }
+      const zone = zoneByCode(zones, image.zone ?? undefined)
+      const job: ImageJob = { prompt: image.prompt ?? '', sort: sortOf(image, i), zone: zone && usableZones([zone]).length ? zone : undefined, logo: image.logo }
       return photo ? { ...job, photo, mode: image.mode ?? 'as_is' } : job
     })
     .filter((job) => job.photo || job.prompt.trim().length >= 10)
+}
+
+/** Поводы в день выхода (±1 день): Tai свяжет пост с праздником, если тема позволяет. */
+async function dayOccasions(db: Database, publishAt: string | null): Promise<string> {
+  const at = publishAt ? Date.parse(publishAt) : Date.now()
+  const list = await datesBetween(db, mskDate(at - 86_400_000), mskDate(at + 86_400_000)).catch(() => [])
+  if (!list.length) return ''
+  return [
+    `Поводы рядом с днём выхода:\n${datesText(list)}`,
+    'Если тема публикации — про этот повод или позволяет его естественно связать, свяжи. В траурный день — никаких развлечений и продаж. Уважительные даты — без шуток.',
+  ].join('\n')
 }
 
 const RevisionSchema = z.object({
@@ -159,6 +174,49 @@ async function dropAiImages(db: Database, postId: string): Promise<void> {
   await db.execute(sql`UPDATE smm_media SET selected = false, updated_at = now() WHERE post_id = ${postId}::uuid AND source IN ('ai', 'archive') AND kind = 'image'`)
 }
 
+interface WriteContext {
+  name: string
+  facts: string
+  marketing: Awaited<ReturnType<typeof marketingContext>>
+  zones: Zone[]
+  archive: LibraryPhoto[]
+  knowledge: string
+  similar: string
+  occasions: string
+}
+
+/** Всё, что Tai знает под конкретную публикацию: клуб, мафия, интерьер, архив, прошлые посты, поводы дня. */
+async function writeContext(db: Database, post: SmmPost, remark = ''): Promise<WriteContext> {
+  const zones = await listZones(db)
+  const topic = [post.topic, post.brief, remark].join(' ')
+  const [name, facts, marketing, archive, knowledge, similar, occasions] = await Promise.all([
+    clubTitle(db),
+    clubFacts(db),
+    marketingContext(db),
+    archiveCandidates(db, { ...post, brief: `${post.brief} ${remark}` }),
+    knowledgeText(db, { mafia: 'full', zones }),
+    similarPastPosts(db, topic),
+    dayOccasions(db, post.publishAt),
+  ])
+  return { name, facts, marketing, zones, archive, knowledge, similar, occasions }
+}
+
+const contextLines = (ctx: WriteContext): string[] => [
+  `Факты о клубе:\n${ctx.facts}`,
+  `Что ты знаешь:\n${ctx.knowledge}`,
+  `Маркетинг:\n${ctx.marketing.text}`,
+  ctx.similar,
+  ctx.occasions,
+  archiveLine(ctx.archive),
+]
+
+/** Форма одной картинки в ответе: зона и логотип — если есть зоны; Ф-код — если есть архив. */
+function imageShape(ctx: WriteContext): string {
+  const zone = usableZones(ctx.zones).length ? ', "zone": "З-код, только если сцена у нас в клубе, иначе null", "logo": false' : ', "logo": false'
+  const archive = ctx.archive.length ? ', "photo": "Ф-код, если берёшь фото архива", "mode": "as_is|edit|inspire"' : ''
+  return `{"prompt": "подробный промпт картинки"${zone}${archive}}`
+}
+
 /**
  * Подготовить публикацию целиком: текст, визуал, сценарий. Итог — на одобрение
  * (или сразу «одобрено», если включён автопилот). Пост должен быть занят claimPost.
@@ -167,20 +225,18 @@ export async function writePost(db: Database, postId: string): Promise<SmmPost> 
   const post = await loadPost(db, postId)
   if (!post) throw new SmmError('Публикация не найдена', 404)
   try {
-    await setPostProgress(db, post.id, step('Пишу текст', 3, 40, 25))
-    const [name, facts, marketing, photos, near, archive] = await Promise.all([clubTitle(db), clubFacts(db), marketingContext(db), clubPhotos(db), neighbours(db, post), archiveCandidates(db, post)])
+    await setPostProgress(db, post.id, step('Изучаю тему и прошлые посты', 2, 8, 4))
+    const ctx = await writeContext(db, post)
+    await setPostProgress(db, post.id, step('Пишу текст', 8, 40, 25))
     const draft = await chatJson(db, {
-      system: systemPrompt(name),
+      system: systemPrompt(ctx.name),
       note: `пост ${post.id}`,
       maxTokens: 5000,
       schema: DraftSchema,
       user: [
         todayLine(),
-        `Факты о клубе:\n${facts}`,
-        `Маркетинг:\n${marketing.text}`,
-        photosLine(photos),
-        archiveLine(archive),
-        near,
+        ...contextLines(ctx),
+        await neighbours(db, post),
         '',
         'Задача: подготовь публикацию.',
         postBriefing(post),
@@ -189,24 +245,24 @@ export async function writePost(db: Database, postId: string): Promise<SmmPost> 
         `Правила формата:\n${FORMAT_RULES[post.format]}`,
         post.format === 'reel' ? `Формулы зацепки — выбери ту, что подходит идее, и заполни конкретикой клуба:\n${HOOK_FORMULAS}` : '',
         `Правила визуала:\n${VISUAL_RULES}`,
-        archive.length ? ARCHIVE_RULES : '',
+        ctx.archive.length ? ARCHIVE_RULES : '',
         '',
         'Ответ — JSON:',
-        `{"body": "готовый текст публикации", "visual": "одной фразой — что на картинке, для людей", "images": [{"prompt": "подробный промпт картинки", "refs": [номера фото клуба, если нужны]${archive.length ? ', "photo": "Ф-код, если берёшь фото архива", "mode": "as_is|edit|inspire"' : ''}}], "script": ${SCRIPT_SHAPE[post.format]}}`,
+        `{"body": "готовый текст публикации", "visual": "одной фразой — что на картинке, для людей", "images": [${imageShape(ctx)}], "script": ${SCRIPT_SHAPE[post.format]}}`,
         `Картинок: ${IMAGE_COUNT[post.format]}.`,
       ].filter((line) => line !== '').join('\n'),
     })
     await setPostProgress(db, post.id, step('Шлифую текст', 40, 50, 10))
-    const body = await polish(db, name, post, draft.body)
+    const body = await polish(db, ctx.name, post, draft.body)
     await updatePost(db, post.id, { body, visual: draft.visual, script: hasScript(post.format) ? (draft.script ?? null) : null, status: 'draft', busy: 'image' })
     await dropAiImages(db, post.id)
     let imageError: string | null = null
     try {
-      await generateImages(db, post, toJobs(draft.images.slice(0, MAX_IMAGES[post.format]), archive, (_, i) => i), { from: 50, to: 97 })
+      await generateImages(db, post, toJobs(draft.images.slice(0, MAX_IMAGES[post.format]), ctx.archive, ctx.zones, (_, i) => i), { from: 50, to: 97 })
     } catch (error) {
       imageError = error instanceof Error ? `Картинка не получилась: ${error.message}` : 'Картинка не получилась'
     }
-    const { autopilot } = marketing.settings
+    const { autopilot } = ctx.marketing.settings
     await updatePost(db, post.id, { status: autopilot ? 'approved' : 'review', busy: null, error: imageError, reviewSentAt: null })
     return (await loadPost(db, post.id))!
   } catch (error) {
@@ -239,14 +295,8 @@ export async function revisePost(db: Database, postId: string, remark: string, a
   try {
     await addComment(db, { postId, authorId: author.id, authorName: author.name, role: 'staff', text: remark })
     await setPostProgress(db, postId, step('Вношу правки', 3, 55, 20))
-    const [name, facts, marketing, photos, comments, archive] = await Promise.all([
-      clubTitle(db),
-      clubFacts(db),
-      marketingContext(db),
-      clubPhotos(db),
-      listComments(db, { postId }, 12),
-      archiveCandidates(db, { ...post, brief: `${post.brief} ${remark}` }),
-    ])
+    const [ctx, comments] = await Promise.all([writeContext(db, post, remark), listComments(db, { postId }, 12)])
+    const { name, archive } = ctx
     const history = comments.map((c) => `${c.role === 'tai' ? 'Tai' : c.authorName ?? 'сотрудник'}: ${c.text}`).join('\n')
     const images = post.media.filter((m) => m.kind === 'image' && m.status === 'done')
     const revision = await chatJson(db, {
@@ -257,10 +307,7 @@ export async function revisePost(db: Database, postId: string, remark: string, a
       schema: RevisionSchema,
       user: [
         todayLine(),
-        `Факты о клубе:\n${facts}`,
-        `Маркетинг:\n${marketing.text}`,
-        photosLine(photos),
-        archiveLine(archive),
+        ...contextLines(ctx),
         '',
         'Публикация сейчас:',
         postBriefing(post),
@@ -277,7 +324,7 @@ export async function revisePost(db: Database, postId: string, remark: string, a
         archive.length ? ARCHIVE_RULES : '',
         '',
         'Сделай, что просят, ничего лишнего не меняй. Ответ — JSON с полями только для того, что меняешь:',
-        `{"reply": "коротко, на «ты», что сделал (1–2 фразы)", "topic"?: "...", "body"?: "новый текст целиком", "visual"?: "...", "images"?: [{"prompt": "...", "refs": [..], ${archive.length ? '"photo"?: "Ф-код", "mode"?: "as_is|edit|inspire", ' : ''}"slot": номер слота}] — только если картинку надо переделать или заменить, "script"?: {...}, "date"?: "YYYY-MM-DD", "time"?: "HH:MM" — если просят перенести, "memory"?: [{"kind": "voice|rule|avoid|insight|fact", "text": "правило на будущее"}] — только если замечание общее (про стиль, слова, подход), а не про этот пост}`,
+        `{"reply": "коротко, на «ты», что сделал (1–2 фразы)", "topic"?: "...", "body"?: "новый текст целиком", "visual"?: "...", "images"?: [${imageShape(ctx).replace(/}$/, ', "slot": номер слота}')}] — только картинки, которые надо переделать или заменить (остальные не трогай: каждая стоит денег), "script"?: {...}, "date"?: "YYYY-MM-DD", "time"?: "HH:MM" — если просят перенести, "memory"?: [{"kind": "voice|rule|avoid|insight|fact", "text": "правило на будущее"}] — только если замечание общее (про стиль, слова, подход), а не про этот пост}`,
       ].filter((line) => line !== '').join('\n'),
     })
 
@@ -304,7 +351,7 @@ export async function revisePost(db: Database, postId: string, remark: string, a
     let reply = revision.reply
     if (revision.images?.length) {
       try {
-        await generateImages(db, post, toJobs(revision.images, archive, (image, i) => image.slot ?? images[i]?.sort ?? i), { from: 55, to: 97 })
+        await generateImages(db, post, toJobs(revision.images, archive, ctx.zones, (image, i) => image.slot ?? images[i]?.sort ?? i), { from: 55, to: 97 })
       } catch (error) {
         reply += ` Но картинка не получилась: ${error instanceof Error ? error.message : 'ошибка'}`
       }
@@ -332,7 +379,13 @@ export async function reviseInBackground(db: Database, postId: string, remark: s
 
 /** Идеи публикаций по направлениям — без сохранения: понравившиеся добавляют в план. */
 export async function suggestIdeas(db: Database, opts: { direction?: string; platform?: string; format?: string; wish?: string; count?: number }): Promise<SmmIdea[]> {
-  const [name, facts, marketing] = await Promise.all([clubTitle(db), clubFacts(db, 30), marketingContext(db)])
+  const [name, facts, marketing, knowledge, dates] = await Promise.all([
+    clubTitle(db),
+    clubFacts(db, 30),
+    marketingContext(db),
+    knowledgeText(db, { mafia: 'brief' }),
+    datesBetween(db, mskDate(), mskDate(Date.now() + 45 * 86_400_000)).catch(() => []),
+  ])
   const count = Math.min(Math.max(opts.count ?? 8, 3), 12)
   const r = await chatJson(db, {
     system: systemPrompt(name),
@@ -343,12 +396,14 @@ export async function suggestIdeas(db: Database, opts: { direction?: string; pla
     user: [
       todayLine(),
       `Факты о клубе:\n${facts}`,
+      `Что ты знаешь:\n${knowledge}`,
       `Маркетинг:\n${marketing.text}`,
+      dates.length ? `Праздники и поводы ближайших полутора месяцев:\n${datesText(dates)}` : '',
       '',
       `Придумай ${count} свежих идей публикаций${opts.direction ? ` по направлению «${directionLabel(opts.direction)}»` : ' по всем направлениям клуба'}${opts.platform ? ` для ${opts.platform}` : ''}${opts.format ? ` в формате ${opts.format}` : ''}.`,
       opts.wish ? `Пожелание: ${opts.wish}` : '',
       `Направления: ${DIRECTIONS.map((d) => `${d.key} — ${d.label}`).join('; ')}.`,
-      'Нужны разные заходы: польза, закулисье, люди клуба, юмор, интерактив, анонсы, итоги, тренды рилс. Идея — конкретная, чтобы сразу было понятно, что снимать или писать.',
+      'Нужны разные заходы: польза, закулисье, люди клуба, юмор, интерактив, анонсы, итоги, тренды рилс, поводы и праздники. Идея — конкретная, чтобы сразу было понятно, что снимать или писать; опирайся на историю и традиции клуба, но не повторяй то, что уже было.',
       'Ответ — JSON: {"ideas": [{"topic": "короткий заголовок", "brief": "в чём идея и зачем (1–2 фразы)", "platform": "telegram|instagram", "format": "post|carousel|story|reel", "direction": "ключ направления"}]}',
     ].filter(Boolean).join('\n'),
   })

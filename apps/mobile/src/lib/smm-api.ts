@@ -7,6 +7,7 @@ import { Alert, Linking, Platform, Share } from 'react-native';
 import { api, ApiError } from './api';
 import { queryClient } from './query';
 import { useClubKey } from './queries';
+import type { SmmClubDate } from './smm-knowledge';
 
 /**
  * «СММ» — Tai ведёт Telegram-канал и Instagram клуба (сервер: apps/api/src/modules/smm).
@@ -429,7 +430,8 @@ export function useSmmPost(id: string) {
   });
 }
 
-export type SmmPlanPayload = { plan: SmmPlan | null; posts: SmmPost[]; comments: SmmComment[] };
+/** dates — праздники и поводы месяца (подписи к дням плана). */
+export type SmmPlanPayload = { plan: SmmPlan | null; posts: SmmPost[]; comments: SmmComment[]; dates?: SmmClubDate[] };
 
 export function useSmmPlan(month: string) {
   const club = useClubKey();

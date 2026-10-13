@@ -3,10 +3,12 @@
  *  - тексты, планы, отчёты и разбор скриншотов — Gemini 3.8 Flash (ответ строго JSON
  *    по схеме; план месяца ~1 мин и ~3 ₽). Claude Sonnet 5.5 в Polza всегда «думает» и на
  *    плане месяца тратил весь лимит ответа на рассуждения — ответ приходил пустым;
- *  - картинки — Nano Banana 2.1 в 2K (точный русский текст на картинке, до 10
- *    референсов — фото клуба), запасная — GPT Image 2.5;
- *  - видео — Veo 3.1 Fast: 8 с со звуком, 9:16, ~45 ₽ — лучшее качество за деньги.
- * Модели меняются переменными SMM_TEXT_MODEL / SMM_IMAGE_MODEL / SMM_VIDEO_MODEL.
+ *  - картинки — Nano Banana 2.1 в 1K: 3 ₽ вместо 4,5 ₽ за 2K, русский текст на картинке
+ *    так же чистый, до 10 референсов (фото зон клуба, архив); запасная — GPT Image 2.5;
+ *  - видео — Veo 3.1 Fast: 8 с со звуком, 9:16, ~45 ₽. Реалистичное видео в клубе —
+ *    с первого кадра: фото-кадр в нашей зоне → Veo оживляет его (FIRST_AND_LAST_FRAMES).
+ * Модели меняются переменными SMM_TEXT_MODEL / SMM_IMAGE_MODEL / SMM_VIDEO_MODEL,
+ * разрешение картинок — SMM_IMAGE_RESOLUTION (1K | 2K | 4K).
  *
  * Каждый вызов пишет стоимость в smm_spend; перед вызовом — проверка бюджета месяца.
  */
@@ -28,11 +30,11 @@ export const SMM_MODELS = {
 
 type SpendKind = 'text' | 'image' | 'video' | 'vision'
 /** Сколько примерно стоит вызов — чтобы не начинать то, на что бюджета уже нет. */
-const ESTIMATE_RUB: Record<SpendKind, number> = { text: 3, vision: 2, image: 5, video: 45 }
+const ESTIMATE_RUB: Record<SpendKind, number> = { text: 3, vision: 2, image: 3, video: 45 }
 const CHAT_TIMEOUT_MS = 180_000
 const IMAGE_TIMEOUT_MS = 170_000
 const POLL_EVERY_MS = 4_000
-const IMAGE_RESOLUTION = '2K'
+const IMAGE_RESOLUTION = ['1K', '2K', '4K'].includes(clean(process.env['SMM_IMAGE_RESOLUTION'])) ? clean(process.env['SMM_IMAGE_RESOLUTION']) : '1K'
 
 export async function smmApiKey(db: Database): Promise<string> {
   try {
@@ -253,14 +255,45 @@ export async function generateImage(db: Database, opts: { prompt: string; aspect
   }
 }
 
+export interface VideoRequest {
+  prompt: string
+  aspect: '9:16' | '16:9'
+  /** Первый кадр: видео начинается ровно с этой картинки — так сцена точно в нашем клубе. */
+  firstFrame?: string
+  /** Референсы (до 3), если первого кадра нет: люди, предметы, помещение. */
+  references?: string[]
+  /** Промпт уже на английском — переводчик Polza не нужен (он портит термины и реплики). */
+  english?: boolean
+}
+
+const VIDEO_PROMPT_MAX = 4_000
+const REJECTED = 'Нейросеть отклонила запрос'
+
 /** Видео делается минуты — запускаем задачу и опрашиваем её кроном (pollVideo). */
-export async function startVideo(db: Database, opts: { prompt: string; aspect: '9:16' | '16:9'; references?: string[] }): Promise<{ polzaId: string; model: string }> {
+export async function startVideo(db: Database, opts: VideoRequest): Promise<{ polzaId: string; model: string }> {
   await assertBudget(db, 'video')
   const apiKey = await smmApiKey(db)
-  const input: Record<string, unknown> = { prompt: opts.prompt.slice(0, 1_900), aspect_ratio: opts.aspect, enableTranslation: 'true' }
   const references = (opts.references ?? []).slice(0, 3)
-  if (references.length) input['images'] = references.map((url) => ({ type: 'url', data: url }))
-  const r = await polza<MediaResponse>(apiKey, '/media', { model: SMM_MODELS.video, input, async: true }, 30_000)
+  const input: Record<string, unknown> = { prompt: opts.prompt.slice(0, VIDEO_PROMPT_MAX), aspect_ratio: opts.aspect, enableTranslation: opts.english ? 'false' : 'true' }
+  if (opts.firstFrame) {
+    input['generationType'] = 'FIRST_AND_LAST_FRAMES_2_VIDEO'
+    input['images'] = [{ type: 'url', data: opts.firstFrame }]
+  } else if (references.length) {
+    input['generationType'] = 'REFERENCE_2_VIDEO'
+    input['images'] = references.map((url) => ({ type: 'url', data: url }))
+  } else {
+    input['generationType'] = 'TEXT_2_VIDEO'
+  }
+  let r: MediaResponse
+  try {
+    r = await polza<MediaResponse>(apiKey, '/media', { model: SMM_MODELS.video, input, async: true }, 30_000)
+  } catch (error) {
+    // Режим не принят (модель сменили переменной) — пусть Polza выберет его сама по картинкам.
+    if (!(error instanceof SmmError) || !error.message.startsWith(REJECTED)) throw error
+    console.warn('[smm] видео: режим не принят, повторяю без него', error.message)
+    const { generationType: _mode, ...auto } = input
+    r = await polza<MediaResponse>(apiKey, '/media', { model: SMM_MODELS.video, input: auto, async: true }, 30_000)
+  }
   if (!r.id) throw new SmmError('Видео не запустилось — попробуйте ещё раз', 502)
   return { polzaId: r.id, model: SMM_MODELS.video }
 }

@@ -5,7 +5,10 @@ import { useState } from 'react';
 import { ActivityIndicator, Alert, Linking, Pressable, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 
+import Animated from 'react-native-reanimated';
+
 import { AppRefreshControl } from '@/components/refresh-control';
+import { Appear, Sheen, glide } from '@/components/smm/motion';
 import { BigButton, Card, ChipButton, Composer, ErrorBanner, PlatformBadge, ProgressBanner, StatusPill, Thread } from '@/components/smm/parts';
 import { Text } from '@/components/text';
 import { ToolbarMenu, ToolbarMenuAction } from '@/components/toolbar';
@@ -150,13 +153,29 @@ export default function SmmPostScreen() {
           }>
           {post.busy || post.media.some((m) => m.status === 'pending') ? <ProgressBanner progress={postProgress(post)} text={post.busy ? busyText[post.busy] : undefined} /> : null}
           {post.error && !post.busy ? <ErrorBanner text={post.error} /> : null}
-          <Header post={post} />
-          <MediaBlock post={post} disabled={working} acting={acting} onRun={run} />
-          <BodyBlock post={post} onEdit={() => router.push({ pathname: '/manage/smm/edit-text', params: { postId: post.id } })} />
-          {post.script ? <ScriptBlock post={post} /> : null}
-          <IdeaBlock post={post} />
-          <ResultBlock post={post} />
-          <NextStep post={post} canApprove={data.canApprove} acting={acting} working={working} onAction={action} />
+          <Appear index={0}>
+            <Header post={post} />
+          </Appear>
+          <Appear index={1}>
+            <MediaBlock post={post} disabled={working} acting={acting} onRun={run} />
+          </Appear>
+          <Appear index={2}>
+            <BodyBlock post={post} onEdit={() => router.push({ pathname: '/manage/smm/edit-text', params: { postId: post.id } })} />
+          </Appear>
+          {post.script ? (
+            <Appear index={3}>
+              <ScriptBlock post={post} />
+            </Appear>
+          ) : null}
+          <Appear index={4}>
+            <IdeaBlock post={post} />
+          </Appear>
+          <Appear index={5}>
+            <ResultBlock post={post} />
+          </Appear>
+          <Appear index={6}>
+            <NextStep post={post} canApprove={data.canApprove} acting={acting} working={working} onAction={action} />
+          </Appear>
           <Text style={[type.title3, styles.label, styles.remarksTitle]}>Замечания для Tai</Text>
           <Thread comments={data.comments} />
           <Composer
@@ -219,10 +238,14 @@ function MediaBlock({ post, disabled, acting, onRun }: { post: SmmPost; disabled
       { text: 'Нарисовать', onPress: (text?: string) => void (text?.trim() ? onRun('image', () => postAction(club, post.id, 'image', { prompt: text.trim(), mediaId: current?.kind === 'image' ? current.id : undefined }), 'Картинка не получилась') : undefined) },
     ]);
   const video = () =>
-    Alert.alert('Видео нейросетью', 'Veo 3.1: 8 секунд со звуком, вертикально. Стоит около 45 ₽, готово за пару минут.', [
-      { text: 'Отмена', style: 'cancel' },
-      { text: 'Сделать', onPress: () => void onRun('video', () => postAction(club, post.id, 'video', {}), 'Видео не запустилось') },
-    ]);
+    promptText(
+      'Видео нейросетью',
+      'Tai продумает сцену, сделает реалистичный первый кадр (если сюжет у вас в клубе — в нужной зоне) и оживит его: 8 секунд со звуком, вертикально, около 48 ₽, пара минут. Можно написать, что должно быть в ролике.',
+      [
+        { text: 'Отмена', style: 'cancel' },
+        { text: 'Сделать', onPress: (wish?: string) => void onRun('video', () => postAction(club, post.id, 'video', wish && wish.trim().length >= 10 ? { prompt: wish.trim() } : {}), 'Видео не запустилось') },
+      ],
+    );
   const remove = () =>
     current &&
     Alert.alert(current.kind === 'video' ? 'Убрать видео?' : media.length > 1 ? `Убрать слайд ${page + 1}?` : 'Убрать картинку?', 'Файл и его варианты уйдут из публикации.', [
@@ -261,7 +284,7 @@ function MediaBlock({ post, disabled, acting, onRun }: { post: SmmPost; disabled
       {media.length > 1 ? (
         <View style={styles.dots}>
           {media.map((m, i) => (
-            <View key={m.id} style={[styles.dot, i === page && styles.dotActive]} />
+            <Animated.View key={m.id} layout={glide} style={[styles.dot, i === page && styles.dotActive]} />
           ))}
         </View>
       ) : null}
@@ -292,7 +315,7 @@ function MediaItem({ media, width, height }: { media: SmmMedia; width: number; h
   if (media.status === 'pending') {
     return (
       <View style={[styles.mediaItem, styles.mediaPending, { width, height }]}>
-        <ActivityIndicator color="white" />
+        <Sheen color="rgba(255,255,255,0.12)" duration={1300} />
         <Text style={[type.subhead, styles.onDark]}>{media.kind === 'video' ? 'Видео делается — пара минут' : media.source === 'archive' ? 'Беру фото из архива…' : 'Рисую…'}</Text>
       </View>
     );
@@ -571,11 +594,11 @@ const styles = StyleSheet.create({
   headerMeta: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
   mediaBlock: { gap: space.sm },
   mediaItem: { borderRadius: 20, borderCurve: 'continuous', backgroundColor: colors.fill },
-  mediaPending: { alignItems: 'center', justifyContent: 'center', gap: space.sm, backgroundColor: '#1C1C1E' },
+  mediaPending: { alignItems: 'center', justifyContent: 'center', gap: space.sm, backgroundColor: '#1C1C1E', overflow: 'hidden' },
   mediaEmpty: { borderRadius: 20, borderCurve: 'continuous', backgroundColor: colors.card, alignItems: 'center', justifyContent: 'center', gap: space.sm, padding: space.lg },
   dots: { flexDirection: 'row', justifyContent: 'center', gap: 6 },
   dot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.tertiaryLabel },
-  dotActive: { backgroundColor: colors.accent },
+  dotActive: { width: 18, backgroundColor: colors.accent },
   variants: { gap: space.sm, paddingHorizontal: 2 },
   variant: { width: 54, height: 66, borderRadius: 10, opacity: 0.6 },
   variantOn: { opacity: 1, borderWidth: 2, borderColor: colors.accent },
