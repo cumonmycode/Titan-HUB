@@ -322,8 +322,9 @@ export async function smmTick(db: Database, clubId: string | null): Promise<void
     await publishDue(env, due)
     await handoffDue(env, approved.filter((p) => !p.busy))
     await remindLinks(env, approved)
-    await reviewDue(env)
+    // Сначала подготовить ближайшую идею — тогда она уходит на одобрение в этот же тик.
     await prepareNext(env)
+    await reviewDue(env)
     await periodic(env)
   } catch (error) {
     console.error('[smm] крон', error)
