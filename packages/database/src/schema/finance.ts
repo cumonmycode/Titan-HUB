@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, numeric, boolean, integer, timestamp, pgEnum, jsonb } from 'drizzle-orm/pg-core'
+import { pgTable, uuid, text, numeric, boolean, integer, timestamp, pgEnum, jsonb, date } from 'drizzle-orm/pg-core'
 import { profiles } from './profiles.js'
 import { inventory } from './menu.js'
 import { checks, paymentMethodEnum, discountTypeEnum } from './checks.js'
@@ -14,6 +14,27 @@ export const discounts = pgTable('discounts', {
   itemId: uuid('item_id').references(() => inventory.id),
   clientRuleId: uuid('client_rule_id'),
   clientId: uuid('client_id').references(() => profiles.id),
+  // Гибкие условия (миграция 085); itemId/clientId выше — устаревшие, перенесены сюда.
+  description: text('description'),
+  /** check | categories | items */
+  scope: text('scope').$type<'check' | 'categories' | 'items'>().notNull().default('check'),
+  categoryIds: uuid('category_ids').array().notNull().default([]),
+  itemIds: uuid('item_ids').array().notNull().default([]),
+  /** all | tiers | clients | staff | first */
+  audience: text('audience').$type<'all' | 'tiers' | 'clients' | 'staff' | 'first'>().notNull().default('all'),
+  tiers: text('tiers').array().notNull().default([]),
+  clientIds: uuid('client_ids').array().notNull().default([]),
+  /** Только в день рождения ± N дней; null — без условия. */
+  birthdayDays: integer('birthday_days'),
+  /** 1 = Пн … 7 = Вс; пусто — любой день. */
+  weekdays: integer('weekdays').array().notNull().default([]),
+  timeFrom: text('time_from'),
+  timeTo: text('time_to'),
+  startsOn: date('starts_on', { mode: 'string' }),
+  endsOn: date('ends_on', { mode: 'string' }),
+  minCheckSum: numeric('min_check_sum', { precision: 12, scale: 2 }).notNull().default('0'),
+  combinable: boolean('combinable').notNull().default(false),
+  sortOrder: integer('sort_order').notNull().default(0),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 })
 
@@ -38,6 +59,17 @@ export const certificates = pgTable('certificates', {
     .references(() => profiles.id),
   usedBy: uuid('used_by').references(() => profiles.id),
   usedAt: timestamp('used_at', { withTimezone: true }),
+  // Сертификаты заново (миграция 086): название, на что тратится, срок, серия, получатель.
+  title: text('title'),
+  /** all | categories | items | events */
+  scope: text('scope').$type<'all' | 'categories' | 'items' | 'events'>().notNull().default('all'),
+  categoryIds: uuid('category_ids').array().notNull().default([]),
+  itemIds: uuid('item_ids').array().notNull().default([]),
+  validUntil: date('valid_until', { mode: 'string' }),
+  series: text('series'),
+  recipient: text('recipient'),
+  note: text('note'),
+  voidedAt: timestamp('voided_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 })
 

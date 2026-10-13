@@ -55,6 +55,8 @@ export const checks = pgTable('checks', {
   // ID авто/тир-скидок, вручную снятых с ЭТОГО чека: applyAutoDiscounts их
   // пропускает (иначе скидка вернулась бы при следующем пересчёте позиций).
   excludedDiscountIds: uuid('excluded_discount_ids').array().default([]),
+  // Скидки клуба, выбранные кассиром вручную (миграция 085): пересчитываются вместе с авто.
+  manualDiscountIds: uuid('manual_discount_ids').array().default([]),
   linkedEventId: uuid('linked_event_id'),
   // База события на чеке: фикс/ручная сумма мероприятия (помимо позиций и аренды).
   // Входит в «Итого», редактируется; синхронизируется при правке суммы события.

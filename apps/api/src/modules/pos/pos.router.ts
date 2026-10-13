@@ -24,6 +24,8 @@ import { accrueBonusLot, spendBonusLots, getBonusExpiryDays } from '../../lib/bo
 import { isRegistrationPending } from '../../lib/registration.js'
 import { getNumericSetting, getStringSetting, LARGE_CHECK_KEY, DEFAULT_LARGE_CHECK, getBoolSetting, STAFF_DISCOUNT_KEY, STAFF_COMP_SCOPE_KEY, STAFF_COMP_OWNERS_KEY, STAFF_MAX_DISCOUNT_KEY, DEFAULT_STAFF_MAX_DISCOUNT } from '../../lib/appSettings.js'
 import { shiftWorkers } from '../../lib/salary.js'
+import { matchesConditions, discountRows, pickDiscounts, type DiscountContext } from '../../lib/discounts.js'
+import { certificateStatus, eligibleAmount, normalizeCode } from '../../lib/certificates.js'
 import { round2, computeRental, computeTotals } from '../../lib/money.js'
 import { publishEvent, updatesChannel } from '../../lib/realtime.js'
 import { getClubIntegration } from '../../lib/secrets.js'
@@ -234,106 +236,68 @@ async function addCheckItemTx(
 type Tx = Parameters<Parameters<Database['transaction']>[0]>[0]
 type DbOrTx = Database | Tx
 
+function parseJsonObject(raw: string | undefined): Record<string, unknown> {
+  try { const v = JSON.parse(raw ?? '{}'); return v && typeof v === 'object' && !Array.isArray(v) ? v : {} } catch { return {} }
+}
+function parseJsonArray(raw: string | undefined): string[] {
+  try { const v = JSON.parse(raw ?? '[]'); return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [] } catch { return [] }
+}
+
 async function applyAutoDiscounts(exec: DbOrTx, checkId: string) {
   const [check] = await exec.select().from(checks).where(eq(checks.id, checkId))
   if (!check) return
 
-  const items = await exec.select().from(checkItems).where(eq(checkItems.checkId, checkId))
-  // База для check-скидок = позиции + платные модификаторы (та же база, что у
-  // computeTotals). Иначе сохранённый/отображаемый amount процентной check-скидки
-  // расходится со списываемой при наличии платных модификаторов.
-  const itemIds = items.map(i => i.id)
-  const mods = itemIds.length
-    ? await exec.select().from(checkItemModifiers).where(inArray(checkItemModifiers.checkItemId, itemIds))
-    : []
-  const qtyByItem = new Map(items.map(i => [i.id, i.quantity]))
-  const modsSum = mods.reduce((s, m) => s + parseFloat(m.priceAtTime) * (qtyByItem.get(m.checkItemId) ?? 1), 0)
-  const itemsOnlySum = items.reduce((s, i) => s + parseFloat(i.priceAtTime) * i.quantity, 0)
-  const itemsSum = itemsOnlySum + modsSum
-
-  // Удаляем ранее применённые авто-скидки (по наличию discountId) перед пересчётом.
+  const ctx = await discountContext(exec, check)
+  // Удаляем ранее применённые скидки клуба (по наличию discountId) перед пересчётом.
   await exec.delete(checkDiscounts).where(
     and(eq(checkDiscounts.checkId, checkId), sql`${checkDiscounts.discountId} IS NOT NULL`),
   )
+  if (!ctx.lines.length) return
 
-  const toInsert: (typeof checkDiscounts.$inferInsert)[] = []
-  const applied = new Set<string>() // дедуп по id скидки (auto + tier не задвоить)
-  // Скидки, вручную снятые с этого чека — не применяем повторно.
-  const excluded = new Set<string>(check.excludedDiscountIds ?? [])
-
-  function pushDiscount(d: typeof discounts.$inferSelect) {
-    if (applied.has(d.id) || excluded.has(d.id)) return
-    applied.add(d.id)
-    if (d.itemId) {
-      // Скидка на конкретную позицию: к каждой строке этого товара, прошедшей minQuantity.
-      const minQty = d.minQuantity ?? 1
-      for (const it of items.filter(i => i.itemId === d.itemId && i.quantity >= minQty)) {
-        const base = parseFloat(it.priceAtTime) * it.quantity
-        const amount = d.type === 'percent'
-          ? base * (parseFloat(d.value) / 100)
-          : Math.min(parseFloat(d.value), base)
-        if (amount <= 0) continue
-        toInsert.push({
-          checkId, discountId: d.id, name: d.name, type: d.type,
-          value: String(d.value), amount: String(round2(amount)),
-          target: 'item', itemId: it.id,
-        })
-      }
-    } else {
-      const base = itemsSum
-      const amount = d.type === 'percent'
-        ? base * (parseFloat(d.value) / 100)
-        : Math.min(parseFloat(d.value), base)
-      if (amount <= 0) return
-      toInsert.push({
-        checkId, discountId: d.id, name: d.name, type: d.type,
-        value: String(d.value), amount: String(round2(amount)),
-        target: 'check', itemId: null,
-      })
-    }
+  const all = await exec.select().from(discounts).where(eq(discounts.isActive, true))
+  // Устаревшие правила «статус → скидка» (веб) — действуют как несуммируемые кандидаты.
+  let forced: (typeof discounts.$inferSelect)[] = []
+  if (ctx.player) {
+    forced = (await exec.select({ d: discounts })
+      .from(clientDiscountRules)
+      .innerJoin(discounts, eq(discounts.id, clientDiscountRules.discountId))
+      .where(and(eq(clientDiscountRules.isActive, true), eq(clientDiscountRules.clientTier, ctx.player.clientTier), eq(discounts.isActive, true))))
+      .map((r) => r.d)
   }
+  const rows = pickDiscounts(all, ctx, {
+    manualIds: check.manualDiscountIds ?? [],
+    excludedIds: check.excludedDiscountIds ?? [],
+    forced,
+  })
+  if (rows.length) await exec.insert(checkDiscounts).values(rows.map((r) => ({ checkId, ...r })))
+}
 
-  // 1. Авто-скидки (isAuto). Скидка с clientId (персональная) применяется ТОЛЬКО к
-  //    чеку этого клиента — независимо от того, на позицию она или на весь чек.
-  //    (Был баг: проверка клиента срабатывала лишь при отсутствии itemId, поэтому
-  //    персональная скидка на конкретную позицию протекала во ВСЕ чеки с этой
-  //    позицией. Теперь клиент-привязка проверяется всегда.)
-  const autoRows = await exec.select().from(discounts)
-    .where(and(eq(discounts.isActive, true), eq(discounts.isAuto, true)))
-  for (const d of autoRows) {
-    if (d.clientId && d.clientId !== check.playerId) continue
-    pushDiscount(d)
-  }
-
-  // 2. Скидки по тиру: активное правило для тира клиента → связанная активная скидка
-  //    (применяется в силу правила, независимо от флага isAuto самой скидки).
-  //    Если на тир настроено НЕСКОЛЬКО активных правил — применяем ТОЛЬКО ОДНО,
-  //    с максимальным эффектом (а не стопку), чтобы скидки не складывались сверх
-  //    замысла. Эффект оцениваем на сумме позиций (check-level база).
+/** Состав чека и гость — для условий скидок (lib/discounts.ts). */
+async function discountContext(exec: DbOrTx, check: typeof checks.$inferSelect): Promise<DiscountContext> {
+  const items = await exec.select({
+    id: checkItems.id, itemId: checkItems.itemId, priceAtTime: checkItems.priceAtTime, quantity: checkItems.quantity, categoryId: inventory.category,
+  }).from(checkItems).leftJoin(inventory, eq(inventory.id, checkItems.itemId)).where(eq(checkItems.checkId, check.id))
+  const ids = items.map((i) => i.id)
+  const mods = ids.length ? await exec.select().from(checkItemModifiers).where(inArray(checkItemModifiers.checkItemId, ids)) : []
+  const qtyByItem = new Map(items.map((i) => [i.id, i.quantity]))
+  const modsSum = mods.reduce((s, m) => s + parseFloat(m.priceAtTime) * (qtyByItem.get(m.checkItemId) ?? 1), 0)
+  const lines = items.map((i) => ({ id: i.id, itemId: i.itemId, categoryId: i.categoryId ?? null, price: parseFloat(i.priceAtTime), qty: i.quantity }))
+  let player: DiscountContext['player'] = null
   if (check.playerId) {
-    const [player] = await exec.select({ tier: profiles.clientTier }).from(profiles).where(eq(profiles.id, check.playerId))
-    if (player?.tier) {
-      const tierRows = await exec.select({ d: discounts })
-        .from(clientDiscountRules)
-        .innerJoin(discounts, eq(discounts.id, clientDiscountRules.discountId))
-        .where(and(
-          eq(clientDiscountRules.isActive, true),
-          eq(clientDiscountRules.clientTier, player.tier),
-          eq(discounts.isActive, true),
-        ))
-      const effect = (d: typeof discounts.$inferSelect) => {
-        const base = d.itemId
-          ? items.filter(i => i.itemId === d.itemId).reduce((s, i) => s + parseFloat(i.priceAtTime) * i.quantity, 0)
-          : itemsSum
-        return d.type === 'percent' ? base * (parseFloat(d.value) / 100) : Math.min(parseFloat(d.value), base)
-      }
-      const best = tierRows.map(r => r.d).filter(d => !applied.has(d.id))
-        .sort((a, b) => effect(b) - effect(a))[0]
-      if (best) pushDiscount(best)
+    const [p] = await exec.select({ role: profiles.role, clientTier: profiles.clientTier, birthday: profiles.birthday }).from(profiles).where(eq(profiles.id, check.playerId))
+    if (p) {
+      const [prev] = await exec.select({ n: sql<number>`count(*)::int` }).from(checks)
+        .where(and(eq(checks.playerId, check.playerId), eq(checks.status, 'closed'), ne(checks.id, check.id)))
+      player = { role: p.role, clientTier: p.clientTier, birthday: p.birthday, closedChecks: prev?.n ?? 0 }
     }
   }
-
-  if (toInsert.length) await exec.insert(checkDiscounts).values(toInsert)
+  return {
+    playerId: check.playerId,
+    player,
+    openedAt: check.createdAt,
+    lines,
+    gross: lines.reduce((s, l) => s + l.price * l.qty, 0) + modsSum,
+  }
 }
 
 // Скидка персоналу/владельцу (тумблер в разделе скидок): если включена И плательщик
@@ -1492,7 +1456,11 @@ posRouter.delete('/checks/:id/discount/:discountRowId', requireRole('owner', 'st
     .where(and(eq(checkDiscounts.id, rowId), eq(checkDiscounts.checkId, checkId)))
   if (!row) return c.json({ error: 'Discount not found' }, 404)
 
-  if (row.discountId) {
+  if (row.discountId && (check.manualDiscountIds ?? []).includes(row.discountId)) {
+    // Скидка клуба, выбранная кассиром: просто убираем её из выбранных.
+    const next = (check.manualDiscountIds ?? []).filter((id) => id !== row.discountId)
+    await db.update(checks).set({ manualDiscountIds: next }).where(eq(checks.id, checkId))
+  } else if (row.discountId) {
     // Авто/тир-скидка: добавляем в исключения чека (дедуп), recalc уберёт её.
     const next = Array.from(new Set([...(check.excludedDiscountIds ?? []), row.discountId]))
     await db.update(checks).set({ excludedDiscountIds: next }).where(eq(checks.id, checkId))
@@ -1505,6 +1473,72 @@ posRouter.delete('/checks/:id/discount/:discountRowId', requireRole('owner', 'st
   publishEvent(c.var.club?.id, 'check:updated', { checkId })
   const data = await getCheckWithItems(checkId, db)
   return c.json({ check: data })
+})
+
+// Скидки клуба для этого чека: ручные (кассир выбирает) с подсказкой, подходят ли они
+// по условиям и сколько дадут. Автоматические кассир не выбирает — они ложатся сами.
+posRouter.get('/checks/:id/club-discounts', requireRole('owner', 'staff'), async (c) => {
+  const db = c.var.db
+  const [check] = await db.select().from(checks).where(eq(checks.id, c.req.param('id')))
+  if (!check) return c.json({ error: 'Not found' }, 404)
+  const ctx = await discountContext(db, check)
+  const list = await db.select().from(discounts)
+    .where(and(eq(discounts.isActive, true), eq(discounts.isAuto, false)))
+    .orderBy(asc(discounts.sortOrder), asc(discounts.name))
+  const applied = new Set(check.manualDiscountIds ?? [])
+  return c.json({
+    discounts: list.map((d) => {
+      const rows = discountRows(d, ctx)
+      return {
+        id: d.id, name: d.name, description: d.description, type: d.type, value: d.value, scope: d.scope,
+        applied: applied.has(d.id),
+        fits: matchesConditions(d, ctx),
+        amount: rows ? round2(rows.effect) : 0,
+      }
+    }),
+  })
+})
+
+// Кассир выбрал скидку клуба: она пересчитывается вместе с остальными (по её «на что»).
+// Сотруднику — тот же лимит суммарной скидки, что и для ручной (staff_max_discount_percent).
+posRouter.post('/checks/:id/club-discounts/:discountId', requireRole('owner', 'staff'), async (c) => {
+  const db = c.var.db
+  const user = c.get('user')
+  const checkId = c.req.param('id')
+  const discountId = c.req.param('discountId')
+  const capPct = user.role !== 'owner' ? await getNumericSetting(STAFF_MAX_DISCOUNT_KEY, DEFAULT_STAFF_MAX_DISCOUNT, db) : null
+  try {
+    await db.transaction(async (tx) => {
+      const [check] = await tx.select().from(checks).where(eq(checks.id, checkId)).for('update')
+      if (!check || check.status !== 'open') throw new Error('CHECK_NOT_OPEN')
+      const [d] = await tx.select().from(discounts).where(and(eq(discounts.id, discountId), eq(discounts.isActive, true)))
+      if (!d) throw new Error('NOT_FOUND')
+      await tx.update(checks).set({
+        manualDiscountIds: Array.from(new Set([...(check.manualDiscountIds ?? []), discountId])),
+        excludedDiscountIds: (check.excludedDiscountIds ?? []).filter((id) => id !== discountId),
+      }).where(eq(checks.id, checkId))
+      await applyAutoDiscounts(tx, checkId)
+      const rows = await tx.select().from(checkDiscounts).where(and(eq(checkDiscounts.checkId, checkId), eq(checkDiscounts.discountId, discountId)))
+      if (!rows.length) throw new Error('NOT_APPLICABLE')
+      if (capPct !== null) {
+        const items = await tx.select().from(checkItems).where(eq(checkItems.checkId, checkId))
+        const ids = items.map((i) => i.id)
+        const mods = ids.length ? await tx.select().from(checkItemModifiers).where(inArray(checkItemModifiers.checkItemId, ids)) : []
+        const all = await tx.select().from(checkDiscounts).where(eq(checkDiscounts.checkId, checkId))
+        const { gross, discountTotal } = computeTotals(items, mods, all)
+        if (discountTotal > gross * (capPct / 100) + 0.01) throw new Error('STAFF_DISCOUNT_LIMIT')
+      }
+    })
+  } catch (err: any) {
+    if (err.message === 'CHECK_NOT_OPEN') return c.json({ error: 'Check not open' }, 400)
+    if (err.message === 'NOT_FOUND') return c.json({ error: 'Скидка не найдена или выключена' }, 404)
+    if (err.message === 'NOT_APPLICABLE') return c.json({ error: 'Скидка не подходит этому чеку: нет нужных позиций или мала сумма' }, 400)
+    if (err.message === 'STAFF_DISCOUNT_LIMIT') return c.json({ error: (capPct ?? 0) <= 0 ? 'Скидки доступны только владельцу' : `Суммарная скидка сотрудника не может превышать ${capPct}% — обратитесь к владельцу` }, 403)
+    throw err
+  }
+  await recalcCheckTotal(checkId, db)
+  publishEvent(c.var.club?.id, 'check:updated', { checkId })
+  return c.json({ check: await getCheckWithItems(checkId, db) })
 })
 
 // Вернуть ранее снятую авто/тир-скидку: убираем её discountId из исключений чека,
@@ -1895,10 +1929,16 @@ posRouter.post('/checks/:id/pay', requireRole('owner', 'staff'), zValidator('jso
       // Validate + lock certificate
       let cert = null
       if (body.certificateCode) {
+        const code = normalizeCode(body.certificateCode) ?? body.certificateCode
         const [c2] = await tx.select().from(certificates)
-          .where(eq(certificates.code, body.certificateCode)).for('update')
-        if (!c2 || c2.isUsed || parseFloat(c2.balance) < 0.01) throw new Error('INVALID_CERT')
+          .where(eq(certificates.code, code)).for('update')
+        if (!c2) throw new Error('INVALID_CERT')
+        const status = certificateStatus(c2)
+        if (status === 'expired') throw new Error('CERT_EXPIRED')
+        if (status !== 'active') throw new Error('INVALID_CERT')
         if (certSent > parseFloat(c2.balance) + 0.01) throw new Error('CERT_INSUFFICIENT')
+        // Сертификат платит только за то, на что выпущен (категории, позиции, мероприятие).
+        if (c2.scope !== 'all' && certSent > (await eligibleAmount(tx, c2, checkId)) + 0.01) throw new Error('CERT_SCOPE')
         cert = c2
       } else if (certSent > 0.005) {
         throw new Error('INVALID_CERT')
@@ -2037,16 +2077,31 @@ posRouter.post('/checks/:id/pay', requireRole('owner', 'staff'), zValidator('jso
       let bonusAwarded = 0
       if (body.playerId && player && !isRegistrationPending(player)) {
         const settingsRows = await tx.select().from(appSettings)
-          .where(inArray(appSettings.key, ['bonus_enabled', 'bonus_accrual_rate', 'bonus_min_purchase', 'bonus_accrual_on_debt']))
+          .where(inArray(appSettings.key, ['bonus_enabled', 'bonus_accrual_rate', 'bonus_min_purchase', 'bonus_accrual_on_debt', 'bonus_tier_rates', 'bonus_excluded_categories']))
         const settings = Object.fromEntries(settingsRows.map(r => [r.key, r.value]))
 
         const bonusEnabled = settings['bonus_enabled'] !== 'false'
-        const accrualRate = parseFloat(settings['bonus_accrual_rate'] ?? '5') / 100
+        // Процент по статусу клиента (bonus_tier_rates: {"resident": 7}), иначе общий.
+        const tierRates = parseJsonObject(settings['bonus_tier_rates'])
+        const tierRate = Number(tierRates[player.clientTier])
+        const accrualRate = (Number.isFinite(tierRate) && tierRate >= 0 ? tierRate : parseFloat(settings['bonus_accrual_rate'] ?? '5')) / 100
         const minPurchase = parseFloat(settings['bonus_min_purchase'] ?? '0')
         const accrualOnDebt = settings['bonus_accrual_on_debt'] === 'true'
+        // Категории без бонусов (например, тарифы или алкоголь): их доля чека не начисляется.
+        const excludedCats = new Set(parseJsonArray(settings['bonus_excluded_categories']))
+        let bonusBase = total
+        if (excludedCats.size && itemRows.length) {
+          const cats = await tx.select({ id: inventory.id, category: inventory.category }).from(inventory)
+            .where(inArray(inventory.id, itemRows.map(i => i.itemId).filter((x): x is string => !!x)))
+          const catOf = new Map(cats.map(r => [r.id, r.category]))
+          const gross = itemRows.reduce((s2, i) => s2 + parseFloat(i.priceAtTime) * i.quantity, 0)
+          const excluded = itemRows.filter(i => i.itemId && excludedCats.has(catOf.get(i.itemId) ?? ''))
+            .reduce((s2, i) => s2 + parseFloat(i.priceAtTime) * i.quantity, 0)
+          if (gross > 0) bonusBase = round2(total * Math.max(0, 1 - excluded / gross))
+        }
 
         if (bonusEnabled && total >= minPurchase && !(debtAmount > 0 && !accrualOnDebt)) {
-          const bonusEarned = Math.floor(total * accrualRate)
+          const bonusEarned = Math.floor(bonusBase * accrualRate)
           bonusAwarded = bonusEarned
           if (bonusEarned > 0) {
             const newBonus = round2(parseFloat(player.bonusPoints) + bonusEarned)
@@ -2141,6 +2196,8 @@ posRouter.post('/checks/:id/pay', requireRole('owner', 'staff'), zValidator('jso
       OVERPAYMENT: ['Сумма безналичной оплаты превышает чек', 400],
       INVALID_CERT: ['Invalid or used certificate', 400],
       CERT_INSUFFICIENT: ['Недостаточно средств на сертификате', 400],
+      CERT_EXPIRED: ['Срок действия сертификата истёк', 400],
+      CERT_SCOPE: ['Сертификатом можно оплатить только позиции, на которые он выпущен', 400],
       DEBT_NO_PLAYER: ['Для оплаты в долг нужно выбрать клиента', 400],
       DEBT_LIMIT: ['Превышен лимит долга клиента', 400],
       DEPOSIT_NO_PLAYER: ['Для оплаты депозитом нужно выбрать клиента', 400],

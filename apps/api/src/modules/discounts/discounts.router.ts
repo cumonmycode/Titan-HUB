@@ -2,10 +2,50 @@ import type { AppEnv } from '../../types.js'
 import { Hono } from 'hono'
 import { zValidator } from '@hono/zod-validator'
 import { z } from 'zod'
-import { discounts, clientDiscountRules, eq, desc } from '@titan/database'
+import { discounts, clientDiscountRules, eq, desc, asc, sql } from '@titan/database'
 import { requireAuth, requireRole, requirePermission } from '../../middleware/auth.js'
 
 export const discountsRouter = new Hono<AppEnv>()
+
+const HHMM = z.string().regex(/^\d{1,2}:\d{2}$/)
+const DATE = z.string().regex(/^\d{4}-\d{2}-\d{2}$/)
+// Условия скидки (миграция 085). Все поля необязательны: PATCH меняет только присланное.
+const ConditionsSchema = z.object({
+  description: z.string().max(300).nullable().optional(),
+  scope: z.enum(['check', 'categories', 'items']).optional(),
+  categoryIds: z.array(z.string().uuid()).max(100).optional(),
+  itemIds: z.array(z.string().uuid()).max(300).optional(),
+  audience: z.enum(['all', 'tiers', 'clients', 'staff', 'first']).optional(),
+  tiers: z.array(z.string().min(1).max(40)).max(30).optional(),
+  clientIds: z.array(z.string().uuid()).max(500).optional(),
+  birthdayDays: z.number().int().min(0).max(31).nullable().optional(),
+  weekdays: z.array(z.number().int().min(1).max(7)).max(7).optional(),
+  timeFrom: HHMM.nullable().optional(),
+  timeTo: HHMM.nullable().optional(),
+  startsOn: DATE.nullable().optional(),
+  endsOn: DATE.nullable().optional(),
+  minCheckSum: z.number().min(0).max(10_000_000).optional(),
+  combinable: z.boolean().optional(),
+  sortOrder: z.number().int().optional(),
+})
+type Conditions = z.infer<typeof ConditionsSchema>
+
+/** Присланные условия → колонки; старые itemId/clientId (веб) превращаем в «на что/кому». */
+function conditionColumns(body: Conditions & { itemId?: string | null; clientId?: string | null; minCheckSum?: number }): Record<string, unknown> {
+  const out: Record<string, unknown> = {}
+  for (const k of Object.keys(ConditionsSchema.shape) as (keyof Conditions)[]) {
+    const v = body[k]
+    if (v === undefined) continue
+    out[k] = k === 'minCheckSum' ? String(v) : v
+  }
+  if (body.itemId !== undefined && body.scope === undefined) {
+    Object.assign(out, body.itemId ? { scope: 'items', itemIds: [body.itemId] } : { scope: 'check', itemIds: [] })
+  }
+  if (body.clientId !== undefined && body.audience === undefined) {
+    Object.assign(out, body.clientId ? { audience: 'clients', clientIds: [body.clientId] } : { audience: 'all', clientIds: [] })
+  }
+  return out
+}
 
 discountsRouter.use('*', requireAuth)
 
@@ -13,8 +53,8 @@ discountsRouter.use('*', requireAuth)
 discountsRouter.get('/', requireRole('owner', 'staff'), async (c) => {
   const db = c.var.db
   const clientId = c.req.query('clientId')
-  const where = clientId ? eq(discounts.clientId, clientId) : undefined
-  const rows = await db.select().from(discounts).where(where).orderBy(desc(discounts.createdAt))
+  const where = clientId ? sql`${clientId}::uuid = ANY(${discounts.clientIds})` : undefined
+  const rows = await db.select().from(discounts).where(where).orderBy(asc(discounts.sortOrder), desc(discounts.createdAt))
   return c.json({ discounts: rows })
 })
 
@@ -33,7 +73,7 @@ discountsRouter.post(
     minQuantity: z.number().int().min(1).optional().default(1),
     itemId: z.string().uuid().optional().nullable(),
     clientId: z.string().uuid().optional().nullable(),
-  }).refine(
+  }).merge(ConditionsSchema).refine(
     // Процентная скидка не может превышать 100%.
     (d) => d.type !== 'percent' || d.value <= 100,
     { message: 'Процентная скидка не может превышать 100%', path: ['value'] },
@@ -48,8 +88,7 @@ discountsRouter.post(
       isActive: body.isActive,
       isAuto: body.isAuto,
       minQuantity: body.minQuantity,
-      itemId: body.itemId ?? undefined,
-      clientId: body.clientId ?? undefined,
+      ...conditionColumns(body),
     }).returning()
     return c.json({ discount: row }, 201)
   }
@@ -193,7 +232,7 @@ discountsRouter.patch(
     minQuantity: z.number().int().min(1).optional(),
     itemId: z.string().uuid().optional().nullable(),
     clientId: z.string().uuid().optional().nullable(),
-  }).refine(
+  }).merge(ConditionsSchema).refine(
     // Если в одном запросе указаны и type='percent', и value — value ≤ 100.
     (d) => d.type !== 'percent' || d.value === undefined || d.value <= 100,
     { message: 'Процентная скидка не может превышать 100%', path: ['value'] },
@@ -229,8 +268,7 @@ discountsRouter.patch(
     if (body.isActive !== undefined) update.isActive = body.isActive
     if (body.isAuto !== undefined) update.isAuto = body.isAuto
     if (body.minQuantity !== undefined) update.minQuantity = body.minQuantity
-    if (body.itemId !== undefined) update.itemId = body.itemId
-    if (body.clientId !== undefined) update.clientId = body.clientId
+    Object.assign(update, conditionColumns(body))
 
     const [row] = await db.update(discounts).set(update).where(eq(discounts.id, id)).returning()
     if (!row) return c.json({ error: 'Not found' }, 404)
