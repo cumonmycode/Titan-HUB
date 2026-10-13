@@ -85,7 +85,7 @@ export const TaiMark = memo(function TaiMark({ size = 22, state = 'idle', level,
   const reach = (k: number, o: number) => {
     'worklet';
     const a = phase.get() * k + o;
-    const s = R * (0.36 + 0.24 * spread.get());
+    const s = R * (0.44 + 0.2 * spread.get());
     return vec(c + Math.cos(a) * s, c + Math.sin(a * 1.15) * s);
   };
   const rose = useDerivedValue(() => reach(1, 0));
@@ -121,13 +121,13 @@ export const TaiMark = memo(function TaiMark({ size = 22, state = 'idle', level,
               <LinearGradient start={vec(c - R, c - R)} end={vec(c + R, c + R)} colors={[pal.iris, pal.violet]} />
             </Circle>
             <Circle cx={c} cy={c} r={R} blendMode="screen">
-              <RadialGradient c={rose} r={R * 0.92} colors={[withAlpha(pal.rose, 0.9), withAlpha(pal.rose, 0)]} />
+              <RadialGradient c={rose} r={R * 0.8} colors={[pal.rose, withAlpha(pal.rose, 0.55), withAlpha(pal.rose, 0)]} positions={[0, 0.45, 1]} />
             </Circle>
             <Circle cx={c} cy={c} r={R} blendMode="screen">
-              <RadialGradient c={sky} r={R * 0.92} colors={[withAlpha(pal.sky, 0.9), withAlpha(pal.sky, 0)]} />
+              <RadialGradient c={sky} r={R * 0.8} colors={[pal.sky, withAlpha(pal.sky, 0.55), withAlpha(pal.sky, 0)]} positions={[0, 0.45, 1]} />
             </Circle>
             <Circle cx={c} cy={c} r={R} blendMode="screen">
-              <RadialGradient c={amber} r={R * 0.92} colors={[withAlpha(pal.peach, 0.85), withAlpha(pal.peach, 0)]} />
+              <RadialGradient c={amber} r={R * 0.7} colors={[withAlpha(pal.peach, 0.9), withAlpha(pal.peach, 0.45), withAlpha(pal.peach, 0)]} positions={[0, 0.45, 1]} />
             </Circle>
             {/* Глубина: край сферы темнее середины. */}
             <Circle cx={c} cy={c} r={R}>
@@ -135,7 +135,7 @@ export const TaiMark = memo(function TaiMark({ size = 22, state = 'idle', level,
             </Circle>
             {/* Блик стекла сверху слева и отражённый свет снизу. */}
             <Circle cx={c} cy={c} r={R}>
-              <RadialGradient c={vec(c - R * 0.32, c - R * 0.42)} r={R * 0.62} colors={['rgba(255,255,255,0.92)', 'rgba(255,255,255,0.35)', 'rgba(255,255,255,0)']} positions={[0, 0.35, 1]} />
+              <RadialGradient c={vec(c - R * 0.34, c - R * 0.44)} r={R * 0.5} colors={['rgba(255,255,255,0.9)', 'rgba(255,255,255,0.3)', 'rgba(255,255,255,0)']} positions={[0, 0.3, 1]} />
             </Circle>
             <Circle cx={c} cy={c} r={R}>
               <RadialGradient c={vec(c + R * 0.22, c + R * 0.78)} r={R * 0.55} colors={['rgba(255,255,255,0.38)', 'rgba(255,255,255,0)']} />

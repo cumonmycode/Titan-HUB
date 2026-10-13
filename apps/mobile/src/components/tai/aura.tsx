@@ -129,7 +129,7 @@ export function TaiGlass({ children, style, proposal = false, decided = false, i
   };
 
   return (
-    <View style={[outer, waiting && { boxShadow: `0 10px 30px -14px ${withAlpha(pal.violet, 0.55)}` }]} onLayout={onLayout}>
+    <View style={[outer, waiting && { borderRadius: corner, boxShadow: `0 10px 30px -14px ${withAlpha(pal.violet, 0.55)}` }]} onLayout={onLayout}>
       <GlassView isInteractive={interactive} style={[styles.glass, { borderRadius: corner }, inner]}>
         {size ? <AuraFill size={size} corner={corner} pal={pal} /> : null}
         {children}
