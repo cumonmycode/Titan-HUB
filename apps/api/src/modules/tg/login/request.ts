@@ -25,11 +25,16 @@ function whenOf(r: Row): string | null {
   })
 }
 
-/** /start r_<token>: привязать чат гостя к заявке и рассказать, что будет дальше. */
-export async function handleRequestStart(club: TgClub, from: TgUser, chatId: number, token: string): Promise<void> {
+export type LinkedRequest = Row
+
+/**
+ * /start r_<token>: привязать чат гостя к заявке. Возвращает заявку (Tai дальше ведёт
+ * разговор сам) или null — ссылка битая или устарела (гостю уже сказали об этом).
+ */
+export async function linkRequestChat(club: TgClub, from: TgUser, chatId: number, token: string): Promise<LinkedRequest | null> {
   if (!TOKEN_RE.test(token)) {
     await club.bot.send(chatId, 'Ссылка недействительна. Если вы оставляли заявку на сайте — администратор свяжется с вами по телефону.')
-    return
+    return null
   }
   const res = await club.db.execute(sql`
     UPDATE bookings SET guest_tg_chat = ${String(chatId)}, guest_tg_id = ${String(from.id)}, updated_at = now()
@@ -39,14 +44,15 @@ export async function handleRequestStart(club: TgClub, from: TgUser, chatId: num
   const r = rows<Row>(res)[0]
   if (!r) {
     await club.bot.send(chatId, 'Ссылка устарела или заявка не найдена. Если вопрос остался — напишите мне сюда или позвоните в клуб.')
-    return
+    return null
   }
+  return r
+}
+
+/** Текст без ИИ (модуль Tai выключен): что будет дальше с заявкой. */
+export function requestLinkedText(r: LinkedRequest): string {
   const what = [r.title || 'Заявка', whenOf(r)].filter(Boolean).join(' · ')
-  if (r.status === 'confirmed') {
-    await club.bot.send(chatId, `✅ Заявка уже подтверждена: ${what}\nВ день визита пришлю напоминание.`)
-  } else if (r.status === 'cancelled') {
-    await club.bot.send(chatId, `Заявка «${r.title || 'Заявка'}» отклонена. Если это ошибка — напишите мне или позвоните в клуб.`)
-  } else {
-    await club.bot.send(chatId, `Готово! Заявка получена: ${what}\nКак только администратор её подтвердит, напишу сюда. В день визита пришлю напоминание. А пока можешь спросить меня о клубе — я Tai 🙂`)
-  }
+  if (r.status === 'confirmed') return `✅ Заявка уже подтверждена: ${what}\nВ день визита пришлю напоминание.`
+  if (r.status === 'cancelled') return `Заявка «${r.title || 'Заявка'}» отклонена. Если это ошибка — напишите мне или позвоните в клуб.`
+  return `Готово! Заявка получена: ${what}\nКак только администратор её подтвердит, напишу сюда. В день визита пришлю напоминание.`
 }

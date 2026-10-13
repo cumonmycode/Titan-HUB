@@ -137,8 +137,41 @@ async function pushStaff(db: Database, clubId: string | null | undefined, r: Req
   }
 }
 
+/**
+ * Рабочий чат для заявок: выбранный в «Сайт → Уведомления», иначе первый рабочий чат Tai
+ * (группа персонала, режим work).
+ */
+export async function workChat(db: Database): Promise<{ chatId: string; threadId: number | null } | null> {
+  const chosen = await readRequestsChat(db)
+  if (chosen) return chosen
+  const [row] = await db.select().from(appSettings).where(eq(appSettings.key, 'tai_chat_settings'))
+  try {
+    const prefs = JSON.parse(row?.value ?? '{}') as Record<string, { mode?: string }>
+    const id = Object.keys(prefs).find((k) => prefs[k]?.mode === 'work')
+    return id ? { chatId: id, threadId: null } : null
+  } catch {
+    return null
+  }
+}
+
+/** Сообщение в рабочий чат (HTML); replyTo — сообщение заявки. Возвращает id сообщения. */
+export async function postToWorkChat(db: Database, html: string, replyTo?: number | null): Promise<{ chatId: string; messageId: number } | null> {
+  const chat = await workChat(db)
+  if (!chat) return null
+  const token = await getClubIntegration(db, 'poll_bot_token').catch(() => null)
+  if (!token) return null
+  const sent = await sendTelegramMessage(token, chat.chatId, html, { messageThreadId: chat.threadId, parseMode: 'HTML', replyToMessageId: replyTo ?? null })
+  if (!sent.ok || !sent.messageId) {
+    console.error('[requests] рабочий чат не принял сообщение:', sent.error)
+    return null
+  }
+  return { chatId: chat.chatId, messageId: sent.messageId }
+}
+
+export { staffText as requestStaffText }
+
 async function postStaffChat(db: Database, r: RequestRow, hubOrigin: string | null): Promise<void> {
-  const chat = await readRequestsChat(db)
+  const chat = await workChat(db)
   if (!chat) return
   const token = await getClubIntegration(db, 'poll_bot_token').catch(() => null)
   if (!token) return
@@ -202,6 +235,7 @@ export async function messageGuest(db: Database, chatId: string, text: string): 
 /** Итог в чат персонала и статус гостю после «Подтвердить» / «Отклонить». */
 export async function notifyRequestStatus(
   db: Database, id: string, status: 'confirmed' | 'cancelled', actor: string, hubOrigin: string | null,
+  opts: { guest?: boolean } = {},
 ): Promise<void> {
   try {
     const r = await loadRequest(db, id)
@@ -215,7 +249,8 @@ export async function notifyRequestStatus(
         })
       }
     }
-    if (r.guest_tg_chat) await messageGuest(db, r.guest_tg_chat, guestStatusText(r, status, await readVenue(db)))
+    // Решил сам Tai в разговоре с гостем — он уже всё сказал, дубль статуса не шлём.
+    if (r.guest_tg_chat && opts.guest !== false) await messageGuest(db, r.guest_tg_chat, guestStatusText(r, status, await readVenue(db)))
   } catch (e) {
     console.error('[requests] уведомление о решении по заявке не ушло:', e)
   }

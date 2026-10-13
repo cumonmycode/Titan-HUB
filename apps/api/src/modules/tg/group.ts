@@ -21,6 +21,7 @@ import { whoIs } from './identity.js'
 import type { TgChatMemberUpdate, TgMessage } from './types.js'
 import { converse } from './dialog/converse.js'
 import { voiceToText } from './private.js'
+import { handleStaffAnswer } from './dialog/request-desk.js'
 
 type MentionTarget = { tgId: string; username: string | null; firstName: string | null }
 type MentionCommand = 'all' | 'tvari' | 'supertvari' | 'lubimki'
@@ -286,6 +287,14 @@ export async function onGroupMessage(club: TgClub, msg: TgMessage, edited: boole
   if (cmd) {
     await handleMentionCommand(club, msg, cmd)
     return
+  }
+  // Ответ сотрудника на вопрос Tai по заявке гостя — Tai передаёт его гостю.
+  if (msg.reply_to_message?.from?.is_bot) {
+    const file = msg.voice ?? msg.audio ?? msg.video_note
+    const answer = file ? ((await voiceToText(club, file)) ?? '') : String(msg.text ?? msg.caption ?? '')
+    const replyToGuest = (c: TgClub, guest: Awaited<ReturnType<typeof whoIs>>, contact: Parameters<typeof converse>[2], chatId: string, text: string) =>
+      converse(c, guest, contact, { chatId, threadId: null, replyTo: null, groupTitle: null }, text, false)
+    if (await handleStaffAnswer(club, msg, answer, replyToGuest)) return
   }
   const botUsername = await club.bot.username()
   const voiceReplyToBot = !!(msg.voice && msg.reply_to_message?.from?.is_bot)

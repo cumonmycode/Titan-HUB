@@ -21,6 +21,7 @@ import { TELEGRAM_STAFF_TOOLS } from './staff-tools.js'
 import { clientPrompt, staffTelegramPrompt } from './prompts.js'
 import { actionMarkup, actionText, blockText, choiceMarkup, linksMarkup, mdToHtml, supplyMarkup, supplyText } from './render.js'
 import { appendMessage, markBlocked, markOutbound, recentTurns } from './memory.js'
+import { activeRequests, requestPrompt, requestTools } from './request-desk.js'
 
 export interface ChatTarget {
   chatId: string
@@ -105,6 +106,8 @@ async function buildEnv(club: TgClub, person: TgPerson, contact: TaiContact | nu
     }
   }
   const session: ClientSession = { club, person, contact: contact!, chatId: target.chatId }
+  // Заявка с сайта: Tai знает её и ведёт до подтверждения (tg/dialog/request-desk.ts).
+  const requests = target.groupTitle ? [] : await activeRequests(club.db, target.chatId)
   return {
     db: club.db,
     user: { sub: profile?.id ?? `tg:${person.tgId}`, role: 'client', nickname: displayName(person) },
@@ -112,8 +115,8 @@ async function buildEnv(club: TgClub, person: TgPerson, contact: TaiContact | nu
     clubName: club.name,
     permissions: undefined,
     headers: { host: club.host },
-    tools: clientTools(session),
-    prompt: await clientPrompt(session, voice),
+    tools: [...clientTools(session), ...requestTools(session, requests)],
+    prompt: (await clientPrompt(session, voice)) + requestPrompt(requests),
     temperature: CLIENT_TEMPERATURE,
   }
 }

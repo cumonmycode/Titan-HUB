@@ -14,7 +14,8 @@ import { NO, REMOVE_KEYBOARD, pendingRow } from './login/common.js'
 import { handleAppContact, handleAppStart, handleLegacyLogin, handleWebCode, rejectLatest } from './login/app.js'
 import { handleHubContact, handleHubStart } from './login/hub.js'
 import { handleLinkCode, handleLinkStart } from './login/link.js'
-import { handleRequestStart } from './login/request.js'
+import { linkRequestChat, requestLinkedText } from './login/request.js'
+import { requestIntro } from './dialog/request-desk.js'
 import { converse } from './dialog/converse.js'
 import { touchContact, updateContact } from './dialog/memory.js'
 
@@ -61,7 +62,6 @@ async function onStartPayload(club: TgClub, from: TgUser, chatId: number, payloa
   else if (payload.startsWith('hub_')) await handleHubStart(club, from, chatId, payload.slice(4))
   else if (payload.startsWith('login_')) await handleLegacyLogin(club, from, chatId, payload.slice(6))
   else if (payload.startsWith('link_')) await handleLinkStart(club, from, chatId, payload.slice(5))
-  else if (payload.startsWith('r_')) await handleRequestStart(club, from, chatId, payload.slice(2))
   else return false
   return true
 }
@@ -72,9 +72,19 @@ export async function onPrivateMessage(club: TgClub, msg: TgMessage): Promise<vo
   const chatId = msg.chat.id
   const text = (msg.text ?? '').trim()
 
+  // Гость пришёл из заявки на сайте: привязываем чат и сразу начинаем разговор о ней.
+  let intro: string | null = null
   if (text.startsWith('/start')) {
     const payload = text.slice('/start'.length).trim()
-    if (payload && (await onStartPayload(club, from, chatId, payload))) return
+    if (payload.startsWith('r_')) {
+      const linked = await linkRequestChat(club, from, chatId, payload.slice(2))
+      if (!linked) return
+      if (linked.status === 'cancelled' || !(await aiEnabled(club))) {
+        await club.bot.send(chatId, requestLinkedText(linked))
+        return
+      }
+      intro = requestIntro(linked)
+    } else if (payload && (await onStartPayload(club, from, chatId, payload))) return
   }
   if (msg.contact) {
     await onContact(club, from, chatId, msg.contact)
@@ -99,7 +109,7 @@ export async function onPrivateMessage(club: TgClub, msg: TgMessage): Promise<vo
     return
   }
 
-  let input = text === '/start' ? START_GREETING : text || (msg.caption ?? '').trim()
+  let input = intro ?? (text === '/start' ? START_GREETING : text || (msg.caption ?? '').trim())
   let voice = false
   const file = msg.voice ?? msg.audio ?? msg.video_note
   if (file) {

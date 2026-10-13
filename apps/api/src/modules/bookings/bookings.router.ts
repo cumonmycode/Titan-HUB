@@ -9,7 +9,7 @@
 import { Hono } from 'hono'
 import { zValidator } from '@hono/zod-validator'
 import { z } from 'zod'
-import { sql, events, profiles, eq } from '@titan/database'
+import { sql, events, profiles, eq, type Database } from '@titan/database'
 import type { AppEnv } from '../../types.js'
 import { requireAuth, requireRole } from '../../middleware/auth.js'
 import { notifyRequestStatus } from '../requests/notify.js'
@@ -82,22 +82,23 @@ bookingsRouter.get('/archive', requireRole('owner', 'staff'), async (c) => {
 
 const PatchSchema = z.object({ status: z.enum(['new', 'confirmed', 'cancelled', 'done']) })
 
-bookingsRouter.patch('/:id', requireRole('owner', 'staff'), zValidator('json', PatchSchema), async (c) => {
-  const db = c.var.db
-  const id = c.req.param('id')
-  const { status } = c.req.valid('json')
-  const user = c.get('user')
+export type DecideResult =
+  | { kind: 'not_found' }
+  | { kind: 'conflict'; event: typeof events.$inferSelect }
+  | { kind: 'refused'; error: string }
+  | { kind: 'ok'; eventId: string | null; cancelledCheckIds: string[] }
 
+/**
+ * Решение по заявке: подтвердить (заявка-мероприятие создаёт planned-мероприятие) или
+ * отклонить (с отменой созданного мероприятия). actorId — кто решил (создатель события);
+ * его же зовёт Tai, когда сам подтверждает заявку гостя (requests/tai-desk.ts).
+ */
+export async function decideBooking(db: Database, id: string, status: 'new' | 'confirmed' | 'cancelled' | 'done', actorId: string): Promise<DecideResult> {
   // Подтверждение — в ОДНОЙ транзакции: строка брони под FOR UPDATE (два параллельных
   // подтверждения не создадут два мероприятия — второе увидит event_id первого), а
   // проверка пересечения и вставка события — под тем же advisory-lock (зона, дата),
   // что и POST /events, иначе бронь с сайта могла занять уже занятую зону.
-  type R =
-    | { kind: 'not_found' }
-    | { kind: 'conflict'; event: typeof events.$inferSelect }
-    | { kind: 'refused'; error: string }
-    | { kind: 'ok'; eventId: string | null; cancelledCheckIds: string[] }
-  const result = await db.transaction<R>(async (tx) => {
+  return db.transaction<DecideResult>(async (tx) => {
     const res = await tx.execute(sql`SELECT * FROM bookings WHERE id = ${id} LIMIT 1 FOR UPDATE`)
     const bk = rows<Record<string, unknown>>(res)[0]
     if (!bk) return { kind: 'not_found' }
@@ -119,7 +120,7 @@ bookingsRouter.patch('/:id', requireRole('owner', 'staff'), zValidator('json', P
       if (ev?.status === 'active') return { kind: 'refused', error: 'Мероприятие уже идёт — сначала завершите или отмените его' }
       if (ev?.status === 'completed') return { kind: 'refused', error: 'Мероприятие по этой брони уже завершено' }
       if (ev && ev.status !== 'cancelled') {
-        cancelledCheckIds = (await cancelEventTx(tx, eventId, user.sub))?.cancelledCheckIds ?? []
+        cancelledCheckIds = (await cancelEventTx(tx, eventId, actorId))?.cancelledCheckIds ?? []
       }
     }
     // Мероприятие создаёт только заявка-мероприятие. Запись на игровой вечер и
@@ -157,7 +158,7 @@ bookingsRouter.patch('/:id', requireRole('owner', 'staff'), zValidator('json', P
         customerPhone: String(bk['phone']),
         comment: (bk['comment'] as string | null) ?? null,
         format: 'regular',
-        createdBy: user.sub,
+        createdBy: actorId,
       }).returning()
       eventId = ev?.id ?? null
     }
@@ -165,6 +166,14 @@ bookingsRouter.patch('/:id', requireRole('owner', 'staff'), zValidator('json', P
     await tx.execute(sql`UPDATE bookings SET status = ${status}, event_id = ${eventId}, updated_at = now() WHERE id = ${id}`)
     return { kind: 'ok', eventId, cancelledCheckIds }
   })
+}
+
+bookingsRouter.patch('/:id', requireRole('owner', 'staff'), zValidator('json', PatchSchema), async (c) => {
+  const db = c.var.db
+  const id = c.req.param('id')
+  const { status } = c.req.valid('json')
+  const user = c.get('user')
+  const result = await decideBooking(db, id, status, user.sub)
 
   if (result.kind === 'not_found') return c.json({ error: 'not found' }, 404)
   if (result.kind === 'refused') return c.json({ error: result.error }, 409)
