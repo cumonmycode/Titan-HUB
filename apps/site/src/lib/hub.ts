@@ -55,6 +55,8 @@ export const FALLBACK_CONFIG: SiteConfig = {
   ],
   eventRates: [{ hours: 1, price: 5000 }, { hours: 2, price: 8000 }, { hours: 3, price: 10000 }],
   zones: [],
+  links: null,
+  taiUrl: null,
   live: false,
 }
 
@@ -67,6 +69,8 @@ interface RawConfig {
   eveningPrices?: SiteConfig['eveningPrices']
   eventRates?: SiteConfig['eventRates']
   zones?: SiteConfig['zones']
+  links?: SiteConfig['links']
+  taiUrl?: unknown
 }
 
 // Ошибки не кэшируются: unstable_cache запоминает только успешный ответ, сбой
@@ -82,6 +86,8 @@ async function loadConfig(): Promise<SiteConfig> {
     eveningPrices: raw.eveningPrices?.length ? raw.eveningPrices : FALLBACK_CONFIG.eveningPrices,
     eventRates: raw.eventRates?.length ? raw.eventRates : FALLBACK_CONFIG.eventRates,
     zones: raw.zones ?? [],
+    links: raw.links && Array.isArray(raw.links.links) ? raw.links : null,
+    taiUrl: typeof raw.taiUrl === 'string' && raw.taiUrl.startsWith('https://t.me/') ? raw.taiUrl : null,
     live: true,
   }
 }

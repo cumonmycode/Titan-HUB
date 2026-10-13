@@ -56,6 +56,7 @@ export default function SiteScreen() {
           <Section title="Сайт">
             <LinkRow icon="paintpalette.fill" color="#AF52DE" title="Оформление" subtitle={look.hint} value={look.title} onPress={() => go('/manage/settings/site/look')} />
             <LinkRow icon="calendar" color="#FF9500" title="Расписание вечеров" subtitle="По нему сайт показывает ближайшие игры" value={`${evenings} в неделю`} onPress={() => go('/manage/settings/site/schedule')} />
+            <LinkRow icon="link.circle.fill" color="#7C4DFF" title="Таплинк" subtitle="Одна ссылка для соцсетей: запись, Tai, контакты" onPress={() => go('/manage/settings/site/links')} />
             <LinkRow icon="photo.on.rectangle.angled" color="#34C759" title="Публикации" subtitle="Турниры и вечеринки с фото" value={stories.data ? String(published) : undefined} onPress={() => go('/manage/settings/site/stories')} />
           </Section>
 

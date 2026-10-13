@@ -22,6 +22,8 @@ export default function ShiftLayout() {
       <Stack.Screen name="open" options={{ title: 'Открыть смену', headerShown: false }} />
       <Stack.Screen name="close" options={{ title: 'Закрыть смену' }} />
       <Stack.Screen name="cash" options={{ title: 'Касса' }} />
+      <Stack.Screen name="staff" options={{ title: 'Кто на смене' }} />
+      <Stack.Screen name="pay" options={{ title: 'Зарплата' }} />
     </Stack>
   );
 }

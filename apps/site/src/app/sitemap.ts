@@ -4,7 +4,7 @@ import { siteUrlOf } from '@/lib/contacts'
 
 export const revalidate = 3600
 
-const PAGES = ['', '/book', '/games', '/events', '/kidspromo', '/portfolio', '/residents', '/studio', '/contact', '/promoinfo', '/privacy-policy', '/terms-and-conditions', '/refund-policy']
+const PAGES = ['', '/book', '/games', '/events', '/kidspromo', '/portfolio', '/residents', '/studio', '/contact', '/link', '/promoinfo', '/privacy-policy', '/terms-and-conditions', '/refund-policy']
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const [stories, config] = await Promise.all([getStories(), getSiteConfig()])

@@ -16,7 +16,10 @@ import { api } from '@/lib/api';
 import { formatMoney } from '@/lib/format';
 import { haptic } from '@/lib/haptics';
 import { KEYBOARD_DISMISS } from '@/lib/layout';
-import { type EveningKey, invalidateShift, OPEN_SHIFT_EVENING_KEYS, parseAmount, useEveningTypes, useLastCashEnd } from '@/lib/shift-api';
+import { type EveningKey, invalidateShift, OPEN_SHIFT_EVENING_KEYS, type OpeningCashOp, parseAmount, useEveningTypes, useLastCashEnd } from '@/lib/shift-api';
+import { WorkerPicker } from '@/components/staff/worker-picker';
+import { useMe } from '@/lib/queries';
+import { useWorkers } from '@/lib/salary-api';
 import { useTextLayout } from '@/lib/text-scale';
 import { colors, radius, space, type } from '@/lib/theme';
 
@@ -62,6 +65,14 @@ export default function OpenShift() {
   const [editing, setEditing] = useState(false);
   const [reason, setReason] = useState('');
   const [evening, setEvening] = useState<EveningKey>('none');
+  const me = useMe();
+  const workers = useWorkers();
+  // Кто работает: по умолчанию — тот, кто открывает (если он сотрудник, а не владелец).
+  const [picked, setPicked] = useState<string[] | null>(null);
+  const selectedWorkers = picked ?? (me.data?.role === 'staff' ? [me.data.id] : []);
+  // Внесения и изъятия сразу при открытии (размен, инкассация) — проводятся вместе со сменой.
+  const [ops, setOps] = useState<OpeningCashOp[]>([]);
+  const [opDraft, setOpDraft] = useState<{ type: OpeningCashOp['type']; amount: string; note: string } | null>(null);
 
   const loading = lastCashEnd.isLoading;
   const expected = lastCashEnd.data ?? null;
@@ -86,6 +97,8 @@ export default function OpenShift() {
         cashStart: matches ? expected : cash,
         eveningType: evening,
         adjustmentReason: needsReason ? reason.trim() : undefined,
+        staffIds: selectedWorkers,
+        operations: ops,
       }),
     onSuccess: () => {
       haptic.success();
@@ -226,6 +239,84 @@ export default function OpenShift() {
           </Animated.View>
         )}
 
+        {/* ——— Кто работает ——— */}
+        <Animated.View layout={layout} style={styles.section}>
+          <Text style={[type.footnote, sheetStyles.sectionTitle]}>КТО РАБОТАЕТ</Text>
+          <GlassCard style={styles.workersCard}>
+            {workers.isLoading ? (
+              <ActivityIndicator />
+            ) : (
+              <WorkerPicker
+                workers={workers.data ?? []}
+                selected={selectedWorkers}
+                onToggle={(id) => setPicked(selectedWorkers.includes(id) ? selectedWorkers.filter((x) => x !== id) : [...selectedWorkers, id])}
+              />
+            )}
+          </GlassCard>
+          <Text style={[type.footnote, styles.caption]}>Зарплату за смену получат отмеченные сотрудники.</Text>
+        </Animated.View>
+
+        {/* ——— Внести или изъять сразу ——— */}
+        <Animated.View layout={layout} style={styles.section}>
+          <Text style={[type.footnote, sheetStyles.sectionTitle]}>КАССА</Text>
+          {ops.map((op, i) => (
+            <Animated.View key={`${op.type}-${i}`} entering={FadeIn.duration(160)} exiting={FadeOut.duration(120)}>
+              <GlassCard style={styles.opRow}>
+                <SymbolView name={op.type === 'deposit' ? 'arrow.down.circle.fill' : 'arrow.up.circle.fill'} size={22} tintColor={op.type === 'deposit' ? TONE.green : TONE.orange} />
+                <View style={styles.opText}>
+                  <Text style={[type.body, sheetStyles.label]}>{`${op.type === 'deposit' ? 'Внести' : 'Изъять'} ${formatMoney(op.amount, { kopecks: 'auto' })}`}</Text>
+                  {op.description ? <Text style={[type.footnote, sheetStyles.secondary]}>{op.description}</Text> : null}
+                </View>
+                <Pressable onPress={() => setOps(ops.filter((_, j) => j !== i))} hitSlop={10} accessibilityRole="button" accessibilityLabel="Убрать операцию">
+                  <SymbolView name="xmark.circle.fill" size={20} tintColor={colors.tertiaryLabel} />
+                </Pressable>
+              </GlassCard>
+            </Animated.View>
+          ))}
+          {opDraft ? (
+            <Animated.View entering={FadeIn.duration(180)}>
+              <GlassCard style={styles.reasonCard}>
+                <Text style={[type.headline, sheetStyles.label]}>{opDraft.type === 'deposit' ? 'Внести в кассу' : 'Изъять из кассы'}</Text>
+                <View style={styles.amountRow}>
+                  <Text style={[styles.opAmount, type.amount]}>{formatTyped(opDraft.amount || '0')}</Text>
+                  <Text style={[styles.currency, type.amount]}>₽</Text>
+                </View>
+                <AmountKeypad value={opDraft.amount} onChange={(amount) => setOpDraft({ ...opDraft, amount })} />
+                <View style={styles.reasonField}>
+                  <TextInput
+                    value={opDraft.note}
+                    onChangeText={(note) => setOpDraft({ ...opDraft, note })}
+                    placeholder={opDraft.type === 'deposit' ? 'Например, размен' : 'Например, инкассация'}
+                    placeholderTextColor={colors.tertiaryLabel}
+                    selectionColor={colors.accent}
+                    style={[type.body, styles.reasonInput]}
+                  />
+                </View>
+                <View style={styles.cashActions}>
+                  <GlassChip label="Отмена" icon="xmark" active={false} onPress={() => setOpDraft(null)} />
+                  <GlassChip
+                    label="Добавить"
+                    icon="checkmark"
+                    active
+                    onPress={() => {
+                      const amount = parseAmount(opDraft.amount);
+                      if (!amount) return;
+                      haptic.selection();
+                      setOps([...ops, { type: opDraft.type, amount, ...(opDraft.note.trim() ? { description: opDraft.note.trim() } : {}) }]);
+                      setOpDraft(null);
+                    }}
+                  />
+                </View>
+              </GlassCard>
+            </Animated.View>
+          ) : (
+            <View style={styles.cashActions}>
+              <GlassChip label="Внести" icon="arrow.down.circle" active={false} onPress={() => { haptic.selection(); setEditing(false); setOpDraft({ type: 'deposit', amount: '', note: '' }); }} />
+              <GlassChip label="Изъять" icon="arrow.up.circle" active={false} onPress={() => { haptic.selection(); setEditing(false); setOpDraft({ type: 'withdrawal', amount: '', note: '' }); }} />
+            </View>
+          )}
+        </Animated.View>
+
         {/* ——— Вечер ——— */}
         <Animated.View layout={layout} style={styles.section}>
           <Text style={[type.footnote, sheetStyles.sectionTitle]}>КАКОЙ СЕГОДНЯ ВЕЧЕР</Text>
@@ -347,6 +438,10 @@ const styles = StyleSheet.create({
   reasonInput: { flex: 1, color: colors.label, paddingVertical: space.sm },
 
   section: { gap: space.sm },
+  workersCard: { padding: space.md },
+  opRow: { flexDirection: 'row', alignItems: 'center', gap: space.md, paddingHorizontal: space.md, paddingVertical: space.sm, minHeight: 56 },
+  opText: { flex: 1, gap: 2 },
+  opAmount: { fontSize: 40, lineHeight: 48, color: colors.label, textAlign: 'center' },
   grid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', rowGap: space.sm },
   tileCell: { width: '48.8%' },
   tileWide: { width: '100%' },

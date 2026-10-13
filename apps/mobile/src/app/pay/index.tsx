@@ -187,7 +187,8 @@ export default function PayScreen() {
     });
   const ledger = ledgerFor(parts);
   const perRow = stacked ? 2 : 3;
-  const methods = [...METHOD_ROWS.flat(), ...(data.linkedEventId ? (['certificate'] as const) : [])];
+  // Сертификатом можно платить в любом чеке — сколько можно, решает сам сертификат (его «на что»).
+  const methods = [...METHOD_ROWS.flat(), 'certificate' as const];
   const methodRows = Array.from({ length: Math.ceil(methods.length / perRow) }, (_, i) => methods.slice(i * perRow, (i + 1) * perRow));
 
   // Подтверждённая банком часть (СБП) меняться не может — показываем её списком частей.
@@ -244,7 +245,7 @@ export default function PayScreen() {
           text: 'Найти',
           onPress: async (code?: string) => {
             try {
-              const found = await validateCertificate(code ?? '');
+              const found = await validateCertificate(code ?? '', checkId);
               usePaymentDraft.getState().setCertificate(found);
               apply(found);
               haptic.success();

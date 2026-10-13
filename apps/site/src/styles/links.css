@@ -1,0 +1,71 @@
+/* Таплинк (/link): одна колонка по центру, как открытка клуба в профиле соцсетей.
+   Стекло — то же, что на сайте; главные кнопки (запись и Tai) — фиолетовые капсулы. */
+.site.lk-site main.lk {
+  position: relative; z-index: 1;
+  width: min(520px, 100% - 2 * 16px); margin: 0 auto;
+  padding: max(40px, env(safe-area-inset-top) + 24px) 0 max(36px, env(safe-area-inset-bottom) + 24px);
+  display: grid; gap: 28px;
+}
+
+.lk-head { display: grid; justify-items: center; text-align: center; gap: 10px; }
+.lk-logo {
+  width: 96px; height: 96px; border-radius: 50%; display: grid; place-items: center; margin-bottom: 6px;
+  background: radial-gradient(circle at 30% 25%, rgba(198, 180, 255, .55), rgba(124, 77, 255, .25) 55%, rgba(16, 12, 36, .6));
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, .22), 0 0 0 7px rgba(124, 77, 255, .14), 0 24px 60px -18px rgba(124, 77, 255, .9);
+  animation: lk-pop .8s var(--ease) both;
+}
+.lk-logo img { width: 74px; height: 74px; border-radius: 50%; object-fit: cover; }
+.lk-head h1 { margin: 0; font-size: clamp(30px, 8vw, 38px); font-weight: 800; line-height: 1.02; letter-spacing: -.035em; animation: lk-up .7s .05s var(--ease) both; }
+.lk-bio { margin: 0; max-width: 40ch; color: var(--muted); font-size: 16px; line-height: 1.5; animation: lk-up .7s .1s var(--ease) both; }
+.lk-head .g-signups { margin-top: 8px; }
+
+.lk-list { display: grid; gap: 12px; }
+.lk-btn {
+  position: relative; display: flex; align-items: center; gap: 14px; width: 100%; min-height: 66px;
+  padding: 12px 16px 12px 12px; border-radius: 22px; color: var(--fg); text-align: left; text-decoration: none;
+  font: inherit; cursor: pointer;
+  transition: transform .3s var(--ease), box-shadow .3s var(--ease), background-color .2s;
+  animation: lk-up .6s var(--ease) both;
+}
+.lk-list > :nth-child(1) { animation-delay: .12s; }
+.lk-list > :nth-child(2) { animation-delay: .16s; }
+.lk-list > :nth-child(3) { animation-delay: .2s; }
+.lk-list > :nth-child(4) { animation-delay: .24s; }
+.lk-list > :nth-child(5) { animation-delay: .28s; }
+.lk-list > :nth-child(n+6) { animation-delay: .32s; }
+.site[data-theme="glass"] .lk-btn.glass { --glass-tint: rgba(20, 16, 44, .3); }
+.lk-primary {
+  border: 1px solid rgba(255, 255, 255, .3);
+  background: linear-gradient(180deg, rgba(255, 255, 255, .3), rgba(255, 255, 255, .02) 55%), rgba(124, 77, 255, .82);
+  -webkit-backdrop-filter: blur(14px) saturate(180%); backdrop-filter: blur(14px) saturate(180%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .5), 0 18px 36px -16px rgba(90, 50, 230, .95);
+}
+.lk-btn:hover { transform: translateY(-2px); }
+.lk-btn:active { transform: translateY(0) scale(.985); }
+.lk-btn:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
+
+.lk-icon {
+  position: relative; z-index: 2;
+  flex: none; width: 42px; height: 42px; border-radius: 14px; display: grid; place-items: center;
+  background: rgba(124, 77, 255, .22); color: var(--accent-text);
+  box-shadow: inset 0 0 0 1px rgba(198, 180, 255, .22);
+}
+.lk-primary .lk-icon { background: rgba(255, 255, 255, .2); color: #fff; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .3); }
+.lk-text { flex: 1; min-width: 0; display: grid; gap: 2px; position: relative; z-index: 2; }
+.lk-label { font-size: 17px; font-weight: 700; letter-spacing: -.015em; line-height: 1.25; }
+.lk-hint { font-size: 13.5px; line-height: 1.35; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lk-primary .lk-hint { color: rgba(255, 255, 255, .82); }
+.lk-arrow { flex: none; opacity: .45; transition: transform .3s var(--ease), opacity .2s; position: relative; z-index: 2; }
+.lk-btn:hover .lk-arrow { opacity: .9; transform: translate(2px, -2px); }
+
+.lk-foot { display: grid; justify-items: center; gap: 6px; text-align: center; color: var(--muted); font-size: 13.5px; animation: lk-up .6s .36s var(--ease) both; }
+.lk-foot p { margin: 0; }
+.lk-foot a { color: var(--accent-text); text-decoration: none; font-weight: 600; }
+.lk-foot a:hover { text-decoration: underline; }
+
+@keyframes lk-up { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+@keyframes lk-pop { from { opacity: 0; transform: scale(.82); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .lk-logo, .lk-head h1, .lk-bio, .lk-btn, .lk-foot { animation: none; }
+  .lk-btn, .lk-arrow { transition: none; }
+}

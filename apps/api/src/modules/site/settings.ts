@@ -29,6 +29,32 @@ export type SiteContacts = z.infer<typeof SiteContactsSchema>
 
 export const EMPTY_CONTACTS: SiteContacts = { phone: '', email: '', telegram: '', channel: '', whatsapp: '', vk: '', instagram: '' }
 
+/**
+ * Таплинк — одна ссылка для соцсетей (сайт /link): кнопки по порядку. Готовые виды берут
+ * адрес сами (контакты клуба, бот Tai, адрес заведения), «своя ссылка» — label + url.
+ */
+export const SITE_LINKS_KEY = 'site_links'
+export const LINK_KINDS = ['book_game', 'book_event', 'tai', 'telegram', 'channel', 'whatsapp', 'vk', 'instagram', 'phone', 'map', 'site', 'custom'] as const
+export const SiteLinkSchema = z.object({
+  id: z.string().trim().min(1).max(40),
+  kind: z.enum(LINK_KINDS),
+  label: z.string().trim().max(60).default(''),
+  url: httpsUrl.default(''),
+  on: z.boolean().default(true),
+})
+export const SiteLinksSchema = z.object({
+  title: z.string().trim().max(60).default(''),
+  bio: z.string().trim().max(200).default(''),
+  links: z.array(SiteLinkSchema).max(30).default([]),
+})
+export type SiteLinks = z.infer<typeof SiteLinksSchema>
+const DEFAULT_LINK_KINDS = ['book_game', 'tai', 'book_event', 'phone', 'whatsapp', 'channel', 'vk', 'instagram', 'map', 'site'] as const
+export const DEFAULT_LINKS: SiteLinks = {
+  title: '',
+  bio: 'Клуб спортивной и городской мафии. Игры каждый вечер, турниры, дни рождения и корпоративы.',
+  links: DEFAULT_LINK_KINDS.map((kind) => ({ id: kind, kind, label: '', url: '', on: true })),
+}
+
 export const DOMAIN_RE = /^(?=.{4,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/
 export type DomainPrimary = 'www' | 'apex'
 
@@ -56,6 +82,13 @@ export async function readSiteContacts(db: Database): Promise<SiteContacts> {
   const m = await readKeys(db, [SITE_CONTACTS_KEY])
   const parsed = SiteContactsSchema.safeParse(parseJson<unknown>(m[SITE_CONTACTS_KEY], {}))
   return parsed.success ? parsed.data : EMPTY_CONTACTS
+}
+
+export async function readSiteLinks(db: Database): Promise<SiteLinks> {
+  const m = await readKeys(db, [SITE_LINKS_KEY])
+  if (!m[SITE_LINKS_KEY]) return DEFAULT_LINKS
+  const parsed = SiteLinksSchema.safeParse(parseJson<unknown>(m[SITE_LINKS_KEY], {}))
+  return parsed.success ? parsed.data : DEFAULT_LINKS
 }
 
 export interface SiteDomain { domain: string | null; primary: DomainPrimary; url: string | null; status: DomainStatus | null }

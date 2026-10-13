@@ -12,6 +12,8 @@ import { useContacts } from '@/components/chrome/ContactsContext'
 import { EVENT_FORMATS, TIMES, TOPICS, formatPhone, mskToday, upcomingEvenings, type EventFormat, type EveningSlot, type Topic } from './options'
 
 type Kind = RequestPreset['kind']
+// Пауза перед переходом к Tai в Telegram после отправки заявки.
+const REDIRECT_MS = 1200
 const KINDS: { id: Kind; label: string }[] = [
   { id: 'game', label: 'Игра' },
   { id: 'event', label: 'Мероприятие' },
@@ -125,8 +127,12 @@ export function RequestForm({ config, preset, variant, onClose, lockKind }: {
       const res = await fetch('/api/site/requests', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
       const data = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string; botUrl?: string | null }
       if (!res.ok || !data.ok) throw new Error(data.error || 'Не получилось отправить заявку')
-      setBotUrl(typeof data.botUrl === 'string' && data.botUrl.startsWith('https://t.me/') ? data.botUrl : null)
+      const bot = typeof data.botUrl === 'string' && data.botUrl.startsWith('https://t.me/') ? data.botUrl : null
+      setBotUrl(bot)
       setStatus('done')
+      // Сразу к Tai: он знает заявку, ответит на вопросы и подтвердит запись. Пауза — чтобы
+      // гость увидел «Заявка принята»; кнопка на экране остаётся, если переход не сработал.
+      if (bot) window.setTimeout(() => window.location.assign(bot), REDIRECT_MS)
     } catch (err) {
       setStatus('idle')
       setError(err instanceof Error && err.message !== 'Failed to fetch' ? err.message : `Нет связи — позвоните нам: ${contacts.phone}`)
@@ -279,12 +285,13 @@ function Done({ kind, variant, botUrl, onClose }: { kind: Kind; variant: 'sheet'
     <div className={`rq rq-${variant} rq-done`} role="status">
       <span className="rq-done-mark" aria-hidden="true"><Check size={34} strokeWidth={2.4} /></span>
       <h2 className="rq-title">Заявка принята</h2>
-      <p>{DONE_TEXT[kind]}</p>
-      {botUrl && (
+      {botUrl ? (
         <div className="rq-bot">
-          <p>Подтверждение и напоминание в день визита — в Telegram.</p>
-          <a className="btn btn-primary" href={botUrl} target="_blank" rel="noopener noreferrer"><Send size={18} aria-hidden="true" /> Получать статус в Telegram</a>
+          <p>Переходим в Telegram — там вас ждёт Tai, администратор клуба: ответит на вопросы и подтвердит запись.</p>
+          <a className="btn btn-primary" href={botUrl}><Send size={18} aria-hidden="true" /> Открыть Telegram</a>
         </div>
+      ) : (
+        <p>{DONE_TEXT[kind]}</p>
       )}
       {onClose && <button type="button" className="btn btn-ghost" onClick={onClose}>Готово</button>}
     </div>

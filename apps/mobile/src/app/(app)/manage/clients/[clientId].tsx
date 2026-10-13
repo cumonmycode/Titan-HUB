@@ -216,6 +216,18 @@ export default function ClientScreen() {
 
         {visits.data && visits.data.tier === 'newbie' ? <VisitsCard progress={visits.data} busy={visitBusy} onChange={(delta) => void changeVisits(delta)} /> : null}
 
+        {data.role === 'staff' || data.role === 'owner' ? (
+          <Card footer="Роль, права, формула зарплаты и вход в HUB — в карточке сотрудника.">
+            <InfoRow
+              icon={data.role === 'owner' ? 'crown.fill' : 'person.badge.key.fill'}
+              iconColor={data.role === 'owner' ? '#FF9500' : '#5856D6'}
+              label={data.role === 'owner' ? 'Владелец клуба' : 'В команде клуба'}
+              chevron={isOwner}
+              onPress={isOwner ? () => router.push({ pathname: '/manage/staff/[staffId]', params: { staffId: data.id } }) : undefined}
+            />
+          </Card>
+        ) : null}
+
         <Card title="Контакты" footer={`В клубе с ${new Date(data.createdAt).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' })}`}>
           <InfoRow label="Телефон" value={data.phone || 'не указан'} muted={!data.phone} onPress={phone ? () => open(`tel:+${phone}`) : undefined} />
           <InfoRow

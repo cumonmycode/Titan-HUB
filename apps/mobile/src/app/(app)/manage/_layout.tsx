@@ -49,6 +49,8 @@ export default function ManageLayout() {
       <Stack.Screen name="pricing/rate" options={editorModal} />
 
       <Stack.Screen name="salary/index" options={formHeader({ title: 'Зарплата' })} />
+      <Stack.Screen name="salary/scheme" options={editorModal} />
+      <Stack.Screen name="salary/pay" options={formHeader({ title: 'Выдать зарплату' })} />
       <Stack.Screen name="expenses/index" options={formHeader({ title: 'Расходы' })} />
       <Stack.Screen name="expenses/new" options={editorModal} />
 
@@ -83,19 +85,22 @@ export default function ManageLayout() {
       <Stack.Screen name="loyalty/bonus" options={formHeader({ title: 'Бонусная программа' })} />
       <Stack.Screen name="loyalty/certificates" options={formHeader({ title: 'Сертификаты' })} />
       <Stack.Screen name="loyalty/discount" options={editorModal} />
-      <Stack.Screen name="loyalty/tier-rule" options={editorModal} />
+      <Stack.Screen name="loyalty/certificate" options={formHeader()} />
+      <Stack.Screen name="loyalty/certificate-new" options={editorModal} />
+      <Stack.Screen name="loyalty/pick" options={editorModal} />
 
       <Stack.Screen name="staff/index" options={formHeader({ title: 'Сотрудники' })} />
       <Stack.Screen name="staff/[staffId]" options={formHeader()} />
       <Stack.Screen name="staff/me" options={formHeader({ title: 'Мой профиль' })} />
       <Stack.Screen name="staff/notifications" options={formHeader({ title: 'Уведомления' })} />
-      <Stack.Screen name="staff/new" options={editorModal} />
+      <Stack.Screen name="staff/add" options={editorModal} />
 
       <Stack.Screen name="settings/index" options={formHeader({ title: 'Настройки клуба' })} />
       <Stack.Screen name="settings/reviews" options={formHeader({ title: 'Отзывы гостей' })} />
       {/* «Сайт»: оформление, расписание, публикации, онлайн-запись, домен и контакты — нативно. */}
       <Stack.Screen name="settings/site/index" options={formHeader({ title: 'Сайт' })} />
       <Stack.Screen name="settings/site/look" options={formHeader({ title: 'Оформление' })} />
+      <Stack.Screen name="settings/site/links" options={formHeader({ title: 'Таплинк' })} />
       <Stack.Screen name="settings/site/schedule" options={formHeader({ title: 'Расписание вечеров' })} />
       <Stack.Screen name="settings/site/evening" options={editorModal} />
       <Stack.Screen name="settings/site/stories" options={formHeader({ title: 'Публикации' })} />

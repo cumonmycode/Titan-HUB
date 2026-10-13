@@ -12,6 +12,9 @@ const nextConfig: NextConfig = {
       // Страницы-заглушки шаблона Wix: кабинет участника и заявление о доступности.
       { source: '/members', destination: '/residents', permanent: true },
       { source: '/accessibility-statement', destination: '/', permanent: true },
+      // Таплинк: одна ссылка для соцсетей живёт на /link.
+      { source: '/links', destination: '/link', permanent: true },
+      { source: '/taplink', destination: '/link', permanent: true },
       // PDF со старого сайта (ссылки разошлись по чатам резидентов).
       { source: '/_files/ugd/ebde67_c09c4ac728c4427d8f6c32bceb5c5435.pdf', destination: '/docs/pravila-fsm.pdf', permanent: true },
       { source: '/_files/ugd/ebde67_3479bcb06de442b2b21c64fa52f22b29.pdf', destination: '/docs/50-ottenkov-krasnogo.pdf', permanent: true },

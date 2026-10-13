@@ -57,6 +57,17 @@ export function invalidateShift() {
   }
 }
 
+/** Состав смены: открытую правит персонал, закрытую — владелец. */
+export async function setShiftStaff(shiftId: string, staffIds: string[]): Promise<void> {
+  await api.put(`/shifts/${shiftId}/staff`, { staffIds });
+  invalidateShift();
+  const host = useSession.getState().club?.host ?? 'none';
+  void queryClient.invalidateQueries({ queryKey: [host, 'salary'] });
+}
+
+/** Внесение или изъятие, которое проводится вместе с открытием смены. */
+export type OpeningCashOp = { type: 'deposit' | 'withdrawal'; amount: number; description?: string };
+
 /** Сумма из поля ввода: «1 500,50» → 1500.5; пусто или мусор → null. */
 export function parseAmount(text: string): number | null {
   const normalized = text.replace(/\s/g, '').replace(',', '.');

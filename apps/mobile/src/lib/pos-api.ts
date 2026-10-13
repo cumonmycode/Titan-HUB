@@ -19,6 +19,8 @@ import type { CheckDetail, CheckRow, NumericString } from './types';
 export type PlayerSearchItem = {
   id: string;
   nickname: string;
+  /** Роль профиля: на чек сотрудника касса не ставит игровой тариф. */
+  role?: 'client' | 'staff' | 'owner';
   clientTier: string;
   /** > 0 — депозит, < 0 — долг. */
   balance: NumericString;

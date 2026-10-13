@@ -26,7 +26,8 @@ import { listLastPolls, votersForToday } from '../../lib/pollState.js'
 import { readPollConfigs } from '../../lib/polls.js'
 import { readAliases } from '../../lib/tgAliases.js'
 import { findPublished, listPublished, publicStory } from './stories.js'
-import { readSiteContacts, readSiteDomain } from './settings.js'
+import { readSiteContacts, readSiteDomain, readSiteLinks } from './settings.js'
+import { getClientBot } from '../requests/clientBot.js'
 
 function rows<T = Record<string, unknown>>(res: unknown): T[] {
   return ((res as { rows?: unknown[] }).rows ?? (res as unknown[])) as T[]
@@ -98,7 +99,9 @@ siteRouter.get('/config', async (c) => {
   // Бронь зоны — все активные зоны клуба (как было в форме /book, которую заменил сайт).
   const zones = await db.select({ id: spaces.id, name: spaces.name, capacity: spaces.capacity, hourlyRate: spaces.hourlyRate })
     .from(spaces).where(eq(spaces.isActive, true)).orderBy(asc(spaces.name))
-  const [contacts, domain] = await Promise.all([readSiteContacts(db), readSiteDomain(db)])
+  const [contacts, domain, links, bot] = await Promise.all([
+    readSiteContacts(db), readSiteDomain(db), readSiteLinks(db), getClientBot(db).catch(() => null),
+  ])
 
   c.header('Cache-Control', `public, max-age=${CONFIG_MAX_AGE_SECONDS}`)
   return c.json({
@@ -115,6 +118,9 @@ siteRouter.get('/config', async (c) => {
     eveningPrices,
     eventRates: rates.map((r) => ({ hours: r.hours, price: Number(r.price) })),
     zones: zones.map((z) => ({ id: z.id, name: z.name, capacity: z.capacity, hourlyRate: Number(z.hourlyRate) })),
+    // Таплинк (/link) и прямая ссылка на Tai — администратора клуба в Telegram.
+    links,
+    taiUrl: bot?.username ? `https://t.me/${bot.username}` : null,
   })
 })
 

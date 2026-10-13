@@ -1,10 +1,30 @@
 import { ContentUnavailableView, Form, Host, ProgressView, Section, Text, Toggle } from '@expo/ui/swift-ui';
 import { refreshable } from '@expo/ui/swift-ui/modifiers';
-import { Stack } from 'expo-router';
+import { Stack, useRouter } from 'expo-router';
 import { Alert } from 'react-native';
 
-import { TextRow } from '@/components/native-form';
+import { LinkRow, TextRow } from '@/components/native-form';
 import { useSettingsEditor } from '@/components/settings-parts';
+import { tierLook, useClientTiers } from '@/lib/clients-api';
+import { useGoods } from '@/lib/goods-api';
+import { usePickDraft } from '@/lib/loyalty-api';
+
+function parseRates(raw: string): Record<string, number> {
+  try {
+    const v = JSON.parse(raw || '{}') as unknown;
+    return v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, number>) : {};
+  } catch {
+    return {};
+  }
+}
+function parseIds(raw: string): string[] {
+  try {
+    const v = JSON.parse(raw || '[]') as unknown;
+    return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [];
+  } catch {
+    return [];
+  }
+}
 
 /** Проверка числа из поля перед сохранением настройки. */
 function numberIn(raw: string, min: number, max: number, apply: (value: string) => void) {
@@ -13,9 +33,16 @@ function numberIn(raw: string, min: number, max: number, apply: (value: string) 
   apply(String(parsed));
 }
 
-/** Бонусная программа: начисление, списание, срок жизни, подарок на день рождения, видимость у клиентов. */
+/**
+ * Бонусная программа: начисление (общий процент и свой для каждого статуса, категории без
+ * бонусов), списание, срок жизни, подарок на день рождения, видимость у клиентов.
+ */
 export default function BonusSettingsScreen() {
+  const router = useRouter();
   const settings = useSettingsEditor();
+  const tiers = useClientTiers();
+  const goods = useGoods();
+  const startPick = usePickDraft((s) => s.start);
 
   if (settings.loading || settings.error) {
     return (
@@ -44,6 +71,50 @@ export default function BonusSettingsScreen() {
                 <TextRow label="Процент от покупки, %" value={String(settings.number('bonus_accrual_rate', 5))} keyboard="decimal-pad" onCommit={(v) => numberIn(v, 0, 100, (x) => settings.save({ bonus_accrual_rate: x }))} />
                 <TextRow label="Минимальная покупка, ₽" value={String(settings.number('bonus_min_purchase', 0))} keyboard="decimal-pad" onCommit={(v) => numberIn(v, 0, 1_000_000, (x) => settings.save({ bonus_min_purchase: x }))} />
                 <Toggle label="Начислять при долге" isOn={settings.flag('bonus_accrual_on_debt', false)} onIsOnChange={(next) => settings.save({ bonus_accrual_on_debt: next ? 'true' : 'false' })} />
+              </Section>
+
+              <Section title="По статусам" footer={<Text>Свой процент для статуса. Пусто — общий процент выше.</Text>}>
+                {(tiers.data ?? []).map((t) => {
+                  const rates = parseRates(settings.text('bonus_tier_rates', '{}'));
+                  return (
+                    <TextRow
+                      key={t.key}
+                      label={`${tierLook(t.key, tiers.data).label}, %`}
+                      value={rates[t.key] !== undefined ? String(rates[t.key]) : ''}
+                      placeholder={String(settings.number('bonus_accrual_rate', 5))}
+                      keyboard="decimal-pad"
+                      onCommit={(v) => {
+                        const next = { ...rates };
+                        if (!v.trim()) delete next[t.key];
+                        else {
+                          const n = Number(v.replace(',', '.'));
+                          if (!Number.isFinite(n) || n < 0 || n > 100) return Alert.alert('Введите число от 0 до 100');
+                          next[t.key] = n;
+                        }
+                        settings.save({ bonus_tier_rates: JSON.stringify(next) });
+                      }}
+                    />
+                  );
+                })}
+              </Section>
+
+              <Section title="Без бонусов" footer={<Text>За эти категории бонусы не начисляются — например, за тарифы игры или алкоголь.</Text>}>
+                {(() => {
+                  const excluded = parseIds(settings.text('bonus_excluded_categories', '[]'));
+                  const names = excluded.map((id) => goods.data?.categories.find((c) => c.id === id)?.name).filter(Boolean).join(', ');
+                  return (
+                    <LinkRow
+                      icon="nosign"
+                      color="#8E8E93"
+                      title={names || 'Начислять на всё'}
+                      value={excluded.length ? String(excluded.length) : 'Выбрать'}
+                      onPress={() => {
+                        startPick('categories', excluded, (ids) => settings.save({ bonus_excluded_categories: JSON.stringify(ids) }));
+                        router.push('/manage/loyalty/pick');
+                      }}
+                    />
+                  );
+                })()}
               </Section>
 
               <Section title="Списание" footer={<Text>Какую часть чека можно закрыть бонусами. Срок жизни 0 — бонусы не сгорают.</Text>}>

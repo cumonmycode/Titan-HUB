@@ -1,5 +1,5 @@
-import { Form, Host, LabeledContent, ProgressView, Section, Text, TextField, useNativeState } from '@expo/ui/swift-ui';
-import { font, foregroundStyle, monospacedDigit } from '@expo/ui/swift-ui/modifiers';
+import { Button, Form, HStack, Host, LabeledContent, ProgressView, Section, Spacer, Text, TextField, useNativeState } from '@expo/ui/swift-ui';
+import { buttonStyle, controlSize, font, foregroundStyle, monospacedDigit } from '@expo/ui/swift-ui/modifiers';
 import { useMutation } from '@tanstack/react-query';
 import { Stack, useRouter } from 'expo-router';
 import { useState } from 'react';
@@ -11,15 +11,28 @@ import { formatMoney, plural } from '@/lib/format';
 import { haptic } from '@/lib/haptics';
 import { invalidateShift, parseAmount, useCashBalance } from '@/lib/shift-api';
 import { ToolbarButton } from '@/components/toolbar';
+import { LinkRow } from '@/components/native-form';
+import { useShiftSummary } from '@/lib/queries';
+import { useShiftSalary } from '@/lib/salary-api';
+import { useSession } from '@/lib/session';
+import { colors } from '@/lib/theme';
 
 type CloseResult = { analytics?: { totalRevenue: number | string; checksCount: number; avgCheck: number | string } };
 
 const cashMoney = (value: number, sign = false) => formatMoney(value, { sign, kopecks: 'auto' });
 
-/** Закрытие смены: фактические наличные сверяются с ожидаемыми; расхождение — только с причиной. */
+/**
+ * Закрытие смены: кто работал и сколько им положено (выдаёт владелец — прямо здесь),
+ * внесение и изъятие, затем пересчёт наличных; расхождение — только с причиной.
+ */
 export default function CloseShift() {
   const router = useRouter();
   const balance = useCashBalance();
+  const summary = useShiftSummary();
+  const isOwner = useSession((st) => st.user?.role === 'owner');
+  const shift = summary.data?.shift ?? null;
+  const team = (summary.data?.shift ? summary.data.staff : undefined) ?? [];
+  const salary = useShiftSalary(shift?.id);
   const [typed, setTyped] = useState<string | null>(null);
   const [reason, setReason] = useState('');
   // Ключ поля суммы, замороженный при первом вводе. Пока пользователь ничего не набрал,
@@ -81,6 +94,42 @@ export default function CloseShift() {
 
       <Host style={{ flex: 1 }} useViewportSizeMeasurement>
         <Form>
+          <Section title="Кто работал">
+            <LinkRow
+              icon="person.2.fill"
+              color={colors.accent}
+              title={team.length ? team.map((w) => w.nickname).join(', ') : 'Никого не отметили'}
+              value="Изменить"
+              onPress={() => router.push('/shift/staff')}
+            />
+          </Section>
+
+          {(salary.data?.workers.length ?? 0) > 0 && (
+            <Section
+              title="Зарплата за смену"
+              footer={<Text>{isOwner ? 'Нажмите на сотрудника — сумму по формуле можно поправить. Наличные выдаются из кассы до пересчёта.' : 'Зарплату выдаёт владелец — после закрытия он получит напоминание.'}</Text>}>
+              {salary.data!.workers.map((w) => (
+                <LinkRow
+                  key={w.profileId}
+                  icon={w.paid ? 'checkmark.circle.fill' : 'banknote'}
+                  color={w.paid ? colors.green : colors.orange}
+                  title={w.nickname}
+                  subtitle={w.paid ? `Выдано ${cashMoney(w.paid.amount)}` : `По формуле «${w.scheme.name}»`}
+                  value={cashMoney(w.paid ? w.paid.amount : w.calculated)}
+                  onPress={isOwner ? () => router.push({ pathname: '/shift/pay', params: { shiftId: shift!.id, profileId: w.profileId } }) : undefined}
+                />
+              ))}
+            </Section>
+          )}
+
+          <Section title="Внести или изъять">
+            <HStack spacing={10}>
+              <Button label="Внести" systemImage="arrow.down.circle" onPress={() => router.push({ pathname: '/shift/cash', params: { type: 'deposit' } })} modifiers={[buttonStyle('bordered'), controlSize('large')]} />
+              <Spacer />
+              <Button label="Изъять" systemImage="arrow.up.circle" onPress={() => router.push({ pathname: '/shift/cash', params: { type: 'withdrawal' } })} modifiers={[buttonStyle('bordered'), controlSize('large')]} />
+            </HStack>
+          </Section>
+
           {balance.isLoading || !b ? (
             <Section>
               <ProgressView />

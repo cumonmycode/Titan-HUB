@@ -85,7 +85,13 @@ export default function NewCheckSheet() {
           <SearchStep
             query={query}
             onQuery={setQuery}
-            onPlayer={(player) => go({ name: 'tariff', player })}
+            onPlayer={(player) => {
+              // Сотрудник на чеке — без игрового тарифа: шаг выбора тарифа не нужен.
+              if (player.role === 'staff' || player.role === 'owner') {
+                haptic.light();
+                create.mutate({ playerId: player.id });
+              } else go({ name: 'tariff', player });
+            }}
             onNewClient={(nickname) => go({ name: 'client', nickname })}
             onSpace={() => go({ name: 'space' })}
             onNoClient={() => {

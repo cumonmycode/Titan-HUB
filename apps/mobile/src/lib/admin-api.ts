@@ -1,17 +1,15 @@
 import { useQuery } from '@tanstack/react-query';
 
 import { api } from './api';
-import { formatMoney, toNumber } from './format';
 import { queryClient } from './query';
 import { useClubKey } from './queries';
 import { useSession } from './session';
 import { startStaffLink } from './staff-push';
-import type { NumericString } from './types';
 
 /**
- * Администрирование клуба: лояльность (скидки, бонусы, сертификаты), пользователи и права,
- * мой профиль и уведомления, настройки заведения, Telegram-опросы, «О системе».
- * Серверные роуты: discounts, certificates, staff, auth/me, notifications, system, club.
+ * Администрирование клуба: мой профиль и уведомления, настройки заведения, Telegram-опросы,
+ * «О системе». Команда — lib/staff-api.ts, скидки и сертификаты — lib/loyalty-api.ts.
+ * Серверные роуты: auth/me, notifications, system, club.
  * Настройки клуба на сервере — строки: булевы значения отправляем как "true"/"false"
  * (скидка персоналу — "1"/"0", как в вебе).
  */
@@ -108,210 +106,6 @@ export function useReviewsConfig() {
 export async function saveReviewsConfig(patch: Partial<ReviewsConfig>): Promise<void> {
   await api.put('/system/reviews-config', patch);
   invalidate(['system', 'reviews-config']);
-}
-
-/* ─────────────────────────── Скидки ─────────────────────────── */
-
-export type Discount = {
-  id: string;
-  name: string;
-  type: 'percent' | 'fixed';
-  value: NumericString;
-  isActive: boolean;
-  isAuto: boolean;
-  minQuantity: number | null;
-  itemId: string | null;
-  clientId: string | null;
-  createdAt: string;
-};
-
-export type TierRule = {
-  id: string;
-  name: string;
-  clientTier: string;
-  discountId: string | null;
-  isActive: boolean;
-  discount: { name: string | null; type: 'percent' | 'fixed' | null; value: NumericString | null } | null;
-};
-
-export function useDiscounts() {
-  const club = useClubKey();
-  return useQuery({
-    queryKey: [club, 'loyalty', 'discounts'],
-    queryFn: () => api.get<{ discounts: Discount[] }>('/discounts').then((r) => r.discounts),
-    staleTime: 15_000,
-  });
-}
-
-export function useTierRules() {
-  const club = useClubKey();
-  return useQuery({
-    queryKey: [club, 'loyalty', 'tier-rules'],
-    queryFn: () => api.get<{ rules: TierRule[] }>('/discounts/tier-rules').then((r) => r.rules),
-    staleTime: 15_000,
-  });
-}
-
-/** «−15 %» или «−300 ₽». */
-export const discountValueText = (discount: { type: 'percent' | 'fixed'; value: NumericString }) =>
-  discount.type === 'percent' ? `−${toNumber(discount.value)} %` : `−${formatMoney(toNumber(discount.value))}`;
-
-export type DiscountInput = {
-  name: string;
-  type: 'percent' | 'fixed';
-  value: number;
-  isActive: boolean;
-  isAuto: boolean;
-  minQuantity: number | null;
-  itemId: string | null;
-  clientId: string | null;
-};
-
-export async function saveDiscount(discountId: string | null, input: DiscountInput): Promise<void> {
-  const body = {
-    name: input.name.trim(),
-    type: input.type,
-    value: input.value,
-    isActive: input.isActive,
-    isAuto: input.isAuto,
-    // «Без порога» = 1 (умолчание сервера): иначе при правке порог нельзя было снять.
-    minQuantity: input.minQuantity ?? 1,
-    itemId: input.itemId,
-    clientId: input.clientId,
-  };
-  if (discountId) await api.patch(`/discounts/${discountId}`, body);
-  else await api.post('/discounts', body);
-  invalidate(['loyalty'], ['pos']);
-}
-
-export async function deleteDiscount(discountId: string): Promise<void> {
-  await api.delete(`/discounts/${discountId}`);
-  invalidate(['loyalty'], ['pos']);
-}
-
-export async function createTierRule(clientTier: string, discountId: string): Promise<void> {
-  await api.post('/discounts/tier-rules', { clientTier, discountId, isActive: true });
-  invalidate(['loyalty'], ['pos']);
-}
-
-export async function setTierRuleActive(ruleId: string, isActive: boolean): Promise<void> {
-  await api.patch(`/discounts/tier-rules/${ruleId}`, { isActive });
-  invalidate(['loyalty'], ['pos']);
-}
-
-export async function deleteTierRule(ruleId: string): Promise<void> {
-  await api.delete(`/discounts/tier-rules/${ruleId}`);
-  invalidate(['loyalty'], ['pos']);
-}
-
-/* ─────────────────────────── Сертификаты ─────────────────────────── */
-
-export type Certificate = { id: string; code: string; amount: number; balance: number; status: 'active' | 'used'; createdAt: string };
-
-export function useCertificates() {
-  const club = useClubKey();
-  return useQuery({
-    queryKey: [club, 'loyalty', 'certificates'],
-    queryFn: () => api.get<{ certificates: Certificate[] }>('/certificates').then((r) => r.certificates),
-    staleTime: 15_000,
-  });
-}
-
-/** Выпуск сертификата; код генерирует сервер. Без идемпотентности — кнопку блокируем. */
-export async function issueCertificate(nominal: number): Promise<{ code: string; nominal: NumericString }> {
-  const { certificate } = await api.post<{ certificate: { code: string; nominal: NumericString } }>('/certificates', { nominal });
-  invalidate(['loyalty', 'certificates']);
-  return certificate;
-}
-
-/** Только владелец: погасить сертификат (больше не принимается в кассе). */
-export async function deactivateCertificate(certificateId: string): Promise<void> {
-  await api.put(`/certificates/${certificateId}/deactivate`, {});
-  invalidate(['loyalty', 'certificates']);
-}
-
-/* ─────────────────────────── Сотрудники ─────────────────────────── */
-
-export type StaffRow = {
-  id: string;
-  nickname: string;
-  phone: string | null;
-  role: 'owner' | 'staff';
-  permissions: Record<string, boolean> | null;
-  tgId: string | null;
-  tgUsername: string | null;
-  photoUrl: string | null;
-  createdAt: string;
-};
-
-export const PERMISSIONS: { key: string; label: string; defaultOn: boolean }[] = [
-  { key: 'menu', label: 'Меню', defaultOn: true },
-  { key: 'inventory', label: 'Склад', defaultOn: true },
-  { key: 'clients', label: 'Клиенты', defaultOn: true },
-  { key: 'discounts', label: 'Скидки', defaultOn: true },
-  { key: 'bonus', label: 'Бонусы', defaultOn: true },
-  { key: 'debtors', label: 'Депозиты, долги и сборы', defaultOn: false },
-  { key: 'expenses', label: 'Расходы', defaultOn: false },
-  { key: 'staff', label: 'Персонал', defaultOn: false },
-  { key: 'salary', label: 'Зарплата', defaultOn: false },
-  { key: 'about', label: 'О заведении', defaultOn: true },
-];
-
-export const permissionOn = (row: Pick<StaffRow, 'permissions'>, key: string) => row.permissions?.[key] ?? PERMISSIONS.find((p) => p.key === key)?.defaultOn ?? true;
-
-export function useStaffAdmin(enabled: boolean) {
-  const club = useClubKey();
-  return useQuery({
-    queryKey: [club, 'staff', 'admin'],
-    queryFn: () => api.get<{ staff: StaffRow[] }>('/staff').then((r) => r.staff),
-    enabled,
-    staleTime: 15_000,
-  });
-}
-
-export function useStaffPasskeys(staffId: string, enabled: boolean) {
-  const club = useClubKey();
-  return useQuery({
-    queryKey: [club, 'staff', staffId, 'passkeys'],
-    queryFn: () => api.get<{ passkeys: { id: string; deviceType: string | null; backedUp: boolean | null; createdAt: string }[] }>(`/staff/${staffId}/passkeys`).then((r) => r.passkeys),
-    enabled,
-    staleTime: 30_000,
-  });
-}
-
-export async function createStaff(input: { nickname: string; password: string; pin: string | null; phone: string | null; role: 'owner' | 'staff' }): Promise<void> {
-  await api.post('/staff', {
-    nickname: input.nickname.trim(),
-    password: input.password,
-    role: input.role,
-    ...(input.pin ? { pin: input.pin } : {}),
-    ...(input.phone ? { phone: input.phone.trim() } : {}),
-  });
-  invalidate(['staff']);
-}
-
-export async function updateStaff(staffId: string, patch: { nickname?: string; phone?: string; role?: 'owner' | 'staff'; password?: string; permissions?: Record<string, boolean> }): Promise<void> {
-  await api.patch(`/staff/${staffId}`, patch);
-  invalidate(['staff'], ['me']);
-}
-
-export async function resetStaffPin(staffId: string, pin: string): Promise<void> {
-  await api.post(`/staff/${staffId}/reset-pin`, { pin });
-}
-
-/** Увольнение: профиль скрывается, его passkey удаляются. Себя удалить нельзя. */
-export async function deleteStaff(staffId: string): Promise<void> {
-  await api.delete(`/staff/${staffId}`);
-  invalidate(['staff']);
-}
-
-export async function deleteStaffPasskey(staffId: string, passkeyId: string): Promise<void> {
-  await api.delete(`/staff/${staffId}/passkeys/${passkeyId}`);
-  invalidate(['staff', staffId, 'passkeys']);
-}
-
-export async function staffTelegramLink(staffId: string): Promise<{ deepLink: string; linked: boolean; tgUsername: string | null }> {
-  return api.post<{ deepLink: string; linked: boolean; tgUsername: string | null }>(`/staff/${staffId}/telegram-link`, {});
 }
 
 /* ─────────────────────────── Мой профиль и уведомления ─────────────────────────── */
@@ -476,3 +270,6 @@ export async function createBackup(): Promise<{ name: string; uploaded: boolean 
   invalidate(['system', 'backup']);
   return r;
 }
+
+/* Права сотрудника переехали в lib/staff-api.ts; реэкспорт — для старых импортов. */
+export { PERMISSIONS, permissionOn } from './staff-api';

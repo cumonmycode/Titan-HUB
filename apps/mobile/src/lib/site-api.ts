@@ -73,6 +73,43 @@ export async function saveSite(patch: SitePatch): Promise<void> {
 
 /* ─────────────────────────── Домен ─────────────────────────── */
 
+/* ─────────────────────────── Таплинк (/link) ─────────────────────────── */
+
+export type SiteLinkKind = 'book_game' | 'book_event' | 'tai' | 'telegram' | 'channel' | 'whatsapp' | 'vk' | 'instagram' | 'phone' | 'map' | 'site' | 'custom';
+export type SiteLink = { id: string; kind: SiteLinkKind; label: string; url: string; on: boolean };
+export type SiteLinks = { title: string; bio: string; links: SiteLink[]; pageUrl: string; contacts: SiteContacts; taiUrl: string | null };
+
+/** Подписи готовых кнопок — как на странице /link (apps/site/src/app/link/page.tsx). */
+export const LINK_LOOK: Record<SiteLinkKind, { title: string; icon: string; color: string }> = {
+  book_game: { title: 'Записаться на игру', icon: 'calendar.badge.checkmark', color: '#7C4DFF' },
+  book_event: { title: 'Заказать мероприятие', icon: 'party.popper', color: '#FF2D55' },
+  tai: { title: 'Написать администратору (Tai)', icon: 'sparkles', color: '#7C4DFF' },
+  telegram: { title: 'Telegram', icon: 'paperplane.fill', color: '#32ADE6' },
+  channel: { title: 'Канал клуба', icon: 'megaphone.fill', color: '#32ADE6' },
+  whatsapp: { title: 'WhatsApp', icon: 'message.fill', color: '#34C759' },
+  vk: { title: 'ВКонтакте', icon: 'globe', color: '#0077FF' },
+  instagram: { title: 'Instagram', icon: 'camera.fill', color: '#E1306C' },
+  phone: { title: 'Позвонить', icon: 'phone.fill', color: '#34C759' },
+  map: { title: 'Как добраться', icon: 'map.fill', color: '#FF9500' },
+  site: { title: 'Сайт клуба', icon: 'safari.fill', color: '#007AFF' },
+  custom: { title: 'Своя ссылка', icon: 'link', color: '#8E8E93' },
+};
+
+export function useSiteLinks() {
+  const club = useClubKey();
+  return useQuery({
+    queryKey: [club, 'site', 'links'],
+    queryFn: () => api.get<SiteLinks>('/system/site-links'),
+    staleTime: 30_000,
+  });
+}
+
+export async function saveSiteLinks(value: { title: string; bio: string; links: SiteLink[] }): Promise<void> {
+  await api.put('/system/site-links', value);
+  const club = useSession.getState().club?.host ?? 'none';
+  void queryClient.invalidateQueries({ queryKey: [club, 'site', 'links'] });
+}
+
 export type DomainCert = { cert: 'none' | 'pending' | 'active' | 'error'; expiresAt: string | null; error: string | null; checkedAt: string | null };
 export type SiteDomain = {
   domain: string | null;

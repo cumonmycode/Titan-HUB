@@ -22,8 +22,8 @@ import { listChats } from '../../lib/tgChats.js'
 import { getClientBot } from '../requests/clientBot.js'
 import { SITE_HOLIDAYS, isSiteHoliday, parseSchedule } from './site.router.js'
 import {
-  DOMAIN_RE, REQUESTS_CHAT_KEY, SITE_CONTACTS_KEY, SITE_DOMAIN_KEY, SITE_DOMAIN_PRIMARY_KEY, SiteContactsSchema,
-  readRequestsChat, readSiteContacts, readSiteDomain,
+  DOMAIN_RE, REQUESTS_CHAT_KEY, SITE_CONTACTS_KEY, SITE_DOMAIN_KEY, SITE_DOMAIN_PRIMARY_KEY, SITE_LINKS_KEY, SiteContactsSchema, SiteLinksSchema,
+  readRequestsChat, readSiteContacts, readSiteDomain, readSiteLinks,
 } from './settings.js'
 
 const ROOT_DOMAIN = (process.env['ROOT_DOMAIN'] || 'titanpos.ru').toLowerCase()
@@ -37,6 +37,28 @@ const owner = [requireAuth, requireRole('owner')] as const
 function upsert(db: Database, key: string, value: string) {
   return db.insert(appSettings).values({ key, value }).onConflictDoUpdate({ target: appSettings.key, set: { value } })
 }
+
+// ─── Таплинк (/link): кнопки для соцсетей ────────────────────────────────────
+siteAdminSettingsRouter.get('/site-links', ...owner, async (c) => {
+  const db = c.var.db
+  const [links, domain, contacts, bot] = await Promise.all([
+    readSiteLinks(db), readSiteDomain(db), readSiteContacts(db), getClientBot(db).catch(() => null),
+  ])
+  const base = domain.url ?? SITE_MIRROR
+  return c.json({ ...links, pageUrl: `${base}/link`, contacts, taiUrl: bot?.username ? `https://t.me/${bot.username}` : null })
+})
+
+siteAdminSettingsRouter.put('/site-links', ...owner, zValidator('json', SiteLinksSchema), async (c) => {
+  const body = c.req.valid('json')
+  const ids = new Set<string>()
+  for (const l of body.links) {
+    if (ids.has(l.id)) return c.json({ error: 'Повторяющиеся кнопки' }, 400)
+    ids.add(l.id)
+    if (l.kind === 'custom' && (!l.label || !l.url)) return c.json({ error: 'У своей ссылки нужны название и адрес https://' }, 400)
+  }
+  await upsert(c.var.db, SITE_LINKS_KEY, JSON.stringify(body))
+  return c.json({ ok: true })
+})
 
 // ─── Оформление, расписание, контакты, уведомления ───────────────────────────
 siteAdminSettingsRouter.get('/site-config', ...owner, async (c) => {

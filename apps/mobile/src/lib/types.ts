@@ -162,10 +162,14 @@ export type ShiftForecastPerCheck = {
 };
 
 /** GET /api/pos/shift-summary — без открытой смены приходит только `{ shift: null }`. */
+export type ShiftWorker = { id: string; nickname: string; photoUrl: string | null };
+
 export type ShiftSummary =
   | { shift: null }
   | {
       shift: { id: string; openedAt: string; eveningType: string };
+      /** Кто работает на смене (получат зарплату за неё). */
+      staff?: ShiftWorker[];
       /** total — без аренды. */
       openChecks: { count: number; total: number };
       cashInRegister: number;

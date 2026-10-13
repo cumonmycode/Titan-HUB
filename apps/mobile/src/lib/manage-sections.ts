@@ -1,6 +1,6 @@
 import type { SFSymbol } from 'sf-symbols-typescript';
 
-import { permissionOn } from './admin-api';
+import { permissionOn } from './staff-api';
 
 /**
  * Разделы «Управления» — список в духе «Настроек» iOS: сверху профиль, дальше группы

@@ -10,6 +10,11 @@ export interface SiteContactsData {
   phone: string; email: string; telegram: string; channel: string; whatsapp: string; vk: string; instagram: string
 }
 
+/** Кнопка таплинка (/link): готовый вид или своя ссылка. Правится в HUB («Сайт → Таплинк»). */
+export type SiteLinkKind = 'book_game' | 'book_event' | 'tai' | 'telegram' | 'channel' | 'whatsapp' | 'vk' | 'instagram' | 'phone' | 'map' | 'site' | 'custom'
+export interface SiteLink { id: string; kind: SiteLinkKind; label: string; url: string; on: boolean }
+export interface SiteLinks { title: string; bio: string; links: SiteLink[] }
+
 export interface SiteConfig {
   /** Праздничное оформление (включается в HUB) или null. */
   holiday: HolidayId | null
@@ -21,6 +26,10 @@ export interface SiteConfig {
   eveningPrices: Price[]
   eventRates: EventRate[]
   zones: Zone[]
+  /** Таплинк; null — HUB не ответил (страница покажет стандартный набор). */
+  links: SiteLinks | null
+  /** Tai — администратор клуба в Telegram. */
+  taiUrl: string | null
   /** false — данные не пришли из HUB, показываем запасные (сайт не должен падать). */
   live: boolean
 }

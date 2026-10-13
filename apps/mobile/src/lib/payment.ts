@@ -360,13 +360,14 @@ const CERTIFICATE_ERRORS: Record<string, string> = {
   Depleted: 'На сертификате не осталось средств',
 };
 
-export async function validateCertificate(rawCode: string): Promise<Certificate> {
+/** checkId — сколько из этого чека можно оплатить сертификатом (на что он выпущен). */
+export async function validateCertificate(rawCode: string, checkId?: string): Promise<Certificate> {
   const code = rawCode.trim().toUpperCase();
   if (!code) throw new Error('Введите код сертификата');
   let lastError: unknown;
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      const r = await api.get<{ remaining: number | string }>(`/certificates/validate/${encodeURIComponent(code)}`);
+      const r = await api.get<{ remaining: number | string }>(`/certificates/validate/${encodeURIComponent(code)}${checkId ? `?checkId=${encodeURIComponent(checkId)}` : ''}`);
       return { code, remaining: round2(toNumber(r.remaining)) };
     } catch (error) {
       lastError = error;

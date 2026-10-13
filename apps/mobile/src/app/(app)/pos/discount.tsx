@@ -3,7 +3,7 @@ import { pickerStyle, tag } from '@expo/ui/swift-ui/modifiers';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
 import { useState } from 'react';
-import { Alert, Pressable, StyleSheet, View } from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import Animated, { FadeIn, FadeOut, LinearTransition } from 'react-native-reanimated';
 
 import { Text } from '@/components/text';
@@ -12,6 +12,7 @@ import { RollingText } from '@/components/rolling-text';
 import { formatMoney, toNumber } from '@/lib/format';
 import { haptic } from '@/lib/haptics';
 import { applyDiscount, restoreDiscount } from '@/lib/pos-api';
+import { applyClubDiscount, discountValueText, useClubDiscounts } from '@/lib/loyalty-api';
 import { useCheck } from '@/lib/queries';
 import { parseAmount } from '@/lib/shift-api';
 import { colors, space, type } from '@/lib/theme';
@@ -47,6 +48,30 @@ export default function DiscountSheet() {
   const excluded = data?.excludedDiscounts ?? [];
 
   const close = () => router.back();
+  // Скидки клуба, которые кассир выбирает сам (настраиваются в «Лояльности»).
+  const club = useClubDiscounts(checkId);
+  const clubList = club.data ?? [];
+
+  const applyClub = async (id: string, amount: number, applied: boolean) => {
+    if (applied || busy) return;
+    if (amount <= 0) {
+      haptic.warning();
+      Alert.alert('Не подходит этому чеку', 'В чеке нет позиций, на которые действует эта скидка, или мала сумма.');
+      return;
+    }
+    haptic.medium();
+    setBusy(true);
+    try {
+      await applyClubDiscount(checkId, id);
+      haptic.success();
+      close();
+    } catch (error) {
+      haptic.error();
+      Alert.alert('Скидка не применена', error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const apply = async () => {
     if (!canApply) return;
@@ -81,6 +106,23 @@ export default function DiscountSheet() {
   return (
     <View style={styles.sheet}>
       <SheetHeader title="Скидка на чек" onClose={close} />
+
+      {clubList.length > 0 && (
+        <View style={styles.club}>
+          <Text style={[type.footnote, sheetStyles.sectionTitle]}>СКИДКИ КЛУБА</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.clubRow}>
+            {clubList.map((d) => (
+              <GlassChip
+                key={d.id}
+                icon={d.applied ? 'checkmark' : d.amount > 0 ? 'tag' : 'tag.slash'}
+                label={`${d.name} · ${d.amount > 0 ? `−${formatMoney(d.amount, { kopecks: 'auto' })}` : discountValueText(d)}`}
+                active={d.applied}
+                onPress={() => void applyClub(d.id, d.amount, d.applied)}
+              />
+            ))}
+          </ScrollView>
+        </View>
+      )}
 
       <View style={styles.display} accessibilityLiveRegion="polite">
         <View style={styles.valueRow}>
@@ -168,6 +210,8 @@ export default function DiscountSheet() {
 }
 
 const styles = StyleSheet.create({
+  club: { gap: space.sm },
+  clubRow: { gap: space.sm, paddingRight: space.lg },
   sheet: { paddingHorizontal: space.xl, paddingTop: space.xl, paddingBottom: space.lg, gap: space.lg },
   flex: { flex: 1 },
   pressed: { opacity: 0.6 },

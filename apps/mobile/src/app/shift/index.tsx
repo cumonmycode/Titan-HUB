@@ -28,6 +28,7 @@ import { Stack, useRouter } from 'expo-router';
 import { formatMoney, formatTime, plural } from '@/lib/format';
 import { useShiftSummary } from '@/lib/queries';
 import { ToolbarButton } from '@/components/toolbar';
+import { LinkRow } from '@/components/native-form';
 import { colors } from '@/lib/theme';
 
 const secondary = foregroundStyle({ type: 'hierarchical', style: 'secondary' });
@@ -121,6 +122,16 @@ export default function ShiftSheet() {
                 {formatMoney(cashInRegister)}
               </Text>
             </LabeledContent>
+          </Section>
+
+          <Section title="На смене" footer={<Text>Зарплату за смену получат отмеченные сотрудники.</Text>}>
+            <LinkRow
+              icon="person.2.fill"
+              color={colors.accent}
+              title={data.staff?.length ? data.staff.map((w) => w.nickname).join(', ') : 'Никого не отметили'}
+              value="Изменить"
+              onPress={() => router.push('/shift/staff')}
+            />
           </Section>
 
           <Section title="Наличные в кассе">
