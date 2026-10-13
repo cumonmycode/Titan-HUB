@@ -41,6 +41,7 @@ import { salaryRouter } from './modules/salary/salary.router.js'
 import { refundsRouter } from './modules/refunds/refunds.router.js'
 import { notificationsRouter } from './modules/notifications/notifications.router.js'
 import { aiRouter } from './modules/ai/ai.router.js'
+import { smmRouter } from './modules/smm/smm.router.js'
 import { systemRouter } from './modules/system/system.router.js'
 import { uploadRouter } from './modules/upload/upload.router.js'
 import { staffRouter } from './modules/staff/staff.router.js'
@@ -118,8 +119,10 @@ app.use('*', prettyJSON())
 // свой — в роутере: файл до 8 МБ; у голоса Tai (/api/ai/assistant/transcribe) — тоже 8 МБ;
 // у восстановления из файла (/api/system/restore-upload) — тоже свой, в system.router.
 const defaultBodyLimit = bodyLimit({ maxSize: 1 * 1024 * 1024 })
+// Файлы СММ (видео для рилс до 60 МБ, фото клуба, скриншоты статистики) — лимит в smm.router.
+const SMM_UPLOAD_RE = /^\/api\/smm\/(?:posts\/[0-9a-f-]{36}\/media|assets|analytics\/screenshot)$/i
 const hasOwnBodyLimit = (path: string): boolean =>
-  path.startsWith('/api/upload/') || path === '/api/auth/app/photo' || path === '/api/system/restore-upload' || path === '/api/ai/assistant/transcribe'
+  path.startsWith('/api/upload/') || path === '/api/auth/app/photo' || path === '/api/system/restore-upload' || path === '/api/ai/assistant/transcribe' || SMM_UPLOAD_RE.test(path)
 app.use('/api/*', (c, next) => (hasOwnBodyLimit(c.req.path) ? next() : defaultBodyLimit(c, next)))
 app.use('/api/*', rateLimit)
 // Инжект БД клуба в контекст (Фаза 1). Wave 0: дефолтная БД = синглтон.
@@ -229,6 +232,9 @@ app.route('/api/salary', salaryRouter)
 app.route('/api/refunds', refundsRouter)
 app.route('/api/notifications', notificationsRouter)
 app.route('/api/ai', aiRouter)
+// СММ и маркетинг — Tai ведёт соцсети клуба; нейросети — как у остальных ИИ-функций (модуль 'ai').
+app.use('/api/smm/*', requireAiPaid())
+app.route('/api/smm', smmRouter)
 app.route('/api/system', systemRouter)
 // Сайт клуба: публикации (турниры, вечеринки) — ведёт владелец из HUB.
 app.route('/api/site-admin', siteAdminRouter)

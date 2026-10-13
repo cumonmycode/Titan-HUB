@@ -17,6 +17,7 @@ import { handleLinkCode, handleLinkStart } from './login/link.js'
 import { handleRequestStart } from './login/request.js'
 import { converse } from './dialog/converse.js'
 import { touchContact, updateContact } from './dialog/memory.js'
+import { onSmmPrivate } from '../smm/tg-handlers.js'
 
 const MAX_VOICE_BYTES = 8 * 1024 * 1024
 const START_GREETING = 'Привет! (человек только что открыл бота и нажал «Старт» — поздоровайся и коротко скажи, чем можешь помочь)'
@@ -112,6 +113,8 @@ export async function onPrivateMessage(club: TgClub, msg: TgMessage): Promise<vo
     input = heard
     voice = true
   }
+  // СММ: замечание к посту, ссылка на вышедшую публикацию, скриншот статистики.
+  if (person.staff && (await onSmmPrivate(club, person, msg, input))) return
   if (!input) {
     await club.bot.send(chatId, 'Я понимаю текст и голосовые — напиши или наговори, что нужно 🙂')
     return

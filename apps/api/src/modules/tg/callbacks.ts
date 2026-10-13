@@ -16,6 +16,7 @@ import { actionMarkup, actionText, supplyAltMarkup, supplyMarkup, supplyText } f
 import { acceptSupply, cancelSupply, editSupply, supplyCard, type SupplyCtx } from '../ai/tai/supply.js'
 import { converse, loadChoice } from './dialog/converse.js'
 import { appendMessage, getContact, touchContact } from './dialog/memory.js'
+import { onSmmCallback } from '../smm/tg-handlers.js'
 
 const REJECTED_TEXT = '🛡 Вход отклонён — доступ никому не выдан. Если это был не ты, ничего делать не нужно.'
 const UUID_RE = /^[0-9a-f-]{36}$/i
@@ -71,6 +72,9 @@ export async function onCallback(club: TgClub, cq: TgCallbackQuery): Promise<voi
       return
     case 'sv':
       await onSupply(club, cq, data.split(':'))
+      return
+    case 'sm':
+      await onSmmCallback(club, cq, arg, extra)
       return
     default:
       await club.bot.answerCallback(cq.id)

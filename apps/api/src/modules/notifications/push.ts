@@ -100,6 +100,7 @@ export const NOTIFICATION_TYPES: NotificationTypeDef[] = [
   { key: 'supply_received', label: 'Приход на склад', description: 'Оформлен приход товара на склад', defaultEnabled: true },
   { key: 'large_refund', label: 'Крупный возврат', description: 'Оформлен возврат на крупную сумму', defaultEnabled: true },
   { key: 'site_request', label: 'Заявка с сайта', description: 'Запись на игру, бронь зоны, мероприятие или сообщение с сайта клуба', defaultEnabled: true },
+  { key: 'smm', label: 'СММ и маркетинг', description: 'Пост ждёт одобрения, пора выложить в Instagram, план и отчёт от Tai', defaultEnabled: true },
 ]
 
 const DEFAULT_ENABLED: Record<string, boolean> = Object.fromEntries(

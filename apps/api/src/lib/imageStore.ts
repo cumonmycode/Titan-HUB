@@ -105,3 +105,88 @@ export async function storeImage(file: File | string | null): Promise<StoreImage
     return { ok: false, status: 500, error: e?.message ?? 'Не удалось сохранить файл' }
   }
 }
+
+// ── Медиа СММ: картинки и видео от нейросетей и с телефона ──────────────────────
+// Нейросеть отдаёт ссылку на 7 дней — кладём файл к себе. Видео (MP4/MOV) допустимо
+// только здесь: обычная загрузка картинок по-прежнему принимает лишь изображения.
+
+export const MAX_MEDIA_BYTES = 60 * 1024 * 1024
+export const MAX_MEDIA_BODY_BYTES = MAX_MEDIA_BYTES + 64 * 1024
+
+/** Тип медиа по первым байтам: картинка (как выше) или видео MP4/MOV (ftyp на смещении 4). */
+export function sniffMediaType(buf: Buffer): string | null {
+  const image = sniffImageType(buf)
+  if (image) return image
+  if (buf.length >= 12 && buf[4] === 0x66 && buf[5] === 0x74 && buf[6] === 0x79 && buf[7] === 0x70) {
+    const brand = buf.subarray(8, 12).toString('ascii')
+    return brand === 'qt  ' ? 'video/quicktime' : 'video/mp4'
+  }
+  return null
+}
+
+const MEDIA_EXT: Record<string, string> = { ...ALLOWED_TYPES, 'video/mp4': 'mp4', 'video/quicktime': 'mov' }
+
+async function ensureBucket(client: Minio.Client): Promise<void> {
+  if (await client.bucketExists(BUCKET)) return
+  await client.makeBucket(BUCKET)
+  await client.setBucketPolicy(BUCKET, JSON.stringify({
+    Version: '2012-10-17',
+    Statement: [{ Effect: 'Allow', Principal: { AWS: ['*'] }, Action: ['s3:GetObject'], Resource: [`arn:aws:s3:::${BUCKET}/*`] }],
+  }))
+}
+
+/** Положить проверенный по байтам файл (картинку или видео) в MinIO; вернуть публичную ссылку. */
+export async function storeMediaBuffer(buffer: Buffer): Promise<StoreImageResult & { mime?: string }> {
+  if (buffer.length > MAX_MEDIA_BYTES) return { ok: false, status: 400, error: 'Файл больше 60 МБ' }
+  const mime = sniffMediaType(buffer)
+  const ext = mime ? MEDIA_EXT[mime] : undefined
+  if (!mime || !ext) return { ok: false, status: 400, error: 'Допустимы картинки (JPEG, PNG, WebP) и видео (MP4, MOV)' }
+  const objectName = `smm-${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
+  try {
+    const client = getMinioClient()
+    await ensureBucket(client)
+    await client.putObject(BUCKET, objectName, buffer, buffer.length, { 'Content-Type': mime })
+    return { ok: true, url: `${process.env['MINIO_PUBLIC_URL'] ?? 'http://localhost:9000'}/${objectName}`, mime }
+  } catch (e: any) {
+    console.error('[smm] не удалось сохранить медиа в MinIO:', e?.code ?? '', e?.message ?? e)
+    return { ok: false, status: 500, error: 'Не удалось сохранить файл' }
+  }
+}
+
+/** Скачать файл по ссылке (результат нейросети) и сохранить у себя. */
+export async function storeRemoteMedia(url: string, timeoutMs = 120_000): Promise<StoreImageResult & { mime?: string }> {
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) })
+    if (!res.ok) return { ok: false, status: 500, error: `Файл не скачался (${res.status})` }
+    return storeMediaBuffer(Buffer.from(await res.arrayBuffer()))
+  } catch (e: any) {
+    console.error('[smm] не удалось скачать медиа:', e?.message ?? e)
+    return { ok: false, status: 500, error: 'Файл не скачался' }
+  }
+}
+
+/**
+ * Прочитать сохранённый файл обратно (для отправки в Telegram): свой — прямо из
+ * MinIO по имени объекта (без похода через nginx), чужая ссылка — обычным запросом.
+ */
+export async function readStoredMedia(url: string): Promise<{ data: Buffer; mime: string; name: string } | null> {
+  const base = (process.env['MINIO_PUBLIC_URL'] ?? 'http://localhost:9000').replace(/\/+$/, '')
+  const name = url.split('/').pop()?.split('?')[0] || 'file'
+  try {
+    let data: Buffer
+    if (url.startsWith(`${base}/`)) {
+      const stream = await getMinioClient().getObject(BUCKET, url.slice(base.length + 1))
+      const chunks: Buffer[] = []
+      for await (const chunk of stream) chunks.push(Buffer.from(chunk as Buffer))
+      data = Buffer.concat(chunks)
+    } else {
+      const res = await fetch(url, { signal: AbortSignal.timeout(60_000) })
+      if (!res.ok) return null
+      data = Buffer.from(await res.arrayBuffer())
+    }
+    return { data, mime: sniffMediaType(data) ?? 'application/octet-stream', name }
+  } catch (e: any) {
+    console.error('[smm] не удалось прочитать медиа:', e?.message ?? e)
+    return null
+  }
+}

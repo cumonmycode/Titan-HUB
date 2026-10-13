@@ -16,6 +16,11 @@
 
 const TELEGRAM = 'https://api.telegram.org'
 const BOT_PATH = /^\/(file\/)?bot\d+:[A-Za-z0-9_-]+\//
+// 3) Публичные страницы для аналитики СММ (только чтение, только эти хосты):
+//      GET /<RELAY_KEY>/web/t.me/s/<канал>  → https://t.me/s/<канал>
+//      GET /<RELAY_KEY>/web/i.instagram.com/api/v1/users/web_profile_info/?username=…
+const WEB_PATH = /^\/web\/(t\.me|www\.instagram\.com|i\.instagram\.com)(\/[^?#]*)$/
+const WEB_HEADERS = ['user-agent', 'accept', 'accept-language', 'x-ig-app-id']
 const WEBHOOK_PATH = /^\/api\/tg\/poll-webhook\/[A-Za-z0-9-]+$/
 const FORWARD_HEADERS = ['content-type', 'accept', 'x-telegram-bot-api-secret-token']
 
@@ -48,6 +53,16 @@ export default {
 
     if (key && url.pathname.startsWith(`/${key}/`)) {
       const rest = url.pathname.slice(key.length + 1)
+      const web = WEB_PATH.exec(rest)
+      if (web && request.method === 'GET') {
+        const headers = new Headers()
+        for (const name of WEB_HEADERS) {
+          const v = request.headers.get(name)
+          if (v) headers.set(name, v)
+        }
+        const res = await fetch(`https://${web[1]}${web[2]}${url.search}`, { headers, redirect: 'manual' })
+        return new Response(res.body, { status: res.status, headers: { 'content-type': res.headers.get('content-type') || 'text/html' } })
+      }
       if (!BOT_PATH.test(rest)) return notFound()
       return forward(request, `${TELEGRAM}${rest}${url.search}`)
     }
