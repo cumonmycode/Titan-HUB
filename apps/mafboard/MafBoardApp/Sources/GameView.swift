@@ -39,9 +39,6 @@ final class GameController: Identifiable {
         profile(at: seat)?.nickname ?? "Игрок \(seat)"
     }
 
-    /// Игрок, чья карточка раскрыта: говорит сейчас (речь, прощальная, оправдание, добор).
-    var expandedSeat: Seat? { state.currentSpeaker }
-
     func perform(_ action: GameAction) {
         let step = state.currentStep
         let wasFinished = state.isFinished
@@ -71,6 +68,26 @@ final class GameController: Identifiable {
         if state.currentStep != step { resetTimer() }
         if wasFinished, !state.isFinished { onReopen?(id) }
         save()
+    }
+
+    // MARK: Подсказки для «Назад» и «Далее»
+
+    /// Куда ведёт «Далее»: заголовок следующего шага.
+    var nextHint: String {
+        if state.isFinished { return "К списку игр" }
+        guard state.canAdvance else { return "Сначала подсчитайте голоса" }
+        guard let next = try? GameEngine.apply(.advance, to: state, at: .now) else { return "" }
+        return next.currentStep.title(in: next)
+    }
+
+    /// Что отменит «Назад».
+    var backHint: String {
+        guard let last = session.log.last?.action else { return "Нечего отменять" }
+        if case .advance = last,
+           let previous = try? GameSession.replay(setup: session.setup, log: Array(session.log.dropLast())) {
+            return "к «\(previous.currentStep.title(in: previous))»"
+        }
+        return "отменить \(last.undoLabel)"
     }
 
     // MARK: Таймер
@@ -116,29 +133,72 @@ private extension GameEvent {
     }
 }
 
+private extension GameAction {
+    /// «фол №3», «выставление №5» — для подписи кнопки «Назад».
+    var undoLabel: String {
+        switch self {
+        case .advance: "шаг"
+        case let .nominate(candidate, _): "выставление №\(candidate)"
+        case .withdrawNomination: "снятие кандидатуры"
+        case .submitBallot: "голосование"
+        case let .night(input):
+            switch input {
+            case .shot: "выстрел"
+            case .check: "проверку"
+            case .heal: "лечение"
+            case .skip: "пропуск"
+            }
+        case let .foul(seat): "фол №\(seat)"
+        case let .cancelFoul(seat): "снятие фола №\(seat)"
+        case let .techFoul(seat): "техфол №\(seat)"
+        case let .cancelTechFoul(seat): "снятие техфола №\(seat)"
+        case let .warning(seat): "предупреждение №\(seat)"
+        case let .disqualify(seat, _): "удаление №\(seat)"
+        case let .eliminateByHost(seat, _): "выбывание №\(seat)"
+        case .recordBestMove: "лучший ход"
+        case .declareOutcome: "итог игры"
+        case .adjustScore: "баллы"
+        }
+    }
+}
+
 // MARK: - Экран игры
 
 struct GameScreen: View {
     @Bindable var game: GameController
     @Environment(\.dismiss) private var dismiss
+    @State private var expanded: Seat?
     @State private var isPickingBestMove = false
+
+    private var state: GameState { game.state }
 
     var body: some View {
         NavigationStack {
-            List {
-                PhaseSection(game: game) { isPickingBestMove = true }
-                if let speaker = game.expandedSeat, let seat = game.state.seat(speaker) {
-                    SpeakerSection(game: game, seat: seat)
+            ScrollView {
+                VStack(spacing: 12) {
+                    PhaseHeader(game: game) { isPickingBestMove = true }
+                    stepContent
+                    if !state.isFinished {
+                        VStack(spacing: 8) {
+                            ForEach(state.seats) { seat in
+                                PlayerCard(game: game, seat: seat, isExpanded: expanded == seat.seat) {
+                                    withAnimation(.snappy) { expanded = expanded == seat.seat ? nil : seat.seat }
+                                }
+                            }
+                        }
+                    }
                 }
-                Section("Игроки") {
-                    ForEach(game.state.seats) { SeatRow(game: game, seat: $0) }
-                }
+                .padding(.horizontal)
+                .padding(.bottom, 16)
             }
-            .listSectionSpacing(.compact)
-            .animation(.snappy, value: game.expandedSeat)
-            .navigationTitle(game.state.moment.displayName)
+            .background(Color(.systemGroupedBackground))
+            .navigationTitle(state.moment.displayName)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { toolbar }
+            .safeAreaInset(edge: .bottom) { StepBar(game: game) { dismiss() } }
+            .onChange(of: state.currentSpeaker, initial: true) { _, speaker in
+                withAnimation(.snappy) { expanded = speaker }
+            }
             .sheet(isPresented: $isPickingBestMove) { BestMoveSheet(game: game) }
             .alert("Ошибка", isPresented: Binding(get: { game.errorMessage != nil }, set: { if !$0 { game.errorMessage = nil } })) {
                 Button("OK", role: .cancel) {}
@@ -158,6 +218,27 @@ struct GameScreen: View {
         .onDisappear { UIApplication.shared.isIdleTimerDisabled = false }
     }
 
+    @ViewBuilder
+    private var stepContent: some View {
+        switch state.currentStep {
+        case let .ballot(candidates, kind):
+            VotingPanel(game: game, candidates: candidates, kind: kind)
+                .id("\(candidates)|\(kind.rawValue)")
+        case let .liftBallot(candidates):
+            LiftPanel(game: game, candidates: candidates)
+        case let .timed(_, speaker) where speaker == nil:
+            TimerView(game: game).gameCard()
+        case let .night(step):
+            NightPanel(game: game, step: step)
+        case .finished:
+            if let record = game.record {
+                ResultsCard(record: record) { game.profile(at: $0) }
+            }
+        default:
+            EmptyView()
+        }
+    }
+
     @ToolbarContentBuilder
     private var toolbar: some ToolbarContent {
         ToolbarItem(placement: .topBarLeading) {
@@ -168,31 +249,65 @@ struct GameScreen: View {
                 game.showsRoles.toggle()
             }
             Menu("Ещё", systemImage: "ellipsis") {
+                if state.bestMoveAuthor != nil, state.bestMove == nil {
+                    Button("Лучший ход", systemImage: "star") { isPickingBestMove = true }
+                }
                 Section("Завершить вручную") {
                     ForEach([Winner.red, .black, .draw], id: \.self) { winner in
                         Button(winner.displayName) { game.perform(.declareOutcome(winner, note: nil)) }
                     }
                 }
             }
-            .disabled(game.state.isFinished)
+            .disabled(state.isFinished)
         }
-        ToolbarItem(placement: .bottomBar) {
-            Button("Отменить", systemImage: "arrow.uturn.backward") { game.undo() }
+    }
+}
+
+// MARK: - Шаги: «Назад» и «Далее»
+
+/// Крупные кнопки шагов внизу: «Назад» отменяет последнее действие, «Далее» ведёт к следующему шагу.
+private struct StepBar: View {
+    let game: GameController
+    let onFinish: () -> Void
+
+    var body: some View {
+        GlassEffectContainer(spacing: 12) {
+            HStack(spacing: 12) {
+                Button {
+                    game.undo()
+                } label: {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Label("Назад", systemImage: "chevron.backward").font(.headline)
+                        Text(game.backHint).font(.caption).lineLimit(1).opacity(0.8)
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 50, alignment: .leading)
+                    .padding(.horizontal, 6)
+                }
+                .buttonStyle(.glass)
                 .disabled(!game.session.canUndo)
-        }
-        ToolbarSpacer(.flexible, placement: .bottomBar)
-        ToolbarItem(placement: .bottomBar) {
-            if game.state.isFinished {
-                Button("Готово", systemImage: "checkmark") { dismiss() }
-                    .labelStyle(.titleAndIcon)
-                    .buttonStyle(.glassProminent)
-            } else {
-                Button("Далее", systemImage: "forward.fill") { game.perform(.advance) }
-                    .labelStyle(.titleAndIcon)
-                    .buttonStyle(.glassProminent)
-                    .disabled(!game.state.canAdvance)
+                .frame(maxWidth: 150)
+
+                Button {
+                    if game.state.isFinished { onFinish() } else { game.perform(.advance) }
+                } label: {
+                    VStack(alignment: .trailing, spacing: 2) {
+                        HStack(spacing: 6) {
+                            Text(game.state.isFinished ? "Готово" : "Далее")
+                            Image(systemName: game.state.isFinished ? "checkmark" : "chevron.forward")
+                        }
+                        .font(.headline)
+                        Text(game.nextHint).font(.caption).lineLimit(1).opacity(0.85)
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 50, alignment: .trailing)
+                    .padding(.horizontal, 6)
+                }
+                .buttonStyle(.glassProminent)
+                .disabled(!game.state.canAdvance && !game.state.isFinished)
             }
         }
+        .controlSize(.large)
+        .padding(.horizontal)
+        .padding(.bottom, 4)
     }
 }
 

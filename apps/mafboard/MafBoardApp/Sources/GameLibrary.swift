@@ -16,12 +16,41 @@ struct FinishedGame: Codable, Identifiable {
     let players: [PlayerProfile]
     /// Ушла в историю на сервер (личную или клуба).
     var isUploaded: Bool
+    /// Вечер для старых игр, сыгранных до появления вечеров (у новых он в `record.seriesID`).
+    var legacyEveningID: SeriesID?
 
     var id: GameID { record.id }
+    var eveningID: SeriesID? { record.seriesID ?? legacyEveningID }
 
     func profile(at seat: Seat) -> PlayerProfile? {
         guard let id = record.seat(seat)?.playerID else { return nil }
         return players.first { $0.id == id }
+    }
+
+    /// Игроки в порядке мест — для «Следующей игры» тем же составом.
+    var seatedPlayers: [PlayerProfile] {
+        record.seats.compactMap { seat in players.first { $0.id == seat.playerID } }
+    }
+}
+
+/// Вечер: игры одного режима и варианта подряд. Итоги вечера — сумма баллов за его игры.
+struct Evening: Codable, Identifiable, Equatable {
+    let id: SeriesID
+    let format: CompetitionFormat
+    let variant: GameVariant
+    let createdAt: Date
+    var updatedAt: Date
+    var closedAt: Date?
+    /// Состав последней игры — чтобы следующую начать тем же составом.
+    var lastPlayers: [PlayerProfile]
+
+    /// Вечер без игр дольше 12 часов закрывается сам.
+    static let idleLimit: TimeInterval = 12 * 3600
+
+    var isOpen: Bool { closedAt == nil && Date.now.timeIntervalSince(updatedAt) < Self.idleLimit }
+
+    var title: String {
+        "\(format.displayName) · \(createdAt.formatted(.dateTime.day().month(.wide)))"
     }
 }
 
@@ -29,7 +58,7 @@ enum GameFiles {
     static var directory: URL { URL.applicationSupportDirectory }
     static var active: URL { directory.appending(path: "current-game.json") }
     static var history: URL { directory.appending(path: "history.json") }
-    static var series: URL { directory.appending(path: "series.json") }
+    static var evenings: URL { directory.appending(path: "evenings.json") }
 
     static func write(_ value: some Encodable, to url: URL) throws {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -55,22 +84,7 @@ enum SavedGameStore {
     static func clear() { try? FileManager.default.removeItem(at: GameFiles.active) }
 }
 
-// MARK: - Серии в истории
-
-/// Серия на главном экране: игры одного режима за один вечер (у рейтинга — одна серия на вечер).
-struct HistoryGroup: Identifiable {
-    let id: String
-    let format: CompetitionFormat
-    let number: Int
-    let day: Date
-    /// По времени: первая игра — первой.
-    let games: [FinishedGame]
-
-    var title: String { "\(format.displayName) #\(number) \(day.formatted(.dateTime.day(.twoDigits).month(.twoDigits).year()))" }
-    var isClosed: Bool { !Calendar.current.isDateInToday(day) }
-}
-
-/// Строка «Итогов» серии: сумма баллов игрока за все её игры.
+/// Строка итогов вечера: сумма баллов игрока за все его игры.
 struct SummaryRow: Identifiable {
     let player: PlayerProfile
     let games: Int
@@ -86,27 +100,28 @@ struct SummaryRow: Identifiable {
 final class GameLibrary {
     private(set) var active: SavedGame?
     private(set) var history: [FinishedGame] = []
+    private(set) var evenings: [Evening] = []
     /// Открытая на экране игра.
     var presented: GameController?
-    /// Игра, созданная в листе «Новая» — откроется, когда лист закроется.
+    /// Игра, созданная в листе «Новая игра» — откроется, когда лист закроется.
     private var pending: GameController?
     var errorMessage: String?
     /// Выгрузка законченной игры на сервер (задаёт приложение). `true` — принята.
-    var uploader: ((GameRecord) async -> Bool)?
-    private var seriesByKey: [String: SeriesID] = [:]
+    var uploader: (@MainActor (GameRecord) async -> Bool)?
 
     init() {
         reload()
-        seriesByKey = (try? GameFiles.read([String: SeriesID].self, from: GameFiles.series)) ?? [:]
     }
 
     func reload() {
         do {
             active = try SavedGameStore.load()
             history = try GameFiles.read([FinishedGame].self, from: GameFiles.history) ?? []
+            evenings = try GameFiles.read([Evening].self, from: GameFiles.evenings) ?? []
         } catch {
             errorMessage = "Часть сохранённых игр не удалось прочитать — файл отложен. \(error.localizedDescription)"
         }
+        adoptOrphanGames()
     }
 
     // MARK: Игры
@@ -140,8 +155,14 @@ final class GameLibrary {
     }
 
     private func archive(_ record: GameRecord, players: [PlayerProfile]) {
+        let game = FinishedGame(record: record, players: players, isUploaded: false)
         history.removeAll { $0.id == record.id }
-        history.insert(FinishedGame(record: record, players: players, isUploaded: false), at: 0)
+        history.insert(game, at: 0)
+        if let id = record.seriesID, let index = evenings.firstIndex(where: { $0.id == id }) {
+            evenings[index].updatedAt = record.finishedAt
+            evenings[index].lastPlayers = game.seatedPlayers
+            saveEvenings()
+        }
         SavedGameStore.clear()
         active = nil
         saveHistory()
@@ -165,6 +186,89 @@ final class GameLibrary {
         saveHistory()
     }
 
+    // MARK: Вечера
+
+    var openEvenings: [Evening] { evenings.filter(\.isOpen).sorted { $0.updatedAt > $1.updatedAt } }
+    var closedEvenings: [Evening] {
+        evenings.filter { !$0.isOpen && !games(of: $0).isEmpty }.sorted { $0.updatedAt > $1.updatedAt }
+    }
+
+    /// Открытый вечер того же режима и варианта — его можно продолжить.
+    func openEvening(format: CompetitionFormat, variant: GameVariant) -> Evening? {
+        openEvenings.first { $0.format == format && $0.variant == variant }
+    }
+
+    /// Новый вечер. `id` задаётся заранее, чтобы создать вечер только после проверки первой игры.
+    @discardableResult
+    func startEvening(id: SeriesID = SeriesID(), format: CompetitionFormat, variant: GameVariant) -> Evening {
+        let evening = Evening(id: id, format: format, variant: variant, createdAt: .now, updatedAt: .now, closedAt: nil, lastPlayers: [])
+        evenings.append(evening)
+        saveEvenings()
+        return evening
+    }
+
+    func closeEvening(_ id: SeriesID) {
+        guard let index = evenings.firstIndex(where: { $0.id == id }) else { return }
+        evenings[index].closedAt = .now
+        saveEvenings()
+    }
+
+    /// Игры вечера по порядку.
+    func games(of evening: Evening) -> [FinishedGame] {
+        history.filter { $0.eveningID == evening.id }.sorted { $0.record.finishedAt < $1.record.finishedAt }
+    }
+
+    func summary(of evening: Evening) -> [SummaryRow] {
+        var rows: [PlayerID: SummaryRow] = [:]
+        for game in games(of: evening) {
+            for score in GameScorer.score(game.record) {
+                guard let player = game.players.first(where: { $0.id == score.playerID }) else { continue }
+                let current = rows[score.playerID]
+                rows[score.playerID] = SummaryRow(
+                    player: player,
+                    games: (current?.games ?? 0) + 1,
+                    wins: (current?.wins ?? 0) + (score.result == .win ? 1 : 0),
+                    points: (current?.points ?? .zero) + score.total
+                )
+            }
+        }
+        return rows.values.sorted { ($0.points, $0.wins) > ($1.points, $1.wins) }
+    }
+
+    /// Игры, сыгранные до появления вечеров: собираем их в закрытые вечера по дню, режиму и варианту.
+    private func adoptOrphanGames() {
+        var created: [String: SeriesID] = [:]
+        var changed = false
+        for index in history.indices {
+            let record = history[index].record
+            if let id = history[index].eveningID {
+                guard !evenings.contains(where: { $0.id == id }) else { continue }
+                evenings.append(Self.closedEvening(id: id, for: record))
+                changed = true
+                continue
+            }
+            let day = Calendar.current.startOfDay(for: record.finishedAt).timeIntervalSince1970
+            let key = "\(day)|\(record.format.rawValue)|\(record.variant.rawValue)"
+            let id = created[key] ?? SeriesID()
+            if created[key] == nil {
+                created[key] = id
+                evenings.append(Self.closedEvening(id: id, for: record))
+            }
+            history[index].legacyEveningID = id
+            changed = true
+        }
+        guard changed else { return }
+        saveEvenings()
+        saveHistory()
+    }
+
+    private static func closedEvening(id: SeriesID, for record: GameRecord) -> Evening {
+        Evening(id: id, format: record.format, variant: record.variant, createdAt: record.startedAt,
+                updatedAt: record.finishedAt, closedAt: record.finishedAt, lastPlayers: [])
+    }
+
+    // MARK: Сохранение
+
     private func saveHistory() {
         do {
             try GameFiles.write(history, to: GameFiles.history)
@@ -173,54 +277,11 @@ final class GameLibrary {
         }
     }
 
-    // MARK: Серии
-
-    /// Серия вечера для режима с таблицей (рейтинг, миникап, турнир). У фанки серии нет.
-    func seriesID(format: CompetitionFormat, variant: GameVariant, on day: Date = .now) -> SeriesID? {
-        guard format.countsTowardStandings else { return nil }
-        let key = "\(day.formatted(.iso8601.year().month().day()))|\(format.rawValue)|\(variant.rawValue)"
-        if let id = seriesByKey[key] { return id }
-        let id = SeriesID()
-        seriesByKey[key] = id
-        try? GameFiles.write(seriesByKey, to: GameFiles.series)
-        return id
-    }
-
-    var groups: [HistoryGroup] {
-        let calendar = Calendar.current
-        let buckets = Dictionary(grouping: history) { game in
-            game.record.seriesID?.description
-                ?? "\(calendar.startOfDay(for: game.record.finishedAt).timeIntervalSince1970)|\(game.record.format.rawValue)|\(game.record.variant.rawValue)"
+    private func saveEvenings() {
+        do {
+            try GameFiles.write(evenings, to: GameFiles.evenings)
+        } catch {
+            errorMessage = "Вечера не сохранились: \(error.localizedDescription)"
         }
-        let unnumbered = buckets.map { key, games in
-            (key: key, games: games.sorted { $0.record.finishedAt < $1.record.finishedAt })
-        }
-        .sorted { ($0.games.first?.record.finishedAt ?? .distantPast) < ($1.games.first?.record.finishedAt ?? .distantPast) }
-
-        var counters: [CompetitionFormat: Int] = [:]
-        let numbered = unnumbered.compactMap { bucket -> HistoryGroup? in
-            guard let first = bucket.games.first else { return nil }
-            let format = first.record.format
-            counters[format, default: 0] += 1
-            return HistoryGroup(
-                id: bucket.key, format: format, number: counters[format] ?? 1,
-                day: calendar.startOfDay(for: first.record.finishedAt), games: bucket.games
-            )
-        }
-        return numbered.reversed()
-    }
-
-    static func summary(of group: HistoryGroup) -> [SummaryRow] {
-        var rows: [PlayerID: (player: PlayerProfile, games: Int, wins: Int, points: Points)] = [:]
-        for game in group.games {
-            for score in GameScorer.score(game.record) {
-                guard let player = game.players.first(where: { $0.id == score.playerID }) else { continue }
-                let current = rows[score.playerID] ?? (player, 0, 0, .zero)
-                rows[score.playerID] = (player, current.games + 1, current.wins + (score.result == .win ? 1 : 0), current.points + score.total)
-            }
-        }
-        return rows.values
-            .map { SummaryRow(player: $0.player, games: $0.games, wins: $0.wins, points: $0.points) }
-            .sorted { ($0.points, $0.wins) > ($1.points, $1.wins) }
     }
 }

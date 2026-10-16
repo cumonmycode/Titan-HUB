@@ -53,35 +53,41 @@ struct RootView: View {
 // MARK: - Вкладки
 
 enum AppTab: Hashable {
-    case home
-    case history
-    /// Не экран, а действие: открывает лист «Новая игра».
+    case games
+    case standings
+    /// Не экран, а действие: открывает «Новую игру».
     case new
     case club
     case profile
 }
 
-/// Одна стеклянная панель вкладок iOS: Главная, История, Новый, Мой клуб, Профиль.
+/// Запрос на новую игру: с нуля или следующей игрой вечера.
+struct NewGameRequest: Identifiable {
+    let id = UUID()
+    var evening: Evening?
+}
+
+/// Одна стеклянная панель вкладок iOS: Игры, Рейтинг, Новая, Клуб, Профиль.
 struct MainTabView: View {
     @Environment(GameLibrary.self) private var library
-    @State private var tab = AppTab.home
-    @State private var isCreating = false
+    @State private var tab = AppTab.games
+    @State private var newGame: NewGameRequest?
 
     var body: some View {
         @Bindable var library = library
         TabView(selection: Binding(get: { tab }, set: { selected in
-            if selected == .new { isCreating = true } else { tab = selected }
+            if selected == .new { newGame = NewGameRequest() } else { tab = selected }
         })) {
-            Tab("Главная", systemImage: "house", value: AppTab.home) {
-                HomeView(onNewGame: { isCreating = true }, onOpenProfile: { tab = .profile })
+            Tab("Игры", systemImage: "theatermasks", value: AppTab.games) {
+                GamesView(onNewGame: { newGame = NewGameRequest(evening: $0) })
             }
-            Tab("История", systemImage: "clock.arrow.circlepath", value: AppTab.history) {
-                HistoryView()
+            Tab("Рейтинг", systemImage: "trophy", value: AppTab.standings) {
+                StandingsView()
             }
-            Tab("Новый", systemImage: "plus.circle", value: AppTab.new) {
+            Tab("Новая", systemImage: "plus.circle.fill", value: AppTab.new) {
                 Color.clear
             }
-            Tab("Мой клуб", systemImage: "person.3", value: AppTab.club) {
+            Tab("Клуб", systemImage: "person.3", value: AppTab.club) {
                 ClubView(onOpenProfile: { tab = .profile })
             }
             Tab("Профиль", systemImage: "person.crop.circle", value: AppTab.profile) {
@@ -89,7 +95,7 @@ struct MainTabView: View {
             }
         }
         .tabBarMinimizeBehavior(.onScrollDown)
-        .sheet(isPresented: $isCreating, onDismiss: library.presentPending) { NewGameView() }
+        .sheet(item: $newGame, onDismiss: library.presentPending) { NewGameFlow(evening: $0.evening) }
         .fullScreenCover(item: $library.presented, onDismiss: library.reload) { GameScreen(game: $0) }
         .alert("Игры", isPresented: Binding(get: { library.errorMessage != nil }, set: { if !$0 { library.errorMessage = nil } })) {
             Button("OK", role: .cancel) {}

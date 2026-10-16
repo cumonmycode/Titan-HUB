@@ -1,60 +1,197 @@
 import SwiftUI
 import MafBoardCore
 
-// MARK: - Фаза
+extension View {
+    /// Карточка на экране игры — системный фон сгруппированного списка.
+    func gameCard() -> some View {
+        padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 22, style: .continuous))
+    }
+}
 
-/// Что сейчас происходит и что от ведущего нужно: голоса, ночной ход, итоги.
-struct PhaseSection: View {
+// MARK: - Шапка фазы
+
+/// Где мы: день или ночь, текущий шаг, кто говорит, кто выставлен.
+struct PhaseHeader: View {
     let game: GameController
     let onBestMove: () -> Void
 
     private var state: GameState { game.state }
-
-    var body: some View {
-        Section {
-            HStack(alignment: .firstTextBaseline) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(state.currentStep.title(in: state)).font(.title3.weight(.semibold))
-                    Text("\(state.setup.variant.displayName) · в игре \(state.aliveSeats.count) из \(state.seats.count)")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                FormatTag(format: state.setup.format)
-            }
-            content
-            if let author = state.bestMoveAuthor, state.bestMove == nil {
-                Button("Лучший ход игрока №\(author)", systemImage: "star", action: onBestMove)
-            }
+    private var isNight: Bool {
+        switch state.phase {
+        case .night, .nightZero: true
+        default: false
         }
     }
 
-    @ViewBuilder
-    private var content: some View {
-        switch state.currentStep {
-        case let .timed(_, speaker) where speaker == nil:
-            TimerView(game: game)
-        case let .ballot(candidates, _):
-            HandCountBallot(game: game, candidates: candidates).id(candidates)
-        case let .liftBallot(candidates):
-            LiftBallot(game: game, candidates: candidates)
-        case let .night(step):
-            NightControls(game: game, step: step)
-        case .dusk:
-            Text("Нажмите «Далее», чтобы продолжить").foregroundStyle(.secondary)
-        case .finished:
-            if let record = game.record {
-                GameResultsList(record: record) { game.profile(at: $0) }
+    private var subtitle: String {
+        if let speaker = state.currentSpeaker { return "Говорит \(game.name(of: speaker)) · в игре \(state.aliveSeats.count) из \(state.seats.count)" }
+        if case .finished = state.currentStep { return outcomeReason }
+        return "\(state.setup.variant.displayName) · в игре \(state.aliveSeats.count) из \(state.seats.count)"
+    }
+
+    private var outcomeReason: String {
+        switch state.outcome?.reason {
+        case .allBlackEliminated: "Все чёрные выбыли"
+        case .blackReachedParity: "Чёрных не меньше, чем красных"
+        case .declaredByHost: "Итог объявил ведущий"
+        case nil: ""
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Label(state.moment.displayName, systemImage: isNight ? "moon.stars.fill" : "sun.max.fill")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(isNight ? Color.indigo : Color.orange)
+                Spacer()
+                FormatTag(format: state.setup.format)
             }
-        default:
-            let nominations = state.nominations
-            if !nominations.isEmpty {
-                LabeledContent("Выставлены") {
-                    Text(nominations.map { "№\($0.candidate)" }.joined(separator: ", "))
-                        .monospacedDigit()
-                }
+            Text(state.currentStep.title(in: state))
+                .font(.title.bold())
+                .contentTransition(.opacity)
+            Text(subtitle).font(.subheadline).foregroundStyle(.secondary)
+            if !state.nominations.isEmpty, !state.isFinished {
+                Text("Выставлены: " + state.nominations.map { "№\($0.candidate)" }.joined(separator: ", "))
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.tint)
+            }
+            if let author = state.bestMoveAuthor, state.bestMove == nil {
+                Button("Лучший ход игрока №\(author)", systemImage: "star.fill", action: onBestMove)
+                    .buttonStyle(.bordered)
+                    .padding(.top, 4)
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.top, 4)
+        .padding(.horizontal, 4)
+    }
+}
+
+// MARK: - Игрок
+
+/// Карточка игрока. Свёрнута — номер, имя, фолы. Раскрыта — таймер (если говорит), выставление и фолы.
+struct PlayerCard: View {
+    let game: GameController
+    let seat: SeatState
+    let isExpanded: Bool
+    let onToggle: () -> Void
+
+    private var state: GameState { game.state }
+    private var isSpeaker: Bool { state.currentSpeaker == seat.seat }
+
+    /// Ночью нажатие на игрока — ход текущей роли.
+    private var nightAction: GameAction? {
+        guard seat.isAlive, case let .night(step) = state.currentStep else { return nil }
+        return switch step {
+        case .mafiaShot, .maniacShot: .night(.shot(seat.seat))
+        case .donCheck, .sheriffCheck: .night(.check(seat.seat))
+        case .doctorHeal: .night(.heal(seat.seat))
+        }
+    }
+
+    private var takesNominations: Bool {
+        guard isSpeaker, case .speech = state.currentStep else { return false }
+        return state.ruleset.day.candidateSource == .nominations
+    }
+
+    private var status: String? {
+        if let elimination = seat.elimination { return elimination.cause.label }
+        if isSpeaker { return "Говорит" }
+        if let nomination = state.nominations.first(where: { $0.candidate == seat.seat }) {
+            return "Выставлен игроком №\(nomination.by)"
+        }
+        if seat.missesNextSpeech { return "Пропускает речь" }
+        return nil
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Button {
+                if let nightAction { game.perform(nightAction) } else { onToggle() }
+            } label: {
+                header
+            }
+            .buttonStyle(.plain)
+            .disabled(!seat.isAlive)
+
+            if isExpanded, seat.isAlive, nightAction == nil {
+                if isSpeaker, game.countdown != nil {
+                    TimerView(game: game)
+                }
+                if takesNominations {
+                    NominationPad(game: game, speaker: seat.seat)
+                }
+                DisciplinePanel(game: game, seat: seat)
+            }
+        }
+        .padding(14)
+        .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 22, style: .continuous))
+        .overlay {
+            if isSpeaker {
+                RoundedRectangle(cornerRadius: 22, style: .continuous).stroke(.tint, lineWidth: 2)
+            }
+        }
+        .opacity(seat.isAlive ? 1 : 0.5)
+    }
+
+    private var header: some View {
+        HStack(spacing: 12) {
+            Text("\(seat.seat.number)")
+                .font(.headline)
+                .monospacedDigit()
+                .foregroundStyle(isSpeaker ? .white : .primary)
+                .frame(width: 34, height: 34)
+                .background(isSpeaker ? AnyShapeStyle(.tint) : AnyShapeStyle(Color(.tertiarySystemFill)), in: .circle)
+            PlayerAvatar(name: game.name(of: seat.seat), url: game.profile(at: seat.seat)?.avatarURL, size: 40)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(game.name(of: seat.seat)).font(.headline).lineLimit(1)
+                HStack(spacing: 6) {
+                    if game.showsRoles {
+                        Text(seat.role.displayName).font(.subheadline.weight(.medium)).foregroundStyle(seat.role.team.tint)
+                    }
+                    if let status {
+                        Text(status).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                }
+            }
+            Spacer(minLength: 4)
+            FoulBadges(seat: seat)
+            if nightAction != nil {
+                Text("Выбрать").font(.subheadline.weight(.semibold)).foregroundStyle(.tint)
+            } else if seat.isAlive {
+                Image(systemName: "chevron.down")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+                    .rotationEffect(.degrees(isExpanded ? 180 : 0))
+            }
+        }
+        .contentShape(.rect)
+    }
+}
+
+/// Значки нарушений в свёрнутой карточке — только если они есть.
+private struct FoulBadges: View {
+    let seat: SeatState
+
+    var body: some View {
+        HStack(spacing: 4) {
+            if seat.fouls > 0 { badge("Ф\(seat.fouls)", .orange) }
+            if seat.techFouls > 0 { badge("Т\(seat.techFouls)", .red) }
+            if seat.warnings > 0 { badge("!\(seat.warnings)", .yellow) }
+        }
+    }
+
+    private func badge(_ text: String, _ color: Color) -> some View {
+        Text(text)
+            .font(.caption.weight(.bold))
+            .monospacedDigit()
+            .foregroundStyle(color)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 3)
+            .background(color.opacity(0.15), in: .capsule)
     }
 }
 
@@ -66,12 +203,12 @@ struct TimerView: View {
 
     var body: some View {
         if let timer = game.countdown {
-            VStack(spacing: 18) {
+            VStack(spacing: 16) {
                 TimelineView(.periodic(from: .now, by: 0.25)) { context in
                     let remaining = timer.remaining(at: context.date)
                     VStack(spacing: 10) {
                         Text(Duration.seconds(remaining.rounded(.up)).formatted(.time(pattern: .minuteSecond)))
-                            .font(.system(size: 76, weight: .light))
+                            .font(.system(size: 72, weight: .light))
                             .monospacedDigit()
                             .foregroundStyle(remaining <= 10 ? AnyShapeStyle(.red) : AnyShapeStyle(.primary))
                             .contentTransition(.numericText(countsDown: true))
@@ -86,340 +223,155 @@ struct TimerView: View {
                 .accessibilityAddTraits(.isButton)
                 .accessibilityHint("Нажатие — старт или пауза, удержание — сброс")
 
-                HStack {
-                    roundButton("Сброс") { game.restartTimer() }
-                        .buttonStyle(.glass)
-                    Spacer()
-                    roundButton("+30 с") { game.extendTimer() }
-                        .buttonStyle(.glass)
-                    Spacer()
-                    roundButton(timer.isRunning ? "Пауза" : "Старт") { game.toggleTimer() }
-                        .buttonStyle(.glassProminent)
-                        .tint(timer.isRunning ? .orange : .green)
+                GlassEffectContainer(spacing: 20) {
+                    HStack {
+                        circleButton("Сброс", size: 62) { game.restartTimer() }
+                            .buttonStyle(.glass)
+                        Spacer()
+                        circleButton(timer.isRunning ? "Пауза" : "Старт", size: 76) { game.toggleTimer() }
+                            .buttonStyle(.glassProminent)
+                            .tint(timer.isRunning ? .orange : .green)
+                        Spacer()
+                        circleButton("+30 с", size: 62) { game.extendTimer() }
+                            .buttonStyle(.glass)
+                    }
                 }
                 .sensoryFeedback(.impact, trigger: timer.isRunning)
             }
-            .padding(.vertical, 6)
         }
     }
 
-    private func roundButton(_ title: String, action: @escaping () -> Void) -> some View {
+    private func circleButton(_ title: String, size: CGFloat, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(title)
                 .font(.subheadline.weight(.semibold))
-                .frame(width: 66, height: 66)
+                .frame(width: size, height: size)
         }
         .buttonBorderShape(.circle)
     }
 }
 
-// MARK: - Говорящий
+// MARK: - Выставление
 
-struct SpeakerSection: View {
-    let game: GameController
-    let seat: SeatState
-    @State private var isConfirmingRemoval = false
-
-    private var label: String {
-        switch game.state.currentStep {
-        case .farewell: "Прощальная речь"
-        case .tieSpeech: "Оправдание"
-        case let .timed(step, _): step.kind.displayName
-        default: "Говорит"
-        }
-    }
-
-    private var takesNominations: Bool {
-        guard case .speech = game.state.currentStep else { return false }
-        return game.state.ruleset.day.candidateSource == .nominations
-    }
-
-    var body: some View {
-        Section {
-            HStack(spacing: 12) {
-                PlayerAvatar(name: game.name(of: seat.seat), url: game.profile(at: seat.seat)?.avatarURL, seat: seat.seat.number, size: 52)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(game.name(of: seat.seat)).font(.title3.weight(.semibold)).lineLimit(1)
-                    Label(label, systemImage: "mic.fill").font(.subheadline).foregroundStyle(.tint)
-                    if game.showsRoles { RoleText(role: seat.role) }
-                }
-                Spacer(minLength: 0)
-                FoulCounters(game: game, seat: seat)
-            }
-            TimerView(game: game)
-            if takesNominations {
-                NominationGrid(game: game, speaker: seat.seat)
-            }
-            Button("Удалить игрока", systemImage: "person.fill.xmark", role: .destructive) {
-                isConfirmingRemoval = true
-            }
-            .confirmationDialog(
-                "Удалить игрока №\(seat.seat) \(game.name(of: seat.seat))?",
-                isPresented: $isConfirmingRemoval,
-                titleVisibility: .visible
-            ) {
-                Button("Удалить", role: .destructive) { game.perform(.disqualify(seat.seat, note: nil)) }
-            } message: {
-                Text("Дисквалификация со штрафом. Отменить можно кнопкой «Отменить».")
-            }
-        }
-    }
-}
-
-private struct NominationGrid: View {
+/// Выставление кандидатуры говорящим — номера раскладкой телефонной клавиатуры.
+private struct NominationPad: View {
     let game: GameController
     let speaker: Seat
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Выставить на голосование").font(.subheadline).foregroundStyle(.secondary)
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 5), spacing: 8) {
-                ForEach(game.state.seats) { target in
-                    let nomination = game.state.nominations.first { $0.candidate == target.seat }
-                    let button = Button {
-                        if let nomination, nomination.by == speaker {
-                            game.perform(.withdrawNomination(by: speaker))
-                        } else {
-                            game.perform(.nominate(candidate: target.seat, by: speaker))
-                        }
-                    } label: {
-                        Text("\(target.seat.number)")
-                            .font(.body.weight(.semibold))
-                            .monospacedDigit()
-                            .frame(maxWidth: .infinity, minHeight: 34)
-                    }
-                    .buttonBorderShape(.roundedRectangle(radius: 10))
-                    .disabled(!target.isAlive)
-                    if nomination == nil {
-                        button.buttonStyle(.bordered)
+            Text("Выставить на голосование").font(.subheadline.weight(.semibold)).foregroundStyle(.secondary)
+            Keypad(count: game.state.seats.count) { number in
+                let seat = Seat(number)
+                let nomination = game.state.nominations.first { $0.candidate == seat }
+                let style: KeypadKey.Style = if !game.state.isAlive(seat) {
+                    .disabled
+                } else if nomination?.by == speaker {
+                    .selected
+                } else if nomination != nil {
+                    .marked
+                } else {
+                    .normal
+                }
+                KeypadKey(number: number, caption: nomination.map { "от \($0.by)" }, style: style) {
+                    if nomination?.by == speaker {
+                        game.perform(.withdrawNomination(by: speaker))
                     } else {
-                        button.buttonStyle(.borderedProminent)
+                        game.perform(.nominate(candidate: seat, by: speaker))
                     }
                 }
             }
         }
-        .padding(.vertical, 4)
     }
 }
 
-// MARK: - Строка игрока
+// MARK: - Нарушения
 
-struct SeatRow: View {
-    let game: GameController
-    let seat: SeatState
-
-    /// Ночью нажатие на игрока — ход текущей роли.
-    private var nightAction: GameAction? {
-        guard seat.isAlive, case let .night(step) = game.state.currentStep else { return nil }
-        return switch step {
-        case .mafiaShot, .maniacShot: .night(.shot(seat.seat))
-        case .donCheck, .sheriffCheck: .night(.check(seat.seat))
-        case .doctorHeal: .night(.heal(seat.seat))
-        }
-    }
-
-    private var status: String? {
-        if let elimination = seat.elimination { return elimination.cause.label }
-        if game.state.currentSpeaker == seat.seat { return "Говорит" }
-        if game.state.nominations.contains(where: { $0.candidate == seat.seat }) { return "Выставлен" }
-        return nil
-    }
-
-    var body: some View {
-        Group {
-            if let nightAction {
-                Button { game.perform(nightAction) } label: {
-                    HStack {
-                        info
-                        Image(systemName: "scope").foregroundStyle(.tint)
-                    }
-                }
-                .foregroundStyle(.primary)
-            } else {
-                HStack {
-                    info
-                    if seat.isAlive { FoulCounters(game: game, seat: seat) }
-                }
-            }
-        }
-        .opacity(seat.isAlive ? 1 : 0.5)
-        .swipeActions(edge: .leading) {
-            if seat.isAlive {
-                Button("Фол", systemImage: "hand.raised.fill") { game.perform(.foul(seat.seat)) }
-                    .tint(.orange)
-            }
-        }
-        .swipeActions(edge: .trailing) {
-            if seat.isAlive {
-                Button("Техфол", systemImage: "exclamationmark.triangle.fill") { game.perform(.techFoul(seat.seat)) }
-                    .tint(.red)
-                Button("Предупр.", systemImage: "exclamationmark.bubble.fill") { game.perform(.warning(seat.seat)) }
-                    .tint(.yellow)
-            }
-        }
-        .contextMenu { DisciplineMenu(game: game, seat: seat.seat) }
-    }
-
-    private var info: some View {
-        HStack(spacing: 12) {
-            PlayerAvatar(name: game.name(of: seat.seat), url: game.profile(at: seat.seat)?.avatarURL, seat: seat.seat.number)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(game.name(of: seat.seat)).fontWeight(.semibold).lineLimit(1)
-                HStack(spacing: 6) {
-                    if game.showsRoles { RoleText(role: seat.role) }
-                    if let status { Text(status).font(.subheadline).foregroundStyle(.secondary) }
-                    if seat.warnings > 0 {
-                        Label("\(seat.warnings)", systemImage: "exclamationmark.bubble.fill")
-                            .font(.caption)
-                            .foregroundStyle(.yellow)
-                    }
-                }
-            }
-            Spacer(minLength: 0)
-        }
-    }
-}
-
-private struct RoleText: View {
-    let role: Role
-
-    var body: some View {
-        Text(role.displayName).font(.subheadline.weight(.medium)).foregroundStyle(role.team.tint)
-    }
-}
-
-private struct DisciplineMenu: View {
-    let game: GameController
-    let seat: Seat
-
-    var body: some View {
-        Button("Фол", systemImage: "hand.raised") { game.perform(.foul(seat)) }
-        Button("Снять фол", systemImage: "hand.raised.slash") { game.perform(.cancelFoul(seat)) }
-        Button("Техфол", systemImage: "exclamationmark.triangle") { game.perform(.techFoul(seat)) }
-        Button("Снять техфол", systemImage: "xmark.octagon") { game.perform(.cancelTechFoul(seat)) }
-        Button("Предупреждение", systemImage: "exclamationmark.bubble") { game.perform(.warning(seat)) }
-        Divider()
-        Button("Выбыл по решению ведущего", systemImage: "person.fill.xmark") {
-            game.perform(.eliminateByHost(seat, note: nil))
-        }
-        Button("Дисквалифицировать", systemImage: "nosign", role: .destructive) {
-            game.perform(.disqualify(seat, note: nil))
-        }
-    }
-}
-
-// MARK: - Фолы
-
-/// Кнопки «Ф» и «Т»: нажатие добавляет, долгое нажатие — меню «Снять».
-struct FoulCounters: View {
+/// Фолы, техфолы, предупреждение и удаление — в раскрытой карточке игрока.
+private struct DisciplinePanel: View {
     let game: GameController
     let seat: SeatState
 
     var body: some View {
         let rules = game.state.ruleset.discipline
-        HStack(spacing: 6) {
-            CounterButton(letter: "Ф", count: seat.fouls, warnAt: rules.foulsToSilence ?? 3,
-                          add: { game.perform(.foul(seat.seat)) }, remove: { game.perform(.cancelFoul(seat.seat)) })
-            CounterButton(letter: "Т", count: seat.techFouls, warnAt: 1,
-                          add: { game.perform(.techFoul(seat.seat)) }, remove: { game.perform(.cancelTechFoul(seat.seat)) })
+        VStack(spacing: 10) {
+            HStack(spacing: 10) {
+                CounterControl(title: "Фолы", count: seat.fouls, limit: rules.foulsToRemoval ?? 4, tint: .orange,
+                               add: { game.perform(.foul(seat.seat)) }, remove: { game.perform(.cancelFoul(seat.seat)) })
+                CounterControl(title: "Техфолы", count: seat.techFouls, limit: rules.techFoulsToRemoval ?? 2, tint: .red,
+                               add: { game.perform(.techFoul(seat.seat)) }, remove: { game.perform(.cancelTechFoul(seat.seat)) })
+            }
+            HStack(spacing: 10) {
+                Button {
+                    game.perform(.warning(seat.seat))
+                } label: {
+                    Label(seat.warnings > 0 ? "Предупр. (\(seat.warnings))" : "Предупреждение", systemImage: "exclamationmark.bubble")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .tint(.yellow)
+                Menu {
+                    Button("Выбыл по решению ведущего", systemImage: "person.fill.xmark") {
+                        game.perform(.eliminateByHost(seat.seat, note: nil))
+                    }
+                    Button("Дисквалифицировать (штраф)", systemImage: "nosign", role: .destructive) {
+                        game.perform(.disqualify(seat.seat, note: nil))
+                    }
+                } label: {
+                    Label("Удалить", systemImage: "person.fill.xmark").frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .tint(.red)
+            }
         }
     }
 }
 
-private struct CounterButton: View {
-    let letter: String
+/// «−  2 Фолы  +» с точками до удаления.
+private struct CounterControl: View {
+    let title: String
     let count: Int
-    let warnAt: Int
+    let limit: Int
+    let tint: Color
     let add: () -> Void
     let remove: () -> Void
 
-    private var tint: Color { count >= warnAt ? .red : (count > 0 ? .orange : .secondary) }
-
     var body: some View {
-        Button(action: add) {
-            Text("\(letter) \(count)")
-                .font(.subheadline.weight(.semibold))
-                .monospacedDigit()
-                .frame(minWidth: 34)
+        HStack(spacing: 0) {
+            Button(action: remove) {
+                Image(systemName: "minus").font(.headline).frame(width: 44, height: 44)
+            }
+            .disabled(count == 0)
+            VStack(spacing: 2) {
+                Text("\(count)")
+                    .font(.title2.weight(.bold))
+                    .monospacedDigit()
+                    .foregroundStyle(count > 0 ? tint : .primary)
+                    .contentTransition(.numericText())
+                Text(title).font(.caption2.weight(.medium)).foregroundStyle(.secondary)
+                HStack(spacing: 3) {
+                    ForEach(0..<max(limit, 1), id: \.self) { index in
+                        Capsule().fill(index < count ? tint : Color(.quaternaryLabel)).frame(width: 8, height: 3)
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity)
+            Button(action: add) {
+                Image(systemName: "plus").font(.headline).frame(width: 44, height: 44)
+            }
         }
-        .buttonStyle(.bordered)
-        .buttonBorderShape(.capsule)
-        .tint(tint)
-        .contextMenu {
-            Button("Снять", systemImage: "minus.circle", action: remove).disabled(count == 0)
-        }
+        .buttonStyle(.borderless)
+        .padding(4)
+        .background(Color(.tertiarySystemFill), in: .rect(cornerRadius: 16, style: .continuous))
         .sensoryFeedback(.impact(weight: .medium), trigger: count)
-        .accessibilityLabel(letter == "Ф" ? "Фолы: \(count)" : "Техфолы: \(count)")
+        .accessibilityElement(children: .combine)
+        .accessibilityValue("\(count)")
     }
 }
 
-// MARK: - Голосование и ночь
+// MARK: - Ночь
 
-/// Голоса «по рукам». Если по правилам воздержавшиеся голосуют за последнего — его число считается само.
-private struct HandCountBallot: View {
-    let game: GameController
-    let candidates: [Seat]
-    @State private var votes: [Seat: Int] = [:]
-
-    private var voters: Int { game.state.aliveSeats.count }
-    private var autoLast: Bool { game.state.ruleset.voting.abstainersVoteForLastCandidate }
-    private var editable: [Seat] { autoLast ? Array(candidates.dropLast()) : candidates }
-    private var given: Int { editable.reduce(0) { $0 + votes[$1, default: 0] } }
-
-    var body: some View {
-        ForEach(editable, id: \.self) { candidate in
-            Stepper(value: binding(for: candidate), in: 0...max(0, voters - given + votes[candidate, default: 0])) {
-                candidateLabel(candidate, votes: votes[candidate, default: 0])
-            }
-        }
-        if autoLast, let last = candidates.last {
-            VStack(alignment: .leading, spacing: 4) {
-                candidateLabel(last, votes: voters - given)
-                Text("Не проголосовавшие уходят последней кандидатуре").font(.footnote).foregroundStyle(.secondary)
-            }
-        }
-        Button {
-            var counts = editable.map { CandidateVotes($0, votes: votes[$0, default: 0]) }
-            if autoLast, let last = candidates.last {
-                counts.append(CandidateVotes(last, votes: voters - given))
-            }
-            game.perform(.submitBallot(.handCount(counts)))
-        } label: {
-            Label("Подсчитать голоса", systemImage: "checkmark.circle.fill")
-        }
-    }
-
-    private func candidateLabel(_ seat: Seat, votes: Int) -> some View {
-        HStack(spacing: 10) {
-            PlayerAvatar(name: game.name(of: seat), url: game.profile(at: seat)?.avatarURL, seat: seat.number, size: 32)
-            Text(game.name(of: seat)).lineLimit(1)
-            Spacer()
-            Text("\(votes)").font(.headline).monospacedDigit()
-        }
-    }
-
-    private func binding(for candidate: Seat) -> Binding<Int> {
-        Binding(get: { votes[candidate, default: 0] }, set: { votes[candidate] = $0 })
-    }
-}
-
-private struct LiftBallot: View {
-    let game: GameController
-    let candidates: [Seat]
-    @State private var count = 0
-
-    var body: some View {
-        LabeledContent("Кандидаты", value: candidates.map { "№\($0)" }.joined(separator: ", "))
-        Stepper("«За»: \(count) из \(game.state.aliveSeats.count)", value: $count, in: 0...game.state.aliveSeats.count)
-        Button {
-            game.perform(.submitBallot(.liftCount(count)))
-        } label: {
-            Label("Подсчитать голоса", systemImage: "checkmark.circle.fill")
-        }
-    }
-}
-
-private struct NightControls: View {
+struct NightPanel: View {
     let game: GameController
     let step: NightStep
 
@@ -431,74 +383,51 @@ private struct NightControls: View {
     }
 
     var body: some View {
-        if !performers.isEmpty {
-            LabeledContent("Ходит", value: performers)
+        VStack(alignment: .leading, spacing: 12) {
+            if !performers.isEmpty {
+                Label("Ходит: \(performers)", systemImage: "moon.fill")
+                    .font(.headline)
+                    .foregroundStyle(.indigo)
+            }
+            Text("Нажмите на игрока ниже — это его цель.").foregroundStyle(.secondary)
+            HStack(spacing: 10) {
+                if step.killer != nil {
+                    Button { game.perform(.night(.shot(nil))) } label: {
+                        Label("Промах", systemImage: "scope").frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                }
+                Button { game.perform(.night(.skip)) } label: {
+                    Label("Пропустить", systemImage: "forward").frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+            }
+            .controlSize(.large)
         }
-        Text("Выберите игрока в списке ниже").foregroundStyle(.secondary)
-        if step.killer != nil {
-            Button("Промах", systemImage: "scope") { game.perform(.night(.shot(nil))) }
-        }
-        Button("Пропустить шаг", systemImage: "forward") { game.perform(.night(.skip)) }
+        .gameCard()
     }
 }
 
-// MARK: - Лучший ход
+// MARK: - Итоги
 
-struct BestMoveSheet: View {
-    let game: GameController
-    @Environment(\.dismiss) private var dismiss
-    @State private var selected: Set<Seat> = []
-
-    private var author: Seat? { game.state.bestMoveAuthor }
-    private var limit: Int { game.state.ruleset.bestMove.maxSeats(playerCount: game.state.seats.count) }
+struct ResultsCard: View {
+    let record: GameRecord
+    let profile: (Seat) -> PlayerProfile?
 
     var body: some View {
-        NavigationStack {
-            List {
-                Section {
-                    ForEach(game.state.seats.map(\.seat).filter { $0 != author }, id: \.self) { seat in
-                        Button {
-                            if selected.contains(seat) {
-                                selected.remove(seat)
-                            } else if selected.count < limit {
-                                selected.insert(seat)
-                            }
-                        } label: {
-                            HStack(spacing: 12) {
-                                PlayerAvatar(name: game.name(of: seat), url: game.profile(at: seat)?.avatarURL, seat: seat.number, size: 36)
-                                Text(game.name(of: seat))
-                                Spacer()
-                                if selected.contains(seat) {
-                                    Image(systemName: "checkmark").fontWeight(.semibold).foregroundStyle(.tint)
-                                }
-                            }
-                        }
-                        .foregroundStyle(.primary)
-                    }
-                } footer: {
-                    Text("Игрок №\(author.map { "\($0)" } ?? "—") называет до \(limit) номеров, которых считает мафией.")
-                }
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
+                Circle().fill(record.outcome.winner.dot).frame(width: 12, height: 12)
+                Text(record.outcome.winner.displayName).font(.title2.bold())
             }
-            .navigationTitle("Лучший ход")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Отмена", systemImage: "xmark") { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Готово", systemImage: "checkmark") {
-                        game.perform(.recordBestMove(selected.sorted()))
-                        dismiss()
-                    }
-                    .disabled(selected.isEmpty)
-                }
-            }
+            Divider()
+            GameResultsList(record: record, profile: profile)
         }
-        .presentationDetents([.medium, .large])
+        .gameCard()
     }
 }
 
-// MARK: - Итоги игры
-
-/// Баллы игроков строками списка. Используется и в игре, и в истории.
+/// Баллы игроков. Используется и в игре, и в истории.
 struct GameResultsList: View {
     let record: GameRecord
     let profile: (Seat) -> PlayerProfile?
@@ -521,6 +450,52 @@ struct GameResultsList: View {
     }
 }
 
+// MARK: - Лучший ход
+
+struct BestMoveSheet: View {
+    let game: GameController
+    @Environment(\.dismiss) private var dismiss
+    @State private var selected: Set<Seat> = []
+
+    private var author: Seat? { game.state.bestMoveAuthor }
+    private var limit: Int { game.state.ruleset.bestMove.maxSeats(playerCount: game.state.seats.count) }
+
+    var body: some View {
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 16) {
+                Text("Игрок №\(author.map { "\($0)" } ?? "—") называет до \(limit) номеров, которых считает мафией.")
+                    .foregroundStyle(.secondary)
+                Keypad(count: game.state.seats.count) { number in
+                    let seat = Seat(number)
+                    let style: KeypadKey.Style = seat == author ? .disabled : (selected.contains(seat) ? .selected : .normal)
+                    KeypadKey(number: number, style: style) {
+                        if selected.contains(seat) {
+                            selected.remove(seat)
+                        } else if selected.count < limit {
+                            selected.insert(seat)
+                        }
+                    }
+                }
+                Spacer()
+            }
+            .padding()
+            .navigationTitle("Лучший ход")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Отмена", systemImage: "xmark") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Готово", systemImage: "checkmark") {
+                        game.perform(.recordBestMove(selected.sorted()))
+                        dismiss()
+                    }
+                    .disabled(selected.isEmpty)
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+    }
+}
+
 // MARK: - Тексты
 
 extension CurrentStep {
@@ -538,7 +513,7 @@ extension CurrentStep {
             }
         case let .tieSpeech(seat): "Оправдание №\(seat)"
         case .liftBallot: "Поднять всех?"
-        case .dusk: state.phase == .day(.dusk) ? "День окончен — наступает ночь" : "Далее"
+        case .dusk: state.phase == .day(.dusk) ? "Наступает ночь" : "Наступает день"
         case let .night(step): step.displayName
         case .finished: state.outcome?.winner.displayName ?? "Игра окончена"
         }
