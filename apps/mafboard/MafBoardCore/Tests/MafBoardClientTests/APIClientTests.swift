@@ -99,6 +99,46 @@ struct APIClientTests {
         #expect(try jsonBody(request)["refreshToken"] as? String == "refresh-1")
     }
 
+    @Test("Сессии: GET с Bearer, текущее устройство помечено, у старых сессий имени может не быть")
+    func sessions() async throws {
+        let transport = StubTransport(json: """
+        {"sessions":[
+          {"id":"0f3c2a10-0000-4000-8000-000000000001","deviceName":"iPhone","platform":"ios",
+           "createdAt":"2026-10-10T10:00:00.000Z","lastUsedAt":"2026-10-16T21:00:00.000Z","isCurrent":true},
+          {"id":"0f3c2a10-0000-4000-8000-000000000002","deviceName":null,"platform":"android",
+           "createdAt":"2026-10-12T09:00:00.000Z","lastUsedAt":"2026-10-16T18:00:00Z","isCurrent":false}
+        ]}
+        """)
+        let sessions = try await client(transport).sessions()
+        #expect(sessions.map(\.isCurrent) == [true, false])
+        #expect(sessions[0].displayName == "iPhone")
+        #expect(sessions[1].displayName == "Android")
+        #expect(sessions[1].lastUsedAt == Date(timeIntervalSince1970: 1_792_173_600))
+
+        let request = await transport.lastRequest
+        #expect(request?.httpMethod == "GET")
+        #expect(request?.url?.path == "/v1/me/sessions")
+        #expect(request?.value(forHTTPHeaderField: "Authorization") == "Bearer access-1")
+    }
+
+    @Test("Отзыв сессии: DELETE по id с Bearer")
+    func revokeSession() async throws {
+        let transport = StubTransport(json: #"{"ok":true}"#)
+        try await client(transport).revokeSession(id: "0f3c2a10-0000-4000-8000-000000000002")
+        let request = await transport.lastRequest
+        #expect(request?.httpMethod == "DELETE")
+        #expect(request?.url?.path == "/v1/me/sessions/0f3c2a10-0000-4000-8000-000000000002")
+        #expect(request?.value(forHTTPHeaderField: "Authorization") == "Bearer access-1")
+    }
+
+    @Test("Своё устройство так не завершить — конфликт с текстом сервера")
+    func revokeCurrentSession() async {
+        let transport = StubTransport(status: 409, json: #"{"error":{"code":"current_session","message":"Это текущее устройство"}}"#)
+        await #expect(throws: APIError.conflict("Это текущее устройство")) {
+            try await client(transport).revokeSession(id: "0f3c2a10-0000-4000-8000-000000000001")
+        }
+    }
+
     @Test("Запросы от имени пользователя несут Bearer-токен, поиск кодирует кириллицу")
     func authorizedSearch() async throws {
         let transport = StubTransport(json: #"{"players":[{"id":5,"nickname":"Шерлок","isInHostClub":true}]}"#)

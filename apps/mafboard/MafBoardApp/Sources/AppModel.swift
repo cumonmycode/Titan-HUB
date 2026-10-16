@@ -207,6 +207,32 @@ final class AppModel {
         }
     }
 
+    // MARK: - Сессии устройств
+
+    /// Устройства, где выполнен вход (блок «Сессии» в профиле). `nil` — список не загружен.
+    private(set) var sessions: [DeviceSession]?
+
+    /// Без всплывающих ошибок: список второстепенный, а ошибки сети уже показывает обновление аккаунта.
+    func refreshSessions() async {
+        do throws(APIError) {
+            sessions = try await withAuth { () async throws(APIError) in try await api.sessions() }
+        } catch {
+            // Сервер без списка сессий (ещё не обновлён) — просто не показываем блок.
+            if case .notFound = error { sessions = nil }
+        }
+    }
+
+    /// Выйти на другом устройстве. Список перечитываем в любом случае: сессия могла завершиться сама.
+    func revokeSession(_ session: DeviceSession) async {
+        do throws(APIError) {
+            try await withAuth { () async throws(APIError) in try await api.revokeSession(id: session.id) }
+            sessions = sessions?.filter { $0.id != session.id }
+        } catch {
+            if case .notFound = error {} else { report(error) }
+        }
+        await refreshSessions()
+    }
+
     private func apply(_ fresh: UserAccount) async {
         account = fresh
         do { try await store.updateAccount(fresh) } catch { report(error) }
@@ -225,6 +251,7 @@ final class AppModel {
         refreshTask = nil
         await store.clear()
         account = nil
+        sessions = nil
         login = TelegramLoginFlow()
         phase = .signedOut
     }

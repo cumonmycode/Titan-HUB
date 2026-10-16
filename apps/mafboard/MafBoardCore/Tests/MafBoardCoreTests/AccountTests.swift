@@ -22,6 +22,42 @@ enum AccountFixture {
     }
 }
 
+@Suite("Сессии устройств")
+struct DeviceSessionTests {
+    private let now = Date(timeIntervalSince1970: 1_792_184_400) // 2026-10-16 21:00 UTC
+
+    private func session(minutesAgo: Int, name: String? = "iPhone", platform: String? = "ios") -> DeviceSession {
+        DeviceSession(
+            id: "s", deviceName: name, platform: platform,
+            createdAt: now.addingTimeInterval(-30 * 24 * 3600), lastUsedAt: now.addingTimeInterval(-Double(minutesAgo) * 60)
+        )
+    }
+
+    @Test("Последняя активность — как на макете: «3 ч назад»", arguments: [
+        (0, "только что"),
+        (5, "5 мин назад"),
+        (59, "59 мин назад"),
+        (3 * 60 + 20, "3 ч назад"),
+        (2 * 24 * 60, "2 дн. назад"),
+    ])
+    func lastSeen(minutesAgo: Int, expected: String) {
+        #expect(session(minutesAgo: minutesAgo).lastSeen(relativeTo: now) == expected)
+    }
+
+    @Test("Старше недели — дата; часы на устройстве чуть отстают — «только что»")
+    func lastSeenEdges() {
+        #expect(session(minutesAgo: 10 * 24 * 60 + 9 * 60).lastSeen(relativeTo: now) == "6 окт.") // полдень UTC — 6-е в любом поясе
+        #expect(session(minutesAgo: -2).lastSeen(relativeTo: now) == "только что")
+    }
+
+    @Test("Без имени устройства — название по платформе")
+    func displayName() {
+        #expect(session(minutesAgo: 0, name: "iPad").displayName == "iPad")
+        #expect(session(minutesAgo: 0, name: nil, platform: "android").displayName == "Android")
+        #expect(session(minutesAgo: 0, name: "", platform: nil).displayName == "Устройство")
+    }
+}
+
 @Suite("Аккаунты и права ведущего")
 struct HostingAccessTests {
     @Test("Игрок GoMafia получает одинаковый PlayerID на любом устройстве")

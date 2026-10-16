@@ -48,6 +48,10 @@ struct GamesResponse: Decodable {
     let games: [GameRecord]
 }
 
+struct SessionsResponse: Decodable {
+    let sessions: [DeviceSession]
+}
+
 struct EmptyResponse: Decodable {}
 
 /// Тело ошибки. Ручки MafBoard отвечают `{"error": {"code", "message"}}`, а общие ответы

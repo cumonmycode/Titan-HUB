@@ -31,6 +31,12 @@ public protocol MafBoardAPI: Sendable {
     func logout(refreshToken: String) async throws(APIError)
     func currentAccount() async throws(APIError) -> UserAccount
 
+    // Сессии устройств
+    /// Устройства, где выполнен вход: текущее первым (`isCurrent`), остальные по последней активности.
+    func sessions() async throws(APIError) -> [DeviceSession]
+    /// Завершает сессию другого устройства. Своё устройство — через `logout`, иначе `.conflict`.
+    func revokeSession(id: String) async throws(APIError)
+
     // GoMafia
     func linkGoMafia(login: String, password: String) async throws(APIError) -> UserAccount
     func unlinkGoMafia() async throws(APIError) -> UserAccount
@@ -89,6 +95,17 @@ public struct MafBoardAPIClient: MafBoardAPI {
 
     public func currentAccount() async throws(APIError) -> UserAccount {
         try await send(.get, "v1/me")
+    }
+
+    // MARK: Сессии устройств
+
+    public func sessions() async throws(APIError) -> [DeviceSession] {
+        let response: SessionsResponse = try await send(.get, "v1/me/sessions")
+        return response.sessions
+    }
+
+    public func revokeSession(id: String) async throws(APIError) {
+        let _: EmptyResponse = try await send(.delete, "v1/me/sessions/\(id)")
     }
 
     // MARK: GoMafia

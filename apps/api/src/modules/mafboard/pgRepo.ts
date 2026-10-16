@@ -2,7 +2,8 @@ import { sql, type Database } from '@titan/database'
 import type { SQL } from 'drizzle-orm'
 import { GomafiaTakenError, type MafboardRepo } from './repo.js'
 import type {
-  GoMafiaClubJSON, GoMafiaPlayerJSON, LoginTicket, MafboardUser, RefreshTokenRow, StoredGame, TicketGuard, TicketPatch, TicketStatus, TicketStep,
+  DeviceSession, GoMafiaClubJSON, GoMafiaPlayerJSON, LoginTicket, MafboardUser, RefreshTokenRow, StoredGame, TicketGuard, TicketPatch,
+  TicketStatus, TicketStep,
 } from './types.js'
 
 // Хранилище MafBoard в Postgres (raw SQL, как modules/smm/db.ts). Даты передаём
@@ -76,6 +77,19 @@ function toTicket(r: Row): LoginTicket {
     note: str(r['note']),
     createdAt: date(r['created_at']),
     expiresAt: date(r['expires_at']),
+  }
+}
+
+function toSession(r: Row): DeviceSession {
+  return {
+    id: String(r['id']),
+    userId: String(r['user_id']),
+    deviceName: str(r['device_name']),
+    platform: str(r['platform']),
+    createdAt: date(r['created_at']),
+    lastUsedAt: date(r['last_used_at']),
+    expiresAt: date(r['expires_at']),
+    revokedAt: dateOrNull(r['revoked_at']),
   }
 }
 
@@ -252,25 +266,115 @@ export class PgMafboardRepo implements MafboardRepo {
     return row ? toTicket(row) : null
   }
 
-  async purgeExpired(before: Date): Promise<{ tickets: number; refreshTokens: number }> {
+  async purgeExpired(before: Date): Promise<{ tickets: number; sessions: number; refreshTokens: number }> {
     const tickets = await this.query(sql`DELETE FROM mb_login_tickets WHERE expires_at < ${iso(before)}::timestamptz RETURNING id`)
+    // Токены истёкшей сессии удаляются каскадом; отдельно — старые токены живых сессий.
+    const sessions = await this.query(sql`DELETE FROM mb_sessions WHERE expires_at < ${iso(before)}::timestamptz RETURNING id`)
     const tokens = await this.query(sql`DELETE FROM mb_refresh_tokens WHERE expires_at < ${iso(before)}::timestamptz RETURNING token_hash`)
-    return { tickets: tickets.length, refreshTokens: tokens.length }
+    return { tickets: tickets.length, sessions: sessions.length, refreshTokens: tokens.length }
+  }
+
+  // ─── Сессии устройств ──────────────────────────────────────────────────────
+
+  async createSession(input: Parameters<MafboardRepo['createSession']>[0]): Promise<DeviceSession> {
+    const row = await this.one(sql`
+      WITH session AS (
+        INSERT INTO mb_sessions (user_id, device_name, platform, created_at, last_used_at, expires_at)
+        VALUES (${input.userId}::uuid, ${input.deviceName}, ${input.platform}, ${iso(input.at)}::timestamptz,
+                ${iso(input.at)}::timestamptz, ${iso(input.expiresAt)}::timestamptz)
+        RETURNING *
+      ), token AS (
+        INSERT INTO mb_refresh_tokens (token_hash, user_id, session_id, device_name, platform, created_at, expires_at)
+        SELECT ${input.refreshTokenHash}, user_id, id, device_name, platform, created_at, expires_at FROM session
+      )
+      SELECT * FROM session
+    `)
+    if (!row) throw new Error('[mafboard] сессия не создана')
+    return toSession(row)
+  }
+
+  async sessionById(id: string): Promise<DeviceSession | null> {
+    if (!UUID.test(id)) return null
+    const row = await this.one(sql`SELECT * FROM mb_sessions WHERE id = ${id}::uuid`)
+    return row ? toSession(row) : null
+  }
+
+  async sessionsByUser(userId: string, now: Date, limit: number): Promise<DeviceSession[]> {
+    const found = await this.query(sql`
+      SELECT * FROM mb_sessions
+      WHERE user_id = ${userId}::uuid AND revoked_at IS NULL AND expires_at > ${iso(now)}::timestamptz
+      ORDER BY last_used_at DESC LIMIT ${limit}
+    `)
+    return found.map(toSession)
+  }
+
+  async extendSession(input: Parameters<MafboardRepo['extendSession']>[0]): Promise<boolean> {
+    const inserted = await this.query(sql`
+      WITH session AS (
+        UPDATE mb_sessions SET last_used_at = GREATEST(last_used_at, ${iso(input.at)}::timestamptz),
+                               expires_at = ${iso(input.expiresAt)}::timestamptz
+        WHERE id = ${input.sessionId}::uuid AND revoked_at IS NULL
+        RETURNING id, user_id
+      )
+      INSERT INTO mb_refresh_tokens (token_hash, user_id, session_id, created_at, expires_at)
+      SELECT ${input.refreshTokenHash}, user_id, id, ${iso(input.at)}::timestamptz, ${iso(input.expiresAt)}::timestamptz FROM session
+      RETURNING token_hash
+    `)
+    return inserted.length > 0
+  }
+
+  async touchSession(id: string, at: Date): Promise<void> {
+    if (!UUID.test(id)) return
+    await this.db.execute(sql`
+      UPDATE mb_sessions SET last_used_at = ${iso(at)}::timestamptz
+      WHERE id = ${id}::uuid AND last_used_at < ${iso(at)}::timestamptz
+    `)
+  }
+
+  async revokeSession(userId: string, sessionId: string, at: Date): Promise<boolean> {
+    if (!UUID.test(userId) || !UUID.test(sessionId)) return false
+    const revoked = await this.query(sql`
+      WITH session AS (
+        UPDATE mb_sessions SET revoked_at = ${iso(at)}::timestamptz
+        WHERE id = ${sessionId}::uuid AND user_id = ${userId}::uuid AND revoked_at IS NULL
+        RETURNING id
+      ), tokens AS (
+        UPDATE mb_refresh_tokens SET revoked_at = ${iso(at)}::timestamptz
+        WHERE session_id IN (SELECT id FROM session) AND revoked_at IS NULL
+      )
+      SELECT id FROM session
+    `)
+    return revoked.length > 0
+  }
+
+  async revokeAllSessions(userId: string, at: Date): Promise<void> {
+    await this.db.execute(sql`
+      WITH sessions AS (
+        UPDATE mb_sessions SET revoked_at = ${iso(at)}::timestamptz
+        WHERE user_id = ${userId}::uuid AND revoked_at IS NULL
+      )
+      UPDATE mb_refresh_tokens SET revoked_at = ${iso(at)}::timestamptz
+      WHERE user_id = ${userId}::uuid AND revoked_at IS NULL
+    `)
   }
 
   // ─── Refresh-токены ────────────────────────────────────────────────────────
 
-  async insertRefreshToken(row: Parameters<MafboardRepo['insertRefreshToken']>[0]): Promise<void> {
-    await this.db.execute(sql`
-      INSERT INTO mb_refresh_tokens (token_hash, user_id, device_name, platform, expires_at)
-      VALUES (${row.tokenHash}, ${row.userId}::uuid, ${row.deviceName}, ${row.platform}, ${iso(row.expiresAt)}::timestamptz)
-    `)
-  }
-
   async refreshToken(tokenHash: string): Promise<RefreshTokenRow | null> {
-    const row = await this.one(sql`SELECT * FROM mb_refresh_tokens WHERE token_hash = ${tokenHash}`)
+    const row = await this.one(sql`
+      SELECT t.token_hash, t.user_id, t.session_id, t.expires_at, t.revoked_at, s.revoked_at AS session_revoked_at
+      FROM mb_refresh_tokens t JOIN mb_sessions s ON s.id = t.session_id
+      WHERE t.token_hash = ${tokenHash}
+    `)
     return row
-      ? { tokenHash: String(row['token_hash']), userId: String(row['user_id']), expiresAt: date(row['expires_at']), revokedAt: dateOrNull(row['revoked_at']) }
+      ? {
+          tokenHash: String(row['token_hash']),
+          userId: String(row['user_id']),
+          sessionId: String(row['session_id']),
+          expiresAt: date(row['expires_at']),
+          revokedAt: dateOrNull(row['revoked_at']),
+          sessionRevokedAt: dateOrNull(row['session_revoked_at']),
+        }
       : null
   }
 
@@ -280,13 +384,6 @@ export class PgMafboardRepo implements MafboardRepo {
       WHERE token_hash = ${tokenHash} AND revoked_at IS NULL RETURNING token_hash
     `)
     return updated.length > 0
-  }
-
-  async revokeAllRefreshTokens(userId: string, at: Date): Promise<void> {
-    await this.db.execute(sql`
-      UPDATE mb_refresh_tokens SET revoked_at = ${iso(at)}::timestamptz
-      WHERE user_id = ${userId}::uuid AND revoked_at IS NULL
-    `)
   }
 
   // ─── Игры ──────────────────────────────────────────────────────────────────

@@ -21,7 +21,7 @@ const ALLOWED_UPDATES = ['message', 'callback_query']
 const WEBHOOK_TIMEOUT_MS = 15_000
 const WEBHOOK_EVERY_MS = 60 * 60_000
 const PURGE_EVERY_MS = 24 * 60 * 60_000
-/** Истёкшие билеты и токены храним ещё 30 дней — для разбора инцидентов. */
+/** Истёкшие билеты, сессии и токены храним ещё 30 дней — для разбора инцидентов. */
 const PURGE_GRACE_MS = 30 * 24 * 60 * 60_000
 
 const redisLimiter: RateLimiter = {
@@ -136,7 +136,7 @@ export async function startMafboard(): Promise<void> {
   }
 }
 
-/** Раз в час — вебхук бота, раз в сутки — чистка истёкших билетов и токенов. */
+/** Раз в час — вебхук бота, раз в сутки — чистка истёкших билетов, сессий и токенов. */
 export function scheduleMafboardCron(): void {
   const result = readMafboardConfig()
   if (!result.ok) return
@@ -149,7 +149,9 @@ export function scheduleMafboardCron(): void {
       if ('error' in current) return
       current.repo
         .purgeExpired(new Date(Date.now() - PURGE_GRACE_MS))
-        .then((removed) => console.log(`[mafboard] чистка: билетов ${removed.tickets}, токенов ${removed.refreshTokens}`))
+        .then((removed) =>
+          console.log(`[mafboard] чистка: билетов ${removed.tickets}, сессий ${removed.sessions}, токенов ${removed.refreshTokens}`),
+        )
         .catch((error) => console.error('[mafboard] чистка не удалась', error))
     } catch (error) {
       console.error('[mafboard] чистка не запущена', error)

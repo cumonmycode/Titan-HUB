@@ -6,7 +6,7 @@ import type { MafboardConfig } from '../../src/modules/mafboard/config.js'
 import { RosterCache, type GoMafiaGateway } from '../../src/modules/mafboard/gomafia.js'
 import { GomafiaTakenError, type MafboardRepo } from '../../src/modules/mafboard/repo.js'
 import { createMafboardRouter, type MafboardDeps } from '../../src/modules/mafboard/router.js'
-import type { LoginTicket, MafboardUser, RefreshTokenRow, StoredGame, TicketGuard } from '../../src/modules/mafboard/types.js'
+import type { DeviceSession, LoginTicket, MafboardUser, RefreshTokenRow, StoredGame, TicketGuard } from '../../src/modules/mafboard/types.js'
 
 // Вебхук бота подписывается от JWT_SECRET Titan HUB (lib/tgWebhook.ts).
 process.env['JWT_SECRET'] ??= 'test-titan-jwt-secret-0123456789abcdef'
@@ -27,7 +27,9 @@ export const config: MafboardConfig = {
 export class MemoryRepo implements MafboardRepo {
   users = new Map<string, MafboardUser>()
   tickets = new Map<string, LoginTicket>()
-  refresh = new Map<string, RefreshTokenRow>()
+  sessions = new Map<string, DeviceSession>()
+  /** Отзыв сессии хранится в самой сессии — `refreshToken()` подставляет его, как JOIN в Postgres. */
+  refresh = new Map<string, Omit<RefreshTokenRow, 'sessionRevokedAt'>>()
   games = new Map<string, StoredGame>()
   private seq = 0
 
@@ -114,28 +116,77 @@ export class MemoryRepo implements MafboardRepo {
   async purgeExpired(before: Date) {
     const expired = [...this.tickets.values()].filter((t) => t.expiresAt < before)
     expired.forEach((t) => this.tickets.delete(t.id))
-    const tokens = [...this.refresh.values()].filter((r) => r.expiresAt < before)
+    const sessions = [...this.sessions.values()].filter((s) => s.expiresAt < before)
+    sessions.forEach((s) => this.sessions.delete(s.id))
+    const tokens = [...this.refresh.values()].filter((r) => r.expiresAt < before || !this.sessions.has(r.sessionId))
     tokens.forEach((r) => this.refresh.delete(r.tokenHash))
-    return { tickets: expired.length, refreshTokens: tokens.length }
+    return { tickets: expired.length, sessions: sessions.length, refreshTokens: tokens.length }
   }
 
-  async insertRefreshToken(row: Parameters<MafboardRepo['insertRefreshToken']>[0]) {
-    this.refresh.set(row.tokenHash, { tokenHash: row.tokenHash, userId: row.userId, expiresAt: row.expiresAt, revokedAt: null })
+  async createSession(input: Parameters<MafboardRepo['createSession']>[0]) {
+    const session: DeviceSession = {
+      id: this.uuid(), userId: input.userId, deviceName: input.deviceName, platform: input.platform,
+      createdAt: input.at, lastUsedAt: input.at, expiresAt: input.expiresAt, revokedAt: null,
+    }
+    this.sessions.set(session.id, session)
+    this.refresh.set(input.refreshTokenHash, {
+      tokenHash: input.refreshTokenHash, userId: input.userId, sessionId: session.id, expiresAt: input.expiresAt, revokedAt: null,
+    })
+    return session
   }
 
-  async refreshToken(hash: string) { return this.refresh.get(hash) ?? null }
+  async sessionById(id: string) { return this.sessions.get(id) ?? null }
+
+  async sessionsByUser(userId: string, now: Date, limit: number) {
+    return [...this.sessions.values()]
+      .filter((s) => s.userId === userId && !s.revokedAt && s.expiresAt > now)
+      .sort((a, b) => b.lastUsedAt.getTime() - a.lastUsedAt.getTime())
+      .slice(0, limit)
+  }
+
+  async extendSession(input: Parameters<MafboardRepo['extendSession']>[0]) {
+    const session = this.sessions.get(input.sessionId)
+    if (!session || session.revokedAt) return false
+    const lastUsedAt = input.at > session.lastUsedAt ? input.at : session.lastUsedAt
+    this.sessions.set(session.id, { ...session, lastUsedAt, expiresAt: input.expiresAt })
+    this.refresh.set(input.refreshTokenHash, {
+      tokenHash: input.refreshTokenHash, userId: session.userId, sessionId: session.id, expiresAt: input.expiresAt, revokedAt: null,
+    })
+    return true
+  }
+
+  async touchSession(id: string, at: Date) {
+    const session = this.sessions.get(id)
+    if (session && session.lastUsedAt < at) this.sessions.set(id, { ...session, lastUsedAt: at })
+  }
+
+  async revokeSession(userId: string, sessionId: string, at: Date) {
+    const session = this.sessions.get(sessionId)
+    if (!session || session.userId !== userId || session.revokedAt) return false
+    this.sessions.set(sessionId, { ...session, revokedAt: at })
+    for (const [hash, row] of this.refresh) {
+      if (row.sessionId === sessionId && !row.revokedAt) this.refresh.set(hash, { ...row, revokedAt: at })
+    }
+    return true
+  }
+
+  async revokeAllSessions(userId: string, at: Date) {
+    for (const session of this.sessions.values()) {
+      if (session.userId === userId && !session.revokedAt) await this.revokeSession(userId, session.id, at)
+    }
+  }
+
+  async refreshToken(hash: string): Promise<RefreshTokenRow | null> {
+    const row = this.refresh.get(hash)
+    if (!row) return null
+    return { ...row, sessionRevokedAt: this.sessions.get(row.sessionId)?.revokedAt ?? null }
+  }
 
   async revokeRefreshToken(hash: string, at: Date) {
     const row = this.refresh.get(hash)
     if (!row || row.revokedAt) return false
     this.refresh.set(hash, { ...row, revokedAt: at })
     return true
-  }
-
-  async revokeAllRefreshTokens(userId: string, at: Date) {
-    for (const [hash, row] of this.refresh) {
-      if (row.userId === userId && !row.revokedAt) this.refresh.set(hash, { ...row, revokedAt: at })
-    }
   }
 
   async insertGame(game: StoredGame) {
@@ -336,12 +387,16 @@ export function callback(from: typeof TG_USER, data: string) {
 }
 
 /** Прогнать полный вход через бота и вернуть сессию приложения. */
-export async function signIn(ctx: TestContext, user = TG_USER): Promise<{ accessToken: string; refreshToken: string; account: any }> {
+export async function signIn(
+  ctx: TestContext,
+  user = TG_USER,
+  device: { deviceName: string; platform: 'ios' | 'android' } = { deviceName: 'iPhone', platform: 'ios' },
+): Promise<{ accessToken: string; refreshToken: string; account: any }> {
   const { handleBotUpdate } = await import('../../src/modules/mafboard/bot.js')
   const bot = { repo: ctx.repo, messenger: ctx.messenger, config, now: () => ctx.clock.now }
 
   const start = await call(ctx, 'POST', '/v1/auth/telegram/start', {
-    body: { deviceName: 'iPhone', platform: 'ios', deviceSecret: DEVICE_SECRET },
+    body: { ...device, deviceSecret: DEVICE_SECRET },
   })
   const code = new URL(start.json.deepLink).searchParams.get('start') ?? ''
   await handleBotUpdate(message(user, { text: `/start ${code}` }) as any, bot)

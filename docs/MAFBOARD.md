@@ -27,7 +27,7 @@ apps/api/src/modules/mafboard/
   repo.ts        — контракт хранилища (MafboardRepo)
   pgRepo.ts      — Postgres-реализация (raw SQL)
   migrations.ts  — схема БД, создание БД при первом старте
-  tokens.ts      — access-JWT (1 ч) и refresh (90 дней, одноразовый)
+  tokens.ts      — access-JWT (1 ч, с id сессии) и refresh (90 дней, одноразовый)
   serialize.ts   — перевод в JSON приложения, телефон в маске
   gomafia.ts     — привязка, поиск «сначала свой клуб», состав клуба (поверх lib/gomafia.ts)
   games.ts       — проверка загружаемой игры (права ведущего, клуб, игроки GoMafia)
@@ -51,8 +51,10 @@ apps/api/test/mafboard/ — тесты (node:test через tsx), хранил�
 | `POST /v1/auth/telegram/start` `{deviceName, platform: ios\|android, deviceSecret}` | — | Билет входа на 10 минут: `{id, deepLink: https://t.me/<бот>?start=login_<код>, expiresAt, confirmationCode}` |
 | `GET /v1/auth/telegram/status?ticket=` | — | `{status: pending, opened}` / `confirmed` / `rejected, note` / `expired` |
 | `POST /v1/auth/telegram/complete` `{ticket, deviceSecret}` | — | `{tokens: {accessToken, refreshToken, accessExpiresAt}, account}`. Билет одноразовый |
-| `POST /v1/auth/refresh` `{refreshToken}` | — | Новая пара токенов. Повторное предъявление старого refresh отзывает все сессии |
-| `POST /v1/auth/logout` `{refreshToken}` | — | Отзывает refresh-токен устройства |
+| `POST /v1/auth/refresh` `{refreshToken}` | — | Новая пара токенов той же сессии. Повторное предъявление уже заменённого refresh отзывает все сессии |
+| `POST /v1/auth/logout` `{refreshToken}` | — | Завершает сессию устройства: её refresh и access перестают действовать |
+| `GET /v1/me/sessions` | Bearer | `{sessions: [{id, deviceName, platform, createdAt, lastUsedAt, isCurrent}]}` — устройства, где выполнен вход; текущее (по сессии access-токена) первым, остальные по `lastUsedAt` |
+| `DELETE /v1/me/sessions/:id` | Bearer | Завершить сессию другого устройства → `{ok: true}`. 409 `current_session` — это текущее устройство (для него `logout`), 404 — нет такой активной сессии у пользователя |
 | `GET /v1/me` | Bearer | `UserAccount`. Профиль GoMafia старше суток обновляется в фоне |
 | `POST /v1/me/gomafia` `{login, password}` | Bearer | Привязать GoMafia: вход в GoMafia проверяет владение, пароль не хранится. 422 `bad_credentials`, 409 `gomafia_taken` |
 | `DELETE /v1/me/gomafia` | Bearer | Отвязать — останутся только фанки |
@@ -91,10 +93,12 @@ apps/api/test/mafboard/ — тесты (node:test через tsx), хранил�
 |---|---|
 | `mb_users` | Telegram (`tg_id` уникален), телефон, версия соглашения, привязка GoMafia (`gomafia_id` уникален, профиль и клуб в `jsonb`) |
 | `mb_login_tickets` | Билеты входа: хэш секрета устройства, шаг в боте, статус, срок |
-| `mb_refresh_tokens` | SHA-256 refresh-токенов, отзыв и ротация |
+| `mb_sessions` | Сессии устройств: имя и платформа из `start`, время входа, последней активности (не чаще раза в 5 минут и при каждом refresh), срок, отзыв |
+| `mb_refresh_tokens` | SHA-256 refresh-токенов, отзыв и ротация; `session_id` — сессия, к которой выдан токен |
 | `mb_games` | Игры: ведущий, клуб (`NULL` — личная), формат, даты, `record jsonb` — GameRecord приложения целиком |
 
-Истёкшие билеты и токены удаляются раз в сутки, через 30 дней после истечения.
+Истёкшие билеты, сессии и токены удаляются раз в сутки, через 30 дней после истечения.
+Миграция `002_mafboard_sessions` превратила существующие цепочки refresh-токенов в сессии (id — `md5` хэша первого токена цепочки, устройство — из него же).
 
 ## Безопасность
 
@@ -103,7 +107,8 @@ apps/api/test/mafboard/ — тесты (node:test через tsx), хранил�
 - `MAFBOARD_JWT_SECRET`, совпадающий с `JWT_SECRET`, отклоняется при загрузке настроек.
 - Ссылка из Telegram без секрета устройства бесполезна. Секрет уходит на сервер напрямую по TLS, хранится только его SHA-256, `complete` атомарно переводит билет в `claimed`.
 - Все изменения билета в боте условные: «ещё pending и принадлежит этому Telegram». Гонка двух аккаунтов за одну ссылку безопасна.
-- Refresh одноразовый. Повтор в течение 30 секунд (потерянный ответ) просто отклоняется. Более поздний повтор считается кражей и отзывает все сессии пользователя. Access-токен живёт час и до истечения не отзывается.
+- Refresh одноразовый. Повтор в течение 30 секунд (потерянный ответ) просто отклоняется. Более поздний повтор уже заменённого токена живой сессии считается кражей и отзывает все сессии пользователя. Токен завершённой сессии (выход, отзыв с другого устройства) просто не принимается.
+- Access-токен несёт id сессии (claim `sid`), и каждая ручка с Bearer проверяет, что сессия не отозвана: выход и «Выйти» в списке сессий действуют сразу, не дожидаясь часа. Токены без `sid` (выданы до появления сессий) отклоняются 401 — приложение просто обновляет пару.
 - Лимиты (Redis, атомарный `SET NX EX` + `INCR`); IPv6 считается по подсети /64:
   - `start` — 20 за 10 минут с одного IP;
   - `complete` — 30 за 10 минут с одного IP;

@@ -9,7 +9,7 @@ import { GOMAFIA_RESYNC_AFTER_MS, LOGIN_TICKET_TTL_MIN, REFRESH_TOKEN_TTL_DAYS, 
 import { validateGameUpload } from './games.js'
 import { MIN_QUERY_LENGTH, refreshLink, resolveLink, searchForHost, type GoMafiaGateway, type RosterCache } from './gomafia.js'
 import { GomafiaTakenError, type MafboardRepo } from './repo.js'
-import { errorBody, toAccountJSON, toPlayerJSON, toTicketStatusJSON } from './serialize.js'
+import { errorBody, toAccountJSON, toPlayerJSON, toSessionsJSON, toTicketStatusJSON } from './serialize.js'
 import {
   issueAccessToken, newConfirmCode, newDeepCode, newRefreshToken, sha256, verifyAccessToken, webhookSecretValid,
 } from './tokens.js'
@@ -46,7 +46,7 @@ export interface MafboardDeps {
 
 export type DepsResolver = () => MafboardDeps | { error: string }
 
-type Env = { Variables: { deps: MafboardDeps; user: MafboardUser } }
+type Env = { Variables: { deps: MafboardDeps; user: MafboardUser; sessionId: string } }
 
 const GAMES_PAGE_LIMIT = 50
 /** Запись одной игры с журналом — десятки килобайт; 256 КБ — с большим запасом. */
@@ -65,6 +65,9 @@ const REFRESH_REUSE_GRACE_MS = 30_000
 /** Членство в клубе без подтверждения дольше недели не даёт прав клуба. */
 const CLUB_TRUST_MAX_MS = 7 * 24 * 60 * 60_000
 const GOMAFIA_INLINE_TIMEOUT_MS = 8_000
+const SESSIONS_LIMIT = 50
+/** «Последняя активность» сессии пишется не чаще раза в 5 минут — не на каждый запрос. */
+const SESSION_TOUCH_EVERY_MS = 5 * 60_000
 
 /** Ключ лимита по IP: для IPv6 — подсеть /64 (адресов в ней у одного клиента сколько угодно). */
 export function ipKey(ip: string): string {
@@ -135,17 +138,19 @@ async function withFreshClub(deps: MafboardDeps, user: MafboardUser): Promise<Ma
   return age > CLUB_TRUST_MAX_MS ? { ...user, gomafia: { ...link, club: null } } : user
 }
 
-async function issueSession(deps: MafboardDeps, user: MafboardUser, device: { name: string | null; platform: string | null }) {
+/** Вход на устройстве: новая сессия и первая пара токенов. */
+async function issueSession(deps: MafboardDeps, user: MafboardUser, device: { name: string; platform: string }) {
   const now = deps.now()
-  const access = await issueAccessToken(user.id, deps.config, now)
   const refreshToken = newRefreshToken()
-  await deps.repo.insertRefreshToken({
-    tokenHash: sha256(refreshToken),
+  const session = await deps.repo.createSession({
     userId: user.id,
     deviceName: device.name,
     platform: device.platform,
+    refreshTokenHash: sha256(refreshToken),
+    at: now,
     expiresAt: addDays(now, REFRESH_TOKEN_TTL_DAYS),
   })
+  const access = await issueAccessToken({ userId: user.id, sessionId: session.id }, deps.config, now)
   return { accessToken: access.token, refreshToken, accessExpiresAt: access.expiresAt.toISOString() }
 }
 
@@ -163,14 +168,21 @@ export function createMafboardRouter(resolveDeps: DepsResolver): Hono<Env> {
     await next()
   })
 
+  /** Действующий access-токен живой сессии: отзыв сессии с другого устройства действует сразу. */
   const requireUser: MiddlewareHandler<Env> = async (c, next) => {
     const deps = c.get('deps')
     const header = c.req.header('authorization') ?? ''
     const token = header.startsWith('Bearer ') ? header.slice(7).trim() : ''
-    const userId = token ? await verifyAccessToken(token, deps.config) : null
-    const user = userId ? await deps.repo.userById(userId) : null
-    if (!user) return fail(c, 401, 'unauthorized', 'Сессия истекла — войдите снова')
+    const claims = token ? await verifyAccessToken(token, deps.config) : null
+    const session = claims ? await deps.repo.sessionById(claims.sessionId) : null
+    const live = session && !session.revokedAt && session.userId === claims?.userId
+    const user = live ? await deps.repo.userById(session.userId) : null
+    if (!session || !user) return fail(c, 401, 'unauthorized', 'Сессия истекла — войдите снова')
+
+    const now = deps.now()
+    if (now.getTime() - session.lastUsedAt.getTime() > SESSION_TOUCH_EVERY_MS) await deps.repo.touchSession(session.id, now)
     c.set('user', user)
+    c.set('sessionId', session.id)
     await next()
   }
 
@@ -252,8 +264,9 @@ export function createMafboardRouter(resolveDeps: DepsResolver): Hono<Env> {
   })
 
   /**
-   * Обновить токены. Refresh одноразовый: каждый вызов выдаёт новый. Повторное
-   * предъявление уже отозванного — признак кражи: отзываем все сессии пользователя.
+   * Обновить токены. Refresh одноразовый: каждый вызов выдаёт новый токен той же сессии.
+   * Повторное предъявление уже заменённого токена живой сессии — признак кражи:
+   * отзываем все сессии пользователя. Токен завершённой сессии просто не принимается.
    */
   router.post('/v1/auth/refresh', body(refreshSchema), async (c) => {
     const deps = c.get('deps')
@@ -261,10 +274,11 @@ export function createMafboardRouter(resolveDeps: DepsResolver): Hono<Env> {
     const hash = sha256(c.req.valid('json').refreshToken)
     const row = await deps.repo.refreshToken(hash)
     if (!row) return fail(c, 401, 'unauthorized', 'Сессия истекла — войдите снова')
+    if (row.sessionRevokedAt) return fail(c, 401, 'unauthorized', 'Сессия завершена — войдите снова')
     if (row.revokedAt) {
       // Свежий повтор (потерянный ответ, параллельный запрос) — не кража: сессии не трогаем.
       if (now.getTime() - row.revokedAt.getTime() > REFRESH_REUSE_GRACE_MS) {
-        await deps.repo.revokeAllRefreshTokens(row.userId, now)
+        await deps.repo.revokeAllSessions(row.userId, now)
       }
       return fail(c, 401, 'unauthorized', 'Сессия уже обновлена — войдите снова')
     }
@@ -275,17 +289,43 @@ export function createMafboardRouter(resolveDeps: DepsResolver): Hono<Env> {
     if (!(await deps.repo.revokeRefreshToken(hash, now, sha256(next)))) {
       return fail(c, 401, 'unauthorized', 'Сессия уже обновлена на другом запросе')
     }
-    const access = await issueAccessToken(user.id, deps.config, now)
-    await deps.repo.insertRefreshToken({
-      tokenHash: sha256(next), userId: user.id, deviceName: null, platform: null, expiresAt: addDays(now, REFRESH_TOKEN_TTL_DAYS),
+    const extended = await deps.repo.extendSession({
+      sessionId: row.sessionId, refreshTokenHash: sha256(next), at: now, expiresAt: addDays(now, REFRESH_TOKEN_TTL_DAYS),
     })
+    // Сессию отозвали с другого устройства, пока шёл этот запрос.
+    if (!extended) return fail(c, 401, 'unauthorized', 'Сессия завершена — войдите снова')
+    const access = await issueAccessToken({ userId: user.id, sessionId: row.sessionId }, deps.config, now)
     return c.json({ accessToken: access.token, refreshToken: next, accessExpiresAt: access.expiresAt.toISOString() })
   })
 
-  /** Выход: отозвать refresh-токен этого устройства. */
+  /** Выход: завершить сессию этого устройства (её refresh-токены и access-токены перестают действовать). */
   router.post('/v1/auth/logout', body(refreshSchema), async (c) => {
     const deps = c.get('deps')
-    await deps.repo.revokeRefreshToken(sha256(c.req.valid('json').refreshToken), deps.now(), null)
+    const row = await deps.repo.refreshToken(sha256(c.req.valid('json').refreshToken))
+    if (row) await deps.repo.revokeSession(row.userId, row.sessionId, deps.now())
+    return c.json({ ok: true })
+  })
+
+  // ─── Сессии устройств ───────────────────────────────────────────────────────
+
+  /** Устройства, где выполнен вход. Текущее (по сессии access-токена) — первым, с `isCurrent`. */
+  router.get('/v1/me/sessions', requireUser, async (c) => {
+    const deps = c.get('deps')
+    const sessions = await deps.repo.sessionsByUser(c.get('user').id, deps.now(), SESSIONS_LIMIT)
+    return c.json({ sessions: toSessionsJSON(sessions, c.get('sessionId')) })
+  })
+
+  /** Завершить сессию на другом устройстве. Своё устройство — через /v1/auth/logout. */
+  router.delete('/v1/me/sessions/:id', requireUser, async (c) => {
+    const deps = c.get('deps')
+    const id = c.req.param('id').toLowerCase()
+    if (!z.string().uuid().safeParse(id).success) return fail(c, 422, 'validation', 'Некорректная сессия')
+    if (id === c.get('sessionId')) {
+      return fail(c, 409, 'current_session', 'Это текущее устройство — чтобы выйти на нём, нажмите «Выйти» внизу профиля')
+    }
+    if (!(await deps.repo.revokeSession(c.get('user').id, id, deps.now()))) {
+      return fail(c, 404, 'not_found', 'Сессия не найдена или уже завершена')
+    }
     return c.json({ ok: true })
   })
 

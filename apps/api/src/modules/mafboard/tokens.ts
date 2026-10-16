@@ -11,20 +11,34 @@ function jwtOptions(config: Pick<MafboardConfig, 'jwtSecret'>) {
   return { secret: config.jwtSecret, issuer: JWT_ISSUER, audience: JWT_AUDIENCE }
 }
 
+/** Владелец access-токена: пользователь и сессия (устройство), к которой токен выдан. */
+export interface AccessClaims {
+  userId: string
+  sessionId: string
+}
+
 export async function issueAccessToken(
-  userId: string,
+  claims: AccessClaims,
   config: Pick<MafboardConfig, 'jwtSecret'>,
   now: Date,
 ): Promise<{ token: string; expiresAt: Date }> {
-  const token = await signScopedJwt({ sub: userId, scope: SCOPE }, `${ACCESS_TOKEN_TTL_SEC}s`, jwtOptions(config))
+  const token = await signScopedJwt(
+    { sub: claims.userId, sid: claims.sessionId, scope: SCOPE },
+    `${ACCESS_TOKEN_TTL_SEC}s`,
+    jwtOptions(config),
+  )
   return { token, expiresAt: new Date(now.getTime() + ACCESS_TOKEN_TTL_SEC * 1000) }
 }
 
-/** id пользователя из действующего access-токена или null. */
-export async function verifyAccessToken(token: string, config: Pick<MafboardConfig, 'jwtSecret'>): Promise<string | null> {
+/**
+ * Пользователь и сессия из действующего access-токена или null. Токен без сессии
+ * (выдан до появления сессий) не принимается — приложение просто обновит пару.
+ */
+export async function verifyAccessToken(token: string, config: Pick<MafboardConfig, 'jwtSecret'>): Promise<AccessClaims | null> {
   try {
     const claims = await verifyScopedJwt(token, jwtOptions(config))
-    return claims['scope'] === SCOPE && typeof claims['sub'] === 'string' ? claims['sub'] : null
+    const { sub, sid } = claims
+    return claims['scope'] === SCOPE && typeof sub === 'string' && typeof sid === 'string' ? { userId: sub, sessionId: sid } : null
   } catch {
     return null
   }

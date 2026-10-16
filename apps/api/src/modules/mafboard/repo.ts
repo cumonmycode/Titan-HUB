@@ -1,5 +1,6 @@
 import type {
-  GoMafiaClubJSON, GoMafiaPlayerJSON, LoginTicket, MafboardUser, RefreshTokenRow, StoredGame, TelegramProfile, TicketGuard, TicketPatch, TicketStep,
+  DeviceSession, GoMafiaClubJSON, GoMafiaPlayerJSON, LoginTicket, MafboardUser, RefreshTokenRow, StoredGame, TelegramProfile, TicketGuard,
+  TicketPatch, TicketStep,
 } from './types.js'
 
 /** Аккаунт GoMafia уже привязан к другому пользователю (уникальность gomafia_id). */
@@ -44,15 +45,38 @@ export interface MafboardRepo {
   updateTicket(id: string, patch: TicketPatch, guard?: TicketGuard): Promise<LoginTicket | null>
   /** Атомарно: подтверждённый, не истёкший билет с этим секретом → claimed. Иначе null. */
   claimTicket(id: string, deviceSecretHash: string, now: Date): Promise<LoginTicket | null>
-  /** Удалить билеты и refresh-токены, истёкшие раньше `before`. */
-  purgeExpired(before: Date): Promise<{ tickets: number; refreshTokens: number }>
+  /** Удалить билеты, сессии и refresh-токены, истёкшие раньше `before`. */
+  purgeExpired(before: Date): Promise<{ tickets: number; sessions: number; refreshTokens: number }>
+
+  // ─── Сессии устройств ──────────────────────────────────────────────────────
+  /** Атомарно: новая сессия (вход на устройстве) вместе с её первым refresh-токеном. */
+  createSession(input: {
+    userId: string
+    deviceName: string | null
+    platform: string | null
+    refreshTokenHash: string
+    at: Date
+    expiresAt: Date
+  }): Promise<DeviceSession>
+  sessionById(id: string): Promise<DeviceSession | null>
+  /** Не отозванные и не истёкшие сессии пользователя, сначала недавние. */
+  sessionsByUser(userId: string, now: Date, limit: number): Promise<DeviceSession[]>
+  /**
+   * Атомарно: новый refresh-токен для сессии и продление её срока. false — сессию
+   * уже отозвали (выход или отзыв с другого устройства), токен не выдан.
+   */
+  extendSession(input: { sessionId: string; refreshTokenHash: string; at: Date; expiresAt: Date }): Promise<boolean>
+  /** Отметить, что сессией пользуются (время не уходит назад). */
+  touchSession(id: string, at: Date): Promise<void>
+  /** Отозвать сессию этого пользователя и её refresh-токены. false — нет такой активной сессии. */
+  revokeSession(userId: string, sessionId: string, at: Date): Promise<boolean>
+  /** Отозвать все сессии пользователя (признак кражи refresh-токена). */
+  revokeAllSessions(userId: string, at: Date): Promise<void>
 
   // ─── Refresh-токены ────────────────────────────────────────────────────────
-  insertRefreshToken(row: { tokenHash: string; userId: string; deviceName: string | null; platform: string | null; expiresAt: Date }): Promise<void>
   refreshToken(tokenHash: string): Promise<RefreshTokenRow | null>
   /** Атомарно отозвать активный токен. false — уже отозван (повторное использование). */
   revokeRefreshToken(tokenHash: string, at: Date, replacedBy: string | null): Promise<boolean>
-  revokeAllRefreshTokens(userId: string, at: Date): Promise<void>
 
   // ─── Игры ──────────────────────────────────────────────────────────────────
   /** Идемпотентно: та же игра того же ведущего — 'exists', чужая с тем же id — 'conflict'. */

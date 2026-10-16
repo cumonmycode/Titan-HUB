@@ -74,9 +74,23 @@
 | `POST /v1/auth/telegram/start` | — | `{deviceName, platform, deviceSecret}` | `LoginTicket {id, deepLink, expiresAt}` |
 | `GET /v1/auth/telegram/status?ticket=` | — | — | `{status: pending\|confirmed\|rejected\|expired, opened?, note?}` |
 | `POST /v1/auth/telegram/complete` | — | `{ticket, deviceSecret}` | `AuthSession {tokens, account}` |
-| `POST /v1/auth/refresh` | — | `{refreshToken}` | `AuthTokens`. Refresh одноразовый; повтор старого отзывает все сессии |
-| `POST /v1/auth/logout` | — | `{refreshToken}` | `{ok: true}` |
+| `POST /v1/auth/refresh` | — | `{refreshToken}` | `AuthTokens`. Refresh одноразовый; повтор уже заменённого отзывает все сессии |
+| `POST /v1/auth/logout` | — | `{refreshToken}` | `{ok: true}`. Завершает сессию этого устройства |
 | `GET /v1/me` | Bearer | — | `UserAccount` |
+
+### Сессии устройств
+
+Каждый вход через бота — отдельная сессия (устройство). Refresh продлевает ту же сессию, access-токен привязан к ней:
+после выхода или отзыва сессии её токены перестают действовать сразу.
+
+| Метод и путь | Авторизация | Ответ |
+|---|---|---|
+| `GET /v1/me/sessions` | Bearer | `{sessions: [DeviceSession]}` — текущее устройство первым, остальные по последней активности |
+| `DELETE /v1/me/sessions/:id` | Bearer | `{ok: true}`. 409 `current_session` — это текущее устройство (выход — через `logout`), 404 — сессии нет или она уже завершена |
+
+`DeviceSession`: `{id, deviceName, platform, createdAt, lastUsedAt, isCurrent}`. `deviceName` — имя из `start`
+(«iPhone»), `platform` — `ios` / `android`; у сессий, открытых до появления этого списка, они могут быть `null`.
+`lastUsedAt` обновляется при обновлении токенов и не чаще раза в 5 минут при запросах.
 
 ## GoMafia
 

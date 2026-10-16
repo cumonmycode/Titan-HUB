@@ -86,6 +86,60 @@ export const MAFBOARD_MIGRATIONS: readonly { id: string; sql: string }[] = [
       CREATE INDEX IF NOT EXISTS mb_games_club_idx ON mb_games (club_id, finished_at) WHERE club_id IS NOT NULL;
     `,
   },
+  {
+    // Сессии устройств для блока «Сессии» в профиле. Refresh-токены одной сессии —
+    // цепочка ротаций (replaced_by), устройство записано только у первого токена.
+    // Существующую цепочку превращаем в сессию с id = md5(хэш первого токена).
+    id: '002_mafboard_sessions',
+    sql: `
+      CREATE TABLE IF NOT EXISTS mb_sessions (
+        id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id      uuid NOT NULL REFERENCES mb_users(id) ON DELETE CASCADE,
+        device_name  text,
+        platform     text,
+        created_at   timestamptz NOT NULL DEFAULT now(),
+        last_used_at timestamptz NOT NULL DEFAULT now(),
+        expires_at   timestamptz NOT NULL,
+        revoked_at   timestamptz
+      );
+      CREATE INDEX IF NOT EXISTS mb_sessions_user_idx ON mb_sessions (user_id, last_used_at DESC) WHERE revoked_at IS NULL;
+      CREATE INDEX IF NOT EXISTS mb_sessions_expires_idx ON mb_sessions (expires_at);
+
+      ALTER TABLE mb_refresh_tokens ADD COLUMN IF NOT EXISTS session_id uuid;
+
+      WITH RECURSIVE chain AS (
+        SELECT r.token_hash, r.token_hash AS root
+        FROM mb_refresh_tokens r
+        WHERE NOT EXISTS (SELECT 1 FROM mb_refresh_tokens p WHERE p.replaced_by = r.token_hash)
+        UNION ALL
+        SELECT n.token_hash, chain.root
+        FROM chain
+        JOIN mb_refresh_tokens cur ON cur.token_hash = chain.token_hash
+        JOIN mb_refresh_tokens n ON n.token_hash = cur.replaced_by
+      )
+      UPDATE mb_refresh_tokens t SET session_id = md5(chain.root)::uuid
+      FROM chain WHERE t.token_hash = chain.token_hash AND t.session_id IS NULL;
+
+      INSERT INTO mb_sessions (id, user_id, device_name, platform, created_at, last_used_at, expires_at, revoked_at)
+      SELECT root.session_id, root.user_id, root.device_name, root.platform, root.created_at,
+             family.last_used_at, family.expires_at, family.revoked_at
+      FROM mb_refresh_tokens root
+      JOIN (
+        SELECT session_id,
+               max(created_at) AS last_used_at,
+               max(expires_at) AS expires_at,
+               CASE WHEN bool_or(revoked_at IS NULL) THEN NULL ELSE max(revoked_at) END AS revoked_at
+        FROM mb_refresh_tokens GROUP BY session_id
+      ) family ON family.session_id = root.session_id
+      WHERE root.session_id = md5(root.token_hash)::uuid
+      ON CONFLICT (id) DO NOTHING;
+
+      ALTER TABLE mb_refresh_tokens ALTER COLUMN session_id SET NOT NULL;
+      ALTER TABLE mb_refresh_tokens
+        ADD CONSTRAINT mb_refresh_tokens_session_fk FOREIGN KEY (session_id) REFERENCES mb_sessions(id) ON DELETE CASCADE;
+      CREATE INDEX IF NOT EXISTS mb_refresh_tokens_session_idx ON mb_refresh_tokens (session_id) WHERE revoked_at IS NULL;
+    `,
+  },
 ]
 
 function rows<T = Record<string, unknown>>(res: unknown): T[] {

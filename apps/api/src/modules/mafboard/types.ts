@@ -95,6 +95,25 @@ export interface TicketGuard {
 export interface RefreshTokenRow {
   tokenHash: string
   userId: string
+  sessionId: string
+  expiresAt: Date
+  revokedAt: Date | null
+  /** Сессия завершена (выход, отзыв с другого устройства) — токен больше не годится, но это не кража. */
+  sessionRevokedAt: Date | null
+}
+
+/**
+ * Сессия — вход на одном устройстве. Живёт, пока её продлевают refresh-токены
+ * (каждое обновление выдаёт новый токен той же сессии), до выхода или отзыва.
+ */
+export interface DeviceSession {
+  id: string
+  userId: string
+  deviceName: string | null
+  platform: string | null
+  createdAt: Date
+  lastUsedAt: Date
+  /** Срок последнего выданного refresh-токена. */
   expiresAt: Date
   revokedAt: Date | null
 }

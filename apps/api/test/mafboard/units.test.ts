@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { verifyToken } from '@titan/auth'
-import { databaseName, readMafboardConfig } from '../../src/modules/mafboard/config.js'
+import { signScopedJwt, verifyToken } from '@titan/auth'
+import { databaseName, JWT_AUDIENCE, JWT_ISSUER, readMafboardConfig } from '../../src/modules/mafboard/config.js'
 import { validateGameUpload } from '../../src/modules/mafboard/games.js'
 import { RosterCache, searchForHost } from '../../src/modules/mafboard/gomafia.js'
-import { maskPhone, normalizePhone, toPlayerJSON, toTicketStatusJSON } from '../../src/modules/mafboard/serialize.js'
+import { maskPhone, normalizePhone, toPlayerJSON, toSessionsJSON, toTicketStatusJSON } from '../../src/modules/mafboard/serialize.js'
 import { ipKey, sanitizeDeviceName } from '../../src/modules/mafboard/router.js'
 import { decoyCodes, issueAccessToken, verifyAccessToken, webhookSecret, webhookSecretValid } from '../../src/modules/mafboard/tokens.js'
-import type { MafboardUser } from '../../src/modules/mafboard/types.js'
+import type { DeviceSession, MafboardUser } from '../../src/modules/mafboard/types.js'
 import { config, FakeGoMafia, gmPlayer, NOW } from './helpers.js'
 
 describe('телефон', () => {
@@ -49,14 +49,39 @@ describe('игрок GoMafia', () => {
 
 describe('токены', () => {
   it('токен MafBoard проверяется своим ключом и не проходит проверку Titan HUB', async () => {
-    const { token, expiresAt } = await issueAccessToken('user-1', config, NOW)
-    assert.equal(await verifyAccessToken(token, config), 'user-1')
+    const { token, expiresAt } = await issueAccessToken({ userId: 'user-1', sessionId: 'session-1' }, config, NOW)
+    assert.deepEqual(await verifyAccessToken(token, config), { userId: 'user-1', sessionId: 'session-1' })
     assert.equal(expiresAt.toISOString(), '2026-10-16T19:00:00.000Z')
     await assert.rejects(verifyToken(token))
 
     const otherKey = { jwtSecret: new TextEncoder().encode('another-secret-0123456789abcdefghij') }
     assert.equal(await verifyAccessToken(token, otherKey), null)
     assert.equal(await verifyAccessToken('garbage', config), null)
+  })
+
+  it('токен без сессии (выдан до появления сессий) не принимается', async () => {
+    const legacy = await signScopedJwt({ sub: 'user-1', scope: 'mafboard' }, '1h', {
+      secret: config.jwtSecret, issuer: JWT_ISSUER, audience: JWT_AUDIENCE,
+    })
+    assert.equal(await verifyAccessToken(legacy, config), null)
+  })
+})
+
+describe('сессии', () => {
+  it('текущая — первой, остальные по свежести; даты в ISO', () => {
+    const session = (id: string, lastUsedAt: string): DeviceSession => ({
+      id, userId: 'u', deviceName: 'iPhone', platform: 'ios', createdAt: NOW, lastUsedAt: new Date(lastUsedAt),
+      expiresAt: new Date('2027-01-01T00:00:00.000Z'), revokedAt: null,
+    })
+    const json = toSessionsJSON(
+      [session('old', '2026-10-10T00:00:00.000Z'), session('current', '2026-10-01T00:00:00.000Z'), session('fresh', '2026-10-16T15:00:00.000Z')],
+      'current',
+    )
+    assert.deepEqual(json.map((s) => [s.id, s.isCurrent]), [['current', true], ['fresh', false], ['old', false]])
+    assert.deepEqual(json[1], {
+      id: 'fresh', deviceName: 'iPhone', platform: 'ios',
+      createdAt: '2026-10-16T18:00:00.000Z', lastUsedAt: '2026-10-16T15:00:00.000Z', isCurrent: false,
+    })
   })
 })
 

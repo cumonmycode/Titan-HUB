@@ -1,5 +1,5 @@
 import type { GomafiaPlayer } from '../../lib/gomafia.js'
-import type { ErrorBody, GoMafiaClubJSON, GoMafiaPlayerJSON, LoginTicket, MafboardUser } from './types.js'
+import type { DeviceSession, ErrorBody, GoMafiaClubJSON, GoMafiaPlayerJSON, LoginTicket, MafboardUser } from './types.js'
 
 // Перевод внутренних данных в JSON-контракт приложения (docs/MAFBOARD.md).
 
@@ -94,6 +94,21 @@ export function toAccountJSON(user: MafboardUser) {
         }
       : null,
   }
+}
+
+/** Сессии для блока «Сессии» в профиле: текущая первой, остальные — по свежести. */
+export function toSessionsJSON(sessions: DeviceSession[], currentId: string) {
+  const isCurrent = (s: DeviceSession) => s.id === currentId
+  return [...sessions]
+    .sort((a, b) => Number(isCurrent(b)) - Number(isCurrent(a)) || b.lastUsedAt.getTime() - a.lastUsedAt.getTime())
+    .map((s) => ({
+      id: s.id,
+      deviceName: s.deviceName,
+      platform: s.platform,
+      createdAt: s.createdAt.toISOString(),
+      lastUsedAt: s.lastUsedAt.toISOString(),
+      isCurrent: isCurrent(s),
+    }))
 }
 
 /** Статус билета для опроса приложением. */
