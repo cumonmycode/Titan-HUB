@@ -209,16 +209,28 @@ final class AppModel {
 
     // MARK: - Сессии устройств
 
-    /// Устройства, где выполнен вход (блок «Сессии» в профиле). `nil` — список не загружен.
-    private(set) var sessions: [DeviceSession]?
+    /// Список устройств, где выполнен вход (секция «Сессии» в профиле).
+    enum SessionList: Equatable {
+        case loading
+        case loaded([DeviceSession])
+        /// Не загрузился (нет сети) — можно повторить.
+        case failed
+        /// Сервер ещё без списка сессий — секцию не показываем.
+        case unsupported
+    }
 
-    /// Без всплывающих ошибок: список второстепенный, а ошибки сети уже показывает обновление аккаунта.
+    private(set) var sessionList = SessionList.loading
+
+    /// Без всплывающих ошибок: список второстепенный. Уже загруженный список при сбое остаётся.
     func refreshSessions() async {
         do throws(APIError) {
-            sessions = try await withAuth { () async throws(APIError) in try await api.sessions() }
+            let sessions = try await withAuth { () async throws(APIError) in try await api.sessions() }
+            sessionList = .loaded(sessions)
         } catch {
-            // Сервер без списка сессий (ещё не обновлён) — просто не показываем блок.
-            if case .notFound = error { sessions = nil }
+            switch error {
+            case .notFound: sessionList = .unsupported
+            default: if case .loaded = sessionList {} else { sessionList = .failed }
+            }
         }
     }
 
@@ -226,7 +238,9 @@ final class AppModel {
     func revokeSession(_ session: DeviceSession) async {
         do throws(APIError) {
             try await withAuth { () async throws(APIError) in try await api.revokeSession(id: session.id) }
-            sessions = sessions?.filter { $0.id != session.id }
+            if case let .loaded(sessions) = sessionList {
+                sessionList = .loaded(sessions.filter { $0.id != session.id })
+            }
         } catch {
             if case .notFound = error {} else { report(error) }
         }
@@ -251,7 +265,7 @@ final class AppModel {
         refreshTask = nil
         await store.clear()
         account = nil
-        sessions = nil
+        sessionList = .loading
         login = TelegramLoginFlow()
         phase = .signedOut
     }

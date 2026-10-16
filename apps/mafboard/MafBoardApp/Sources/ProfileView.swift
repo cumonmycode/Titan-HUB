@@ -1,7 +1,7 @@
 import SwiftUI
 import MafBoardCore
 
-/// «Профиль»: кто вошёл, GoMafia, аккаунт, сессии, режимы, оформление.
+/// «Профиль»: кто вошёл, GoMafia, аккаунт, режимы, оформление.
 struct ProfileView: View {
     @Environment(AppModel.self) private var model
     @AppStorage(AccentChoice.storageKey) private var accent = AccentChoice.blue
@@ -11,7 +11,6 @@ struct ProfileView: View {
     @State private var isLinking = false
     @State private var isConfirmingUnlink = false
     @State private var isConfirmingSignOut = false
-    @State private var sessionToRevoke: DeviceSession?
 
     var body: some View {
         NavigationStack {
@@ -31,7 +30,7 @@ struct ProfileView: View {
                             Label("Телефон", systemImage: "phone.fill")
                         }
                     }
-                    sessionsSection
+                    SessionsSection()
                     formatsSection(account.hostingAccess, isLinked: account.goMafia != nil)
                 }
                 Section("Оформление") {
@@ -63,22 +62,7 @@ struct ProfileView: View {
                 }
             }
             .navigationTitle("Профиль")
-            .task { await model.refreshSessions() }
-            .refreshable {
-                async let account: Void = model.refreshAccount()
-                async let sessions: Void = model.refreshSessions()
-                _ = await (account, sessions)
-            }
-            .confirmationDialog(
-                sessionToRevoke.map { "Выйти на «\($0.displayName)»?" } ?? "",
-                isPresented: Binding(get: { sessionToRevoke != nil }, set: { if !$0 { sessionToRevoke = nil } }),
-                titleVisibility: .visible,
-                presenting: sessionToRevoke
-            ) { session in
-                Button("Выйти", role: .destructive) { Task { await model.revokeSession(session) } }
-            } message: { _ in
-                Text("На этом устройстве MafBoard закроется, для входа снова понадобится Telegram.")
-            }
+            .refreshable { await model.refreshAccount() }
         }
     }
 
@@ -165,44 +149,6 @@ struct ProfileView: View {
         }
     }
 
-    // MARK: Сессии
-
-    /// Устройства, где выполнен вход. Пока список не загружен (или сервер его не знает) — секции нет.
-    @ViewBuilder
-    private var sessionsSection: some View {
-        if let sessions = model.sessions, !sessions.isEmpty {
-            Section {
-                ForEach(sessions) { sessionRow($0) }
-            } header: {
-                Text("Сессии")
-            } footer: {
-                Text("Устройства, где выполнен вход в ваш аккаунт.")
-            }
-        }
-    }
-
-    private func sessionRow(_ session: DeviceSession) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: session.systemImage)
-                .font(.title2)
-                .foregroundStyle(.tint)
-                .frame(width: 32)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(session.displayName).lineLimit(1)
-                Text(session.isCurrent ? "Текущее" : session.lastSeen(relativeTo: .now))
-                    .font(.subheadline)
-                    .foregroundStyle(session.isCurrent ? AnyShapeStyle(.green) : AnyShapeStyle(.secondary))
-            }
-            Spacer()
-            if !session.isCurrent {
-                Button("Выйти", role: .destructive) { sessionToRevoke = session }
-                    .buttonStyle(.borderless)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.red)
-            }
-        }
-    }
-
     private func formatsSection(_ access: HostingAccess, isLinked: Bool) -> some View {
         Section {
             ForEach(CompetitionFormat.allCases, id: \.self) { format in
@@ -217,17 +163,6 @@ struct ProfileView: View {
             if !isLinked {
                 Text("Без GoMafia доступны только фанки.")
             }
-        }
-    }
-}
-
-private extension DeviceSession {
-    /// Значок по платформе: телефон (iPad — по имени) или компьютер для остального.
-    var systemImage: String {
-        switch platform {
-        case "ios": displayName.localizedCaseInsensitiveContains("ipad") ? "ipad" : "iphone"
-        case "android": "smartphone"
-        default: "desktopcomputer"
         }
     }
 }
