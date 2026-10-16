@@ -182,6 +182,10 @@ export async function gomafiaLogin(login: string, password: string): Promise<Gom
   const sessionToken = res.sessionToken ?? u?.sessionToken ?? res.data?.sessionToken
   const userId = u?.id != null ? String(u.id) : res.id != null ? String(res.id) : undefined
   const clubId = u?.club_id != null ? String(u.club_id) : undefined
+  if (!userId) {
+    // Только имена полей, без значений: в ответе есть sessionToken.
+    console.warn('[gomafia] вход без id игрока, поля ответа:', Object.keys(res ?? {}), u && u !== res ? Object.keys(u) : [])
+  }
   return { ok: true, sessionToken, userId, clubId: clubId ?? null }
 }
 

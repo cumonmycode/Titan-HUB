@@ -1,6 +1,6 @@
 import { Hono } from 'hono'
 import type { ReplyMarkup } from '../../src/lib/tgBot.js'
-import type { GomafiaPlayer } from '../../src/lib/gomafia.js'
+import type { GomafiaLoginResult, GomafiaPlayer } from '../../src/lib/gomafia.js'
 import type { BotMessenger } from '../../src/modules/mafboard/bot.js'
 import type { MafboardConfig } from '../../src/modules/mafboard/config.js'
 import { RosterCache, type GoMafiaGateway } from '../../src/modules/mafboard/gomafia.js'
@@ -215,11 +215,14 @@ export class FakeGoMafia implements GoMafiaGateway {
   ])
   roster: GomafiaPlayer[] = [gmPlayer(4242, 'host'), gmPlayer(5001, 'Шерлок')]
   clubCalls = 0
+  /** Подменить ответ входа (форма успеха без id, сетевая ошибка). */
+  loginOverride: GomafiaLoginResult | null = null
 
-  async login(login: string, password: string) {
+  async login(login: string, password: string): Promise<GomafiaLoginResult> {
+    if (this.loginOverride) return this.loginOverride
     return login === 'host' && password === 'secret'
       ? { ok: true, userId: '4242', clubId: '77' }
-      : { ok: false, error: 'wrong' }
+      : { ok: false, error: 'Никнейм и пароль введены неверно, проверьте правильность введенных данных' }
   }
 
   async player(id: string) { return this.players.get(id) ?? null }

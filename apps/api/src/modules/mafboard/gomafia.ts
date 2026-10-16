@@ -105,19 +105,41 @@ export type LinkResolution =
   | { ok: true; player: GoMafiaPlayerJSON; club: GoMafiaClubJSON | null }
   | { ok: false; reason: 'bad_credentials' | 'unavailable'; message: string }
 
+/** Ошибки транспорта из lib/gomafia.ts — это не «неверный пароль». */
+const TRANSPORT_ERRORS = new Set(['network', 'bad_json'])
+const UNAVAILABLE = 'GoMafia не отвечает, попробуйте позже'
+
+/** Игрок с точно таким ником (без учёта регистра) — по поиску GoMafia. */
+async function playerIdByNickname(gateway: GoMafiaGateway, nickname: string): Promise<string | undefined> {
+  const needle = nickname.trim().toLowerCase()
+  const found = await gateway.search(nickname.trim(), 20).catch(() => [])
+  return found.find((p) => p.login.trim().toLowerCase() === needle)?.gomafiaId
+}
+
 /** Проверить логин и пароль GoMafia и собрать профиль с клубом. Пароль дальше этой функции не уходит. */
 export async function resolveLink(gateway: GoMafiaGateway, login: string, password: string): Promise<LinkResolution> {
   let auth: gm.GomafiaLoginResult
   try {
     auth = await gateway.login(login, password)
   } catch {
-    return { ok: false, reason: 'unavailable', message: 'GoMafia не отвечает, попробуйте позже' }
+    return { ok: false, reason: 'unavailable', message: UNAVAILABLE }
   }
-  if (!auth.ok || !auth.userId) {
-    return { ok: false, reason: 'bad_credentials', message: 'Неверный логин или пароль GoMafia' }
+  if (!auth.ok) {
+    if (typeof auth.error === 'string' && TRANSPORT_ERRORS.has(auth.error)) {
+      return { ok: false, reason: 'unavailable', message: UNAVAILABLE }
+    }
+    const text = typeof auth.error === 'string' && /[а-яё]/i.test(auth.error) ? auth.error : null
+    return { ok: false, reason: 'bad_credentials', message: text ?? 'Неверный никнейм или пароль GoMafia' }
   }
 
-  const detail = await gateway.player(auth.userId).catch(() => null)
+  // Форма успешного ответа GoMafia известна не полностью: если id игрока в нём нет,
+  // ищем профиль по нику — пароль только что подтверждён именно для него.
+  const userId = auth.userId ?? (isNickname(login) ? await playerIdByNickname(gateway, login) : undefined)
+  if (!userId) {
+    return { ok: false, reason: 'unavailable', message: 'Вход в GoMafia прошёл, но профиль не найден. Войдите по никнейму, а не по почте или телефону' }
+  }
+
+  const detail = await gateway.player(userId).catch(() => null)
   // id игрока берём из ответа входа, форма которого известна не полностью. Если вошли по нику,
   // профиль обязан быть с тем же ником — иначе мы бы привязали чужой аккаунт.
   if (detail && isNickname(login) && detail.login.trim().toLowerCase() !== login.trim().toLowerCase()) {
@@ -125,7 +147,7 @@ export async function resolveLink(gateway: GoMafiaGateway, login: string, passwo
   }
   const clubId = detail?.clubId ?? auth.clubId ?? null
   const base: gm.GomafiaPlayer = detail ?? {
-    gomafiaId: auth.userId, login, fullName: null, firstName: null, lastName: null,
+    gomafiaId: userId, login, fullName: null, firstName: null, lastName: null,
     elo: null, avatar: null, clubId, clubTitle: null, city: null, tournaments: null,
   }
   const player = toPlayerJSON(base, false)

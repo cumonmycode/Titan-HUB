@@ -52,6 +52,32 @@ describe('GoMafia', () => {
     assert.equal(unlinked.json.goMafia, null)
   })
 
+  it('неверный пароль — текст GoMafia, сбой сети — не «неверный пароль»', async () => {
+    const ctx = createTestContext()
+    const session = await signIn(ctx)
+    const bad = await call(ctx, 'POST', '/v1/me/gomafia', { token: session.accessToken, body: { login: 'host', password: 'wrong' } })
+    assert.equal(bad.status, 422)
+    assert.match(bad.json.error.message, /Никнейм и пароль введены неверно/)
+
+    ctx.gomafia.loginOverride = { ok: false, error: 'network' }
+    const down = await call(ctx, 'POST', '/v1/me/gomafia', { token: session.accessToken, body: { login: 'host', password: 'secret' } })
+    assert.equal(down.status, 502)
+    assert.equal(down.json.error.code, 'gomafia_unavailable')
+  })
+
+  it('успешный вход без id игрока: профиль находится по нику', async () => {
+    const ctx = createTestContext()
+    const session = await signIn(ctx)
+    ctx.gomafia.loginOverride = { ok: true, sessionToken: 'gm-session' }
+    const ok = await call(ctx, 'POST', '/v1/me/gomafia', { token: session.accessToken, body: { login: 'HOST', password: 'secret' } })
+    assert.equal(ok.status, 200)
+    assert.equal(ok.json.goMafia.player.id, 4242)
+    assert.equal(ok.json.goMafia.club.id, 77)
+
+    const byEmail = await call(ctx, 'POST', '/v1/me/gomafia', { token: session.accessToken, body: { login: 'host@example.com', password: 'secret' } })
+    assert.equal(byEmail.status, 502)
+  })
+
   it('профиль с чужим ником отменяет привязку', async () => {
     const ctx = createTestContext()
     const session = await signIn(ctx)
