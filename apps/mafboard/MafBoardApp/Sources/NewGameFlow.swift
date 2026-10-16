@@ -91,6 +91,7 @@ struct NewGameFlow: View {
     let evening: Evening?
     @State private var draft = NewGameDraft()
     @State private var path: [Step] = []
+    @Environment(\.dismiss) private var dismiss
 
     enum Step: Hashable {
         case format
@@ -105,7 +106,8 @@ struct NewGameFlow: View {
                     switch step {
                     case .format: FormatStep { path.append(.players) }
                     case .players: PlayersStep { path.append(.roles) }
-                    case .roles: RolesStep()
+                    // Закрывает весь лист (а не только шаг) — тогда игра открывается.
+                    case .roles: RolesStep { dismiss() }
                     }
                 }
         }
@@ -288,69 +290,106 @@ private struct FormatCard: View {
 
 // MARK: - Шаг 3: игроки
 
+/// Подсказка при вводе на место: игрок клуба, игрок GoMafia или гость под введённым именем.
+private enum Suggestion: Identifiable {
+    case club(GoMafiaPlayer)
+    case goMafia(GoMafiaPlayer)
+    case guest(String)
+
+    var id: String {
+        switch self {
+        case let .club(player): "club-\(player.id)"
+        case let .goMafia(player): "gm-\(player.id)"
+        case let .guest(name): "guest-\(name)"
+        }
+    }
+
+    var profile: PlayerProfile {
+        switch self {
+        case let .club(player), let .goMafia(player): PlayerProfile(goMafia: player)
+        case let .guest(name): PlayerProfile(nickname: name)
+        }
+    }
+}
+
+/// Рассадка: нажатие на место открывает ввод прямо в строке — клавиатура, поиск по клубу,
+/// затем по GoMafia, последним — гость под введённым именем.
 private struct PlayersStep: View {
     let onNext: () -> Void
     @Environment(NewGameDraft.self) private var draft
     @Environment(GameLibrary.self) private var library
-    @State private var adding: AddTarget?
+    @Environment(AppModel.self) private var model
+    @State private var editingSlot: SeatSlot.ID?
+    @State private var query = ""
+    @State private var roster: [GoMafiaPlayer] = []
+    @State private var found: [GoMafiaPlayer] = []
+    @State private var isSearching = false
     @State private var errorMessage: String?
+    @FocusState private var isFieldFocused: Bool
 
-    /// Лист добавления: на свободные места или на конкретное место.
-    struct AddTarget: Identifiable {
-        let id = UUID()
-        var slotID: SeatSlot.ID?
-    }
+    private static let clubLimit = 5
+    private static let goMafiaLimit = 6
+
+    private var trimmed: String { query.trimmingCharacters(in: .whitespaces) }
 
     var body: some View {
         @Bindable var draft = draft
-        List {
-            Section {
-                LabeledContent("Игра", value: draft.variant.displayName)
-                LabeledContent("Режим") { FormatTag(format: draft.format) }
-                if let evening = draft.evening {
-                    LabeledContent("Вечер", value: "\(evening.title) · игра \(library.games(of: evening).count + 1)")
-                }
-                if draft.variant == .city {
-                    Stepper("Игроков: \(draft.cityCount)", value: $draft.cityCount, in: Ruleset.city.allowedPlayerCounts)
-                        .onChange(of: draft.cityCount) { draft.resize() }
-                }
-            }
-
-            Section {
-                ForEach(Array(draft.slots.enumerated()), id: \.element.id) { index, slot in
-                    Button {
-                        adding = AddTarget(slotID: slot.id)
-                    } label: {
-                        SlotRow(number: index + 1, player: slot.player)
+        ScrollViewReader { proxy in
+            List {
+                Section {
+                    LabeledContent("Игра", value: draft.variant.displayName)
+                    LabeledContent("Режим") { FormatTag(format: draft.format) }
+                    if let evening = draft.evening {
+                        LabeledContent("Вечер", value: "\(evening.title) · игра \(library.games(of: evening).count + 1)")
                     }
-                    .foregroundStyle(.primary)
-                    .swipeActions {
-                        if let player = slot.player {
-                            Button("Убрать", systemImage: "person.badge.minus", role: .destructive) { draft.remove(player.id) }
+                    if draft.variant == .city {
+                        Stepper("Игроков: \(draft.cityCount)", value: $draft.cityCount, in: Ruleset.city.allowedPlayerCounts)
+                            .onChange(of: draft.cityCount) { draft.resize() }
+                    }
+                }
+
+                Section {
+                    ForEach(Array(draft.slots.enumerated()), id: \.element.id) { index, slot in
+                        if slot.id == editingSlot {
+                            editingRow(index: index, slot: slot)
+                        } else {
+                            Button {
+                                beginEditing(slot.id)
+                            } label: {
+                                SlotRow(number: index + 1, player: slot.player)
+                            }
+                            .foregroundStyle(.primary)
+                            .swipeActions {
+                                if let player = slot.player {
+                                    Button("Убрать", systemImage: "person.badge.minus", role: .destructive) { draft.remove(player.id) }
+                                }
+                            }
                         }
                     }
+                    .onMove { draft.slots.move(fromOffsets: $0, toOffset: $1) }
+                } header: {
+                    HStack {
+                        Text("Рассадка")
+                        Spacer()
+                        Text("\(draft.filled) из \(draft.playerCount)")
+                    }
+                } footer: {
+                    Text("Нажмите на место и начните вводить ник: сначала ваш клуб, затем GoMafia, последним — гость под этим именем.")
                 }
-                .onMove { draft.slots.move(fromOffsets: $0, toOffset: $1) }
-            } header: {
-                HStack {
-                    Text("Рассадка")
-                    Spacer()
-                    Text("\(draft.filled) из \(draft.playerCount)")
-                }
-            } footer: {
-                Text("Нажмите на место, чтобы выбрать игрока. Удерживайте и перетащите, чтобы поменять места.")
-            }
 
-            Section {
-                Button("Добавить игроков", systemImage: "person.badge.plus") { adding = AddTarget() }
-                    .disabled(draft.freeSeats == 0)
-                if let last = draft.evening?.lastPlayers, !last.isEmpty {
-                    Button("Состав прошлой игры", systemImage: "arrow.uturn.backward.circle") { draft.seat(last) }
+                Section {
+                    if let last = draft.evening?.lastPlayers, !last.isEmpty {
+                        Button("Состав прошлой игры", systemImage: "arrow.uturn.backward.circle") { draft.seat(last) }
+                    }
+                    Button("Перемешать места", systemImage: "shuffle") { draft.shuffleSeats() }
+                        .disabled(draft.filled < 2)
+                    Button("Очистить", systemImage: "trash", role: .destructive) { draft.seat([]) }
+                        .disabled(draft.filled == 0)
                 }
-                Button("Перемешать места", systemImage: "shuffle") { draft.shuffleSeats() }
-                    .disabled(draft.filled < 2)
-                Button("Очистить", systemImage: "trash", role: .destructive) { draft.seat([]) }
-                    .disabled(draft.filled == 0)
+            }
+            .onChange(of: editingSlot) { _, slot in
+                guard let slot else { return }
+                withAnimation { proxy.scrollTo(slot, anchor: .top) }
             }
         }
         .navigationTitle("Игроки")
@@ -358,21 +397,109 @@ private struct PlayersStep: View {
             ToolbarItem(placement: .topBarTrailing) { EditButton() }
         }
         .safeAreaInset(edge: .bottom) {
-            Button {
-                proceed()
-            } label: {
-                Text(draft.freeSeats == 0 ? "Далее: роли" : "Далее: роли (гостей: \(draft.freeSeats))")
-                    .frame(maxWidth: .infinity)
+            if editingSlot == nil {
+                Button {
+                    proceed()
+                } label: {
+                    Text(draft.freeSeats == 0 ? "Далее: роли" : "Далее: роли (гостей: \(draft.freeSeats))")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.glassProminent)
+                .controlSize(.large)
+                .padding(.horizontal)
             }
-            .buttonStyle(.glassProminent)
-            .controlSize(.large)
-            .padding(.horizontal)
         }
-        .sheet(item: $adding) { AddPlayersSheet(slotID: $0.slotID).environment(draft) }
+        .task { await loadRoster() }
+        .task(id: trimmed) { await searchGoMafia() }
         .alert("Нельзя продолжить", isPresented: Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })) {
             Button("OK", role: .cancel) {}
         } message: {
             Text(errorMessage ?? "")
+        }
+    }
+
+    // MARK: Ввод на месте
+
+    private func editingRow(index: Int, slot: SeatSlot) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 12) {
+                Text("\(index + 1)")
+                    .font(.headline)
+                    .monospacedDigit()
+                    .foregroundStyle(.tint)
+                    .frame(width: 26, alignment: .trailing)
+                TextField(slot.player?.nickname ?? "Ник или имя гостя", text: $query)
+                    .focused($isFieldFocused)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .submitLabel(.next)
+                    .onSubmit { if let first = suggestions.first { pick(first) } }
+                    .onAppear { isFieldFocused = true }
+                if isSearching {
+                    ProgressView()
+                }
+                Button("Готово") { endEditing() }
+                    .buttonStyle(.borderless)
+                    .fontWeight(.semibold)
+            }
+            .padding(.vertical, 4)
+            ForEach(suggestions) { suggestion in
+                Divider().padding(.leading, 38)
+                Button {
+                    pick(suggestion)
+                } label: {
+                    SuggestionRow(suggestion: suggestion, isGuestAllowed: !draft.format.countsTowardStandings)
+                }
+                .buttonStyle(.borderless)
+                .foregroundStyle(.primary)
+            }
+        }
+    }
+
+    /// Сначала свой клуб, затем GoMafia, последним — гость под введённым именем.
+    private var suggestions: [Suggestion] {
+        guard !trimmed.isEmpty else { return [] }
+        let taken = draft.taken
+        let needle = trimmed.lowercased()
+        let club = roster
+            .filter { $0.nickname.lowercased().contains(needle) && !taken.contains(PlayerID.goMafia($0.id)) }
+            .sorted { lhs, rhs in
+                let lhsPrefix = lhs.nickname.lowercased().hasPrefix(needle)
+                let rhsPrefix = rhs.nickname.lowercased().hasPrefix(needle)
+                if lhsPrefix != rhsPrefix { return lhsPrefix }
+                return (lhs.elo ?? 0) > (rhs.elo ?? 0)
+            }
+            .prefix(Self.clubLimit)
+        let clubIDs = Set(roster.map(\.id))
+        let others = found
+            .filter { !clubIDs.contains($0.id) && !taken.contains(PlayerID.goMafia($0.id)) }
+            .prefix(Self.goMafiaLimit)
+        return club.map(Suggestion.club) + others.map(Suggestion.goMafia) + [.guest(trimmed)]
+    }
+
+    private func beginEditing(_ slotID: SeatSlot.ID) {
+        query = ""
+        editingSlot = slotID
+    }
+
+    private func endEditing() {
+        editingSlot = nil
+        query = ""
+        isFieldFocused = false
+    }
+
+    /// Сажаем игрока и сразу переходим к следующему свободному месту.
+    private func pick(_ suggestion: Suggestion) {
+        guard let slotID = editingSlot,
+              let index = draft.slots.firstIndex(where: { $0.id == slotID }),
+              draft.add(suggestion.profile, to: slotID)
+        else { return }
+        query = ""
+        let following = draft.slots[(index + 1)...] + draft.slots[..<index]
+        if let next = following.first(where: { $0.player == nil }) {
+            editingSlot = next.id
+        } else {
+            endEditing()
         }
     }
 
@@ -385,6 +512,68 @@ private struct PlayersStep: View {
             }
         }
         onNext()
+    }
+
+    // MARK: Загрузка
+
+    private func loadRoster() async {
+        guard roster.isEmpty, let clubID = model.account?.goMafia?.club?.id else { return }
+        roster = await model.clubRoster(clubID: clubID) ?? []
+    }
+
+    private func searchGoMafia() async {
+        guard trimmed.count >= 2 else {
+            found = []
+            return
+        }
+        try? await Task.sleep(for: .milliseconds(300))
+        guard !Task.isCancelled else { return }
+        isSearching = true
+        defer { isSearching = false }
+        guard let players = await model.searchPlayers(trimmed), !Task.isCancelled else { return }
+        found = players
+    }
+}
+
+private struct SuggestionRow: View {
+    let suggestion: Suggestion
+    let isGuestAllowed: Bool
+
+    var body: some View {
+        HStack(spacing: 12) {
+            switch suggestion {
+            case let .club(player), let .goMafia(player):
+                PlayerAvatar(name: player.nickname, url: player.avatarURL, size: 30)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(player.nickname).lineLimit(1)
+                    Text([player.clubTitle, player.elo.map { "ELO \(Int($0))" }].compactMap { $0 }.joined(separator: " · "))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                Spacer()
+                if case .club = suggestion {
+                    Label("Клуб", systemImage: "star.fill").font(.caption).foregroundStyle(.yellow)
+                } else {
+                    Text("GoMafia").font(.caption).foregroundStyle(.secondary)
+                }
+            case let .guest(name):
+                Image(systemName: "person.crop.circle.badge.questionmark")
+                    .font(.title2)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 30)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Гостевой игрок «\(name)»").lineLimit(1)
+                    Text(isGuestAllowed ? "Без аккаунта GoMafia — играет под этим именем" : "Только для фанки")
+                        .font(.caption)
+                        .foregroundStyle(isGuestAllowed ? AnyShapeStyle(.secondary) : AnyShapeStyle(.orange))
+                }
+                Spacer()
+            }
+        }
+        .padding(.vertical, 8)
+        .padding(.leading, 38)
+        .contentShape(.rect)
     }
 }
 
@@ -424,7 +613,8 @@ private struct RolesStep: View {
     @Environment(NewGameDraft.self) private var draft
     @Environment(AppModel.self) private var model
     @Environment(GameLibrary.self) private var library
-    @Environment(\.dismiss) private var dismiss
+    /// Игра создана — закрыть мастер целиком.
+    let onStarted: () -> Void
     @State private var isRevealed = false
     @State private var errorMessage: String?
 
@@ -512,164 +702,9 @@ private struct RolesStep: View {
                 library.startEvening(id: eveningID, format: draft.format, variant: draft.variant)
             }
             library.start(setup: setup, players: players)
-            dismiss()
+            onStarted()
         } catch {
             errorMessage = error.message
         }
-    }
-}
-
-// MARK: - Добавление игроков
-
-/// Игроки на места: из клуба (отметками), поиском по GoMafia или гостем.
-struct AddPlayersSheet: View {
-    /// Место, на которое выбираем одного игрока. `nil` — заполняем свободные места подряд.
-    let slotID: SeatSlot.ID?
-    @Environment(NewGameDraft.self) private var draft
-    @Environment(AppModel.self) private var model
-    @Environment(\.dismiss) private var dismiss
-    @State private var source: Source = .club
-    @State private var query = ""
-    @State private var roster: [GoMafiaPlayer] = []
-    @State private var results: [GoMafiaPlayer] = []
-    @State private var guestName = ""
-    @State private var isLoadingRoster = false
-
-    enum Source: String, CaseIterable {
-        case club = "Клуб"
-        case search = "Поиск"
-        case guest = "Гость"
-    }
-
-    private var clubID: Int? { model.account?.goMafia?.club?.id }
-    private var trimmed: String { query.trimmingCharacters(in: .whitespaces) }
-    private var filteredRoster: [GoMafiaPlayer] {
-        let sorted = roster.sorted { ($0.elo ?? 0) > ($1.elo ?? 0) }
-        guard !trimmed.isEmpty else { return sorted }
-        return sorted.filter { $0.nickname.localizedCaseInsensitiveContains(trimmed) }
-    }
-
-    var body: some View {
-        NavigationStack {
-            List {
-                Section {
-                    Picker("Источник", selection: $source) {
-                        ForEach(Source.allCases, id: \.self) { Text($0.rawValue).tag($0) }
-                    }
-                    .pickerStyle(.segmented)
-                    .listRowBackground(Color.clear)
-                    .listRowInsets(EdgeInsets())
-                }
-                switch source {
-                case .club: clubSection
-                case .search: searchSection
-                case .guest: guestSection
-                }
-            }
-            .navigationTitle(slotID == nil ? "Свободно мест: \(draft.freeSeats)" : "Игрок на место")
-            .navigationBarTitleDisplayMode(.inline)
-            .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: source == .club ? "Найти в клубе" : "Ник в GoMafia")
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Готово", systemImage: "checkmark") { dismiss() }
-                }
-            }
-            .task {
-                if clubID == nil { source = .search }
-                await loadRoster()
-            }
-            .task(id: "\(source.rawValue)|\(trimmed)") { await search() }
-        }
-    }
-
-    // MARK: Источники
-
-    @ViewBuilder
-    private var clubSection: some View {
-        if clubID == nil {
-            Section {
-                Text("Клуб появится после подключения GoMafia в профиле.").foregroundStyle(.secondary)
-            }
-        } else {
-            Section {
-                if isLoadingRoster, roster.isEmpty { ProgressView().frame(maxWidth: .infinity) }
-                ForEach(filteredRoster) { player in pickRow(player) }
-            } footer: {
-                Text("Отмечайте игроков — они займут свободные места по порядку.")
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var searchSection: some View {
-        Section {
-            if trimmed.count < 2 {
-                Text("Введите хотя бы 2 символа ника").foregroundStyle(.secondary)
-            }
-            ForEach(results) { player in pickRow(player) }
-        }
-    }
-
-    private var guestSection: some View {
-        Section {
-            HStack {
-                TextField("Имя гостя", text: $guestName)
-                    .textInputAutocapitalization(.words)
-                    .submitLabel(.done)
-                    .onSubmit(addGuest)
-                Button("Добавить", action: addGuest)
-                    .disabled(guestName.trimmingCharacters(in: .whitespaces).isEmpty || draft.freeSeats == 0 && slotID == nil)
-            }
-        } footer: {
-            Text("Игрок без аккаунта GoMafia — только для фанки.")
-        }
-    }
-
-    private func pickRow(_ player: GoMafiaPlayer) -> some View {
-        let profile = PlayerProfile(goMafia: player)
-        let isSeated = draft.taken.contains(profile.id)
-        return Button {
-            if isSeated {
-                draft.remove(profile.id)
-            } else if draft.add(profile, to: slotID), slotID != nil {
-                dismiss()
-            }
-        } label: {
-            HStack {
-                PlayerRow(player: player)
-                Image(systemName: isSeated ? "checkmark.circle.fill" : "circle")
-                    .font(.title3)
-                    .foregroundStyle(isSeated ? AnyShapeStyle(.tint) : AnyShapeStyle(.tertiary))
-            }
-        }
-        .foregroundStyle(.primary)
-        .disabled(!isSeated && draft.freeSeats == 0 && slotID == nil)
-    }
-
-    private func addGuest() {
-        let name = guestName.trimmingCharacters(in: .whitespaces)
-        guard !name.isEmpty, draft.add(PlayerProfile(nickname: name), to: slotID) else { return }
-        guestName = ""
-        if slotID != nil { dismiss() }
-    }
-
-    // MARK: Загрузка
-
-    private func loadRoster() async {
-        guard let clubID, roster.isEmpty else { return }
-        isLoadingRoster = true
-        roster = await model.clubRoster(clubID: clubID) ?? []
-        isLoadingRoster = false
-    }
-
-    private func search() async {
-        guard source == .search, trimmed.count >= 2 else {
-            results = []
-            return
-        }
-        try? await Task.sleep(for: .milliseconds(350))
-        guard !Task.isCancelled else { return }
-        guard let found = await model.searchPlayers(trimmed), !Task.isCancelled else { return }
-        results = found
     }
 }

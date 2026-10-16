@@ -23,7 +23,7 @@ struct GamesView: View {
                     }
                 }
                 if !library.closedEvenings.isEmpty {
-                    Section("Прошлые вечера") {
+                    Section("История") {
                         ForEach(library.closedEvenings) { evening in
                             NavigationLink {
                                 EveningDetailView(evening: evening)
@@ -35,11 +35,7 @@ struct GamesView: View {
                 }
             }
             .navigationTitle("Игры")
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Новая игра", systemImage: "plus") { onNewGame(nil) }
-                }
-            }
+            .profileButton()
         }
     }
 }
@@ -160,7 +156,7 @@ private struct OpenEveningSection: View {
                     .confirmationDialog("Завершить вечер?", isPresented: $isConfirmingClose, titleVisibility: .visible) {
                         Button("Завершить") { library.closeEvening(evening.id) }
                     } message: {
-                        Text("Итоги сохранятся в прошлых вечерах.")
+                        Text("Итоги останутся в истории.")
                     }
             }
         }
@@ -263,6 +259,8 @@ struct FinishedGameView: View {
                 LabeledContent("Режим") { FormatTag(format: game.record.format) }
                 LabeledContent("Игра", value: game.record.variant.displayName)
                 LabeledContent("Окончена", value: game.record.finishedAt.formatted(date: .abbreviated, time: .shortened))
+                LabeledContent("Номер игры", value: game.id.shortCode)
+                    .monospaced()
                 if game.isUploaded {
                     Label("Сохранена на сервере", systemImage: "checkmark.icloud").foregroundStyle(.green)
                 }

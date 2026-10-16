@@ -4,6 +4,7 @@ import MafBoardCore
 /// «Профиль»: кто вошёл, подключения, настройки ведущего.
 struct ProfileView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.dismiss) private var dismiss
     @State private var isConfirmingSignOut = false
 
     private static let termsURL = URL(string: "https://mafboard.titanpos.ru/terms")!
@@ -16,6 +17,21 @@ struct ProfileView: View {
                         ProfileHeader(account: account)
                     }
                     .listRowBackground(Color.clear)
+
+                    Section {
+                        NavigationLink {
+                            ClubView()
+                        } label: {
+                            ConnectionRow(
+                                title: "Мой клуб",
+                                detail: account.goMafia?.club?.title ?? "Нет клуба",
+                                isConnected: nil
+                            ) {
+                                Image(systemName: "person.3.fill").font(.system(size: 13))
+                            }
+                            .tint(.purple)
+                        }
+                    }
 
                     Section("Подключения") {
                         NavigationLink {
@@ -87,6 +103,11 @@ struct ProfileView: View {
             }
             .navigationTitle("Профиль")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Готово", systemImage: "checkmark") { dismiss() }
+                }
+            }
             .refreshable { await model.refreshAccount() }
             .task { await model.refreshSessions() }
         }

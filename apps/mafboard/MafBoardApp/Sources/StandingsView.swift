@@ -96,6 +96,7 @@ struct StandingsView: View {
                 }
             }
             .navigationTitle("Рейтинг")
+            .profileButton()
             .onChange(of: format) { eveningID = nil }
         }
     }

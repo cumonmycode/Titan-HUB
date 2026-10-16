@@ -54,11 +54,33 @@ struct Evening: Codable, Identifiable, Equatable {
     }
 }
 
+/// Файлы игр. У каждого ведущего своя папка — игры разных ведущих на одном телефоне не смешиваются.
+@MainActor
 enum GameFiles {
-    static var directory: URL { URL.applicationSupportDirectory }
-    static var active: URL { directory.appending(path: "current-game.json") }
-    static var history: URL { directory.appending(path: "history.json") }
-    static var evenings: URL { directory.appending(path: "evenings.json") }
+    /// Папка вошедшего ведущего (`users/<id>`). `nil` — никто не вошёл, файлов нет.
+    static var userFolder: String?
+
+    private static let names = ["current-game.json", "history.json", "evenings.json"]
+
+    static var directory: URL {
+        let base = URL.applicationSupportDirectory
+        return userFolder.map { base.appending(path: "users/\($0)") } ?? base.appending(path: "users/none")
+    }
+    static var active: URL { directory.appending(path: names[0]) }
+    static var history: URL { directory.appending(path: names[1]) }
+    static var evenings: URL { directory.appending(path: names[2]) }
+
+    /// Игры, сохранённые до разделения по ведущим (в корне), переезжают к первому вошедшему.
+    static func adoptLegacyFiles() {
+        let base = URL.applicationSupportDirectory
+        let manager = FileManager.default
+        let legacy = names.map { base.appending(path: $0) }.filter { manager.fileExists(atPath: $0.path()) }
+        guard userFolder != nil, !legacy.isEmpty, !manager.fileExists(atPath: directory.path()) else { return }
+        try? manager.createDirectory(at: directory, withIntermediateDirectories: true)
+        for url in legacy {
+            try? manager.moveItem(at: url, to: directory.appending(path: url.lastPathComponent))
+        }
+    }
 
     static func write(_ value: some Encodable, to url: URL) throws {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -78,6 +100,7 @@ enum GameFiles {
     }
 }
 
+@MainActor
 enum SavedGameStore {
     static func load() throws -> SavedGame? { try GameFiles.read(SavedGame.self, from: GameFiles.active) }
     static func save(_ game: SavedGame) throws { try GameFiles.write(game, to: GameFiles.active) }
@@ -109,11 +132,23 @@ final class GameLibrary {
     /// Выгрузка законченной игры на сервер (задаёт приложение). `true` — принята.
     var uploader: (@MainActor (GameRecord) async -> Bool)?
 
-    init() {
+    /// Вошёл другой ведущий (или вышел): показываем только его игры.
+    func switchUser(_ userID: UserID?) {
+        let folder = userID?.description
+        guard folder != GameFiles.userFolder || (history.isEmpty && evenings.isEmpty && active == nil) else { return }
+        GameFiles.userFolder = folder
+        presented = nil
+        pending = nil
+        active = nil
+        history = []
+        evenings = []
+        guard folder != nil else { return }
+        GameFiles.adoptLegacyFiles()
         reload()
     }
 
     func reload() {
+        guard GameFiles.userFolder != nil else { return }
         do {
             active = try SavedGameStore.load()
             history = try GameFiles.read([FinishedGame].self, from: GameFiles.history) ?? []
@@ -284,4 +319,10 @@ final class GameLibrary {
             errorMessage = "Вечера не сохранились: \(error.localizedDescription)"
         }
     }
+}
+
+extension Identifier where Entity == GameRecord {
+    /// Номер игры для людей: первые 6 знаков её UUID. Сам UUID уникален навсегда —
+    /// поэтому игры разных ведущих не смешиваются ни на телефоне, ни на сервере.
+    var shortCode: String { "#" + rawValue.uuidString.prefix(6) }
 }

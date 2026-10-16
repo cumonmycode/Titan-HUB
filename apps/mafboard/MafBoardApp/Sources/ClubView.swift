@@ -1,10 +1,9 @@
 import SwiftUI
 import MafBoardCore
 
-/// «Мой клуб»: клуб ведущего в GoMafia и его состав; поиск — по всей GoMafia.
+/// «Мой клуб» (открывается из профиля): клуб ведущего в GoMafia и его состав; поиск — по всей GoMafia.
 struct ClubView: View {
     @Environment(AppModel.self) private var model
-    let onOpenProfile: () -> Void
     @State private var roster: [GoMafiaPlayer] = []
     @State private var isLoading = false
     @State private var query = ""
@@ -15,40 +14,39 @@ struct ClubView: View {
     private var isSearching: Bool { trimmed.count >= 2 }
 
     var body: some View {
-        NavigationStack {
-            List {
-                if isSearching {
-                    Section("Поиск в GoMafia") {
-                        ForEach(results) { PlayerRow(player: $0) }
+        List {
+            if isSearching {
+                Section("Поиск в GoMafia") {
+                    ForEach(results) { PlayerRow(player: $0) }
+                }
+            } else if let club {
+                Section {
+                    LabeledContent("Город", value: club.city ?? "—")
+                    LabeledContent("Игроков в составе", value: isLoading && roster.isEmpty ? "…" : "\(roster.count)")
+                }
+                Section("Состав") {
+                    if isLoading, roster.isEmpty {
+                        ProgressView().frame(maxWidth: .infinity)
                     }
-                } else if let club {
-                    Section {
-                        LabeledContent("Город", value: club.city ?? "—")
-                        LabeledContent("Игроков в составе", value: isLoading && roster.isEmpty ? "…" : "\(roster.count)")
-                    }
-                    Section("Состав") {
-                        if isLoading, roster.isEmpty {
-                            ProgressView().frame(maxWidth: .infinity)
-                        }
-                        ForEach(roster.sorted { ($0.elo ?? 0) > ($1.elo ?? 0) }) { PlayerRow(player: $0) }
-                    }
+                    ForEach(roster.sorted { ($0.elo ?? 0) > ($1.elo ?? 0) }) { PlayerRow(player: $0) }
                 }
             }
-            .overlay { placeholder }
-            .navigationTitle(club?.title ?? "Мой клуб")
-            .searchable(text: $query, prompt: "Ник в GoMafia")
-            .refreshable { await loadRoster() }
-            .task(id: club?.id) { await loadRoster() }
-            .task(id: trimmed) {
-                guard isSearching else {
-                    results = []
-                    return
-                }
-                try? await Task.sleep(for: .milliseconds(350))
-                guard !Task.isCancelled else { return }
-                guard let found = await model.searchPlayers(trimmed), !Task.isCancelled else { return }
-                results = found
+        }
+        .overlay { placeholder }
+        .navigationTitle(club?.title ?? "Мой клуб")
+        .navigationBarTitleDisplayMode(.inline)
+        .searchable(text: $query, prompt: "Ник в GoMafia")
+        .refreshable { await loadRoster() }
+        .task(id: club?.id) { await loadRoster() }
+        .task(id: trimmed) {
+            guard isSearching else {
+                results = []
+                return
             }
+            try? await Task.sleep(for: .milliseconds(350))
+            guard !Task.isCancelled else { return }
+            guard let found = await model.searchPlayers(trimmed), !Task.isCancelled else { return }
+            results = found
         }
     }
 
@@ -61,11 +59,11 @@ struct ClubView: View {
                 Label("Нет клуба", systemImage: "person.3")
             } description: {
                 Text(model.account?.goMafia == nil
-                     ? "Привяжите GoMafia в профиле — здесь появится ваш клуб и его состав."
+                     ? "Подключите GoMafia — здесь появится ваш клуб и его состав."
                      : "В GoMafia вы пока не состоите в клубе. Поиск игроков работает и так.")
             } actions: {
                 if model.account?.goMafia == nil {
-                    Button("Открыть профиль", action: onOpenProfile)
+                    NavigationLink("Подключить GoMafia") { GoMafiaConnectionView() }
                         .buttonStyle(.glassProminent)
                 }
             }
