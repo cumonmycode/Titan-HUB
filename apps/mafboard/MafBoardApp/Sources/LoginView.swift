@@ -18,7 +18,6 @@ struct LoginView: View {
             content
         }
         .padding(24)
-        .background { AppBackground() }
         .onChange(of: model.telegramURLToOpen) { _, url in
             guard let url else { return }
             openURL(url)

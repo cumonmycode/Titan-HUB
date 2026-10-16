@@ -125,35 +125,20 @@ struct GameScreen: View {
 
     var body: some View {
         NavigationStack {
-            ScrollViewReader { proxy in
-                ScrollView {
-                    VStack(spacing: 12) {
-                        PhaseCard(game: game) { isPickingBestMove = true }
-                        ForEach(game.state.seats) { seat in
-                            Group {
-                                if seat.seat == game.expandedSeat {
-                                    SpeakerCard(game: game, seat: seat)
-                                } else {
-                                    SeatRow(game: game, seat: seat)
-                                }
-                            }
-                            .id(seat.seat)
-                        }
-                    }
-                    .padding(.horizontal)
-                    .padding(.bottom, 12)
-                    .animation(.snappy, value: game.expandedSeat)
+            List {
+                PhaseSection(game: game) { isPickingBestMove = true }
+                if let speaker = game.expandedSeat, let seat = game.state.seat(speaker) {
+                    SpeakerSection(game: game, seat: seat)
                 }
-                .onChange(of: game.expandedSeat) { _, seat in
-                    guard let seat else { return }
-                    withAnimation(.snappy) { proxy.scrollTo(seat, anchor: .center) }
+                Section("Игроки") {
+                    ForEach(game.state.seats) { SeatRow(game: game, seat: $0) }
                 }
             }
-            .appBackground()
+            .listSectionSpacing(.compact)
+            .animation(.snappy, value: game.expandedSeat)
             .navigationTitle(game.state.moment.displayName)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { toolbar }
-            .safeAreaInset(edge: .bottom) { bottomBar }
             .sheet(isPresented: $isPickingBestMove) { BestMoveSheet(game: game) }
             .alert("Ошибка", isPresented: Binding(get: { game.errorMessage != nil }, set: { if !$0 { game.errorMessage = nil } })) {
                 Button("OK", role: .cancel) {}
@@ -191,36 +176,23 @@ struct GameScreen: View {
             }
             .disabled(game.state.isFinished)
         }
-    }
-
-    private var bottomBar: some View {
-        GlassEffectContainer(spacing: 12) {
-            HStack(spacing: 12) {
-                Button("Отменить", systemImage: "arrow.uturn.backward") { game.undo() }
-                    .labelStyle(.iconOnly)
-                    .buttonStyle(.glass)
-                    .disabled(!game.session.canUndo)
-                if game.state.isFinished {
-                    Button {
-                        dismiss()
-                    } label: {
-                        Label("Готово", systemImage: "checkmark").frame(maxWidth: .infinity)
-                    }
+        ToolbarItem(placement: .bottomBar) {
+            Button("Отменить", systemImage: "arrow.uturn.backward") { game.undo() }
+                .disabled(!game.session.canUndo)
+        }
+        ToolbarSpacer(.flexible, placement: .bottomBar)
+        ToolbarItem(placement: .bottomBar) {
+            if game.state.isFinished {
+                Button("Готово", systemImage: "checkmark") { dismiss() }
+                    .labelStyle(.titleAndIcon)
                     .buttonStyle(.glassProminent)
-                } else {
-                    Button {
-                        game.perform(.advance)
-                    } label: {
-                        Label("Далее", systemImage: "forward.fill").frame(maxWidth: .infinity)
-                    }
+            } else {
+                Button("Далее", systemImage: "forward.fill") { game.perform(.advance) }
+                    .labelStyle(.titleAndIcon)
                     .buttonStyle(.glassProminent)
                     .disabled(!game.state.canAdvance)
-                }
             }
         }
-        .controlSize(.large)
-        .padding(.horizontal)
-        .padding(.bottom, 8)
     }
 }
 

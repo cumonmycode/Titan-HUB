@@ -24,31 +24,43 @@ struct NewGameView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(spacing: 16) {
-                    variantCard
-                    formatCard
-                    seatsCard
+            Form {
+                Section {
+                    Picker("Вариант", selection: $variant) {
+                        ForEach(GameVariant.allCases, id: \.self) { Text($0.displayName).tag($0) }
+                    }
+                    .pickerStyle(.segmented)
+                    .listRowBackground(Color.clear)
+                    .listRowInsets(EdgeInsets())
+                    if variant == .city {
+                        Stepper("Игроков: \(cityCount)", value: $cityCount, in: Ruleset.city.allowedPlayerCounts)
+                    }
                 }
-                .padding(.horizontal)
-                .padding(.bottom, 24)
+                formatSection
+                seatsSection
+                Section {
+                    Toggle("Случайная рассадка", isOn: $shufflesSeating)
+                } footer: {
+                    Text("Роли раздаются случайно. Пустые места займут гости «Игрок N» — это можно только в фанке.")
+                }
             }
-            .appBackground()
             .navigationTitle("Новая игра")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Отмена", systemImage: "xmark") { dismiss() }
                 }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Начать", systemImage: "checkmark", action: start)
+                }
             }
             .safeAreaInset(edge: .bottom) {
                 Button(action: start) {
-                    Label("Раздать роли и начать", systemImage: "theatermasks.fill").frame(maxWidth: .infinity)
+                    Text("Раздать роли и начать").frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.glassProminent)
                 .controlSize(.large)
                 .padding(.horizontal)
-                .padding(.bottom, 8)
             }
             .sheet(item: $picking) { slot in
                 PlayerPickerView(taken: Set(seats.compactMap { $0?.id })) { seats[slot.index] = $0 }
@@ -64,100 +76,85 @@ struct NewGameView: View {
         }
     }
 
-    // MARK: Карточки
+    // MARK: Разделы
 
-    private var variantCard: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            CapsLabel(text: "Вариант")
-            Picker("Вариант", selection: $variant) {
-                ForEach(GameVariant.allCases, id: \.self) { Text($0.displayName).tag($0) }
+    private var formatSection: some View {
+        Section {
+            ForEach(CompetitionFormat.allCases, id: \.self) { item in
+                let allowed = item == .funky || access?.allows(item) == true
+                Button {
+                    format = item
+                } label: {
+                    HStack {
+                        Text(item.displayName).foregroundStyle(allowed ? .primary : .secondary)
+                        Spacer()
+                        if !allowed {
+                            Image(systemName: "lock.fill").foregroundStyle(.secondary)
+                        } else if format == item {
+                            Image(systemName: "checkmark").foregroundStyle(.tint).fontWeight(.semibold)
+                        }
+                    }
+                }
+                .disabled(!allowed)
             }
-            .pickerStyle(.segmented)
-            if variant == .city {
-                Stepper("Игроков: \(cityCount)", value: $cityCount, in: Ruleset.city.allowedPlayerCounts)
+        } header: {
+            Text("Режим")
+        } footer: {
+            if access?.allows(.rating) != true {
+                Text("Рейтинг, миникап и турнир — для ведущего клуба GoMafia. Привяжите GoMafia в профиле.")
+            } else if format.countsTowardStandings {
+                Text("Только игроки GoMafia. Игры вечера складываются в одну серию.")
             }
         }
-        .glassCard()
     }
 
-    private var formatCard: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            CapsLabel(text: "Режим")
-            GlassEffectContainer(spacing: 10) {
-                LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible())], spacing: 10) {
-                    ForEach(CompetitionFormat.allCases, id: \.self) { item in
-                        let allowed = item == .funky || access?.allows(item) == true
-                        Button {
-                            if allowed {
-                                format = item
-                            } else {
-                                errorMessage = "«\(item.displayName)» доступен ведущему клуба GoMafia. Привяжите GoMafia в профиле."
-                            }
-                        } label: {
-                            HStack {
-                                Text(item.displayName).font(.headline)
-                                Spacer()
-                                if !allowed { Image(systemName: "lock.fill").foregroundStyle(.secondary) }
-                            }
-                            .padding(.horizontal, 14)
-                            .frame(maxWidth: .infinity, minHeight: 48)
-                        }
-                        .buttonStyle(.plain)
-                        .glassEffect(format == item ? .regular.tint(item.tint.opacity(0.45)).interactive() : .regular.interactive(), in: .rect(cornerRadius: 16))
-                        .opacity(allowed ? 1 : 0.6)
+    private var seatsSection: some View {
+        Section {
+            ForEach(0..<count, id: \.self) { index in
+                Button {
+                    picking = SeatSlot(index: index)
+                } label: {
+                    seatRow(index)
+                }
+                .foregroundStyle(.primary)
+                .swipeActions {
+                    if seats[index] != nil {
+                        Button("Убрать", systemImage: "person.badge.minus", role: .destructive) { seats[index] = nil }
                     }
                 }
             }
-            if format.countsTowardStandings {
-                Text("В «\(format.displayName)» играют только игроки GoMafia. Игры вечера складываются в одну серию.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .glassCard()
-    }
-
-    private var seatsCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        } header: {
             HStack {
-                CapsLabel(text: "Рассадка")
+                Text("Рассадка")
                 Spacer()
-                Text("\(seats.prefix(count).compactMap { $0 }.count) из \(count)").font(.subheadline).foregroundStyle(.secondary)
+                Text("\(seats.prefix(count).compactMap { $0 }.count) из \(count)")
             }
-            ForEach(0..<count, id: \.self) { index in
-                seatRow(index)
-            }
-            Toggle("Случайная рассадка", isOn: $shufflesSeating)
-                .padding(.top, 6)
-            Text("Пустые места займут гости «Игрок N» — только для фанки.")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
         }
-        .glassCard()
     }
 
     private func seatRow(_ index: Int) -> some View {
         HStack(spacing: 12) {
-            Text("\(index + 1)").font(.headline).monospacedDigit().frame(width: 26)
+            Text("\(index + 1)")
+                .font(.body.weight(.semibold))
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
+                .frame(width: 24, alignment: .trailing)
             if let player = seats[index] {
-                PlayerAvatar(name: player.nickname, url: player.avatarURL, size: 36)
+                PlayerAvatar(name: player.nickname, url: player.avatarURL, size: 32)
                 Text(player.nickname).lineLimit(1)
-                if player.goMafiaID == nil { FormatTag(text: "гость", color: .secondary) }
                 Spacer()
-                Button("Убрать", systemImage: "xmark.circle.fill") { seats[index] = nil }
-                    .labelStyle(.iconOnly)
-                    .foregroundStyle(.secondary)
-                    .buttonStyle(.plain)
+                if player.goMafiaID == nil {
+                    Text("гость").font(.caption).foregroundStyle(.secondary)
+                }
             } else {
-                Image(systemName: "person.crop.circle.badge.plus").font(.title2).foregroundStyle(.secondary).frame(width: 36)
+                Image(systemName: "person.crop.circle.badge.plus")
+                    .font(.title2)
+                    .foregroundStyle(.tint)
+                    .frame(width: 32)
                 Text("Выбрать игрока").foregroundStyle(.secondary)
                 Spacer()
             }
         }
-        .padding(10)
-        .background(.white.opacity(0.06), in: .rect(cornerRadius: 16))
-        .contentShape(.rect)
-        .onTapGesture { picking = SeatSlot(index: index) }
     }
 
     // MARK: Старт
@@ -202,37 +199,39 @@ struct PlayerPickerView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(spacing: 10) {
-                    HStack(spacing: 10) {
-                        TextField("Гость без GoMafia", text: $guestName)
+            List {
+                Section {
+                    HStack {
+                        TextField("Имя гостя", text: $guestName)
                             .textInputAutocapitalization(.words)
                             .submitLabel(.done)
                             .onSubmit(addGuest)
                         Button("Добавить", action: addGuest)
-                            .buttonStyle(.glass)
                             .disabled(guestName.trimmingCharacters(in: .whitespaces).isEmpty)
                     }
-                    .glassCard(cornerRadius: 20, padding: 12)
-
-                    ForEach(results) { player in
-                        let isTaken = taken.contains(PlayerID.goMafia(player.id))
-                        Button { pick(PlayerProfile(goMafia: player)) } label: {
-                            PlayerRow(player: player).glassCard(cornerRadius: 20, padding: 12)
+                } header: {
+                    Text("Гость")
+                } footer: {
+                    Text("Игрок без аккаунта GoMafia — только для фанки.")
+                }
+                if !results.isEmpty {
+                    Section("GoMafia") {
+                        ForEach(results) { player in
+                            let isTaken = taken.contains(PlayerID.goMafia(player.id))
+                            Button { pick(PlayerProfile(goMafia: player)) } label: {
+                                PlayerRow(player: player)
+                            }
+                            .foregroundStyle(.primary)
+                            .disabled(isTaken)
                         }
-                        .buttonStyle(.plain)
-                        .disabled(isTaken)
-                        .opacity(isTaken ? 0.4 : 1)
-                    }
-                    if results.isEmpty {
-                        Text(trimmed.count < 2 ? "Введите хотя бы 2 символа ника" : "Никого не нашли")
-                            .foregroundStyle(.secondary)
-                            .padding(.top, 24)
                     }
                 }
-                .padding()
             }
-            .appBackground()
+            .overlay {
+                if trimmed.count >= 2, results.isEmpty {
+                    ContentUnavailableView.search(text: trimmed)
+                }
+            }
             .navigationTitle("Игрок")
             .navigationBarTitleDisplayMode(.inline)
             .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Ник в GoMafia")

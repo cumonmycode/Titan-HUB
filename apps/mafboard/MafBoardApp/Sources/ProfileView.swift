@@ -1,10 +1,11 @@
 import SwiftUI
 import MafBoardCore
 
-/// Профиль: кто вошёл, GoMafia, Telegram, доступные режимы.
+/// «Профиль»: кто вошёл, GoMafia, аккаунт, режимы, оформление.
 struct ProfileView: View {
     @Environment(AppModel.self) private var model
-    @AppStorage(AppTheme.storageKey) private var theme = AppTheme.midnight
+    @AppStorage(AccentChoice.storageKey) private var accent = AccentChoice.blue
+    @AppStorage(AppearanceChoice.storageKey) private var appearance = AppearanceChoice.system
     @State private var goMafiaLogin = ""
     @State private var goMafiaPassword = ""
     @State private var isLinking = false
@@ -13,199 +14,154 @@ struct ProfileView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(spacing: 16) {
-                    if let account = model.account {
-                        identityCard(account)
-                        goMafiaCard(account)
-                        HStack(spacing: 12) {
-                            tile(icon: "paperplane.fill", color: .blue, title: "Telegram",
-                                 subtitle: account.telegram.username.map { "@\($0)" } ?? account.telegram.displayName, dot: .green)
-                            tile(icon: "phone.fill", color: .green, title: "Телефон",
-                                 subtitle: account.maskedPhone ?? "не указан", dot: account.maskedPhone == nil ? nil : theme.accent)
+            Form {
+                if let account = model.account {
+                    Section { header(account) }
+                    goMafiaSection(account)
+                    Section("Аккаунт") {
+                        LabeledContent {
+                            Text(account.telegram.username.map { "@\($0)" } ?? account.telegram.displayName)
+                        } label: {
+                            Label("Telegram", systemImage: "paperplane.fill")
                         }
-                        formatsCard(account.hostingAccess)
+                        LabeledContent {
+                            Text(account.maskedPhone ?? "Не указан")
+                        } label: {
+                            Label("Телефон", systemImage: "phone.fill")
+                        }
                     }
-                    Button("Выйти", systemImage: "rectangle.portrait.and.arrow.right", role: .destructive) {
-                        isConfirmingSignOut = true
-                    }
-                    .buttonStyle(.glass)
-                    .controlSize(.large)
-                    .confirmationDialog("Выйти из MafBoard?", isPresented: $isConfirmingSignOut, titleVisibility: .visible) {
-                        Button("Выйти", role: .destructive) { Task { await model.signOut() } }
-                    }
+                    formatsSection(account.hostingAccess, isLinked: account.goMafia != nil)
                 }
-                .padding(.horizontal)
-                .padding(.bottom, 24)
+                Section("Оформление") {
+                    Picker(selection: $appearance) {
+                        ForEach(AppearanceChoice.allCases) { Text($0.title).tag($0) }
+                    } label: {
+                        Label("Тема", systemImage: "circle.lefthalf.filled")
+                    }
+                    Picker(selection: $accent) {
+                        ForEach(AccentChoice.allCases) { choice in
+                            Label {
+                                Text(choice.title)
+                            } icon: {
+                                Image(systemName: "circle.fill").foregroundStyle(choice.color)
+                            }
+                            .tag(choice)
+                        }
+                    } label: {
+                        Label("Акцент", systemImage: "paintpalette")
+                    }
+                    .pickerStyle(.navigationLink)
+                }
+                Section {
+                    Button("Выйти", role: .destructive) { isConfirmingSignOut = true }
+                        .frame(maxWidth: .infinity)
+                        .confirmationDialog("Выйти из MafBoard?", isPresented: $isConfirmingSignOut, titleVisibility: .visible) {
+                            Button("Выйти", role: .destructive) { Task { await model.signOut() } }
+                        }
+                }
             }
-            .appBackground()
             .navigationTitle("Профиль")
             .refreshable { await model.refreshAccount() }
         }
     }
 
-    // MARK: Кто вошёл
+    // MARK: Шапка
 
-    private func identityCard(_ account: UserAccount) -> some View {
+    private func header(_ account: UserAccount) -> some View {
         let nickname = account.goMafia?.player.nickname ?? account.telegram.displayName
-        return HStack(spacing: 16) {
-            PlayerAvatar(name: nickname, url: account.goMafia?.player.avatarURL, size: 84)
-                .padding(4)
-                .overlay(RoundedRectangle(cornerRadius: 30, style: .continuous).stroke(theme.accent, lineWidth: 2.5))
-            VStack(alignment: .leading, spacing: 8) {
-                CapsLabel(text: "Никнейм")
-                Text(nickname)
-                    .font(.title2.bold())
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.7)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(.white.opacity(0.07), in: .rect(cornerRadius: 16))
-                if let club = account.goMafia?.club {
-                    Label(club.title, systemImage: "building.2").font(.subheadline).foregroundStyle(.secondary)
-                }
+        return HStack(spacing: 14) {
+            PlayerAvatar(name: nickname, url: account.goMafia?.player.avatarURL, size: 60)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(nickname).font(.title3.weight(.semibold)).lineLimit(1)
+                Text(account.goMafia?.club?.title ?? "Ведущий")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
             }
         }
-        .glassCard()
+        .padding(.vertical, 4)
     }
 
     // MARK: GoMafia
 
-    private func goMafiaCard(_ account: UserAccount) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 12) {
-                Text("GM")
-                    .font(.headline.weight(.black))
-                    .foregroundStyle(theme.accent)
-                    .frame(width: 52, height: 52)
-                    .background(.white.opacity(0.07), in: .rect(cornerRadius: 16))
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("GoMafia").font(.headline)
-                    CapsLabel(text: account.goMafia == nil ? "Не подключено" : "Подключено", color: account.goMafia == nil ? .secondary : .green)
-                }
-                Spacer()
-                if account.goMafia != nil {
-                    Button("Обновить", systemImage: "arrow.triangle.2.circlepath") { Task { await model.refreshAccount() } }
-                        .labelStyle(.iconOnly)
-                        .buttonStyle(.glass)
-                    Button("Отвязать", systemImage: "xmark") { isConfirmingUnlink = true }
-                        .labelStyle(.iconOnly)
-                        .buttonStyle(.glass)
-                        .tint(.red)
-                        .confirmationDialog("Отвязать GoMafia?", isPresented: $isConfirmingUnlink, titleVisibility: .visible) {
-                            Button("Отвязать", role: .destructive) { Task { await model.unlinkGoMafia() } }
-                        } message: {
-                            Text("Останутся только фанки.")
+    @ViewBuilder
+    private func goMafiaSection(_ account: UserAccount) -> some View {
+        if let link = account.goMafia {
+            Section {
+                HStack(spacing: 12) {
+                    PlayerAvatar(name: link.player.nickname, url: link.player.avatarURL, size: 36)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(link.player.nickname)
+                        if let elo = link.player.elo {
+                            Text("ELO \(elo.formatted(.number.precision(.fractionLength(0))))")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                                .monospacedDigit()
                         }
-                }
-            }
-            if let link = account.goMafia {
-                linkedRows(link)
-            } else {
-                linkForm
-            }
-        }
-        .glassCard()
-    }
-
-    private func linkedRows(_ link: GoMafiaLink) -> some View {
-        VStack(spacing: 10) {
-            HStack(spacing: 12) {
-                PlayerAvatar(name: link.player.nickname, url: link.player.avatarURL, size: 36)
-                Text(link.player.nickname).font(.headline)
-                Spacer()
-                if let elo = link.player.elo {
-                    Text("ELO \(elo.formatted(.number.precision(.fractionLength(0))))").monospacedDigit().foregroundStyle(.secondary)
-                }
-            }
-            .innerRow()
-            HStack {
-                Text("Авторизация").foregroundStyle(.secondary)
-                Spacer()
-                Label("Привязан", systemImage: "checkmark")
-                    .font(.subheadline.bold())
-                    .foregroundStyle(.green)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-                    .background(.green.opacity(0.15), in: .capsule)
-            }
-            .innerRow()
-        }
-    }
-
-    private var linkForm: some View {
-        VStack(spacing: 10) {
-            TextField("Никнейм в GoMafia", text: $goMafiaLogin)
-                .textContentType(.username)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .innerRow()
-            SecureField("Пароль", text: $goMafiaPassword)
-                .textContentType(.password)
-                .innerRow()
-            Button {
-                Task {
-                    isLinking = true
-                    if await model.linkGoMafia(login: goMafiaLogin.trimmingCharacters(in: .whitespaces), password: goMafiaPassword) {
-                        goMafiaPassword = ""
                     }
-                    isLinking = false
-                }
-            } label: {
-                Label(isLinking ? "Проверяем…" : "Привязать", systemImage: "link").frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.glassProminent)
-            .controlSize(.large)
-            .disabled(goMafiaLogin.isEmpty || goMafiaPassword.isEmpty || isLinking)
-            Text("Как на gomafia.pro: никнейм (не почта и не телефон) и пароль. Пароль проверяется на сервере и не сохраняется. Без GoMafia доступны только фанки.")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-        }
-    }
-
-    // MARK: Плитки и режимы
-
-    private func tile(icon: String, color: Color, title: String, subtitle: String, dot: Color?) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .top) {
-                Image(systemName: icon)
-                    .font(.title3)
-                    .foregroundStyle(color)
-                    .frame(width: 44, height: 44)
-                    .background(.white.opacity(0.07), in: .rect(cornerRadius: 14))
-                Spacer()
-                if let dot { Circle().fill(dot).frame(width: 9, height: 9) }
-            }
-            Text(title).font(.headline)
-            Text(subtitle).font(.subheadline).foregroundStyle(.secondary).lineLimit(1).minimumScaleFactor(0.8)
-        }
-        .glassCard(cornerRadius: 24)
-    }
-
-    private func formatsCard(_ access: HostingAccess) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            CapsLabel(text: "Режимы")
-            ForEach(CompetitionFormat.allCases, id: \.self) { format in
-                HStack {
-                    Text(format.displayName)
                     Spacer()
-                    Image(systemName: access.allows(format) ? "checkmark.circle.fill" : "lock.fill")
-                        .foregroundStyle(access.allows(format) ? AnyShapeStyle(.green) : AnyShapeStyle(.secondary))
+                    Label("Привязан", systemImage: "checkmark.circle.fill")
+                        .font(.subheadline)
+                        .foregroundStyle(.green)
                 }
-                .innerRow()
+                LabeledContent("Клуб", value: link.club?.title ?? "Без клуба")
+                Button("Обновить профиль", systemImage: "arrow.clockwise") { Task { await model.refreshAccount() } }
+                Button("Отвязать GoMafia", systemImage: "link.badge.minus", role: .destructive) { isConfirmingUnlink = true }
+                    .confirmationDialog("Отвязать GoMafia?", isPresented: $isConfirmingUnlink, titleVisibility: .visible) {
+                        Button("Отвязать", role: .destructive) { Task { await model.unlinkGoMafia() } }
+                    } message: {
+                        Text("Останутся только фанки.")
+                    }
+            } header: {
+                Text("GoMafia")
+            } footer: {
+                Text("Профиль и клуб подтягиваются из GoMafia.")
+            }
+        } else {
+            Section {
+                TextField("Никнейм", text: $goMafiaLogin)
+                    .textContentType(.username)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                SecureField("Пароль", text: $goMafiaPassword)
+                    .textContentType(.password)
+                Button {
+                    Task {
+                        isLinking = true
+                        if await model.linkGoMafia(login: goMafiaLogin.trimmingCharacters(in: .whitespaces), password: goMafiaPassword) {
+                            goMafiaPassword = ""
+                        }
+                        isLinking = false
+                    }
+                } label: {
+                    if isLinking {
+                        ProgressView().frame(maxWidth: .infinity)
+                    } else {
+                        Text("Привязать").frame(maxWidth: .infinity)
+                    }
+                }
+                .disabled(goMafiaLogin.isEmpty || goMafiaPassword.isEmpty || isLinking)
+            } header: {
+                Text("GoMafia")
+            } footer: {
+                Text("Как на gomafia.pro: никнейм (не почта и не телефон) и пароль. Пароль проверяется на сервере и не сохраняется.")
             }
         }
-        .glassCard()
     }
-}
 
-private extension View {
-    /// Строка внутри стеклянной карточки — без второго слоя стекла.
-    func innerRow() -> some View {
-        padding(.horizontal, 14)
-            .padding(.vertical, 12)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(.white.opacity(0.06), in: .rect(cornerRadius: 16))
+    private func formatsSection(_ access: HostingAccess, isLinked: Bool) -> some View {
+        Section {
+            ForEach(CompetitionFormat.allCases, id: \.self) { format in
+                LabeledContent(format.displayName) {
+                    Image(systemName: access.allows(format) ? "checkmark" : "lock.fill")
+                        .foregroundStyle(access.allows(format) ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
+                }
+            }
+        } header: {
+            Text("Режимы")
+        } footer: {
+            if !isLinked {
+                Text("Без GoMafia доступны только фанки.")
+            }
+        }
     }
 }

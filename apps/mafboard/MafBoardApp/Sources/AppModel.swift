@@ -175,6 +175,26 @@ final class AppModel {
         }
     }
 
+    /// Состав клуба GoMafia целиком (постранично). `nil` — не удалось загрузить.
+    func clubRoster(clubID: Int) async -> [GoMafiaPlayer]? {
+        var players: [GoMafiaPlayer] = []
+        var seen = Set<Int>()
+        do throws(APIError) {
+            for page in 1...Self.maxRosterPages {
+                let batch = try await withAuth { () async throws(APIError) in try await api.clubRoster(clubID: clubID, page: page) }
+                let fresh = batch.filter { seen.insert($0.id).inserted }
+                if fresh.isEmpty { break }
+                players += fresh
+            }
+            return players
+        } catch {
+            report(error)
+            return players.isEmpty ? nil : players
+        }
+    }
+
+    private static let maxRosterPages = 12
+
     /// Законченная игра — в историю на сервере (личную или клуба). `true` — сервер её принял (или уже имел).
     func uploadGame(_ record: GameRecord) async -> Bool {
         guard phase == .signedIn, record.host != nil else { return false }
