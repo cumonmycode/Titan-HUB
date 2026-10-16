@@ -11,28 +11,34 @@ struct PlayersView: View {
 
     var body: some View {
         NavigationStack {
-            List(players) { PlayerRow(player: $0) }
-                .overlay {
-                    if players.isEmpty {
-                        ContentUnavailableView(
-                            trimmed.count < 2 ? "Поиск игроков GoMafia" : "Никого не нашли",
-                            systemImage: "magnifyingglass",
-                            description: Text(trimmed.count < 2 ? "Введите хотя бы 2 символа ника" : "Попробуйте другой ник")
-                        )
-                    }
+            ScrollView {
+                LazyVStack(spacing: 10) {
+                    ForEach(players) { PlayerRow(player: $0).glassCard(cornerRadius: 20, padding: 12) }
                 }
-                .navigationTitle("Игроки")
-                .searchable(text: $query, prompt: "Ник в GoMafia")
-                .task(id: trimmed) {
-                    guard trimmed.count >= 2 else {
-                        players = []
-                        return
-                    }
-                    try? await Task.sleep(for: .milliseconds(350))
-                    guard !Task.isCancelled else { return }
-                    guard let found = await model.searchPlayers(trimmed), !Task.isCancelled else { return }
-                    players = found
+                .padding()
+            }
+            .overlay {
+                if players.isEmpty {
+                    ContentUnavailableView(
+                        trimmed.count < 2 ? "Поиск игроков GoMafia" : "Никого не нашли",
+                        systemImage: "magnifyingglass",
+                        description: Text(trimmed.count < 2 ? "Введите хотя бы 2 символа ника" : "Попробуйте другой ник")
+                    )
                 }
+            }
+            .appBackground()
+            .navigationTitle("Игроки")
+            .searchable(text: $query, prompt: "Ник в GoMafia")
+            .task(id: trimmed) {
+                guard trimmed.count >= 2 else {
+                    players = []
+                    return
+                }
+                try? await Task.sleep(for: .milliseconds(350))
+                guard !Task.isCancelled else { return }
+                guard let found = await model.searchPlayers(trimmed), !Task.isCancelled else { return }
+                players = found
+            }
         }
     }
 }
@@ -42,18 +48,13 @@ struct PlayerRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            AsyncImage(url: player.avatarURL) { image in
-                image.resizable().scaledToFill()
-            } placeholder: {
-                Image(systemName: "person.crop.circle.fill").resizable().foregroundStyle(.secondary)
-            }
-            .frame(width: 40, height: 40)
-            .clipShape(.circle)
-            VStack(alignment: .leading) {
-                Text(player.nickname).font(.headline)
+            PlayerAvatar(name: player.nickname, url: player.avatarURL, size: 44)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(player.nickname).font(.headline).lineLimit(1)
                 Text([player.clubTitle, player.city].compactMap { $0 }.joined(separator: " · "))
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
+                    .lineLimit(1)
             }
             Spacer()
             if let elo = player.elo {

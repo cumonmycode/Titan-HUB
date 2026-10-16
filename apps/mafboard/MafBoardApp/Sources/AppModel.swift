@@ -175,6 +175,18 @@ final class AppModel {
         }
     }
 
+    /// Законченная игра — в историю на сервере (личную или клуба). `true` — сервер её принял (или уже имел).
+    func uploadGame(_ record: GameRecord) async -> Bool {
+        guard phase == .signedIn, record.host != nil else { return false }
+        do throws(APIError) {
+            try await withAuth { () async throws(APIError) in try await api.uploadGame(record) }
+            return true
+        } catch {
+            if case .conflict = error { return true }
+            return false
+        }
+    }
+
     private func apply(_ fresh: UserAccount) async {
         account = fresh
         do { try await store.updateAccount(fresh) } catch { report(error) }

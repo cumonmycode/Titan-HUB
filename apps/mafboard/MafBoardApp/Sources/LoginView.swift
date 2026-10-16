@@ -11,13 +11,14 @@ struct LoginView: View {
             Spacer()
             Image(systemName: "theatermasks.fill")
                 .font(.system(size: 72))
-                .foregroundStyle(.red.gradient)
+                .foregroundStyle(.tint)
             Text("MafBoard").font(.largeTitle.bold())
             Text("Компаньон ведущего мафии").foregroundStyle(.secondary)
             Spacer()
             content
         }
         .padding(24)
+        .background { AppBackground() }
         .onChange(of: model.telegramURLToOpen) { _, url in
             guard let url else { return }
             openURL(url)
