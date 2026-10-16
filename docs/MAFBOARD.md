@@ -42,7 +42,7 @@ apps/api/test/mafboard/ — тесты (node:test через tsx), хранил�
 
 ## API
 
-Базовый адрес для приложения: `https://titanpos.ru/api/mafboard`. Все запросы и ответы — JSON,
+Базовый адрес для приложения: `https://mafboard.titanpos.ru/api/mafboard` (поддомен отдаёт только API MafBoard, страницу возврата `/auth/return`, `/terms` и `apple-app-site-association`; см. блок в `nginx/nginx.conf`). Все запросы и ответы — JSON,
 даты — ISO 8601. Ошибки приходят в формате `{"error": {"code": "…", "message": "…"}}`.
 
 | Метод и путь | Авторизация | Что делает |
@@ -119,7 +119,7 @@ apps/api/test/mafboard/ — тесты (node:test через tsx), хранил�
 1. Создать бота в @BotFather. Положить в `.env` переменные `MAFBOARD_BOT_TOKEN`, `MAFBOARD_JWT_SECRET` (`openssl rand -base64 48`) и `MAFBOARD_APP_LINK_BASE`. Остальные — по [CONFIGURATION.md](CONFIGURATION.md#mafboard-приложение-ведущих-мафии).
 2. Передеплоить шлюз: `cd infra/telegram-relay && wrangler deploy`. В `WEBHOOK_PATH` добавлен `/api/mafboard/tg-webhook`.
 3. Задеплоить API. При старте модуль сам создаст БД `mafboard` (пользователю Postgres нужно право `CREATEDB` — у `titan` в compose оно есть), применит миграции и поставит вебхук.
-4. На домене `MAFBOARD_APP_LINK_BASE` разместить `/.well-known/apple-app-site-association` с путём `/auth/return*` и страницу `/auth/return`, которая без приложения ведёт в App Store.
+4. `MAFBOARD_APP_LINK_BASE=https://mafboard.titanpos.ru`. Поддомен уже настроен в nginx: `apple-app-site-association` (`G99YH9UK8C.ru.titan.mafboard`, путь `/auth/return*`), страница возврата с кнопкой `mafboard://` и временная `/terms`. **Текст соглашения в `/terms` — заглушка: заменить до запуска приложения.**
 
 ## Тесты
 

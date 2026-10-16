@@ -31,8 +31,9 @@ import type { Database } from '@titan/database'
 // Базовый домен платформы. На нём (и служебных поддоменах) — дефолтный синглтон.
 const ROOT_DOMAIN = (process.env['ROOT_DOMAIN'] || 'titanpos.ru').toLowerCase()
 
-// Служебные поддомены первого уровня (НЕ клубы): admin → суперадмин-контур.
-const RESERVED_LABELS = new Set(['admin'])
+// Служебные поддомены первого уровня (НЕ клубы): admin → суперадмин-контур,
+// mafboard → сервер приложения MafBoard (docs/MAFBOARD.md).
+const RESERVED_LABELS = new Set(['admin', 'mafboard'])
 
 // Подписка клуба (минимум для энфорсмента доступа). paidUntil — дата окончания
 // оплаченного периода (null = бессрочно/не задана).
