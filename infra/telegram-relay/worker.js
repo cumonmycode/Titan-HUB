@@ -11,6 +11,7 @@
 //
 //  2) Входящий вебхук бота опросов (Telegram → нам):
 //       POST /api/tg/poll-webhook/<clubId>     → https://<ORIGIN_HOST>/api/tg/poll-webhook/<clubId>
+//       POST /api/mafboard/tg-webhook          → https://<ORIGIN_HOST>/api/mafboard/tg-webhook (бот MafBoard)
 //     Подлинность проверяет API по заголовку X-Telegram-Bot-Api-Secret-Token.
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -26,7 +27,7 @@ const WEB_HEADERS = ['user-agent', 'accept', 'accept-language', 'x-ig-app-id', '
 // 4) Файлы СММ для серверов Meta (публикация в Instagram берёт картинку по ссылке):
 //      GET /media/smm-<файл> → https://<ORIGIN_HOST>/media/smm-<файл>. Только наши файлы СММ.
 const MEDIA_PATH = /^\/media\/smm-[\w.-]+$/
-const WEBHOOK_PATH = /^\/api\/tg\/poll-webhook\/[A-Za-z0-9-]+$/
+const WEBHOOK_PATH = /^\/api\/(tg\/poll-webhook\/[A-Za-z0-9-]+|mafboard\/tg-webhook)$/
 const FORWARD_HEADERS = ['content-type', 'accept', 'x-telegram-bot-api-secret-token']
 
 function pickHeaders(src) {

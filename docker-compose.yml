@@ -83,6 +83,10 @@ services:
       # Рантайм app её НЕ использует, пока не построен суперадмин/провижининг —
       # переменная задаётся заранее, чтобы control-инструменты её подхватили.
       CONTROL_DATABASE_URL: postgresql://titan:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/titan_control
+      # MafBoard (приложение ведущих мафии): своя БД на том же сервере, создаётся при
+      # первом старте. Модуль включается, когда в .env заданы MAFBOARD_JWT_SECRET и
+      # MAFBOARD_APP_LINK_BASE (см. docs/MAFBOARD.md).
+      MAFBOARD_DATABASE_URL: postgresql://titan:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/mafboard
       # WebAuthn суперадмина: панель на поддомене admin.titanpos.ru. RP_ID —
       # регистрируемый домен titanpos.ru (валиден для всех *.titanpos.ru),
       # ORIGIN — фактический origin панели. Отделены от клубных WEBAUTHN_*.

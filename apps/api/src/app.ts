@@ -55,6 +55,7 @@ import { gomafiaRouter } from './modules/gomafia/gomafia.router.js'
 import { superadminRouter } from './modules/superadmin/index.js'
 import { residentRouter } from './modules/resident/resident.router.js'
 import { broadcastRouter } from './modules/resident/broadcast.router.js'
+import { mafboardRouter } from './modules/mafboard/index.js'
 
 const app = new Hono()
 
@@ -176,6 +177,11 @@ app.route('/api/geo', geoRouter)
 // «Звонок» персоналу принят на iPhone (CallKit) — подтверждение по одноразовому ключу
 // из VoIP-push, без авторизации. ДО requireActiveSubscription: звонок уже идёт.
 app.route('/api/alerts', alertsRouter)
+
+// MafBoard — сервер отдельного приложения для ведущих мафии из любых клубов GoMafia
+// (вход через своего бота, GoMafia, история игр). Не арендатор: своя БД и свои токены,
+// c.var.db/club не использует, подпиской клуба не гейтится. См. docs/MAFBOARD.md.
+app.route('/api/mafboard', mafboardRouter)
 
 // Энфорсмент подписки на клуб-поддомене (грейс→блок). На основном домене (club=null)
 // и для allowlist (/api/club, /api/health, /api/superadmin) — пропуск.

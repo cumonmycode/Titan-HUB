@@ -61,3 +61,38 @@ export async function verifyJwt(token: string): Promise<Record<string, unknown>>
   const { payload } = await jwtVerify(token, getSecret())
   return payload as Record<string, unknown>
 }
+
+/** Контур со СВОИМ ключом: токены одного контура не проходят проверку другого. */
+export interface ScopedJwtOptions {
+  secret: Uint8Array
+  issuer: string
+  audience: string
+}
+
+/**
+ * Подпись JWT отдельным секретом (напр. MafBoard — приложение для ведущих любых клубов).
+ * В отличие от signJwt, ключ НЕ JWT_SECRET: такой токен не пройдёт requireAuth Titan HUB.
+ */
+export async function signScopedJwt(
+  claims: Record<string, unknown>,
+  expiresIn: string,
+  options: ScopedJwtOptions,
+): Promise<string> {
+  return new SignJWT(claims)
+    .setProtectedHeader({ alg: 'HS256' })
+    .setIssuedAt()
+    .setIssuer(options.issuer)
+    .setAudience(options.audience)
+    .setExpirationTime(expiresIn)
+    .sign(options.secret)
+}
+
+/** Проверка токена отдельного контура: подпись, срок, issuer и audience. Бросает при несовпадении. */
+export async function verifyScopedJwt(token: string, options: ScopedJwtOptions): Promise<Record<string, unknown>> {
+  const { payload } = await jwtVerify(token, options.secret, {
+    issuer: options.issuer,
+    audience: options.audience,
+    algorithms: ['HS256'],
+  })
+  return payload as Record<string, unknown>
+}

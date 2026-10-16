@@ -181,6 +181,22 @@ Platega-реквизиты могут быть заданы на уровне п
 | `GOMAFIA_LOGIN` | Нет | Логин «проектного» аккаунта GoMafia (фолбэк, если у клуба нет своей интеграции). |
 | `GOMAFIA_PASSWORD` | Нет | Пароль «проектного» аккаунта GoMafia (фолбэк). <!-- VERIFY: актуальные prod-значения --> |
 
+#### MafBoard (приложение ведущих мафии)
+
+Источник: `apps/api/src/modules/mafboard/config.ts`. Подробно — [MAFBOARD.md](MAFBOARD.md). Без `MAFBOARD_DATABASE_URL`, `MAFBOARD_JWT_SECRET` и `MAFBOARD_APP_LINK_BASE` модуль выключен: его ручки отвечают 503, остальной API работает.
+
+| Переменная | Обязательная | Умолчание | Описание |
+|---|---|---|---|
+| `MAFBOARD_DATABASE_URL` | Для модуля | — (в compose: `…/mafboard`) | Отдельная БД MafBoard. Создаётся при первом старте (`CREATE DATABASE`), миграции — `_mafboard_migrations`. |
+| `MAFBOARD_JWT_SECRET` | Для модуля | — | Ключ токенов приложения, ≥ 32 символов. Свой: токен MafBoard не проходит `requireAuth` Titan HUB. |
+| `MAFBOARD_APP_LINK_BASE` | Для модуля | — | `https://`-домен Universal Link приложения; бот возвращает на `<домен>/auth/return?ticket=…`. |
+| `MAFBOARD_BOT_TOKEN` | Для входа | — | Токен бота входа MafBoard. Без него вход через Telegram недоступен. |
+| `MAFBOARD_BOT_USERNAME` | Нет | из `getMe` | Username бота без «@» (для ссылки `t.me/<бот>?start=login_…`). |
+| `MAFBOARD_TERMS_URL` | Нет | `<APP_LINK_BASE>/terms` | Пользовательское соглашение, которое бот показывает при входе. |
+| `MAFBOARD_TERMS_VERSION` | Нет | `1` | Версия соглашения: при смене бот попросит принять его заново. |
+
+Вебхук бота: `https://<TELEGRAM_WEBHOOK_HOST|ROOT_DOMAIN>/api/mafboard/tg-webhook` (ставится при старте и раз в час). Шлюз `infra/telegram-relay` должен быть передеплоен с путём `/api/mafboard/tg-webhook` в `WEBHOOK_PATH`.
+
 #### Rate Limiting (Hono-middleware)
 
 Источник: `apps/api/src/middleware/rateLimit.ts`.

@@ -16,6 +16,7 @@ import { smmTick } from './modules/smm/workflow.js'
 import { runMigrations, runMigrationsOn } from './migrations/runner.js'
 import { listActiveClubDbNames, buildClubConnString } from './lib/clubResolver.js'
 import { getSharedRedis } from './lib/redis.js'
+import { scheduleMafboardCron, startMafboard } from './modules/mafboard/index.js'
 
 const port = Number(process.env['API_PORT'] ?? 3001)
 // CRON_DISABLED=1 — инстанс без фоновых задач: пробный запуск на копии БД при
@@ -102,6 +103,9 @@ runMigrations()
       console.log(`🚀 Titan HUB API running on http://localhost:${info.port}`)
     })
     setupGracefulShutdown(server)
+    // MafBoard — своя БД и свой бот; стартует ПОСЛЕ serve и в фоне: ни медленный шлюз
+    // Telegram, ни недоступная БД MafBoard не задерживают Titan HUB (startMafboard не бросает).
+    void startMafboard()
   })
   .catch((err) => {
     console.error('[migrations] FATAL — server will not start:', err)
@@ -311,3 +315,6 @@ function scheduleStaffAlertsCron() {
 }
 
 if (!CRON_DISABLED) scheduleStaffAlertsCron()
+
+// MafBoard: вебхук своего бота (раз в час) и чистка истёкших билетов входа (раз в сутки).
+if (!CRON_DISABLED) scheduleMafboardCron()
