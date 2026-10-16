@@ -54,7 +54,7 @@ fi
 # (set -e не срабатывает — все шаги защищены). Имена файлов: <db>_<ts>.sql.gz,
 # своя ротация и выгрузка в Drive по маске на каждую БД.
 EXTRA_DBS=$(docker compose exec -T postgres psql -U titan -d titan_hub -tAc \
-  "SELECT datname FROM pg_database WHERE datname = 'titan_control' OR datname LIKE 'club_%' ORDER BY datname" 2>/dev/null | tr -d '\r' || true)
+  "SELECT datname FROM pg_database WHERE datname IN ('titan_control', 'mafboard') OR datname LIKE 'club_%' ORDER BY datname" 2>/dev/null | tr -d '\r' || true)
 for DBN in $EXTRA_DBS; do
   [ -z "$DBN" ] && continue
   EF="$BACKUP_DIR/${DBN}_${TS}.sql.gz"
