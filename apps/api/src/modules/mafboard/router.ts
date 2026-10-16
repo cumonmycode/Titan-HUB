@@ -17,7 +17,7 @@ import type { MafboardUser } from './types.js'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // API приложения MafBoard (/api/mafboard). Контракт — docs/MAFBOARD.md; клиент —
-// MafBoardClient в репозитории приложения. Зависимости приходят снаружи (index.ts):
+// MafBoardClient в apps/mafboard (Swift). Зависимости приходят снаружи (index.ts):
 // в проде Postgres/Redis/Telegram/GoMafia, в тестах — заглушки.
 // ─────────────────────────────────────────────────────────────────────────────
 

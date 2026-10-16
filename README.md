@@ -54,6 +54,7 @@
 | **My Titan** | клиенты клуба | бонусы, депозит и долг, история, оплата через СБП, уведомления | `apps/client` (iOS/Android), `apps/wallet` (веб-версия, `/residents`); вход и уведомления — бот Tai |
 | **Titan Home** | гости в кабинке | счёт, меню и заказ, оплата по QR, оценка вечера и управление светом и кондиционером (Home Assistant) на Android-планшете | `apps/home` (Android, см. [docs/HOME_APP.md](docs/HOME_APP.md)), веб-версия `apps/web/src/app/tablet` (`/tablet`) |
 | **Titan Menu** | гости в зале | меню на телевизоре (AbleSign) | `apps/web/public/tv-menu.html` (`/menu`) |
+| **MafBoard** | ведущие мафии из любых клубов GoMafia | компаньон ведущего: рассадка, роли, фазы, голосования, фолы, рейтинги; вход через бота @mafboard_bot | `apps/mafboard` (iOS, Swift), сервер — `apps/api/src/modules/mafboard`, см. [docs/MAFBOARD.md](docs/MAFBOARD.md) |
 
 Технические идентификаторы (bundle ID, пакеты, пути, имена папок) остались прежними — меняются только названия.
 
@@ -219,7 +220,8 @@ titan-hub/
 │   ├── api/          # @titan/api      — REST API (Hono, порт 3001)
 │   ├── wallet/       # @titan/wallet   — My Titan, веб-версия и Telegram WebApp (Next.js, basePath /residents, порт 3002)
 │   ├── mobile/       # titan-mobile     — Titan HUB для iOS и Android (Expo SDK 57, вне pnpm-воркспейса)
-│   └── client/       # titan-resident   — My Titan для iOS и Android (Expo SDK 57, вне pnpm-воркспейса)
+│   ├── client/       # titan-resident   — My Titan для iOS и Android (Expo SDK 57, вне pnpm-воркспейса)
+│   └── mafboard/     # MafBoard         — приложение ведущих мафии (Swift-пакет MafBoardCore, вне pnpm-воркспейса)
 ├── packages/
 │   ├── database/     # @titan/database — Drizzle ORM: схема, клиент БД, реэкспорт операторов
 │   ├── auth/         # @titan/auth     — signToken/verifyToken (JWT), hashPassword/hashPin, verifyTelegramInitData

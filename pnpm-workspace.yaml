@@ -6,6 +6,8 @@ packages:
   - "!apps/mobile"
   - "!apps/client"
   - "!apps/home"
+  # MafBoard (приложение ведущих мафии) — Swift-пакет со своей сборкой.
+  - "!apps/mafboard"
   # Сайт клуба (titanmafia.ru) — отдельный npm-проект со своим Dockerfile.
   - "!apps/site"
 allowBuilds:
