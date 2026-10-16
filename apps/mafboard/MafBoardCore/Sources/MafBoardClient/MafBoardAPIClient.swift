@@ -27,6 +27,8 @@ public protocol MafBoardAPI: Sendable {
     func telegramLoginStatus(ticketID: String) async throws(APIError) -> LoginTicketStatus
     func completeTelegramLogin(ticketID: String, secret: DeviceSecret) async throws(APIError) -> AuthSession
     func refreshTokens(_ refreshToken: String) async throws(APIError) -> AuthTokens
+    /// Отзывает refresh-токен на сервере (выход с устройства).
+    func logout(refreshToken: String) async throws(APIError)
     func currentAccount() async throws(APIError) -> UserAccount
 
     // GoMafia
@@ -77,6 +79,12 @@ public struct MafBoardAPIClient: MafBoardAPI {
 
     public func refreshTokens(_ refreshToken: String) async throws(APIError) -> AuthTokens {
         try await send(.post, "v1/auth/refresh", body: RefreshTokensRequest(refreshToken: refreshToken), authorized: false)
+    }
+
+    public func logout(refreshToken: String) async throws(APIError) {
+        let _: EmptyResponse = try await send(
+            .post, "v1/auth/logout", body: RefreshTokensRequest(refreshToken: refreshToken), authorized: false
+        )
     }
 
     public func currentAccount() async throws(APIError) -> UserAccount {

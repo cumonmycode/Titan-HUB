@@ -88,6 +88,17 @@ struct APIClientTests {
         #expect(session.account.hostingAccess.allowedFormats == [.funky])
     }
 
+    @Test("Выход отзывает refresh-токен: POST без Bearer, токен в теле")
+    func logout() async throws {
+        let transport = StubTransport(json: #"{"ok":true}"#)
+        try await client(transport).logout(refreshToken: "refresh-1")
+        let request = await transport.lastRequest
+        #expect(request?.httpMethod == "POST")
+        #expect(request?.url?.path == "/v1/auth/logout")
+        #expect(request?.value(forHTTPHeaderField: "Authorization") == nil)
+        #expect(try jsonBody(request)["refreshToken"] as? String == "refresh-1")
+    }
+
     @Test("Запросы от имени пользователя несут Bearer-токен, поиск кодирует кириллицу")
     func authorizedSearch() async throws {
         let transport = StubTransport(json: #"{"players":[{"id":5,"nickname":"Шерлок","isInHostClub":true}]}"#)

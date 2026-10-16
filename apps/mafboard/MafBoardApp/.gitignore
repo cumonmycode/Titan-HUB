@@ -1,0 +1,5 @@
+# Генерируется xcodegen из project.yml
+MafBoard.xcodeproj/
+Generated/
+build/
+scripts/.asc-env

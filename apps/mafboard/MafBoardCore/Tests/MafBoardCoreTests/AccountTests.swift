@@ -119,6 +119,34 @@ struct TelegramLoginTests {
         #expect(flow.handle(.statusReceived(.confirmed)) == [.completeLogin(ticketID: "t-1", secret)])
     }
 
+    @Test("Сбой сети при обмене билета не теряет вход: снова ждём и повторяем по опросу")
+    func interruptedCompletionRetries() {
+        var flow = TelegramLoginFlow()
+        _ = flow.handle(.start(secret))
+        _ = flow.handle(.ticketIssued(ticket))
+        _ = flow.handle(.returnedFromTelegram(ticketID: "t-1"))
+        #expect(flow.pendingTicket?.0 == ticket)
+        #expect(flow.handle(.completionInterrupted).isEmpty)
+        #expect(flow.state == .waitingForTelegram(ticket, secret, opened: true))
+        #expect(flow.handle(.statusReceived(.confirmed)) == [.completeLogin(ticketID: "t-1", secret)])
+        _ = flow.handle(.requestFailed("Билет уже использован"))
+        #expect(flow.state == .failed(.network("Билет уже использован")))
+        #expect(flow.pendingTicket == nil)
+    }
+
+    @Test("После перезапуска приложения вход продолжается с сохранённым билетом")
+    func resumeAfterRelaunch() {
+        var flow = TelegramLoginFlow()
+        #expect(flow.handle(.resume(ticket, secret)).isEmpty)
+        #expect(flow.pollingTicketID == "t-1")
+        #expect(flow.handle(.returnedFromTelegram(ticketID: "t-1")) == [.completeLogin(ticketID: "t-1", secret)])
+
+        var busy = TelegramLoginFlow()
+        _ = busy.handle(.start(secret))
+        #expect(busy.handle(.resume(ticket, secret)).isEmpty)
+        #expect(busy.state == .requestingTicket(secret))
+    }
+
     @Test("Чужая ссылка возврата игнорируется, отказ и истечение завершают вход")
     func failures() {
         var flow = TelegramLoginFlow()

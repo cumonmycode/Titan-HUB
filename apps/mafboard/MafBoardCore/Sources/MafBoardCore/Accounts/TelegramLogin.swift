@@ -128,7 +128,12 @@ public enum TelegramLoginEvent: Sendable, Equatable {
     case returnedFromTelegram(ticketID: String)
     case statusReceived(LoginTicketStatus)
     case sessionReceived(AuthSession)
+    /// Запрос не удался окончательно (билет не выдан, сервер отказал в обмене).
     case requestFailed(String)
+    /// Обмен подтверждённого билета прервался (сеть, сбой сервера) — ждём и пробуем снова по опросу статуса.
+    case completionInterrupted
+    /// Продолжить вход после перезапуска приложения: билет и секрет сохранены на устройстве.
+    case resume(LoginTicket, DeviceSecret)
     case clockTick(Date)
     case reset
 }
@@ -152,6 +157,14 @@ public struct TelegramLoginFlow: Sendable, Equatable {
         if case let .waitingForTelegram(ticket, _, _) = state { ticket.id } else { nil }
     }
 
+    /// Незавершённый вход, который стоит сохранить на случай перезапуска приложения.
+    public var pendingTicket: (LoginTicket, DeviceSecret)? {
+        switch state {
+        case let .waitingForTelegram(ticket, secret, _), let .completing(ticket, secret): (ticket, secret)
+        default: nil
+        }
+    }
+
     public mutating func handle(_ event: TelegramLoginEvent) -> [TelegramLoginCommand] {
         switch (state, event) {
         case (_, .reset):
@@ -161,6 +174,10 @@ public struct TelegramLoginFlow: Sendable, Equatable {
         case let (.idle, .start(secret)), let (.failed, .start(secret)):
             state = .requestingTicket(secret)
             return [.requestTicket(secret)]
+
+        case let (.idle, .resume(ticket, secret)):
+            state = .waitingForTelegram(ticket, secret, opened: true)
+            return []
 
         case let (.requestingTicket(secret), .ticketIssued(ticket)):
             state = .waitingForTelegram(ticket, secret, opened: false)
@@ -190,6 +207,10 @@ public struct TelegramLoginFlow: Sendable, Equatable {
         case let (.waitingForTelegram(ticket, _, _), .clockTick(now)) where now >= ticket.expiresAt,
              let (.completing(ticket, _), .clockTick(now)) where now >= ticket.expiresAt:
             state = .failed(.expired)
+            return []
+
+        case let (.completing(ticket, secret), .completionInterrupted):
+            state = .waitingForTelegram(ticket, secret, opened: true)
             return []
 
         case let (.completing, .sessionReceived(session)):

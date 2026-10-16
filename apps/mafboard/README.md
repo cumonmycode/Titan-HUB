@@ -15,8 +15,9 @@
 - `MafBoardCore/` — Swift-пакет: ядро `MafBoardCore` (правила, движок, баллы, рейтинги, аккаунты, вход через Telegram) и `MafBoardClient` (клиент API сервера). Покрыто тестами.
 - `docs/ARCHITECTURE.md` — архитектура, поток игры, отличия правил, открытые вопросы.
 - `docs/API.md` — контракт сервера: вход через Telegram-бота, GoMafia, история игр клуба.
-
-Интерфейс приложения ещё впереди.
+- `MafBoardApp/` — iOS-приложение (SwiftUI, iOS 26, bundle `ru.titan.mafboard`, команда G99YH9UK8C):
+  вход через бота, профиль и привязка GoMafia, поиск игроков, ведение тренировочной фанки.
+  Проект Xcode генерируется [xcodegen](https://github.com/yonaskolb/XcodeGen) из `project.yml`.
 
 ## Разработка
 
@@ -29,3 +30,14 @@ swift test
 ```
 
 Пакет можно открыть в Xcode: `open apps/mafboard/MafBoardCore/Package.swift`.
+
+Приложение (нужен `brew install xcodegen`):
+
+```bash
+cd apps/mafboard/MafBoardApp
+xcodegen generate && open MafBoard.xcodeproj   # разработка в Xcode
+scripts/install-device.sh                      # сборка и установка на подключённый iPhone
+```
+
+Подпись: аккаунт Xcode или ключ App Store Connect API (`ASC_KEY_ID`/`ASC_ISSUER_ID`, как у `ios:testflight`
+в `apps/mobile`) — подробнее в шапке скрипта.
