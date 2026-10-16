@@ -197,6 +197,8 @@ services:
       # Webroot для certbot (HTTP-01): titanmafia.ru и admin — выпуск и продление без даунтайма.
       - ./nginx/acme:/var/www/certbot:ro
       - ./nginx/sites:/etc/nginx/sites:ro
+      # Статика поддомена mafboard.titanpos.ru (пользовательское соглашение).
+      - ./nginx/mafboard:/usr/share/nginx/mafboard:ro
       - nginx-cache:/var/cache/nginx
     # Стартуем nginx только когда апстримы здоровы (api прогнал миграции) —
     # закрывает окно 502 при холодном старте/перезагрузке хоста.

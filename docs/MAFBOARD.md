@@ -120,7 +120,7 @@ apps/api/test/mafboard/ — тесты (node:test через tsx), хранил�
 1. Создать бота в @BotFather. Положить в `.env` переменные `MAFBOARD_BOT_TOKEN`, `MAFBOARD_JWT_SECRET` (`openssl rand -base64 48`) и `MAFBOARD_APP_LINK_BASE`. Остальные — по [CONFIGURATION.md](CONFIGURATION.md#mafboard-приложение-ведущих-мафии).
 2. Передеплоить шлюз: `cd infra/telegram-relay && wrangler deploy`. В `WEBHOOK_PATH` добавлен `/api/mafboard/tg-webhook`.
 3. Задеплоить API. При старте модуль сам создаст БД `mafboard` (пользователю Postgres нужно право `CREATEDB` — у `titan` в compose оно есть), применит миграции и поставит вебхук.
-4. `MAFBOARD_APP_LINK_BASE=https://mafboard.titanpos.ru`. Поддомен уже настроен в nginx: `apple-app-site-association` (`G99YH9UK8C.ru.titan.mafboard`, путь `/auth/return*`), страница возврата с кнопкой `mafboard://` и временная `/terms`. **Текст соглашения в `/terms` — заглушка: заменить до запуска приложения.**
+4. `MAFBOARD_APP_LINK_BASE=https://mafboard.titanpos.ru`. Поддомен уже настроен в nginx: `apple-app-site-association` (`G99YH9UK8C.ru.titan.mafboard`, путь `/auth/return*`), страница возврата с кнопкой `mafboard://` и пользовательское соглашение `/terms` (файл `nginx/mafboard/terms.html`; при изменении текста поднимите `MAFBOARD_TERMS_VERSION`). В соглашении не указаны реквизиты оператора персональных данных (ФИО или наименование, адрес) — добавить их; контакты для обращений — в описании бота @mafboard_bot.
 
 ## Тесты
 
