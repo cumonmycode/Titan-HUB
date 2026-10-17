@@ -26,6 +26,16 @@ public struct Countdown: Codable, Sendable, Equatable {
         remaining(at: date) <= 0
     }
 
+    /// Сколько прошло сверх отведённого времени (0, пока время не вышло) — ведущий видит перебор.
+    public func overtime(at date: Date) -> TimeInterval {
+        max(0, elapsed(at: date) - duration)
+    }
+
+    /// Доля оставшегося времени: 1 — только начали, 0 — время вышло.
+    public func fraction(at date: Date) -> Double {
+        duration > 0 ? remaining(at: date) / duration : 0
+    }
+
     public mutating func start(at date: Date) {
         guard runningSince == nil else { return }
         runningSince = date

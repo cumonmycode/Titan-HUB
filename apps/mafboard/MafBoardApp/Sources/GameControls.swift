@@ -363,69 +363,6 @@ private struct PenaltySwipe: ViewModifier {
     }
 }
 
-// MARK: - Таймер
-
-/// Таймер речи одной строкой: цифры (нажатие — старт/пауза, удержание — сброс) и кнопки справа.
-struct TimerView: View {
-    let game: GameController
-
-    var body: some View {
-        if let timer = game.countdown {
-            TimelineView(.periodic(from: .now, by: 0.25)) { context in
-                let remaining = timer.remaining(at: context.date)
-                VStack(spacing: 8) {
-                    HStack(spacing: 8) {
-                        // Вибро за 10 секунд до конца и на нуле — только у идущего таймера.
-                        let stage = !timer.isRunning ? 0 : (remaining <= 0 ? 2 : (remaining <= 10 ? 1 : 0))
-                        Text(Duration.seconds(remaining.rounded(.up)).formatted(.time(pattern: .minuteSecond)))
-                            .sensoryFeedback(trigger: stage) { _, new in
-                                switch new {
-                                case 1: .warning
-                                case 2: .error
-                                default: nil
-                                }
-                            }
-                            .font(.system(size: 44, weight: .light))
-                            .monospacedDigit()
-                            .foregroundStyle(remaining <= 10 ? AnyShapeStyle(.red) : AnyShapeStyle(.primary))
-                            .contentTransition(.numericText(countsDown: true))
-                            .contentShape(.rect)
-                            .onTapGesture { game.toggleTimer() }
-                            .onLongPressGesture { game.restartTimer() }
-                            .accessibilityAddTraits(.isButton)
-                            .accessibilityHint("Нажатие — старт или пауза, удержание — сброс")
-                        Spacer(minLength: 0)
-                        GlassEffectContainer(spacing: 8) {
-                            HStack(spacing: 8) {
-                                Button("Сброс", systemImage: "arrow.counterclockwise") { game.restartTimer() }
-                                    .labelStyle(.iconOnly)
-                                    .buttonStyle(.glass)
-                                    .buttonBorderShape(.circle)
-                                Button { game.extendTimer() } label: {
-                                    Text("+30").font(.footnote.weight(.semibold)).monospacedDigit()
-                                }
-                                .buttonStyle(.glass)
-                                .buttonBorderShape(.circle)
-                                Button(timer.isRunning ? "Пауза" : "Старт", systemImage: timer.isRunning ? "pause.fill" : "play.fill") {
-                                    game.toggleTimer()
-                                }
-                                .labelStyle(.iconOnly)
-                                .buttonStyle(.glassProminent)
-                                .buttonBorderShape(.circle)
-                                .tint(timer.isRunning ? .orange : .green)
-                                .controlSize(.large)
-                            }
-                        }
-                    }
-                    ProgressView(value: timer.duration > 0 ? remaining / timer.duration : 0)
-                        .tint(remaining <= 10 ? .red : .accentColor)
-                }
-            }
-            .sensoryFeedback(.impact, trigger: timer.isRunning)
-        }
-    }
-}
-
 // MARK: - Выставление
 
 /// Выставление кандидатуры говорящим — номера сеткой 5×2.

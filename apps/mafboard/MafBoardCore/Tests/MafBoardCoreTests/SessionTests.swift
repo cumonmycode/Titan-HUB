@@ -120,4 +120,15 @@ struct CountdownTests {
         #expect(countdown.remaining(at: start + 150) == 20)
         #expect(countdown.isExpired(at: start + 170))
     }
+
+    @Test("Перебор после конца времени и доля оставшегося")
+    func overtimeAndFraction() {
+        let start = Date(timeIntervalSince1970: 0)
+        var countdown = Countdown(seconds: 60)
+        countdown.start(at: start)
+        #expect(countdown.fraction(at: start + 15) == 0.75)
+        #expect(countdown.overtime(at: start + 30) == 0)
+        #expect(countdown.overtime(at: start + 65) == 5)
+        #expect(countdown.fraction(at: start + 65) == 0)
+    }
 }

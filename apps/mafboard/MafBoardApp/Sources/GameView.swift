@@ -14,6 +14,11 @@ final class GameController: Identifiable {
     private(set) var session: GameSession
     let players: [PlayerProfile]
     private(set) var countdown: Countdown?
+    /// Таймер сам запускается на каждой речи. Настройка ведущего — общая для всех игр.
+    private(set) var autoStartsTimer = TimerSettings.autoStart
+    /// Время вышло — через пару секунд следующая речь (и её таймер).
+    private(set) var autoAdvances = TimerSettings.autoAdvance
+    @ObservationIgnored private var expiryTask: Task<Void, Never>?
     /// Результат проверки дона или шерифа — показываем ведущему сразу после ввода.
     var checkResult: NightCheck?
     var errorMessage: String?
@@ -27,7 +32,7 @@ final class GameController: Identifiable {
         id = session.setup.gameID
         self.session = session
         self.players = players
-        resetTimer()
+        restoreTimer()
     }
 
     var state: GameState { session.state }
@@ -54,7 +59,12 @@ final class GameController: Identifiable {
         if case .night(.check) = action, case let .check(check)? = state.events.last(where: \.isCheck)?.kind {
             checkResult = check
         }
-        if state.currentStep != step { resetTimer() }
+        if state.currentStep != step {
+            resetTimer()
+        } else if action.isBestMove {
+            // Лучший ход записан — пошла заключительная минута.
+            startTimerIfAuto()
+        }
         save()
         // Законченная игра (и любые правки после конца — доп. баллы, лучший ход) — в историю и на сервер.
         if state.isFinished, let record { onFinish?(record, players) }
@@ -117,18 +127,92 @@ final class GameController: Identifiable {
         guard var timer = countdown else { return }
         if timer.isRunning { timer.pause(at: .now) } else { timer.start(at: .now) }
         countdown = timer
+        timerChanged()
     }
 
     func extendTimer() {
         countdown?.extend(bySeconds: 30)
+        timerChanged()
     }
 
+    /// Заново с полного времени — и сразу идёт.
     func restartTimer() {
-        resetTimer()
+        countdown = state.timerSeconds.map(Countdown.init(seconds:))
+        countdown?.start(at: .now)
+        timerChanged()
     }
 
+    func setAutoStart(_ isOn: Bool) {
+        autoStartsTimer = isOn
+        TimerSettings.autoStart = isOn
+    }
+
+    func setAutoAdvance(_ isOn: Bool) {
+        autoAdvances = isOn
+        TimerSettings.autoAdvance = isOn
+        scheduleExpiry()
+    }
+
+    /// Новый шаг — свой таймер. С автозапуском он сразу идёт; на заключительной речи с невписанным ЛХ —
+    /// ждёт ЛХ: по правилам его записывают до минуты.
     private func resetTimer() {
         countdown = state.timerSeconds.map(Countdown.init(seconds:))
+        if autoStartsTimer, !isWaitingForBestMove { countdown?.start(at: .now) }
+        timerChanged()
+    }
+
+    private func startTimerIfAuto() {
+        guard autoStartsTimer, var timer = countdown, !timer.isRunning, timer.elapsed(at: .now) == 0 else { return }
+        timer.start(at: .now)
+        countdown = timer
+        timerChanged()
+    }
+
+    private var isWaitingForBestMove: Bool {
+        if case let .farewell(seat) = state.currentStep { state.awaitsBestMove(from: seat) } else { false }
+    }
+
+    /// Экран игры открыт заново или приложение перезапущено — время текущей речи продолжается.
+    private func restoreTimer() {
+        guard state.timerSeconds != nil, let saved = TimerStore.load(gameID: id, step: timerStepKey) else {
+            resetTimer()
+            return
+        }
+        countdown = saved
+        scheduleExpiry()
+    }
+
+    /// Шаг, к которому относится сохранённое время: «День 2|speech(5)».
+    private var timerStepKey: String { "\(state.moment.displayName)|\(state.currentStep)" }
+
+    private func timerChanged() {
+        if let countdown, !state.isFinished {
+            TimerStore.save(countdown, gameID: id, step: timerStepKey)
+        } else {
+            TimerStore.clear(gameID: id)
+        }
+        scheduleExpiry()
+    }
+
+    /// «Дальше по окончании»: когда время выйдет (и ещё пара секунд), игра сама идёт к следующему шагу.
+    private func scheduleExpiry() {
+        expiryTask?.cancel()
+        expiryTask = nil
+        guard autoAdvances, let timer = countdown, timer.isRunning else { return }
+        let delay = timer.remaining(at: .now) + TimerSettings.advanceGrace
+        let step = state.currentStep
+        expiryTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(delay))
+            guard !Task.isCancelled else { return }
+            self?.advanceAfterExpiry(from: step)
+        }
+    }
+
+    private func advanceAfterExpiry(from step: CurrentStep) {
+        guard autoAdvances, state.currentStep == step, state.canAdvance,
+              let timer = countdown, timer.isRunning, timer.isExpired(at: .now)
+        else { return }
+        perform(.advance)
     }
 
     // MARK: Итоги
@@ -151,6 +235,13 @@ private extension GameEvent {
 }
 
 private extension GameAction {
+    var isBestMove: Bool {
+        switch self {
+        case .recordBestMove, .recordBestMoveBy: true
+        default: false
+        }
+    }
+
     /// «фол №3», «выставление №5» — для подписи кнопки «Назад».
     var undoLabel: String {
         switch self {
