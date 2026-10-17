@@ -37,6 +37,41 @@ public struct GameSession: Sendable, Equatable {
         return last.action
     }
 
+    /// Вернуть удалённого игрока (дисквалификация, выбывание по решению ведущего, фолы, техфолы):
+    /// из журнала убирается действие, которым он был удалён, остальные переигрываются.
+    /// Если без этого действия журнал не сходится — ошибка, состояние не меняется. Возвращает убранное действие.
+    @discardableResult
+    public mutating func reinstate(_ seat: Seat) throws(GameError) -> GameAction {
+        guard let cause = state.seat(seat)?.elimination?.cause, let index = removalIndex(of: seat, cause: cause) else {
+            throw .nothingToCancel(seat)
+        }
+        var remaining = log
+        let removed = remaining.remove(at: index)
+        let replayed: GameState
+        do {
+            replayed = try Self.replay(setup: setup, log: remaining)
+        } catch {
+            throw .cannotReinstate(seat)
+        }
+        guard replayed.isAlive(seat) else { throw .cannotReinstate(seat) }
+        state = replayed
+        log = remaining
+        return removed.action
+    }
+
+    /// Последнее действие, которым игрок удалён этой причиной.
+    private func removalIndex(of seat: Seat, cause: EliminationCause) -> Int? {
+        log.lastIndex { entry in
+            switch (cause, entry.action) {
+            case let (.removed(.fouls), .foul(target)): target == seat
+            case let (.removed(.techFouls), .techFoul(target)): target == seat
+            case let (.removed(.disqualified), .disqualify(target, _)): target == seat
+            case let (.hostDecision, .eliminateByHost(target, _)): target == seat
+            default: false
+            }
+        }
+    }
+
     public static func replay(setup: GameSetup, log: [LogEntry]) throws(GameError) -> GameState {
         var state = GameEngine.start(setup)
         for entry in log {

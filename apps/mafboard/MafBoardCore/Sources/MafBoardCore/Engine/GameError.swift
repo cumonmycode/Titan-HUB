@@ -21,6 +21,8 @@ public enum GameError: Error, Sendable, Equatable {
     case invalidBestMove(BestMoveProblem)
     case nothingToCancel(Seat)
     case nothingToUndo
+    /// Удалённого игрока не вернуть: без его удаления журнал игры не сходится.
+    case cannotReinstate(Seat)
 }
 
 public enum SetupProblem: Sendable, Equatable {
@@ -95,6 +97,7 @@ extension GameError: LocalizedError {
         case .bestMoveNotAvailable: "Право лучшего хода ещё никто не получил"
         case let .nothingToCancel(seat): "У игрока №\(seat) нечего отменять"
         case .nothingToUndo: "Нечего отменять"
+        case let .cannotReinstate(seat): "Игрока №\(seat) не вернуть: после удаления игра ушла дальше. Отмените шаги кнопкой «Назад»"
         }
     }
 }

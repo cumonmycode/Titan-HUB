@@ -99,6 +99,14 @@ struct PlayerCard: View {
         return state.ruleset.day.candidateSource == .nominations
     }
 
+    /// Удалён ведущим или за фолы — такого можно вернуть. Убитого и заголосованного — нет (это ход игры).
+    private var isRemoved: Bool {
+        switch seat.elimination?.cause {
+        case .removed, .hostDecision: true
+        default: false
+        }
+    }
+
     private var status: String? {
         if let elimination = seat.elimination { return elimination.cause.label }
         if isSpeaker { return "Говорит" }
@@ -136,8 +144,7 @@ struct PlayerCard: View {
                 RoundedRectangle(cornerRadius: 20, style: .continuous).stroke(.tint, lineWidth: 1.5)
             }
         }
-        .opacity(seat.isAlive ? 1 : 0.5)
-        .modifier(PenaltySwipe(game: game, seat: seat, isEnabled: seat.isAlive && !isSpeaker) { isConfirmingRemoval = true })
+        .modifier(PenaltySwipe(game: game, seat: seat, isEnabled: seat.isAlive && !isSpeaker))
         .confirmationDialog(
             "Удалить №\(seat.seat) \(game.name(of: seat.seat))?",
             isPresented: $isConfirmingRemoval,
@@ -149,6 +156,29 @@ struct PlayerCard: View {
     }
 
     private var header: some View {
+        HStack(spacing: 10) {
+            identity.opacity(seat.isAlive ? 1 : 0.5)
+            Spacer(minLength: 4)
+            PenaltyDots(fouls: seat.fouls, techFouls: seat.techFouls)
+            if isRemoved {
+                Button("Вернуть", systemImage: "arrow.uturn.backward") { game.reinstate(seat.seat) }
+                    .font(.subheadline.weight(.semibold))
+                    .buttonStyle(.bordered)
+                    .buttonBorderShape(.capsule)
+                    .controlSize(.small)
+            } else if nightAction != nil {
+                Text("Выбрать").font(.subheadline.weight(.semibold)).foregroundStyle(.tint)
+            } else if seat.isAlive {
+                Image(systemName: "chevron.down")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+                    .rotationEffect(.degrees(isExpanded ? 180 : 0))
+            }
+        }
+        .contentShape(.rect)
+    }
+
+    private var identity: some View {
         HStack(spacing: 10) {
             Text("\(seat.seat.number)")
                 .font(.subheadline.weight(.bold))
@@ -170,18 +200,7 @@ struct PlayerCard: View {
                     }
                 }
             }
-            Spacer(minLength: 4)
-            PenaltyDots(fouls: seat.fouls, techFouls: seat.techFouls)
-            if nightAction != nil {
-                Text("Выбрать").font(.subheadline.weight(.semibold)).foregroundStyle(.tint)
-            } else if seat.isAlive {
-                Image(systemName: "chevron.down")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.tertiary)
-                    .rotationEffect(.degrees(isExpanded ? 180 : 0))
-            }
         }
-        .contentShape(.rect)
     }
 }
 
@@ -208,20 +227,19 @@ private struct PenaltyDots: View {
 
 // MARK: - Свайпы
 
-/// Свайпы по карточке ступенями, как в «Почте»:
-/// вправо — фол, техфол, удаление; влево — снять фол, снять техфол, удаление. Удаление — с подтверждением.
+/// Свайпы по карточке ступенями, как в «Почте»: вправо — фол, дальше — техфол;
+/// влево — снять фол, дальше — снять техфол. Удаление свайпом нет — только кнопкой.
 /// У говорящего свайп отключён — его карточка раскрыта и управляется кнопками.
 private struct PenaltySwipe: ViewModifier {
     let game: GameController
     let seat: SeatState
     let isEnabled: Bool
-    let onRemove: () -> Void
     @State private var offset: CGFloat = 0
     @State private var axis: Axis?
     @State private var tier = 0
 
-    /// Короткий, средний и полный свайп.
-    private static let thresholds: [CGFloat] = [60, 135, 220]
+    /// Короткий и длинный свайп.
+    private static let thresholds: [CGFloat] = [60, 140]
 
     private enum Direction {
         case add
@@ -246,7 +264,7 @@ private struct PenaltySwipe: ViewModifier {
                 }
                 guard axis == .horizontal else { return }
                 let width = value.translation.width
-                let limit = Self.thresholds[2] + 30
+                let limit = Self.thresholds[1] + 40
                 offset = abs(width) > limit ? (width > 0 ? 1 : -1) * (limit + (abs(width) - limit) * 0.2) : width
                 tier = Self.tier(for: offset)
             }
@@ -264,7 +282,6 @@ private struct PenaltySwipe: ViewModifier {
 
     private func perform(_ direction: Direction, tier: Int) {
         switch (direction, tier) {
-        case (_, 3): onRemove()
         case (.add, 1): game.perform(.foul(seat.seat))
         case (.add, 2): game.perform(.techFoul(seat.seat))
         case (.cancel, 1) where seat.fouls > 0: game.perform(.cancelFoul(seat.seat))
@@ -277,7 +294,6 @@ private struct PenaltySwipe: ViewModifier {
     private var action: (title: String, icon: String, color: Color) {
         let shown = max(tier, 1)
         return switch (direction, shown) {
-        case (_, 3): ("Удалить", "person.fill.xmark", .red)
         case (.add, 1): ("Фол", "hand.raised.fill", .orange)
         case (.add, _): ("Техфол", "exclamationmark.triangle.fill", Color(red: 0.85, green: 0.25, blue: 0.2))
         case (.cancel, 1): ("Снять фол", "arrow.uturn.backward", .teal)
@@ -415,7 +431,7 @@ private struct PenaltyRow: View {
                     .buttonBorderShape(.circle)
                     .tint(.red)
             }
-            Text("Свайп вправо — фол, техфол, удаление. Влево — снять.")
+            Text("Свайп вправо — фол, дальше — техфол. Влево — снять.")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
         }

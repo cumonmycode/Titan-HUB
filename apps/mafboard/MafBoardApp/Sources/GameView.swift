@@ -72,6 +72,21 @@ final class GameController: Identifiable {
         save()
     }
 
+    /// Вернуть удалённого игрока: удаление уходит из журнала вместе с последствиями.
+    func reinstate(_ seat: Seat) {
+        let step = state.currentStep
+        let wasFinished = state.isFinished
+        do throws(GameError) {
+            try session.reinstate(seat)
+        } catch {
+            errorMessage = error.message
+            return
+        }
+        if state.currentStep != step { resetTimer() }
+        if wasFinished, !state.isFinished { onReopen?(id) }
+        save()
+    }
+
     // MARK: Подсказки для «Назад» и «Далее»
 
     /// Куда ведёт «Далее»: заголовок следующего шага.

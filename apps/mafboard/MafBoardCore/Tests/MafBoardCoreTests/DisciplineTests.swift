@@ -46,6 +46,40 @@ struct DisciplineTests {
         #expect(session.state.votings.last?.skipReason == .cancelledByRemoval)
     }
 
+    @Test("Дисквалифицированного можно вернуть: удаление уходит из журнала вместе с последствиями")
+    func reinstateDisqualified() throws {
+        var session = try Fixture.session()
+        try session.advance(times: 2)
+        try session.run(.nominate(candidate: 3, by: 1), .disqualify(5, note: nil), .foul(2))
+        #expect(session.state.isVotingCancelledToday)
+
+        let removed = try session.reinstate(5)
+        #expect(removed == .disqualify(5, note: nil))
+        #expect(session.state.isAlive(5))
+        #expect(!session.state.isVotingCancelledToday)
+        #expect(session.state.seat(2)?.fouls == 1)
+        #expect(session.log.count == 4)
+    }
+
+    @Test("Удалённого за фолы и техфолы возвращаем с фолами на шаг меньше")
+    func reinstateAfterFouls() throws {
+        var session = try Fixture.session()
+        try session.run(.foul(7), .foul(7), .foul(7), .foul(7), .techFoul(2), .techFoul(2), .eliminateByHost(9, note: nil))
+        try session.reinstate(7)
+        #expect(session.state.isAlive(7))
+        #expect(session.state.seat(7)?.fouls == 3)
+        try session.reinstate(2)
+        #expect(session.state.seat(2)?.techFouls == 1)
+        try session.reinstate(9)
+        #expect(session.state.isAlive(9))
+    }
+
+    @Test("Живого или не удалённого игрока вернуть нельзя")
+    func reinstateRequiresRemoval() throws {
+        var session = try Fixture.session()
+        #expect(throws: GameError.nothingToCancel(4)) { try session.reinstate(4) }
+    }
+
     @Test("Два техфола — удаление")
     func twoTechFoulsRemove() throws {
         var session = try Fixture.session()
