@@ -95,9 +95,16 @@ public enum StandingsCalculator {
         scoringOverride: ScoringPolicy? = nil,
         tiebreakers: [StandingsTiebreaker] = StandingsTiebreaker.defaultOrder
     ) -> [PlayerStanding] {
-        let scores = records
-            .filter(query.includes)
-            .flatMap { GameScorer.score($0, policy: scoringOverride) }
+        standings(of: records.filter(query.includes), scoringOverride: scoringOverride, tiebreakers: tiebreakers)
+    }
+
+    /// Таблица по любому набору игр — например, по вечеру, в том числе фанок.
+    public static func standings(
+        of records: [GameRecord],
+        scoringOverride: ScoringPolicy? = nil,
+        tiebreakers: [StandingsTiebreaker] = StandingsTiebreaker.defaultOrder
+    ) -> [PlayerStanding] {
+        let scores = records.flatMap { GameScorer.score($0, policy: scoringOverride) }
         let rows = Dictionary(grouping: scores, by: \.playerID).map { makeStanding($0.key, $0.value) }
         let sorted = rows.sorted { lhs, rhs in
             if ranksHigher(lhs, rhs, by: tiebreakers) { return true }

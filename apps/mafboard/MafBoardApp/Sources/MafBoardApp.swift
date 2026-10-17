@@ -125,7 +125,8 @@ struct MainTabView: View {
             tab = .games
             if let evening = nextEvening {
                 nextEvening = nil
-                newGame = NewGameRequest(evening: evening)
+                // Свежий вечер: в нём состав только что законченной игры.
+                newGame = NewGameRequest(evening: library.evenings.first { $0.id == evening.id } ?? evening)
             }
         }) { game in
             GameScreen(game: game, onNextGame: openEvening(of: game).map { evening in { nextEvening = evening } })

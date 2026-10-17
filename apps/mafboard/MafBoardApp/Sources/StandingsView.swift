@@ -50,7 +50,11 @@ struct StandingsView: View {
         let query = scope.map { StandingsQuery(format: format, scope: $0, variant: variant) }
         let records = library.history.map(\.record)
         let standings = query.map { StandingsCalculator.standings($0, from: records) } ?? []
-        let gameCount = query.map { query in records.filter(query.includes).count } ?? 0
+        let included = query.map { query in
+            library.history.filter { query.includes($0.record) }.sorted { $0.record.finishedAt < $1.record.finishedAt }
+        } ?? []
+        let gameCount = included.count
+        let played = included.playedGames { _, game in game.record.finishedAt.formatted(.dateTime.day().month(.abbreviated)) }
 
         NavigationStack {
             List {
@@ -77,7 +81,10 @@ struct StandingsView: View {
                 if !standings.isEmpty {
                     Section {
                         ForEach(standings) { row in
-                            StandingRow(standing: row, player: players[row.playerID])
+                            StandingCard(standing: row, player: players[row.playerID], games: played[row.playerID] ?? [])
+                                .listRowBackground(Color.clear)
+                                .listRowSeparator(.hidden)
+                                .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
                         }
                     } header: {
                         Text("Таблица")
@@ -100,32 +107,6 @@ struct StandingsView: View {
             .navigationTitle("Рейтинг")
             .profileButton()
             .onChange(of: format) { eveningID = nil }
-        }
-    }
-}
-
-private struct StandingRow: View {
-    let standing: PlayerStanding
-    let player: PlayerProfile?
-
-    var body: some View {
-        let name = player?.nickname ?? "Игрок"
-        HStack(spacing: 12) {
-            Text("\(standing.place)")
-                .font(.headline)
-                .monospacedDigit()
-                .foregroundStyle(standing.place <= 3 ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
-                .frame(width: 26)
-            PlayerAvatar(name: name, url: player?.avatarURL, size: 36)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(name).lineLimit(1)
-                Text("Игр \(standing.gamesPlayed) · побед \(standing.wins) · ср. \(standing.averagePoints.formatted(.number.precision(.fractionLength(2))))")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
-            }
-            Spacer()
-            Text(standing.points.description).font(.headline).monospacedDigit()
         }
     }
 }

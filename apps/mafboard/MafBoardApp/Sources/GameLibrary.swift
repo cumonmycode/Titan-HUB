@@ -150,15 +150,6 @@ enum SavedGameStore {
 }
 
 /// Строка итогов вечера: сумма баллов игрока за все его игры.
-struct SummaryRow: Identifiable {
-    let player: PlayerProfile
-    let games: Int
-    let wins: Int
-    let points: Points
-
-    var id: PlayerID { player.id }
-}
-
 // MARK: - Библиотека игр
 
 /// Игры ведущего. Во время работы источник правды — память: файлы читаются один раз при входе
@@ -461,24 +452,6 @@ final class GameLibrary {
     /// Игры вечера по порядку.
     func games(of evening: Evening) -> [FinishedGame] {
         history.filter { $0.eveningID == evening.id }.sorted { $0.record.finishedAt < $1.record.finishedAt }
-    }
-
-    func summary(of evening: Evening) -> [SummaryRow] {
-        var rows: [PlayerID: SummaryRow] = [:]
-        for game in games(of: evening) {
-            for score in GameScorer.score(game.record) {
-                let player = game.players.first(where: { $0.id == score.playerID })
-                    ?? PlayerProfile(nickname: "Игрок \(score.seat)", id: score.playerID)
-                let current = rows[score.playerID]
-                rows[score.playerID] = SummaryRow(
-                    player: player,
-                    games: (current?.games ?? 0) + 1,
-                    wins: (current?.wins ?? 0) + (score.result == .win ? 1 : 0),
-                    points: (current?.points ?? .zero) + score.total
-                )
-            }
-        }
-        return rows.values.sorted { ($0.points, $0.wins) > ($1.points, $1.wins) }
     }
 
     /// Вечер игры есть всегда: если на телефоне его нет (игра с сервера), создаём по самой игре.

@@ -56,7 +56,7 @@ struct ResultsCard: View {
         let bonusPlayers = scores.filter { $0.bonus > .zero }.count
         return VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .top, spacing: 12) {
-                Image(systemName: winner == .draw ? "equal" : "crown.fill")
+                Image(systemName: winner == .draw ? "equal" : "trophy.fill")
                     .font(.title2.weight(.bold))
                     .foregroundStyle(.white)
                     .frame(width: 52, height: 52)

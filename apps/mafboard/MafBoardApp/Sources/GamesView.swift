@@ -220,7 +220,7 @@ private struct StartCard: View {
 
 // MARK: - Вечер
 
-/// Открытый вечер: побед по командам, лидер, игры, «Следующая игра» и итоги.
+/// Открытый вечер: побед по командам, игры, «Следующая игра» и итоги.
 private struct EveningCard: View {
     let evening: Evening
     let isGameRunning: Bool
@@ -230,7 +230,6 @@ private struct EveningCard: View {
 
     var body: some View {
         let games = library.games(of: evening)
-        let leader = library.summary(of: evening).first
         VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: 2) {
@@ -250,15 +249,6 @@ private struct EveningCard: View {
 
             if !games.isEmpty {
                 WinsBar(winners: games.map(\.record.outcome.winner))
-                if let leader {
-                    HStack(spacing: 8) {
-                        Image(systemName: "crown.fill").foregroundStyle(.yellow)
-                        Text("Лидер: \(leader.player.nickname)").lineLimit(1)
-                        Spacer()
-                        Text(leader.points.description).font(.headline).monospacedDigit()
-                    }
-                    .font(.subheadline)
-                }
                 VStack(spacing: 0) {
                     ForEach(Array(games.enumerated()), id: \.element.id) { index, game in
                         NavigationLink {
@@ -331,14 +321,13 @@ private struct GameLine: View {
 
 // MARK: - История
 
-/// Прошлый вечер: листок календаря, режим, число игр, лидер и полоса побед.
+/// Прошлый вечер: листок календаря, режим, число игр и полоса побед.
 private struct HistoryEveningCard: View {
     let evening: Evening
     @Environment(GameLibrary.self) private var library
 
     var body: some View {
         let games = library.games(of: evening)
-        let leader = library.summary(of: evening).first
         HStack(spacing: 14) {
             VStack(spacing: 0) {
                 Text(evening.createdAt.formatted(.dateTime.month(.abbreviated)))
@@ -362,7 +351,7 @@ private struct HistoryEveningCard: View {
                     Text(evening.format.displayName).font(.headline)
                     Text(evening.variant.displayName).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
                 }
-                Text([gamesPlayed(games.count), leader.map { "лидер \($0.player.nickname)" }].compactMap { $0 }.joined(separator: " · "))
+                Text(gamesPlayed(games.count))
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -396,7 +385,9 @@ struct EveningDetailView: View {
 
     var body: some View {
         let games = library.games(of: evening)
-        let summary = library.summary(of: evening)
+        let standings = StandingsCalculator.standings(of: games.map(\.record))
+        let played = games.playedGames { index, _ in "Игра \(index + 1)" }
+        let profiles = games.playerProfiles
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 VStack(alignment: .leading, spacing: 12) {
@@ -406,19 +397,19 @@ struct EveningDetailView: View {
                         FormatTag(format: evening.format)
                     }
                     if !games.isEmpty { WinsBar(winners: games.map(\.record.outcome.winner)) }
-                    VStack(spacing: 0) {
-                        ForEach(Array(summary.enumerated()), id: \.element.id) { place, row in
-                            StandingLine(place: place + 1, row: row)
-                            if place < summary.count - 1 { Divider().padding(.leading, 52) }
-                        }
-                    }
                     Text(evening.format.countsTowardStandings
-                         ? "Сумма баллов за вечер. Таблица за любой период — во вкладке «Рейтинг»."
-                         : "Фанка в рейтинги не идёт — это сумма баллов за вечер.")
+                         ? "Сумма баллов за вечер. Нажмите на игрока — подробности по баллам, ролям и играм."
+                         : "Фанка в рейтинги не идёт — это сумма баллов за вечер. Нажмите на игрока — подробности.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
                 .contentCard(padding: 18)
+
+                VStack(spacing: 10) {
+                    ForEach(standings) { standing in
+                        StandingCard(standing: standing, player: profiles[standing.playerID], games: played[standing.playerID] ?? [])
+                    }
+                }
 
                 VStack(alignment: .leading, spacing: 10) {
                     Text("Игры").font(.title3.bold())
@@ -443,38 +434,6 @@ struct EveningDetailView: View {
         .ambientBackground()
         .navigationTitle(evening.title)
         .navigationBarTitleDisplayMode(.inline)
-    }
-}
-
-private struct StandingLine: View {
-    let place: Int
-    let row: SummaryRow
-
-    private var medal: Color? {
-        switch place {
-        case 1: .yellow
-        case 2: Color(white: 0.75)
-        case 3: .orange
-        default: nil
-        }
-    }
-
-    var body: some View {
-        HStack(spacing: 12) {
-            ZStack {
-                if let medal { Circle().fill(medal.opacity(0.25)) }
-                Text("\(place)").font(.subheadline.weight(.bold)).monospacedDigit()
-            }
-            .frame(width: 28, height: 28)
-            PlayerAvatar(name: row.player.nickname, url: row.player.avatarURL, size: 32)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(row.player.nickname).lineLimit(1)
-                Text("Игр \(row.games) · побед \(row.wins)").font(.caption).foregroundStyle(.secondary)
-            }
-            Spacer()
-            Text(row.points.description).font(.headline).monospacedDigit()
-        }
-        .padding(.vertical, 8)
     }
 }
 

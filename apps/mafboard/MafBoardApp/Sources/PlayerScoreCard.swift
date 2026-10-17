@@ -70,12 +70,7 @@ struct PlayerScoreCard: View {
                     .offset(x: 4, y: 4)
             }
             VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 5) {
-                    Text(name).font(.body.weight(.semibold)).lineLimit(1)
-                    if score.result == .win {
-                        Image(systemName: "crown.fill").font(.caption).foregroundStyle(.yellow)
-                    }
-                }
+                Text(name).font(.body.weight(.semibold)).lineLimit(1)
                 HStack(spacing: 6) {
                     Text(score.role.displayName)
                         .font(.caption.weight(.semibold))
