@@ -21,7 +21,7 @@ struct GamesView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
                     if !active.isEmpty || orphan != nil {
-                        FolderSectionTitle("Активные")
+                        FolderSectionTitle("Активные серии")
                     }
                     if let orphan {
                         RunningGameRow(game: orphan).folderCard(padding: 12)
@@ -37,7 +37,7 @@ struct GamesView: View {
                         StartCard { onNewGame(nil) }
                     }
                     if !completed.isEmpty {
-                        FolderSectionTitle("Завершённые").padding(.top, 12)
+                        FolderSectionTitle("Завершённые серии").padding(.top, 12)
                         VStack(spacing: 0) {
                             ForEach(Array(completed.enumerated()), id: \.element.id) { index, evening in
                                 NavigationLink {
@@ -256,8 +256,8 @@ private struct StartCard: View {
 
 // MARK: - Активная серия
 
-/// Активная серия компактно: шапка (нажатие — открыть серию), идущая игра одной строкой,
-/// «Ещё одна игра», как только у прошлой игры есть итог.
+/// Активная серия компактно: шапка (нажатие — открыть серию), идущая игра одной строкой
+/// или последняя сыгранная игра с итогом, под ней «Ещё одна игра».
 private struct FolderCard: View {
     let evening: Evening
     /// Идущая игра этой серии.
@@ -281,7 +281,17 @@ private struct FolderCard: View {
                 RunningGameRow(game: running)
                     .padding(10)
                     .background(Color.accentColor.opacity(0.08), in: .rect(cornerRadius: 16, style: .continuous))
-            } else if !isGameRunning {
+            } else if let last = games.last {
+                // Сыгранная игра серии — с итогом; под ней «Ещё одна игра».
+                NavigationLink {
+                    FinishedGameView(game: last, number: games.count)
+                } label: {
+                    GameLine(game: last, number: games.count)
+                }
+                .buttonStyle(.plain)
+                .background(Color.primary.opacity(0.05), in: .rect(cornerRadius: 16, style: .continuous))
+            }
+            if running == nil, !isGameRunning {
                 HStack(spacing: 8) {
                     Button(action: onNext) {
                         Label(games.isEmpty ? "Первая игра" : "Ещё одна игра", systemImage: "plus")
