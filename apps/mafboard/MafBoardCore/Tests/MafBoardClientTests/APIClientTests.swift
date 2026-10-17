@@ -139,6 +139,53 @@ struct APIClientTests {
         }
     }
 
+    @Test("Снимок идущей игры: PUT с номером игры в адресе, ответ — сохранён ли")
+    func saveActiveGame() async throws {
+        let transport = StubTransport(json: #"{"stored":true}"#)
+        let setup = try GameSetup(
+            format: .funky, ruleset: .sport,
+            players: (1...10).map { _ in PlayerID() },
+            roles: try Ruleset.sport.standardRoles(playerCount: 10)
+        )
+        let game = ActiveGameEnvelope(
+            id: setup.gameID, revision: 4, updatedAt: Date(timeIntervalSince1970: 1_792_000_000),
+            snapshot: ActiveGameSnapshot(session: GameSession(setup: setup), players: [PlayerProfile(nickname: "Шерлок")])
+        )
+        #expect(try await client(transport).saveActiveGame(game))
+        let request = await transport.lastRequest
+        #expect(request?.httpMethod == "PUT")
+        #expect(request?.url?.path == "/v1/games/active/\(setup.gameID)")
+        let body = try jsonBody(request)
+        #expect(body["revision"] as? Int == 4)
+        let snapshot = try #require(body["snapshot"] as? [String: Any])
+        let session = try #require(snapshot["session"] as? [String: Any])
+        let sentSetup = try #require(session["setup"] as? [String: Any])
+        #expect(sentSetup["gameID"] as? String == setup.gameID.description)
+    }
+
+    @Test("Идущие игры с сервера читаются обратно в сессию движка")
+    func activeGamesRoundTrip() async throws {
+        // Даты по API — с точностью до миллисекунд, поэтому берём ровные.
+        let start = Date(timeIntervalSince1970: 1_792_000_000)
+        let setup = try GameSetup(
+            format: .funky, ruleset: .sport,
+            players: (1...10).map { _ in PlayerID() },
+            roles: try Ruleset.sport.standardRoles(playerCount: 10),
+            createdAt: start
+        )
+        var session = GameSession(setup: setup)
+        try session.perform(.advance, at: start.addingTimeInterval(60))
+        let envelope = ActiveGameEnvelope(
+            id: setup.gameID, revision: 2, updatedAt: Date(timeIntervalSince1970: 1_792_000_000),
+            snapshot: ActiveGameSnapshot(session: session, players: [])
+        )
+        let encoded = try APICoding.makeEncoder().encode(envelope)
+        let json = #"{"games":["# + String(decoding: encoded, as: UTF8.self) + "]}"
+        let games = try await client(StubTransport(json: json)).activeGames()
+        #expect(games.first?.snapshot.session == session)
+        #expect(games.first?.revision == 2)
+    }
+
     @Test("Запросы от имени пользователя несут Bearer-токен, поиск кодирует кириллицу")
     func authorizedSearch() async throws {
         let transport = StubTransport(json: #"{"players":[{"id":5,"nickname":"Шерлок","isInHostClub":true}]}"#)

@@ -119,6 +119,16 @@ export interface DeviceSession {
 }
 
 /** Завершённая игра в истории. `record` — GameRecord приложения как есть. */
+/** Идущая игра ведущего: снимок журнала, чтобы продолжить после переустановки или на другом устройстве. */
+export interface StoredActiveGame {
+  id: string
+  hostUserId: string
+  /** Растёт с каждым изменением на телефоне: старый снимок не затирает новый. */
+  revision: number
+  updatedAt: Date
+  snapshot: unknown
+}
+
 export interface StoredGame {
   id: string
   hostUserId: string

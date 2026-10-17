@@ -48,6 +48,12 @@ public protocol MafBoardAPI: Sendable {
     func uploadGame(_ record: GameRecord) async throws(APIError)
     func clubGames(clubID: Int, since: Date?) async throws(APIError) -> [GameRecord]
     func myGames(since: Date?) async throws(APIError) -> [GameRecord]
+
+    // Идущие игры
+    /// `true` — снимок сохранён; `false` — на сервере снимок новее или игра уже закончена.
+    func saveActiveGame(_ game: ActiveGameEnvelope) async throws(APIError) -> Bool
+    func activeGames() async throws(APIError) -> [ActiveGameEnvelope]
+    func deleteActiveGame(id: GameID) async throws(APIError)
 }
 
 public struct MafBoardAPIClient: MafBoardAPI {
@@ -150,11 +156,28 @@ public struct MafBoardAPIClient: MafBoardAPI {
         return response.games
     }
 
+    // MARK: Идущие игры
+
+    public func saveActiveGame(_ game: ActiveGameEnvelope) async throws(APIError) -> Bool {
+        let response: StoredResponse = try await send(.put, "v1/games/active/\(game.id)", body: game)
+        return response.stored
+    }
+
+    public func activeGames() async throws(APIError) -> [ActiveGameEnvelope] {
+        let response: ActiveGamesResponse = try await send(.get, "v1/games/active")
+        return response.games
+    }
+
+    public func deleteActiveGame(id: GameID) async throws(APIError) {
+        let _: EmptyResponse = try await send(.delete, "v1/games/active/\(id)")
+    }
+
     // MARK: Транспорт
 
     private enum Method: String {
         case get = "GET"
         case post = "POST"
+        case put = "PUT"
         case delete = "DELETE"
     }
 

@@ -6,7 +6,7 @@ import type { MafboardConfig } from '../../src/modules/mafboard/config.js'
 import { RosterCache, type GoMafiaGateway } from '../../src/modules/mafboard/gomafia.js'
 import { GomafiaTakenError, type MafboardRepo } from '../../src/modules/mafboard/repo.js'
 import { createMafboardRouter, type MafboardDeps } from '../../src/modules/mafboard/router.js'
-import type { DeviceSession, LoginTicket, MafboardUser, RefreshTokenRow, StoredGame, TicketGuard } from '../../src/modules/mafboard/types.js'
+import type { DeviceSession, LoginTicket, MafboardUser, RefreshTokenRow, StoredActiveGame, StoredGame, TicketGuard } from '../../src/modules/mafboard/types.js'
 
 // Вебхук бота подписывается от JWT_SECRET Titan HUB (lib/tgWebhook.ts).
 process.env['JWT_SECRET'] ??= 'test-titan-jwt-secret-0123456789abcdef'
@@ -31,6 +31,7 @@ export class MemoryRepo implements MafboardRepo {
   /** Отзыв сессии хранится в самой сессии — `refreshToken()` подставляет его, как JOIN в Postgres. */
   refresh = new Map<string, Omit<RefreshTokenRow, 'sessionRevokedAt'>>()
   games = new Map<string, StoredGame>()
+  activeGames = new Map<string, StoredActiveGame>()
   private seq = 0
 
   private uuid(): string {
@@ -202,6 +203,27 @@ export class MemoryRepo implements MafboardRepo {
 
   async gamesByClub(clubId: number, since: Date | null, limit: number) {
     return [...this.games.values()].filter((g) => g.clubId === clubId && (!since || g.finishedAt > since)).slice(0, limit)
+  }
+
+  async saveActiveGame(game: StoredActiveGame) {
+    const finished = this.games.get(game.id)
+    if (finished) return finished.hostUserId === game.hostUserId ? 'stale' : 'conflict'
+    const existing = this.activeGames.get(game.id)
+    if (existing && existing.hostUserId !== game.hostUserId) return 'conflict'
+    if (existing && existing.revision > game.revision) return 'stale'
+    this.activeGames.set(game.id, game)
+    return 'saved'
+  }
+
+  async activeGamesByHost(userId: string, limit: number) {
+    return [...this.activeGames.values()]
+      .filter((g) => g.hostUserId === userId)
+      .sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime())
+      .slice(0, limit)
+  }
+
+  async deleteActiveGame(userId: string, id: string) {
+    if (this.activeGames.get(id)?.hostUserId === userId) this.activeGames.delete(id)
   }
 }
 

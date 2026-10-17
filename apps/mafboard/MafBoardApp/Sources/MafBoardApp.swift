@@ -2,23 +2,38 @@ import SwiftUI
 
 @main
 struct MafBoardApp: App {
-    @State private var model = AppModel()
-    @State private var library = GameLibrary()
+    @State private var model: AppModel
+    @State private var library: GameLibrary
+    @State private var sync: GameSync
     @Environment(\.scenePhase) private var scenePhase
+
+    init() {
+        let model = AppModel()
+        let library = GameLibrary()
+        _model = State(initialValue: model)
+        _library = State(initialValue: library)
+        _sync = State(initialValue: GameSync(library: library, model: model))
+    }
 
     var body: some Scene {
         WindowGroup {
             RootView()
                 .environment(model)
                 .environment(library)
+                .environment(sync)
                 .task {
                     library.uploader = { [model] record in await model.uploadGame(record) }
+                    library.onActiveChanged = { [sync] in sync.activeChanged() }
                     await model.bootstrap()
                 }
                 .onOpenURL { model.handle(url: $0) }
         }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .active { Task { await model.pollLogin() } }
+            guard phase == .active else { return }
+            Task {
+                await model.pollLogin()
+                await sync.refresh()
+            }
         }
     }
 }
@@ -26,6 +41,7 @@ struct MafBoardApp: App {
 struct RootView: View {
     @Environment(AppModel.self) private var model
     @Environment(GameLibrary.self) private var library
+    @Environment(GameSync.self) private var sync
     @AppStorage(AccentChoice.storageKey) private var accent = AccentChoice.blue
     @AppStorage(AppearanceChoice.storageKey) private var appearance = AppearanceChoice.system
 
@@ -39,10 +55,11 @@ struct RootView: View {
         }
         .tint(accent.color)
         .preferredColorScheme(appearance.colorScheme)
+        .connectionIndicator()
         .task(id: model.account?.id) {
-            // Игры — только вошедшего ведущего.
+            // Игры — только вошедшего ведущего; идущая игра подтягивается с сервера.
             library.switchUser(model.account?.id)
-            await library.uploadPending()
+            await sync.refresh()
         }
         .alert(
             "Ошибка",

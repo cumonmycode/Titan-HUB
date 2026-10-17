@@ -52,6 +52,10 @@ const GAMES_PAGE_LIMIT = 50
 /** Запись одной игры с журналом — десятки килобайт; 256 КБ — с большим запасом. */
 const GAME_BODY_LIMIT_BYTES = 256 * 1024
 const GAMES_PER_DAY = 100
+/** Снимок идущей игры уходит после каждого хода (с паузой) — запас на долгий вечер. */
+const ACTIVE_SAVES_PER_HOUR = 1200
+const ACTIVE_GAMES_LIMIT = 5
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const START_LIMIT = { count: 20, windowSec: 600 }
 const COMPLETE_LIMIT = { count: 30, windowSec: 600 }
 const LINK_LIMIT = { count: 5, windowSec: 600 }
@@ -112,6 +116,27 @@ const startSchema = z.object({
 const completeSchema = z.object({ ticket: z.string().uuid(), deviceSecret: z.string().min(32).max(128) })
 const refreshSchema = z.object({ refreshToken: z.string().min(32).max(128) })
 const linkSchema = z.object({ login: z.string().trim().min(1).max(100), password: z.string().min(1).max(200) })
+/** Снимок идущей игры: журнал движка и игроки. Проверяем только то, на что опирается сервер. */
+const activeGameSchema = z.object({
+  revision: z.number().int().min(0).max(10_000_000),
+  updatedAt: z.string().refine((value) => !Number.isNaN(Date.parse(value)), 'Некорректная дата'),
+  snapshot: z
+    .object({
+      session: z
+        .object({
+          setup: z
+            .object({
+              gameID: z.string().uuid(),
+              host: z.object({ userID: z.string().uuid() }).passthrough(),
+            })
+            .passthrough(),
+          log: z.array(z.unknown()).max(5000),
+        })
+        .passthrough(),
+      players: z.array(z.unknown()).max(40),
+    })
+    .passthrough(),
+})
 
 function parseSince(value: string | undefined): Date | null | 'invalid' {
   if (!value) return null
@@ -440,6 +465,8 @@ export function createMafboardRouter(resolveDeps: DepsResolver): Hono<Env> {
 
     const outcome = await deps.repo.insertGame(result.game)
     if (outcome === 'conflict') return fail(c, 409, 'game_conflict', 'Игра с таким номером уже сохранена другим ведущим')
+    // Игра закончена — её черновик больше не нужен.
+    await deps.repo.deleteActiveGame(user.id, result.game.id)
     return c.json({ id: result.game.id }, outcome === 'inserted' ? 201 : 200)
   })
 
@@ -463,6 +490,50 @@ export function createMafboardRouter(resolveDeps: DepsResolver): Hono<Env> {
     if (since === 'invalid') return fail(c, 422, 'validation', 'Некорректная дата since')
     const games = await deps.repo.gamesByClub(clubId, since, GAMES_PAGE_LIMIT)
     return c.json({ games: games.map((g) => g.record) })
+  })
+
+  // ─── Идущие игры ────────────────────────────────────────────────────────────
+
+  /** Снимок идущей игры с телефона. Старший снимок не перезаписывается младшим. */
+  router.put('/v1/games/active/:id', gameBodyLimit, requireUser, async (c) => {
+    const deps = c.get('deps')
+    const user = c.get('user')
+    const id = c.req.param('id')
+    if (!UUID_PATTERN.test(id)) return fail(c, 422, 'validation', 'Некорректный номер игры')
+    if (!(await deps.limiter.hit(`mb:active:${user.id}`, ACTIVE_SAVES_PER_HOUR, 60 * 60))) {
+      return fail(c, 429, 'rate_limited', 'Слишком частые сохранения игры')
+    }
+    const parsed = activeGameSchema.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return fail(c, 422, 'invalid_snapshot', 'Снимок игры повреждён или неполный')
+    const { revision, updatedAt, snapshot } = parsed.data
+    if (snapshot.session.setup.gameID.toLowerCase() !== id.toLowerCase()) {
+      return fail(c, 422, 'id_mismatch', 'Номер игры не совпадает со снимком')
+    }
+    if (snapshot.session.setup.host.userID.toLowerCase() !== user.id.toLowerCase()) {
+      return fail(c, 403, 'host_mismatch', 'Игру может сохранить только её ведущий')
+    }
+    const outcome = await deps.repo.saveActiveGame({
+      id: id.toLowerCase(), hostUserId: user.id, revision, updatedAt: new Date(updatedAt), snapshot,
+    })
+    if (outcome === 'conflict') return fail(c, 409, 'game_conflict', 'Игра с таким номером принадлежит другому ведущему')
+    return c.json({ stored: outcome === 'saved' })
+  })
+
+  /** Идущие игры ведущего — чтобы продолжить после переустановки или на другом устройстве. */
+  router.get('/v1/games/active', requireUser, async (c) => {
+    const deps = c.get('deps')
+    const games = await deps.repo.activeGamesByHost(c.get('user').id, ACTIVE_GAMES_LIMIT)
+    return c.json({
+      games: games.map((g) => ({ id: g.id, revision: g.revision, updatedAt: g.updatedAt.toISOString(), snapshot: g.snapshot })),
+    })
+  })
+
+  /** Ведущий удалил идущую игру. */
+  router.delete('/v1/games/active/:id', requireUser, async (c) => {
+    const id = c.req.param('id')
+    if (!UUID_PATTERN.test(id)) return fail(c, 422, 'validation', 'Некорректный номер игры')
+    await c.get('deps').repo.deleteActiveGame(c.get('user').id, id.toLowerCase())
+    return c.json({ ok: true })
   })
 
   return router

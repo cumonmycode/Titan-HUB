@@ -227,3 +227,71 @@ describe('история игр', () => {
     assert.equal(res.status, 401)
   })
 })
+
+describe('идущие игры', () => {
+  const GAME = 'C0FFEE00-0000-4000-8000-000000000001'
+
+  function snapshot(hostId: string, revision: number, gameID = GAME) {
+    return {
+      revision,
+      updatedAt: '2026-10-16T17:10:00.000Z',
+      snapshot: {
+        session: { schemaVersion: 1, setup: { gameID, host: { userID: hostId.toUpperCase() } }, log: Array(revision).fill({}) },
+        players: [{ id: 'p1', nickname: 'Шерлок' }],
+      },
+    }
+  }
+
+  it('снимок сохраняется, отдаётся и не затирается более старым', async () => {
+    const ctx = createTestContext()
+    const host = await signIn(ctx)
+    const put = (body: unknown) => call(ctx, 'PUT', `/v1/games/active/${GAME}`, { token: host.accessToken, body })
+
+    assert.deepEqual((await put(snapshot(host.account.id, 3))).json, { stored: true })
+    assert.deepEqual((await put(snapshot(host.account.id, 2))).json, { stored: false })
+    assert.deepEqual((await put(snapshot(host.account.id, 5))).json, { stored: true })
+
+    const list = await call(ctx, 'GET', '/v1/games/active', { token: host.accessToken })
+    assert.equal(list.status, 200)
+    assert.equal(list.json.games.length, 1)
+    assert.equal(list.json.games[0].id, GAME.toLowerCase())
+    assert.equal(list.json.games[0].revision, 5)
+    assert.equal(list.json.games[0].snapshot.players[0].nickname, 'Шерлок')
+  })
+
+  it('чужую игру не сохранить и не увидеть; номер в адресе и в снимке должны совпадать', async () => {
+    const ctx = createTestContext()
+    const host = await signIn(ctx)
+    const other = await signIn(ctx, { ...TG_USER, id: 3003, username: 'other' })
+    await call(ctx, 'PUT', `/v1/games/active/${GAME}`, { token: host.accessToken, body: snapshot(host.account.id, 1) })
+
+    const forged = await call(ctx, 'PUT', `/v1/games/active/${GAME}`, { token: other.accessToken, body: snapshot(host.account.id, 9) })
+    assert.equal(forged.status, 403)
+    const clash = await call(ctx, 'PUT', `/v1/games/active/${GAME}`, { token: other.accessToken, body: snapshot(other.account.id, 9) })
+    assert.equal(clash.status, 409)
+    const mismatch = await call(ctx, 'PUT', '/v1/games/active/C0FFEE00-0000-4000-8000-000000000002', {
+      token: host.accessToken, body: snapshot(host.account.id, 1),
+    })
+    assert.equal(mismatch.status, 422)
+
+    const theirs = await call(ctx, 'GET', '/v1/games/active', { token: other.accessToken })
+    assert.equal(theirs.json.games.length, 0)
+  })
+
+  it('удаление и загрузка законченной игры убирают снимок', async () => {
+    const ctx = createTestContext()
+    const host = await signIn(ctx)
+    const finishedID = 'A1B2C3D4-0000-4000-8000-000000000123'
+    await call(ctx, 'PUT', `/v1/games/active/${GAME}`, { token: host.accessToken, body: snapshot(host.account.id, 1) })
+    await call(ctx, 'PUT', `/v1/games/active/${finishedID}`, { token: host.accessToken, body: snapshot(host.account.id, 1, finishedID) })
+
+    assert.equal((await call(ctx, 'DELETE', `/v1/games/active/${GAME}`, { token: host.accessToken })).status, 200)
+    const uploaded = await call(ctx, 'POST', '/v1/games', { token: host.accessToken, body: gameRecord(host.account.id, 'funky', null, finishedID) })
+    assert.equal(uploaded.status, 201)
+
+    const list = await call(ctx, 'GET', '/v1/games/active', { token: host.accessToken })
+    assert.equal(list.json.games.length, 0)
+    const late = await call(ctx, 'PUT', `/v1/games/active/${finishedID}`, { token: host.accessToken, body: snapshot(host.account.id, 7, finishedID) })
+    assert.deepEqual(late.json, { stored: false })
+  })
+})

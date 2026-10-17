@@ -2,7 +2,7 @@ import { sql, type Database } from '@titan/database'
 import type { SQL } from 'drizzle-orm'
 import { GomafiaTakenError, type MafboardRepo } from './repo.js'
 import type {
-  DeviceSession, GoMafiaClubJSON, GoMafiaPlayerJSON, LoginTicket, MafboardUser, RefreshTokenRow, StoredGame, TicketGuard, TicketPatch,
+  DeviceSession, GoMafiaClubJSON, GoMafiaPlayerJSON, LoginTicket, MafboardUser, RefreshTokenRow, StoredActiveGame, StoredGame, TicketGuard, TicketPatch,
   TicketStatus, TicketStep,
 } from './types.js'
 
@@ -104,6 +104,16 @@ function toGame(r: Row): StoredGame {
     finishedAt: date(r['finished_at']),
     schemaVersion: Number(r['schema_version']),
     record: json<unknown>(r['record']),
+  }
+}
+
+function toActiveGame(r: Row): StoredActiveGame {
+  return {
+    id: String(r['id']),
+    hostUserId: String(r['host_user_id']),
+    revision: Number(r['revision']),
+    updatedAt: date(r['updated_at']),
+    snapshot: json<unknown>(r['snapshot']),
   }
 }
 
@@ -419,4 +429,32 @@ export class PgMafboardRepo implements MafboardRepo {
     `)
     return found.map(toGame)
   }
+  async saveActiveGame(game: StoredActiveGame): Promise<'saved' | 'stale' | 'conflict'> {
+    const finished = await this.one(sql`SELECT host_user_id FROM mb_games WHERE id = ${game.id}::uuid`)
+    if (finished) return String(finished['host_user_id']) === game.hostUserId ? 'stale' : 'conflict'
+    const saved = await this.query(sql`
+      INSERT INTO mb_active_games (id, host_user_id, revision, updated_at, snapshot)
+      VALUES (${game.id}::uuid, ${game.hostUserId}::uuid, ${game.revision}, ${iso(game.updatedAt)}::timestamptz,
+              ${JSON.stringify(game.snapshot)}::jsonb)
+      ON CONFLICT (id) DO UPDATE
+        SET revision = EXCLUDED.revision, updated_at = EXCLUDED.updated_at, snapshot = EXCLUDED.snapshot
+        WHERE mb_active_games.host_user_id = EXCLUDED.host_user_id AND mb_active_games.revision <= EXCLUDED.revision
+      RETURNING id
+    `)
+    if (saved.length > 0) return 'saved'
+    const existing = await this.one(sql`SELECT host_user_id FROM mb_active_games WHERE id = ${game.id}::uuid`)
+    return existing && String(existing['host_user_id']) === game.hostUserId ? 'stale' : 'conflict'
+  }
+
+  async activeGamesByHost(userId: string, limit: number): Promise<StoredActiveGame[]> {
+    const found = await this.query(sql`
+      SELECT * FROM mb_active_games WHERE host_user_id = ${userId}::uuid ORDER BY updated_at DESC LIMIT ${limit}
+    `)
+    return found.map(toActiveGame)
+  }
+
+  async deleteActiveGame(userId: string, id: string): Promise<void> {
+    await this.query(sql`DELETE FROM mb_active_games WHERE id = ${id}::uuid AND host_user_id = ${userId}::uuid`)
+  }
+
 }

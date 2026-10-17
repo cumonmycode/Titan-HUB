@@ -140,6 +140,21 @@ export const MAFBOARD_MIGRATIONS: readonly { id: string; sql: string }[] = [
       CREATE INDEX IF NOT EXISTS mb_refresh_tokens_session_idx ON mb_refresh_tokens (session_id) WHERE revoked_at IS NULL;
     `,
   },
+  {
+    // Идущие игры: последний снимок журнала с телефона ведущего. Снимок со старшей ревизией
+    // не перезаписывается младшей; после загрузки законченной игры снимок удаляется.
+    id: '003_mafboard_active_games',
+    sql: `
+      CREATE TABLE IF NOT EXISTS mb_active_games (
+        id           uuid PRIMARY KEY,
+        host_user_id uuid NOT NULL REFERENCES mb_users(id) ON DELETE CASCADE,
+        revision     integer NOT NULL,
+        updated_at   timestamptz NOT NULL,
+        snapshot     jsonb NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS mb_active_games_host_idx ON mb_active_games (host_user_id, updated_at DESC);
+    `,
+  },
 ]
 
 function rows<T = Record<string, unknown>>(res: unknown): T[] {

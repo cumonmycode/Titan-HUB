@@ -196,15 +196,43 @@ final class AppModel {
     private static let maxRosterPages = 12
 
     /// Законченная игра — в историю на сервере (личную или клуба). `true` — сервер её принял (или уже имел).
-    func uploadGame(_ record: GameRecord) async -> Bool {
-        guard phase == .signedIn, record.host != nil else { return false }
+    func uploadGame(_ record: GameRecord) async -> SyncResult {
+        guard phase == .signedIn else { return .offline }
+        guard record.host != nil else { return .rejected }
         do throws(APIError) {
             try await withAuth { () async throws(APIError) in try await api.uploadGame(record) }
-            return true
+            return .done
         } catch {
-            if case .conflict = error { return true }
-            return false
+            return SyncResult(error)
         }
+    }
+
+    // MARK: - Идущие игры на сервере
+
+    func saveActiveGame(_ game: ActiveGameEnvelope) async -> SyncResult {
+        guard phase == .signedIn else { return .offline }
+        do throws(APIError) {
+            _ = try await withAuth { () async throws(APIError) in try await api.saveActiveGame(game) }
+            return .done
+        } catch {
+            return SyncResult(error)
+        }
+    }
+
+    func deleteActiveGame(_ id: GameID) async -> SyncResult {
+        guard phase == .signedIn else { return .offline }
+        do throws(APIError) {
+            try await withAuth { () async throws(APIError) in try await api.deleteActiveGame(id: id) }
+            return .done
+        } catch {
+            return SyncResult(error)
+        }
+    }
+
+    /// Идущие игры ведущего на сервере. `nil` — сервер недоступен.
+    func activeGames() async -> [ActiveGameEnvelope]? {
+        guard phase == .signedIn else { return nil }
+        return try? await withAuth { () async throws(APIError) in try await api.activeGames() }
     }
 
     // MARK: - Сессии устройств
@@ -336,6 +364,24 @@ extension TelegramLoginFailure {
         case let .rejected(note): note ?? "Вход отклонён"
         case .expired: "Время на вход истекло — попробуйте ещё раз"
         case let .network(text): text
+        }
+    }
+}
+
+/// Итог фоновой отправки на сервер.
+enum SyncResult {
+    /// Сервер принял.
+    case done
+    /// Сервер отказал по существу (данные, права) — повторять бессмысленно.
+    case rejected
+    /// Нет связи или сбой сервера — повторим позже.
+    case offline
+
+    init(_ error: APIError) {
+        switch error {
+        case .transport, .rateLimited, .unauthorized: self = .offline
+        case let .server(status, _): self = status >= 500 ? .offline : .rejected
+        case .conflict, .forbidden, .notFound, .validation, .decoding: self = .rejected
         }
     }
 }

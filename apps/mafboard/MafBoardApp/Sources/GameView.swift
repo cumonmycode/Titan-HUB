@@ -18,6 +18,8 @@ final class GameController: Identifiable {
     var checkResult: NightCheck?
     var errorMessage: String?
     var showsRoles = false
+    /// Сохранить идущую игру (на телефоне и затем на сервере).
+    @ObservationIgnored var onSave: ((GameSession, [PlayerProfile]) -> Void)?
     @ObservationIgnored var onFinish: ((GameRecord, [PlayerProfile]) -> Void)?
     @ObservationIgnored var onReopen: ((GameID) -> Void)?
 
@@ -116,14 +118,10 @@ final class GameController: Identifiable {
         try? GameRecord(session: session)
     }
 
-    /// Законченную игру хранит история, идущую — файл текущей игры.
+    /// Законченную игру хранит история, идущую — телефон и сервер.
     private func save() {
         guard !state.isFinished else { return }
-        do {
-            try SavedGameStore.save(SavedGame(session: session, players: players))
-        } catch {
-            errorMessage = "Игра не сохранилась на устройстве: \(error.localizedDescription)"
-        }
+        onSave?(session, players)
     }
 }
 
@@ -214,6 +212,7 @@ struct GameScreen: View {
                 Text(game.checkResult.map(\.verdict) ?? "")
             }
         }
+        .connectionIndicator()
         .onAppear { UIApplication.shared.isIdleTimerDisabled = true }
         .onDisappear { UIApplication.shared.isIdleTimerDisabled = false }
     }

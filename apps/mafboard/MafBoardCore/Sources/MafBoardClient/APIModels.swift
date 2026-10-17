@@ -54,6 +54,41 @@ struct SessionsResponse: Decodable {
 
 struct EmptyResponse: Decodable {}
 
+struct StoredResponse: Decodable {
+    let stored: Bool
+}
+
+struct ActiveGamesResponse: Decodable {
+    let games: [ActiveGameEnvelope]
+}
+
+/// Снимок идущей игры: журнал движка и игроки (имена, аватары).
+public struct ActiveGameSnapshot: Codable, Sendable, Equatable {
+    public let session: GameSession
+    public let players: [PlayerProfile]
+
+    public init(session: GameSession, players: [PlayerProfile]) {
+        self.session = session
+        self.players = players
+    }
+}
+
+/// Идущая игра на сервере. `revision` растёт с каждым изменением на телефоне —
+/// сервер не перезаписывает более новый снимок более старым.
+public struct ActiveGameEnvelope: Codable, Sendable, Equatable {
+    public let id: GameID
+    public let revision: Int
+    public let updatedAt: Date
+    public let snapshot: ActiveGameSnapshot
+
+    public init(id: GameID, revision: Int, updatedAt: Date, snapshot: ActiveGameSnapshot) {
+        self.id = id
+        self.revision = revision
+        self.updatedAt = updatedAt
+        self.snapshot = snapshot
+    }
+}
+
 /// Тело ошибки. Ручки MafBoard отвечают `{"error": {"code", "message"}}`, а общие ответы
 /// Titan HUB (404 вне модуля, 500) — `{"error": "текст"}`. Понимаем оба.
 struct APIErrorBody: Decodable {

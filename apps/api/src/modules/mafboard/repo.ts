@@ -1,5 +1,5 @@
 import type {
-  DeviceSession, GoMafiaClubJSON, GoMafiaPlayerJSON, LoginTicket, MafboardUser, RefreshTokenRow, StoredGame, TelegramProfile, TicketGuard,
+  DeviceSession, GoMafiaClubJSON, GoMafiaPlayerJSON, LoginTicket, MafboardUser, RefreshTokenRow, StoredActiveGame, StoredGame, TelegramProfile, TicketGuard,
   TicketPatch, TicketStep,
 } from './types.js'
 
@@ -83,4 +83,13 @@ export interface MafboardRepo {
   insertGame(game: StoredGame): Promise<'inserted' | 'exists' | 'conflict'>
   gamesByHost(userId: string, since: Date | null, limit: number): Promise<StoredGame[]>
   gamesByClub(clubId: number, since: Date | null, limit: number): Promise<StoredGame[]>
+
+  // ─── Идущие игры ───────────────────────────────────────────────────────────
+  /**
+   * Сохранить снимок идущей игры. 'saved' — записан; 'stale' — на сервере снимок новее
+   * или игра уже закончена; 'conflict' — игра с этим id принадлежит другому ведущему.
+   */
+  saveActiveGame(game: StoredActiveGame): Promise<'saved' | 'stale' | 'conflict'>
+  activeGamesByHost(userId: string, limit: number): Promise<StoredActiveGame[]>
+  deleteActiveGame(userId: string, id: string): Promise<void>
 }
