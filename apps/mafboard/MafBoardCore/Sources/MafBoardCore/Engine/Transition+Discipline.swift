@@ -90,6 +90,13 @@ extension Transition {
         emit(.criticalRemovalMarked(seat, isCritical))
     }
 
+    /// Вскрытие шерифом отмечается в любой момент, и во время игры, и после неё.
+    mutating func markSheriffClaim(_ seat: Seat, _ claimed: Bool) throws(GameError) {
+        let index = try index(of: seat)
+        state.seats[index].claimedSheriff = claimed
+        emit(.sheriffClaimMarked(seat, claimed))
+    }
+
     /// ППК: команда нарушителя проигрывает. Нарушение возможно и в заключительную минуту (ФСМ 6.9.5).
     mutating func forfeit(_ seat: Seat, note: String?) throws(GameError) {
         try requireInProgress()

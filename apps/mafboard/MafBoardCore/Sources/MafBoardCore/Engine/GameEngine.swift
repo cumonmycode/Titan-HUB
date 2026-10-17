@@ -78,6 +78,7 @@ struct Transition {
         case let .disqualify(seat, note): try remove(seat, reason: .disqualified(note: note))
         case let .eliminateByHost(seat, note): try eliminateByHost(seat, note: note)
         case let .markCriticalRemoval(seat, isCritical): try markCriticalRemoval(seat, isCritical)
+        case let .markSheriffClaim(seat, claimed): try markSheriffClaim(seat, claimed)
         case let .forfeit(seat, note): try forfeit(seat, note: note)
         case let .recordBestMove(seats):
             guard let author = state.bestMoveAuthor else { throw .bestMoveNotAvailable }

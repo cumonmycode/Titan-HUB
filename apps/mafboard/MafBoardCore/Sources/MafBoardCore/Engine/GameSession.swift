@@ -20,6 +20,13 @@ public struct GameSession: Sendable, Equatable {
         state = GameEngine.start(setup)
     }
 
+    /// Сыгранная игра из истории — чтобы поправить итоги (допбаллы, протокол, ЛХ).
+    public init(record: GameRecord) throws(GameError) {
+        setup = record.setup
+        log = record.log
+        state = try Self.replay(setup: record.setup, log: record.log)
+    }
+
     public var canUndo: Bool { !log.isEmpty }
 
     public mutating func perform(_ action: GameAction, at date: Date = .now) throws(GameError) {

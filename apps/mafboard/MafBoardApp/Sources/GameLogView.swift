@@ -118,6 +118,8 @@ private extension GameEvent {
             return line("timer", .orange, "\(who(seat)): 3 фола — ближайшая речь полминуты")
         case let .criticalRemovalMarked(seat, isCritical):
             return line("person.fill.xmark", .red, isCritical ? "Удаление \(who(seat)) — на критике" : "Удаление \(who(seat)) — не на критике")
+        case let .sheriffClaimMarked(seat, claimed):
+            return line("checkmark.shield.fill", .orange, claimed ? "\(who(seat)) вскрылся шерифом" : "Снята отметка вскрытия \(who(seat))")
         case let .bestMoveAvailable(seat):
             return line("star", .yellow, "\(who(seat)) получает право лучшего хода")
         case let .protocolRecorded(proto):

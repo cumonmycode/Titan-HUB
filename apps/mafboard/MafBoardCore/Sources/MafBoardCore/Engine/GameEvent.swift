@@ -190,6 +190,7 @@ public struct GameEvent: Codable, Sendable, Equatable {
         /// 3-й фол: ближайшая речь вдвое короче.
         case speechHalved(Seat)
         case criticalRemovalMarked(Seat, Bool)
+        case sheriffClaimMarked(Seat, Bool)
         case bestMoveAvailable(Seat)
         case bestMove(BestMove)
         case scoreAdjusted(ScoreAdjustment)

@@ -12,138 +12,185 @@ struct ScoreEditing {
     let onProtocol: (() -> Void)?
     /// `nil` — права лучшего хода нет.
     let onBestMove: (() -> Void)?
-    /// `nil` — игрок не удалён за фолы или дисквалификацию.
+    /// `nil` — игрок не удалён за фолы или дисквалификацию, либо правила не штрафуют «на критике».
     let isCriticalRemoval: Binding<Bool>?
+    let criticalPenalty: Points?
+    /// «Вскрылся шерифом» — отметка; баллы за вскрытие судья ставит в Доп+ или Доп−.
+    let sheriffClaim: Binding<Bool>
 
-    /// Положительный допбалл — от +0.2 до +1.0 (ФСМ 8.4.3), отрицательный — от −0.2 до −1.0 (8.4.4).
-    static let bonusValues = [0] + Array(stride(from: 20, through: 100, by: 10))
-    static let penaltyValues = [0] + Array(stride(from: -20, through: -100, by: -10))
+    /// Положительный допбалл — от +0.2 до +1.0 (ФСМ 8.4.3), отрицательный — от −1.0 до −0.2 (8.4.4). По возрастанию.
+    static let bonusScale = [0] + Array(stride(from: 20, through: 100, by: 10))
+    static let penaltyScale = bonusScale.reversed().map { -$0 }
 }
 
-/// Карточка игрока в итогах: свёрнута — номер, имя, роль и итог; раскрыта — из чего итог сложился.
+/// Карточка игрока в итогах — стекло. Свёрнута: номер, имя, роль, значки и итог.
+/// Раскрыта: из чего сложился итог, а у ведущего — ещё и правка допбаллов, ЛХ, протокола и «критики».
 struct PlayerScoreCard: View {
     let score: PlayerGameScore
     let player: PlayerProfile?
     /// «ПУ · убит мафией», «удалён за фолы».
     let status: String?
+    /// Игрок вскрывался шерифом.
+    var isSheriffClaim = false
     var editing: ScoreEditing?
     @State private var isExpanded = false
 
     private var name: String { player?.nickname ?? "Игрок \(score.seat)" }
+    private var teamTint: Color { score.role.team.tint }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 14) {
             header
                 .contentShape(.rect)
-                .onTapGesture { withAnimation(.snappy) { isExpanded.toggle() } }
+                .onTapGesture { withAnimation(.smooth(duration: 0.35)) { isExpanded.toggle() } }
                 .accessibilityAddTraits(.isButton)
+                .accessibilityHint(isExpanded ? "Свернуть" : "Подробнее о баллах")
             if isExpanded {
-                breakdown.transition(.opacity.combined(with: .move(edge: .top)))
+                details.transition(.blurReplace.combined(with: .opacity))
             }
         }
-        .padding(12)
-        .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 20, style: .continuous))
+        .padding(14)
+        .glassEffect(.regular, in: .rect(cornerRadius: 26, style: .continuous))
+        .sensoryFeedback(.selection, trigger: isExpanded)
     }
 
+    // MARK: Шапка
+
     private var header: some View {
-        HStack(spacing: 10) {
-            Text("\(score.seat.number)")
-                .font(.subheadline.weight(.bold))
-                .monospacedDigit()
-                .frame(width: 30, height: 30)
-                .background(Color(.tertiarySystemFill), in: .circle)
-            PlayerAvatar(name: name, url: player?.avatarURL, size: 34)
-            VStack(alignment: .leading, spacing: 1) {
-                HStack(spacing: 4) {
+        HStack(spacing: 12) {
+            ZStack(alignment: .bottomTrailing) {
+                PlayerAvatar(name: name, url: player?.avatarURL, size: 44)
+                Text("\(score.seat.number)")
+                    .font(.caption2.weight(.heavy))
+                    .monospacedDigit()
+                    .foregroundStyle(.white)
+                    .frame(minWidth: 18, minHeight: 18)
+                    .background(teamTint.gradient, in: .circle)
+                    .overlay { Circle().stroke(.background, lineWidth: 2) }
+                    .offset(x: 4, y: 4)
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 5) {
                     Text(name).font(.body.weight(.semibold)).lineLimit(1)
                     if score.result == .win {
-                        Image(systemName: "checkmark.seal.fill").font(.caption).foregroundStyle(.green)
+                        Image(systemName: "crown.fill").font(.caption).foregroundStyle(.yellow)
                     }
                 }
                 HStack(spacing: 6) {
-                    Text(score.role.displayName).font(.caption.weight(.medium)).foregroundStyle(score.role.team.tint)
-                    if let status { Text(status).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
+                    Text(score.role.displayName)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(teamTint)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 2)
+                        .background(teamTint.opacity(0.15), in: .capsule)
+                    if isSheriffClaim {
+                        Image(systemName: "checkmark.shield.fill").font(.caption2).foregroundStyle(.orange)
+                    }
+                    ForEach(score.badges, id: \.self) { icon in
+                        Image(systemName: icon).font(.caption2).foregroundStyle(.secondary)
+                    }
+                }
+                if let status {
+                    Text(status).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 }
             }
-            Spacer(minLength: 4)
+            Spacer(minLength: 6)
             Text(score.total.description)
-                .font(.title3.weight(.bold))
+                .font(.title2.weight(.bold))
                 .monospacedDigit()
-                .contentTransition(.numericText())
+                .contentTransition(.numericText(value: score.total.doubleValue))
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(totalTint.opacity(0.18), in: .capsule)
+                .foregroundStyle(totalTint == .secondary ? Color.primary : totalTint)
             Image(systemName: "chevron.down")
-                .font(.caption.weight(.semibold))
+                .font(.footnote.weight(.bold))
                 .foregroundStyle(.tertiary)
                 .rotationEffect(.degrees(isExpanded ? 180 : 0))
         }
     }
 
-    // MARK: Расшифровка
+    private var totalTint: Color {
+        if score.total > .zero { return .green }
+        if score.total < .zero { return .red }
+        return .secondary
+    }
 
-    @ViewBuilder
-    private var breakdown: some View {
-        VStack(spacing: 8) {
-            ScoreRow(title: score.resultTitle, points: score.resultPoints)
+    // MARK: Подробности
+
+    private var details: some View {
+        VStack(spacing: 14) {
+            VStack(spacing: 10) {
+                ForEach(score.lines(includeExtras: editing == nil, editing: editing)) { line in
+                    LineRow(line: line)
+                }
+                if isSheriffClaim, editing == nil {
+                    HStack(spacing: 12) {
+                        IconBadge(icon: "checkmark.shield.fill", tint: .orange)
+                        Text("Вскрылся шерифом").font(.subheadline.weight(.medium))
+                        Spacer()
+                    }
+                }
+            }
             if let editing {
-                PickerRow(title: "Доп +", values: ScoreEditing.bonusValues, selection: editing.bonus)
-                PickerRow(title: "Доп −", values: ScoreEditing.penaltyValues, selection: editing.penalty)
-            } else {
-                if score.extraBonus != .zero { ScoreRow(title: "Доп +", points: score.extraBonus) }
-                if score.extraPenalty != .zero { ScoreRow(title: "Доп −", points: score.extraPenalty) }
+                VStack(spacing: 10) {
+                    ExtraStepper(title: "Доп +", icon: "plus", tint: .green, scale: ScoreEditing.bonusScale, value: editing.bonus)
+                    ExtraStepper(title: "Доп −", icon: "minus", tint: .red, scale: ScoreEditing.penaltyScale, value: editing.penalty)
+                }
+                .padding(12)
+                .background(Color.primary.opacity(0.05), in: .rect(cornerRadius: 18, style: .continuous))
+                ActionChips(score: score, editing: editing)
             }
-            protocolRow
-            bestMoveRow
-            ForEach(Array(score.disciplineLines.enumerated()), id: \.offset) { _, line in
-                ScoreRow(title: line.title, points: line.points)
+            HStack {
+                Text("Итог").font(.headline)
+                Spacer()
+                Text(score.total.description)
+                    .font(.title3.weight(.bold))
+                    .monospacedDigit()
+                    .contentTransition(.numericText(value: score.total.doubleValue))
             }
-            if let critical = editing?.isCriticalRemoval {
-                Toggle("Удаление на критике (−1)", isOn: critical)
-                    .font(.subheadline)
-            }
-            Divider()
-            ScoreRow(title: "Итог", points: score.total, isTotal: true)
-        }
-    }
-
-    @ViewBuilder
-    private var protocolRow: some View {
-        if let component = score.component(where: \.isProtocol) {
-            ScoreRow(title: component.kind == .colorProtocol(firstKilled: true) ? "Протокол ПУ" : "Протокол",
-                     points: component.points, action: editing?.onProtocol)
-        } else if let onProtocol = editing?.onProtocol {
-            AddRow(title: "Протокол", action: onProtocol)
-        }
-    }
-
-    @ViewBuilder
-    private var bestMoveRow: some View {
-        if let component = score.component(where: \.isBestMove), case let .bestMove(guessed) = component.kind {
-            ScoreRow(title: "Лучший ход", detail: "угадано \(guessed)", points: component.points, action: editing?.onBestMove)
-        } else if let onBestMove = editing?.onBestMove {
-            AddRow(title: "Лучший ход", action: onBestMove)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(totalTint.opacity(0.14), in: .capsule)
         }
     }
 }
 
-/// Строка расшифровки: название, пояснение и баллы. Если есть действие — нажатие правит значение.
-private struct ScoreRow: View {
+// MARK: - Строки расшифровки
+
+/// Строка расшифровки: значок, название, пояснение и баллы. С действием — нажатие открывает правку.
+struct ScoreLine: Identifiable {
+    let id: String
+    let icon: String
+    let tint: Color
     let title: String
     var detail: String?
     let points: Points
-    var isTotal = false
     var action: (() -> Void)?
+}
+
+private struct LineRow: View {
+    let line: ScoreLine
 
     var body: some View {
-        let row = HStack(spacing: 6) {
-            Text(title).font(isTotal ? .headline : .subheadline)
-            if let detail { Text(detail).font(.caption).foregroundStyle(.secondary) }
-            if action != nil { Image(systemName: "pencil").font(.caption).foregroundStyle(.tint) }
+        let row = HStack(spacing: 12) {
+            IconBadge(icon: line.icon, tint: line.tint)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(line.title).font(.subheadline.weight(.medium))
+                if let detail = line.detail {
+                    Text(detail).font(.caption).foregroundStyle(.secondary)
+                }
+            }
             Spacer()
-            Text(isTotal ? points.description : points.signed)
-                .font(isTotal ? .headline : .subheadline.weight(.semibold))
+            Text(line.points.signed)
+                .font(.subheadline.weight(.semibold))
                 .monospacedDigit()
-                .foregroundStyle(isTotal || points == .zero ? AnyShapeStyle(.primary) : AnyShapeStyle(points > .zero ? Color.green : Color.red))
+                .foregroundStyle(line.points == .zero ? AnyShapeStyle(.secondary) : AnyShapeStyle(line.points > .zero ? Color.green : Color.red))
+            if line.action != nil {
+                Image(systemName: "pencil.circle.fill").font(.title3).foregroundStyle(.tint)
+            }
         }
-        if let action {
+        if let action = line.action {
             Button(action: action) { row.contentShape(.rect) }.buttonStyle(.plain)
         } else {
             row
@@ -151,42 +198,185 @@ private struct ScoreRow: View {
     }
 }
 
-/// Доп+ или Доп− — значение выбирается из шкалы ФСМ.
-private struct PickerRow: View {
-    let title: String
-    let values: [Int]
-    let selection: Binding<Int>
+private struct IconBadge: View {
+    let icon: String
+    let tint: Color
 
     var body: some View {
-        HStack {
-            Text(title).font(.subheadline)
-            Spacer()
-            // Значение не со шкалы (старые пресеты) тоже показываем — иначе пикер пустой.
-            let options = values.contains(selection.wrappedValue) ? values : (values + [selection.wrappedValue]).sorted { abs($0) < abs($1) }
-            Picker(title, selection: selection) {
-                ForEach(options, id: \.self) { Text(Points(hundredths: $0).signed).tag($0) }
-            }
-            .pickerStyle(.menu)
-            .labelsHidden()
-        }
+        Image(systemName: icon)
+            .font(.footnote.weight(.bold))
+            .foregroundStyle(tint)
+            .frame(width: 30, height: 30)
+            .background(tint.opacity(0.16), in: .circle)
     }
 }
 
-private struct AddRow: View {
+// MARK: - Правка допбаллов
+
+/// Доп+ или Доп−: «−» и «+» шагают по шкале ФСМ, нажатие на число — сразу нужное значение.
+private struct ExtraStepper: View {
     let title: String
-    let action: () -> Void
+    let icon: String
+    let tint: Color
+    /// По возрастанию.
+    let scale: [Int]
+    @Binding var value: Int
+
+    /// Позиция текущего значения; значение не со шкалы (старые пресеты) — ближайшая.
+    private var index: Int {
+        scale.firstIndex(of: value) ?? scale.indices.min { abs(scale[$0] - value) < abs(scale[$1] - value) } ?? 0
+    }
 
     var body: some View {
-        Button(action: action) {
-            HStack {
-                Text(title).font(.subheadline)
-                Spacer()
-                Label("Записать", systemImage: "plus.circle").font(.subheadline.weight(.semibold))
+        HStack(spacing: 12) {
+            IconBadge(icon: icon, tint: tint)
+            Text(title).font(.subheadline.weight(.semibold))
+            Spacer(minLength: 4)
+            GlassEffectContainer(spacing: 6) {
+                HStack(spacing: 6) {
+                    Button { step(-1) } label: {
+                        Image(systemName: "minus").font(.body.weight(.bold)).frame(width: 26, height: 26)
+                    }
+                    .buttonStyle(.glass)
+                    .buttonBorderShape(.circle)
+                    .disabled(index == 0)
+                    .accessibilityLabel("Меньше")
+
+                    Menu {
+                        ForEach(scale.reversed(), id: \.self) { option in
+                            Button(Points(hundredths: option).signed) { value = option }
+                        }
+                    } label: {
+                        Text(Points(hundredths: value).signed)
+                            .font(.headline)
+                            .monospacedDigit()
+                            .foregroundStyle(value == 0 ? AnyShapeStyle(.secondary) : AnyShapeStyle(tint))
+                            .contentTransition(.numericText(value: Double(value)))
+                            .frame(minWidth: 54, minHeight: 26)
+                    }
+                    .buttonStyle(.glass)
+                    .buttonBorderShape(.capsule)
+
+                    Button { step(1) } label: {
+                        Image(systemName: "plus").font(.body.weight(.bold)).frame(width: 26, height: 26)
+                    }
+                    .buttonStyle(.glass)
+                    .buttonBorderShape(.circle)
+                    .disabled(index == scale.count - 1)
+                    .accessibilityLabel("Больше")
+                }
             }
-            .contentShape(.rect)
         }
-        .buttonStyle(.plain)
-        .foregroundStyle(.tint)
+        .sensoryFeedback(.selection, trigger: value)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(title)
+        .accessibilityValue(Points(hundredths: value).signed)
+    }
+
+    private func step(_ direction: Int) {
+        let next = min(max(index + direction, 0), scale.count - 1)
+        withAnimation(.snappy) { value = scale[next] }
+    }
+}
+
+/// Действия в раскрытой карточке: записать ЛХ или протокол, отметить «на критике» и вскрытие шерифом.
+private struct ActionChips: View {
+    let score: PlayerGameScore
+    let editing: ScoreEditing
+
+    private var needsBestMove: Bool { editing.onBestMove != nil && score.component(where: \.isBestMove) == nil }
+    private var needsProtocol: Bool { editing.onProtocol != nil && score.component(where: \.isProtocol) == nil }
+
+    var body: some View {
+        GlassEffectContainer(spacing: 8) {
+            ChipFlow(spacing: 8) {
+                if needsBestMove, let onBestMove = editing.onBestMove {
+                    Button(action: onBestMove) {
+                        Label("Лучший ход", systemImage: "star.fill").font(.subheadline.weight(.semibold))
+                    }
+                    .buttonStyle(.glassProminent)
+                    .tint(.orange)
+                }
+                if needsProtocol, let onProtocol = editing.onProtocol {
+                    Button(action: onProtocol) {
+                        Label("Протокол", systemImage: "list.clipboard.fill").font(.subheadline.weight(.semibold))
+                    }
+                    .buttonStyle(.glass)
+                }
+                ToggleChip(title: "Вскрылся шерифом", icon: "checkmark.shield.fill", tint: .orange, isOn: editing.sheriffClaim)
+                if let critical = editing.isCriticalRemoval {
+                    ToggleChip(
+                        title: "На критике" + (editing.criticalPenalty.map { " \((-$0).signed)" } ?? ""),
+                        icon: "person.fill.xmark", tint: .red, isOn: critical
+                    )
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// Переключатель-чип: выключен — прозрачное стекло, включён — цветное с галочкой.
+private struct ToggleChip: View {
+    let title: String
+    let icon: String
+    let tint: Color
+    @Binding var isOn: Bool
+
+    var body: some View {
+        let label = Label(title, systemImage: isOn ? "checkmark.circle.fill" : icon)
+            .font(.subheadline.weight(.semibold))
+        Group {
+            if isOn {
+                Button { isOn = false } label: { label }.buttonStyle(.glassProminent).tint(tint)
+            } else {
+                Button { isOn = true } label: { label }.buttonStyle(.glass)
+            }
+        }
+        .sensoryFeedback(.impact(weight: .medium), trigger: isOn)
+        .accessibilityAddTraits(isOn ? .isSelected : [])
+    }
+}
+
+/// Чипы в строку с переносом — как теги.
+private struct ChipFlow: Layout {
+    var spacing: CGFloat = 8
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let width = proposal.width ?? .infinity
+        var x: CGFloat = 0
+        var y: CGFloat = 0
+        var rowHeight: CGFloat = 0
+        var widest: CGFloat = 0
+        for view in subviews {
+            let size = view.sizeThatFits(.unspecified)
+            if x > 0, x + size.width > width {
+                x = 0
+                y += rowHeight + spacing
+                rowHeight = 0
+            }
+            x += size.width + spacing
+            rowHeight = max(rowHeight, size.height)
+            widest = max(widest, x - spacing)
+        }
+        return CGSize(width: min(widest, width), height: y + rowHeight)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var x = bounds.minX
+        var y = bounds.minY
+        var rowHeight: CGFloat = 0
+        for view in subviews {
+            let size = view.sizeThatFits(.unspecified)
+            if x > bounds.minX, x + size.width > bounds.maxX {
+                x = bounds.minX
+                y += rowHeight + spacing
+                rowHeight = 0
+            }
+            view.place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(size))
+            x += size.width + spacing
+            rowHeight = max(rowHeight, size.height)
+        }
     }
 }
 
@@ -225,18 +415,57 @@ extension PlayerGameScore {
         }
     }
 
-    /// Техфолы, удаление, ППК, двойное деление — то, что считается по ходу игры.
-    var disciplineLines: [(title: String, points: Points)] {
+    /// Значки в свёрнутой карточке: что есть в баллах игрока.
+    var badges: [String] {
         components.compactMap { component in
             switch component.kind {
-            case let .techFouls(count): (count == 1 ? "Техфол" : "Техфолы ×\(count)", component.points)
-            case .removal: ("Удаление", component.points)
-            case .criticalRemoval: ("Удаление на критике", component.points)
-            case .forfeit: ("ППК", component.points)
-            case .doubleSplit: ("Двойное деление", component.points)
-            case .result, .bestMove, .adjustment, .colorProtocol: nil
+            case .bestMove: "star.fill"
+            case .colorProtocol: "list.clipboard.fill"
+            case .techFouls: "exclamationmark.triangle.fill"
+            case .removal, .criticalRemoval: "person.fill.xmark"
+            case .forfeit: "exclamationmark.octagon.fill"
+            case .result, .adjustment, .doubleSplit: nil
             }
         }
+    }
+
+    /// Строки расшифровки в порядке: результат, допбаллы, протокол, ЛХ, штрафы.
+    /// - Parameter includeExtras: показывать Доп+ и Доп− строками (в истории); у ведущего они в правке.
+    func lines(includeExtras: Bool, editing: ScoreEditing?) -> [ScoreLine] {
+        var lines = [ScoreLine(
+            id: "result", icon: result == .win ? "trophy.fill" : (result == .draw ? "equal" : "xmark"),
+            tint: result == .win ? .yellow : .gray, title: resultTitle, points: resultPoints
+        )]
+        if includeExtras {
+            if extraBonus != .zero { lines.append(ScoreLine(id: "bonus", icon: "plus", tint: .green, title: "Доп +", points: extraBonus)) }
+            if extraPenalty != .zero { lines.append(ScoreLine(id: "penalty", icon: "minus", tint: .red, title: "Доп −", points: extraPenalty)) }
+        }
+        for component in components {
+            switch component.kind {
+            case let .colorProtocol(firstKilled):
+                lines.append(ScoreLine(id: "protocol", icon: "list.clipboard.fill", tint: .blue,
+                                       title: firstKilled ? "Протокол ПУ" : "Протокол", points: component.points,
+                                       action: editing?.onProtocol))
+            case let .bestMove(guessed):
+                lines.append(ScoreLine(id: "bestMove", icon: "star.fill", tint: .orange, title: "Лучший ход",
+                                       detail: "угадано чёрных: \(guessed)", points: component.points,
+                                       action: editing?.onBestMove))
+            case let .techFouls(count):
+                lines.append(ScoreLine(id: "techFouls", icon: "exclamationmark.triangle.fill", tint: .red,
+                                       title: count == 1 ? "Техфол" : "Техфолы ×\(count)", points: component.points))
+            case .removal:
+                lines.append(ScoreLine(id: "removal", icon: "person.fill.xmark", tint: .red, title: "Удаление", points: component.points))
+            case .criticalRemoval:
+                lines.append(ScoreLine(id: "removal", icon: "person.fill.xmark", tint: .red, title: "Удаление на критике", points: component.points))
+            case .forfeit:
+                lines.append(ScoreLine(id: "forfeit", icon: "exclamationmark.octagon.fill", tint: .red, title: "ППК", points: component.points))
+            case .doubleSplit:
+                lines.append(ScoreLine(id: "doubleSplit", icon: "equal.circle.fill", tint: .orange, title: "Двойное деление", points: component.points))
+            case .result, .adjustment:
+                break
+            }
+        }
+        return lines
     }
 
     func component(where matches: (ScoreComponent.Kind) -> Bool) -> ScoreComponent? {

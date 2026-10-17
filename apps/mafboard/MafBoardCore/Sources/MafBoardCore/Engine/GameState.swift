@@ -60,6 +60,8 @@ public struct SeatState: Codable, Sendable, Equatable, Identifiable {
     public internal(set) var halvesNextSpeech = false
     /// Удалён «на критике» — штраф больше обычного (ФСМ 8.2.4).
     public internal(set) var isCriticalRemoval = false
+    /// Вскрылся шерифом (отметка судьи).
+    public internal(set) var claimedSheriff = false
 
     init(_ assignment: SeatAssignment) {
         seat = assignment.seat
@@ -81,7 +83,7 @@ public struct SeatState: Codable, Sendable, Equatable, Identifiable {
 extension SeatState {
     private enum CodingKeys: String, CodingKey {
         case seat, playerID, role, elimination, fouls, techFouls, techFoulKinds, warnings,
-             missesNextSpeech, halvesNextSpeech, isCriticalRemoval
+             missesNextSpeech, halvesNextSpeech, isCriticalRemoval, claimedSheriff
     }
 
     /// Записи до видов техфолов хранили только их число — все такие техфолы обычные.
@@ -101,6 +103,7 @@ extension SeatState {
         missesNextSpeech = try container.decode(Bool.self, forKey: .missesNextSpeech)
         halvesNextSpeech = try container.decodeIfPresent(Bool.self, forKey: .halvesNextSpeech) ?? false
         isCriticalRemoval = try container.decodeIfPresent(Bool.self, forKey: .isCriticalRemoval) ?? false
+        claimedSheriff = try container.decodeIfPresent(Bool.self, forKey: .claimedSheriff) ?? false
     }
 
     public func encode(to encoder: any Encoder) throws {
@@ -117,6 +120,7 @@ extension SeatState {
         try container.encode(missesNextSpeech, forKey: .missesNextSpeech)
         try container.encode(halvesNextSpeech, forKey: .halvesNextSpeech)
         try container.encode(isCriticalRemoval, forKey: .isCriticalRemoval)
+        try container.encode(claimedSheriff, forKey: .claimedSheriff)
     }
 }
 

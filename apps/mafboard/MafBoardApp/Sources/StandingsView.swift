@@ -86,6 +86,7 @@ struct StandingsView: View {
                     }
                 }
             }
+            .tabBarClearance()
             .ambientBackground()
             .overlay {
                 if standings.isEmpty {

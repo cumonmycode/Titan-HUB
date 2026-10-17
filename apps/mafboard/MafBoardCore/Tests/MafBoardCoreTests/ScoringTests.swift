@@ -62,6 +62,16 @@ struct ScoringTests {
         #expect(session.state.seat(9)?.isCriticalRemoval == false)
     }
 
+    @Test("Отметка «вскрылся шерифом» ставится и после игры и не меняет баллы")
+    func sheriffClaimMark() throws {
+        var session = try Fixture.session()
+        try session.run(.declareOutcome(.red, note: nil), .markSheriffClaim(5, true), .markSheriffClaim(4, true), .markSheriffClaim(4, false))
+        let record = try GameRecord(session: session)
+        #expect(record.seat(5)?.claimedSheriff == true)
+        #expect(record.seat(4)?.claimedSheriff == false)
+        #expect(try scoresBySeat(session)[5]?.total == 1)
+    }
+
     @Test("Городская мафия считается по прежним баллам, без штрафа за деление")
     func cityKeepsStandardScoring() throws {
         let session = try Fixture.session(ruleset: .city, roles: Fixture.cityRoles)

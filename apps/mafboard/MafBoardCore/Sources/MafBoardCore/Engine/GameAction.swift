@@ -28,6 +28,8 @@ public enum GameAction: Codable, Sendable, Equatable {
     case eliminateByHost(Seat, note: String?)
     /// Удаление было «на критике» — штраф −1 вместо −0.6 (ФСМ 8.2.4). Можно отметить и после игры.
     case markCriticalRemoval(Seat, Bool)
+    /// Отметка «вскрылся шерифом» — для судьи: баллы за вскрытие он ставит сам через допбаллы.
+    case markSheriffClaim(Seat, Bool)
     /// ППК: нарушение игрока — поражение его команде и штраф −1.5 (ФСМ 6.9, 8.2.5).
     case forfeit(Seat, note: String?)
 

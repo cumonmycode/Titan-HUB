@@ -174,6 +174,7 @@ private extension GameAction {
         case let .disqualify(seat, _): "удаление №\(seat)"
         case let .eliminateByHost(seat, _): "выбывание №\(seat)"
         case let .markCriticalRemoval(seat, _): "«на критике» №\(seat)"
+        case let .markSheriffClaim(seat, _): "вскрытие №\(seat)"
         case .forfeit: "ППК"
         case .recordBestMove, .recordBestMoveBy: "лучший ход"
         case let .recordProtocol(proto): "протокол №\(proto.author)"

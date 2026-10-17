@@ -309,10 +309,30 @@ final class GameLibrary {
 
     // MARK: Законченные игры
 
+    /// Правка итогов сыгранной игры: каждое изменение пересохраняет её в истории и отправляет на сервер.
+    func editor(for game: FinishedGame) -> GameController? {
+        let session: GameSession
+        do throws(GameError) {
+            session = try GameSession(record: game.record)
+        } catch {
+            errorMessage = "Игру не открыть для правки: \(error.message)"
+            return nil
+        }
+        let controller = GameController(session: session, players: game.players)
+        controller.onFinish = { [weak self] record, players in self?.archive(record, players: players) }
+        return controller
+    }
+
     /// Игра закончилась: в историю (сразу видна в своём вечере) и на сервер.
+    /// Правка уже сохранённой игры оставляет её на прежнем месте и не трогает вечер.
     private func archive(_ record: GameRecord, players: [PlayerProfile]) {
         let game = FinishedGame(record: record, players: players, isUploaded: false)
-        history.removeAll { $0.id == record.id }
+        if let index = history.firstIndex(where: { $0.id == record.id }) {
+            history[index] = game
+            saveHistory()
+            onActiveChanged?()
+            return
+        }
         history.insert(game, at: 0)
         if let id = record.seriesID {
             ensureEvening(id, for: record)

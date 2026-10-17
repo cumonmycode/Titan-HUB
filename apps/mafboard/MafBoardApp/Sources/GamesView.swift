@@ -36,6 +36,7 @@ struct GamesView: View {
                 .padding(.horizontal)
                 .padding(.bottom, 24)
             }
+            .tabBarClearance()
             .ambientBackground()
             .navigationTitle("Игры")
             .profileButton()
@@ -438,6 +439,7 @@ struct EveningDetailView: View {
             .padding(.horizontal)
             .padding(.bottom, 24)
         }
+        .tabBarClearance()
         .ambientBackground()
         .navigationTitle(evening.title)
         .navigationBarTitleDisplayMode(.inline)
@@ -478,9 +480,18 @@ private struct StandingLine: View {
 
 /// Законченная игра: крупный итог, подробности и игроки с ролями и баллами.
 struct FinishedGameView: View {
-    let game: FinishedGame
+    let initial: FinishedGame
     let number: Int
+    @Environment(GameLibrary.self) private var library
+    @State private var editor: GameController?
 
+    init(game: FinishedGame, number: Int) {
+        initial = game
+        self.number = number
+    }
+
+    /// Свежая версия из истории: после правки итогов экран сразу показывает новые баллы.
+    private var game: FinishedGame { library.history.first { $0.id == initial.id } ?? initial }
     private var record: GameRecord { game.record }
 
     private var reason: String { record.outcome.reason.text }
@@ -535,6 +546,7 @@ struct FinishedGameView: View {
 
                 NavigationLink {
                     GameLogView(events: record.events) { game.profile(at: $0)?.nickname ?? "Игрок \($0)" }
+                        .tabBarClearance()
                 } label: {
                     HStack {
                         Label("Ход игры", systemImage: "list.bullet.rectangle.portrait").font(.headline)
@@ -548,15 +560,25 @@ struct FinishedGameView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Игроки и баллы").font(.title3.bold()).padding(.horizontal, 4)
                     ForEach(GameScorer.score(record)) { score in
-                        PlayerScoreCard(score: score, player: game.profile(at: score.seat), status: record.scoreStatus(of: score.seat))
+                        PlayerScoreCard(
+                            score: score, player: game.profile(at: score.seat), status: record.scoreStatus(of: score.seat),
+                            isSheriffClaim: record.seat(score.seat)?.claimedSheriff ?? false
+                        )
                     }
                 }
             }
             .padding(.horizontal)
             .padding(.bottom, 24)
         }
+        .tabBarClearance()
         .ambientBackground()
         .navigationTitle("Игра \(number)")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button("Изменить итоги", systemImage: "square.and.pencil") { editor = library.editor(for: game) }
+            }
+        }
+        .sheet(item: $editor) { ResultsEditorSheet(game: $0) }
     }
 }

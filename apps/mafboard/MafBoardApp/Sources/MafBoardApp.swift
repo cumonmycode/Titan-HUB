@@ -115,7 +115,8 @@ struct MainTabView: View {
             screen(.games) { GamesView(onNewGame: { newGame = NewGameRequest(evening: $0) }) }
             screen(.standings) { StandingsView() }
         }
-        .safeAreaInset(edge: .bottom, spacing: 0) {
+        // Панель поверх экранов; место под неё каждый список оставляет сам (`tabBarClearance`).
+        .overlay(alignment: .bottom) {
             BottomBar(selection: $tab) { newGame = NewGameRequest() }
         }
         .sheet(item: $newGame, onDismiss: library.presentPending) { NewGameFlow(evening: $0.evening) }
@@ -147,6 +148,16 @@ struct MainTabView: View {
             .opacity(tab == which ? 1 : 0)
             .allowsHitTesting(tab == which)
             .accessibilityHidden(tab != which)
+    }
+}
+
+extension View {
+    /// Место под нижней панелью вкладок: конец списка не прячется под ней.
+    /// Ставится прямо на `ScrollView`/`List` экрана — отступ снаружи `NavigationStack` до списка не доходит.
+    func tabBarClearance() -> some View {
+        safeAreaInset(edge: .bottom, spacing: 0) {
+            Color.clear.frame(height: 76).allowsHitTesting(false)
+        }
     }
 }
 
