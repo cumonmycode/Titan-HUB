@@ -40,7 +40,7 @@ struct ResultsCard: View {
 
             if let onNextGame {
                 Button(action: onNextGame) {
-                    Label("Следующая игра", systemImage: "plus").font(.headline).frame(maxWidth: .infinity)
+                    Label("Ещё одна игра", systemImage: "plus").font(.headline).frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.glassProminent)
                 .controlSize(.extraLarge)

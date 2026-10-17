@@ -279,7 +279,7 @@ private extension GameAction {
 
 struct GameScreen: View {
     @Bindable var game: GameController
-    /// «Следующая игра» вечера с экрана итогов. `nil` — вечер уже закрыт.
+    /// «Ещё одна игра» серии с экрана итогов. `nil` — серия уже закрыта.
     var onNextGame: (() -> Void)?
     @Environment(\.dismiss) private var dismiss
     @State private var isShowingLog = false

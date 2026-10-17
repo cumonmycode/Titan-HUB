@@ -1,8 +1,8 @@
 import SwiftUI
 import MafBoardCore
 
-/// Вкладка «Игры»: папки по типу игры, режиму и дате. Сверху активные (в них идёт игра или вечер продолжается),
-/// ниже завершённые — от новых к старым. Идущая игра живёт внутри своей папки.
+/// Вкладка «Игры»: серии по типу игры, режиму и дате. Сверху активные (в них идёт игра или серия продолжается),
+/// ниже завершённые — от новых к старым. Идущая игра живёт внутри своей серии.
 struct GamesView: View {
     @Environment(GameLibrary.self) private var library
     let onNewGame: (Evening?) -> Void
@@ -14,17 +14,17 @@ struct GamesView: View {
             .filter { $0.isOpen || $0.id == runningFolder }
             .sorted { $0.updatedAt > $1.updatedAt }
         let completed = library.closedEvenings.filter { $0.id != runningFolder }
-        // Игра без своей папки (сыграна до папок или папка не найдена) — отдельной карточкой.
+        // Игра без своей серии (сыграна до серий или серия не найдена) — отдельной строкой.
         let orphan = running.flatMap { game in active.contains { $0.id == runningFolder } ? nil : game }
 
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: 12) {
                     if !active.isEmpty || orphan != nil {
                         FolderSectionTitle("Активные")
                     }
                     if let orphan {
-                        RunningGameBlock(game: orphan).folderCard()
+                        RunningGameRow(game: orphan).folderCard(padding: 12)
                     }
                     ForEach(active) { evening in
                         FolderCard(
@@ -37,21 +37,20 @@ struct GamesView: View {
                         StartCard { onNewGame(nil) }
                     }
                     if !completed.isEmpty {
-                        FolderSectionTitle("Завершённые").padding(.top, 10)
-                        VStack(spacing: 10) {
-                            ForEach(completed) { evening in
+                        FolderSectionTitle("Завершённые").padding(.top, 12)
+                        VStack(spacing: 0) {
+                            ForEach(Array(completed.enumerated()), id: \.element.id) { index, evening in
                                 NavigationLink {
-                                    EveningDetailView(evening: evening, onAnotherGame: running == nil ? { anotherGame(in: evening) } : nil)
+                                    EveningDetailView(evening: evening)
                                 } label: {
                                     CompletedFolderRow(evening: evening)
                                 }
                                 .buttonStyle(.plain)
-                                .contextMenu {
-                                    Button("Ещё одна игра", systemImage: "plus") { anotherGame(in: evening) }
-                                        .disabled(running != nil)
-                                }
+                                if index < completed.count - 1 { Divider().padding(.leading, 56) }
                             }
                         }
+                        .padding(.vertical, 4)
+                        .glassEffect(.regular, in: .rect(cornerRadius: 22, style: .continuous))
                     }
                 }
                 .padding(.horizontal)
@@ -63,12 +62,6 @@ struct GamesView: View {
             .profileButton()
         }
     }
-
-    /// Ещё одна игра в завершённой серии — серия снова активна, состав последней игры уже на местах.
-    private func anotherGame(in evening: Evening) {
-        guard let reopened = library.reopenEvening(evening.id) else { return }
-        withAnimation(.smooth) { onNewGame(reopened) }
-    }
 }
 
 private struct FolderSectionTitle: View {
@@ -77,7 +70,7 @@ private struct FolderSectionTitle: View {
     init(_ text: String) { self.text = text }
 
     var body: some View {
-        Text(text).font(.title2.bold()).padding(.horizontal, 4)
+        Text(text).font(.title3.bold()).padding(.horizontal, 4)
     }
 }
 
@@ -100,17 +93,17 @@ extension GameVariant {
 
 extension View {
     /// Карточка папки на главном экране — стекло.
-    func folderCard(padding: CGFloat = 16) -> some View {
+    func folderCard(padding: CGFloat = 12) -> some View {
         self.padding(padding)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .glassEffect(.regular, in: .rect(cornerRadius: 26, style: .continuous))
+            .glassEffect(.regular, in: .rect(cornerRadius: 22, style: .continuous))
     }
 }
 
 /// Значок папки: цвет режима, внутри — значок типа игры.
 private struct FolderIcon: View {
     let evening: Evening
-    var size: CGFloat = 46
+    var size: CGFloat = 34
 
     var body: some View {
         ZStack {
@@ -189,8 +182,8 @@ private struct WinsBar: View {
 
 // MARK: - Идущая игра
 
-/// Идущая игра: шаг, время, места и «Продолжить». Внутри своей папки или отдельно.
-private struct RunningGameBlock: View {
+/// Идущая игра одной строкой: пульс, шаг и время, «Продолжить».
+private struct RunningGameRow: View {
     let game: SavedGame
     @Environment(GameLibrary.self) private var library
     @State private var isConfirmingDelete = false
@@ -198,78 +191,37 @@ private struct RunningGameBlock: View {
     var body: some View {
         let state = game.session.state
         let setup = game.session.setup
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Label("Идёт игра", systemImage: "circle.fill")
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(.tint)
-                    .symbolEffect(.pulse, options: .repeating)
-                    .textCase(.uppercase)
-                Spacer()
-                Menu {
-                    Button("Удалить игру", systemImage: "trash", role: .destructive) { isConfirmingDelete = true }
-                } label: {
-                    Image(systemName: "ellipsis").font(.subheadline.weight(.semibold)).frame(width: 28, height: 28)
-                }
-                .buttonStyle(.glass)
-                .buttonBorderShape(.circle)
-            }
-            VStack(alignment: .leading, spacing: 4) {
-                Text(state.currentStep.title(in: state)).font(.title3.bold())
+        HStack(spacing: 10) {
+            Circle()
+                .fill(.tint)
+                .frame(width: 8, height: 8)
+                .symbolEffect(.pulse, options: .repeating)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(state.currentStep.title(in: state)).font(.subheadline.weight(.semibold)).lineLimit(1)
                 TimelineView(.periodic(from: .now, by: 60)) { context in
-                    Text("\(state.moment.displayName) · идёт \(durationText(from: setup.createdAt, to: context.date))")
-                        .font(.subheadline)
+                    Text("\(state.moment.displayName) · \(state.aliveSeats.count) в игре · \(durationText(from: setup.createdAt, to: context.date))")
+                        .font(.caption)
                         .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 }
             }
-            SeatStrip(state: state)
+            Spacer(minLength: 4)
             Button {
                 library.resumeActive()
             } label: {
-                Label("Продолжить", systemImage: "play.fill").font(.headline).frame(maxWidth: .infinity)
+                Label("Продолжить", systemImage: "play.fill").font(.subheadline.weight(.semibold))
             }
             .buttonStyle(.glassProminent)
-            .controlSize(.large)
+        }
+        .contextMenu {
+            Button("Удалить игру", systemImage: "trash", role: .destructive) { isConfirmingDelete = true }
         }
         .confirmationDialog("Удалить игру?", isPresented: $isConfirmingDelete, titleVisibility: .visible) {
             Button("Удалить", role: .destructive) { library.discardActive() }
         } message: {
             Text("Игра не попадёт в историю.")
         }
-    }
-}
-
-/// Места за столом одной строкой: в игре — закрашены, выбывшие — пустые, говорящий — в акценте.
-private struct SeatStrip: View {
-    let state: GameState
-
-    var body: some View {
-        HStack(spacing: 4) {
-            ForEach(state.seats) { seat in
-                let isSpeaker = state.currentSpeaker == seat.seat
-                Text("\(seat.seat.number)")
-                    .font(.caption2.weight(.bold))
-                    .monospacedDigit()
-                    .foregroundStyle(seat.isAlive ? (isSpeaker ? Color.white : Color.primary) : Color.secondary)
-                    .frame(maxWidth: .infinity, minHeight: 24)
-                    .background {
-                        if isSpeaker {
-                            Circle().fill(.tint)
-                        } else if seat.isAlive {
-                            Circle().fill(Color.primary.opacity(0.1))
-                        } else {
-                            Circle().strokeBorder(Color.secondary.opacity(0.4), lineWidth: 1)
-                        }
-                    }
-                    .overlay {
-                        if !seat.isAlive {
-                            Rectangle().fill(Color.secondary.opacity(0.6)).frame(height: 1).rotationEffect(.degrees(-45))
-                        }
-                    }
-            }
-        }
-        .accessibilityElement()
-        .accessibilityLabel("В игре \(state.aliveSeats.count) из \(state.seats.count)")
     }
 }
 
@@ -302,12 +254,13 @@ private struct StartCard: View {
     }
 }
 
-// MARK: - Активная папка
+// MARK: - Активная серия
 
-/// Активная папка: тип, режим и дата, идущая игра, сыгранные игры, «Следующая игра» и «Итоги».
+/// Активная серия компактно: шапка (нажатие — открыть серию), идущая игра одной строкой,
+/// «Ещё одна игра», как только у прошлой игры есть итог.
 private struct FolderCard: View {
     let evening: Evening
-    /// Идущая игра этой папки.
+    /// Идущая игра этой серии.
     let running: SavedGame?
     let isGameRunning: Bool
     let onNext: () -> Void
@@ -316,81 +269,71 @@ private struct FolderCard: View {
 
     var body: some View {
         let games = library.games(of: evening)
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 12) {
-                FolderIcon(evening: evening)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("\(evening.variant.shortName) · \(evening.format.displayName)").font(.title3.bold()).lineLimit(1)
-                    Text("\(evening.createdAt.formatted(.dateTime.day().month(.wide))) · \(gamesPlayed(games.count))")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer(minLength: 4)
-                Menu {
-                    Button("Завершить серию", systemImage: "checkmark.circle") { isConfirmingClose = true }
-                } label: {
-                    Image(systemName: "ellipsis").font(.subheadline.weight(.semibold)).frame(width: 28, height: 28)
-                }
-                .buttonStyle(.glass)
-                .buttonBorderShape(.circle)
+        VStack(alignment: .leading, spacing: 10) {
+            NavigationLink {
+                EveningDetailView(evening: evening)
+            } label: {
+                FolderHeader(evening: evening, games: games)
             }
+            .buttonStyle(.plain)
 
             if let running {
-                RunningGameBlock(game: running)
-                    .padding(14)
-                    .background(Color.accentColor.opacity(0.08), in: .rect(cornerRadius: 20, style: .continuous))
-            }
-
-            if !games.isEmpty {
-                WinsBar(winners: games.map(\.record.outcome.winner))
-                VStack(spacing: 0) {
-                    ForEach(Array(games.enumerated()), id: \.element.id) { index, game in
-                        NavigationLink {
-                            FinishedGameView(game: game, number: index + 1)
-                        } label: {
-                            GameLine(game: game, number: index + 1)
-                        }
-                        .buttonStyle(.plain)
-                        if index < games.count - 1 { Divider().padding(.leading, 16) }
+                RunningGameRow(game: running)
+                    .padding(10)
+                    .background(Color.accentColor.opacity(0.08), in: .rect(cornerRadius: 16, style: .continuous))
+            } else if !isGameRunning {
+                HStack(spacing: 8) {
+                    Button(action: onNext) {
+                        Label(games.isEmpty ? "Первая игра" : "Ещё одна игра", systemImage: "plus")
+                            .font(.subheadline.weight(.semibold))
+                            .frame(maxWidth: .infinity)
                     }
-                }
-                .background(Color.primary.opacity(0.05), in: .rect(cornerRadius: 18, style: .continuous))
-            } else if running == nil {
-                Text("Игр пока нет — начните первую.").font(.subheadline).foregroundStyle(.secondary)
-            }
-
-            if !isGameRunning || !games.isEmpty {
-                GlassEffectContainer(spacing: 10) {
-                    HStack(spacing: 10) {
-                        if !isGameRunning {
-                            Button(action: onNext) {
-                                Label(games.isEmpty ? "Первая игра" : "Следующая игра", systemImage: "plus")
-                                    .font(.headline)
-                                    .frame(maxWidth: .infinity)
-                            }
-                            .buttonStyle(.glassProminent)
-                        }
-                        if !games.isEmpty {
-                            NavigationLink {
-                                EveningDetailView(evening: evening)
-                            } label: {
-                                Label("Итоги", systemImage: "list.number")
-                                    .font(.headline)
-                                    .frame(maxWidth: isGameRunning ? .infinity : nil)
-                            }
-                            .buttonStyle(.glass)
-                        }
+                    .buttonStyle(.glassProminent)
+                    Menu {
+                        Button("Завершить серию", systemImage: "checkmark.circle") { isConfirmingClose = true }
+                    } label: {
+                        Image(systemName: "ellipsis").font(.subheadline.weight(.semibold)).frame(width: 22, height: 22)
                     }
-                    .controlSize(.large)
+                    .buttonStyle(.glass)
+                    .buttonBorderShape(.circle)
+                    .accessibilityLabel("Ещё")
                 }
             }
         }
-        .folderCard(padding: 16)
+        .folderCard(padding: 12)
         .confirmationDialog("Завершить серию?", isPresented: $isConfirmingClose, titleVisibility: .visible) {
             Button("Завершить") { withAnimation(.smooth) { library.closeEvening(evening.id) } }
         } message: {
-            Text("Серия уйдёт вниз, в завершённые, вместе с играми и итогами. Добавить игру потом можно кнопкой «Ещё одна игра».")
+            Text("Серия уйдёт вниз, в завершённые, вместе с играми и итогами. Новая игра этого типа начнёт новую серию.")
         }
+    }
+}
+
+/// Шапка серии: значок, тип и режим, дата и число игр, полоса побед.
+private struct FolderHeader: View {
+    let evening: Evening
+    let games: [FinishedGame]
+    var showsYear = false
+
+    var body: some View {
+        HStack(spacing: 10) {
+            FolderIcon(evening: evening)
+            VStack(alignment: .leading, spacing: 3) {
+                Text("\(evening.variant.shortName) · \(evening.format.displayName)")
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
+                HStack(spacing: 8) {
+                    Text("\(evening.createdAt.formatted(showsYear ? .dateTime.day().month(.abbreviated).year() : .dateTime.day().month(.abbreviated))) · \(gamesPlayed(games.count))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                    MiniWinsBar(winners: games.map(\.record.outcome.winner))
+                }
+            }
+            Spacer(minLength: 4)
+            Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
+        }
+        .contentShape(.rect)
     }
 }
 
@@ -420,30 +363,17 @@ private struct GameLine: View {
     }
 }
 
-// MARK: - Завершённые папки
+// MARK: - Завершённые серии
 
-/// Завершённая папка: значок, тип и режим, дата, число игр и полоса побед.
+/// Завершённая серия — строка общего списка.
 private struct CompletedFolderRow: View {
     let evening: Evening
     @Environment(GameLibrary.self) private var library
 
     var body: some View {
-        let games = library.games(of: evening)
-        HStack(spacing: 12) {
-            FolderIcon(evening: evening, size: 40)
-            VStack(alignment: .leading, spacing: 5) {
-                Text("\(evening.variant.shortName) · \(evening.format.displayName)").font(.headline).lineLimit(1)
-                Text("\(evening.createdAt.formatted(.dateTime.day().month(.wide).year())) · \(gamesPlayed(games.count))")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                MiniWinsBar(winners: games.map(\.record.outcome.winner))
-            }
-            Spacer(minLength: 4)
-            Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
-        }
-        .folderCard(padding: 12)
-        .contentShape(.rect)
+        FolderHeader(evening: evening, games: library.games(of: evening), showsYear: true)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 9)
     }
 }
 
@@ -453,7 +383,7 @@ private struct MiniWinsBar: View {
     var body: some View {
         HStack(spacing: 2) {
             ForEach(Array(winners.enumerated()), id: \.offset) { _, winner in
-                Capsule().fill(winner.dot).frame(width: 14, height: 4)
+                Capsule().fill(winner.dot).frame(width: 10, height: 4)
             }
         }
     }
@@ -464,10 +394,7 @@ private struct MiniWinsBar: View {
 /// Вечер: подиум итогов и все его игры.
 struct EveningDetailView: View {
     let evening: Evening
-    /// «Ещё одна игра» — для завершённой серии. `nil` — кнопки нет (серия активна или идёт игра).
-    var onAnotherGame: (() -> Void)?
     @Environment(GameLibrary.self) private var library
-    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         let games = library.games(of: evening)
@@ -488,16 +415,6 @@ struct EveningDetailView: View {
                          : "Фанка в рейтинги не идёт — это сумма баллов за серию. Нажмите на игрока — подробности.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
-                    if let onAnotherGame {
-                        Button {
-                            dismiss()
-                            onAnotherGame()
-                        } label: {
-                            Label("Ещё одна игра", systemImage: "plus").font(.headline).frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(.glassProminent)
-                        .controlSize(.large)
-                    }
                 }
                 .contentCard(padding: 18)
 

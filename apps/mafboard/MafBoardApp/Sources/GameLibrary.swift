@@ -444,15 +444,6 @@ final class GameLibrary {
         return evening
     }
 
-    /// «Ещё одна игра» в завершённой серии: серия снова активна, игра пойдёт в неё же.
-    func reopenEvening(_ id: SeriesID) -> Evening? {
-        guard let index = evenings.firstIndex(where: { $0.id == id }) else { return nil }
-        evenings[index].closedAt = nil
-        evenings[index].updatedAt = .now
-        saveEvenings()
-        return evenings[index]
-    }
-
     func closeEvening(_ id: SeriesID) {
         guard let index = evenings.firstIndex(where: { $0.id == id }) else { return }
         evenings[index].closedAt = .now
