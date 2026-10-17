@@ -165,7 +165,8 @@ private extension GameAction {
 struct GameScreen: View {
     @Bindable var game: GameController
     @Environment(\.dismiss) private var dismiss
-    @State private var expanded: Seat?
+    /// Раскрытые карточки: говорящий раскрыт всегда, остальные — по касанию, независимо друг от друга.
+    @State private var expanded: Set<Seat> = []
     @State private var isPickingBestMove = false
 
     private var state: GameState { game.state }
@@ -179,8 +180,10 @@ struct GameScreen: View {
                     if !state.isFinished {
                         VStack(spacing: 8) {
                             ForEach(state.seats) { seat in
-                                PlayerCard(game: game, seat: seat, isExpanded: expanded == seat.seat) {
-                                    withAnimation(.snappy) { expanded = expanded == seat.seat ? nil : seat.seat }
+                                PlayerCard(game: game, seat: seat, isExpanded: expanded.contains(seat.seat)) {
+                                    withAnimation(.snappy) {
+                                        if expanded.contains(seat.seat) { expanded.remove(seat.seat) } else { expanded.insert(seat.seat) }
+                                    }
                                 }
                             }
                         }
@@ -194,8 +197,11 @@ struct GameScreen: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { toolbar }
             .safeAreaInset(edge: .bottom) { StepBar(game: game) { dismiss() } }
-            .onChange(of: state.currentSpeaker, initial: true) { _, speaker in
-                withAnimation(.snappy) { expanded = speaker }
+            .onChange(of: state.currentSpeaker, initial: true) { previous, speaker in
+                withAnimation(.snappy) {
+                    if let previous, previous != speaker { expanded.remove(previous) }
+                    if let speaker { expanded.insert(speaker) }
+                }
             }
             .sheet(isPresented: $isPickingBestMove) { BestMoveSheet(game: game) }
             .alert("Ошибка", isPresented: Binding(get: { game.errorMessage != nil }, set: { if !$0 { game.errorMessage = nil } })) {

@@ -111,13 +111,13 @@ struct PlayerCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Button {
-                if let nightAction { game.perform(nightAction) } else { onToggle() }
-            } label: {
-                header
-            }
-            .buttonStyle(.plain)
-            .disabled(!seat.isAlive)
+            // Касание, а не кнопка: отпускание пальца после свайпа не раскрывает и не сворачивает карточку.
+            header
+                .onTapGesture {
+                    guard seat.isAlive else { return }
+                    if let nightAction { game.perform(nightAction) } else { onToggle() }
+                }
+                .accessibilityAddTraits(.isButton)
 
             if isExpanded, seat.isAlive, nightAction == nil {
                 if isSpeaker, game.countdown != nil {
@@ -137,7 +137,7 @@ struct PlayerCard: View {
             }
         }
         .opacity(seat.isAlive ? 1 : 0.5)
-        .modifier(PenaltySwipe(game: game, seat: seat) { isConfirmingRemoval = true })
+        .modifier(PenaltySwipe(game: game, seat: seat, isEnabled: seat.isAlive && !isSpeaker) { isConfirmingRemoval = true })
         .confirmationDialog(
             "Удалить №\(seat.seat) \(game.name(of: seat.seat))?",
             isPresented: $isConfirmingRemoval,
@@ -209,10 +209,12 @@ private struct PenaltyDots: View {
 // MARK: - Свайпы
 
 /// Свайпы по карточке ступенями, как в «Почте»:
-/// влево — фол, техфол, удаление; вправо — снять фол, снять техфол, удаление. Удаление — с подтверждением.
+/// вправо — фол, техфол, удаление; влево — снять фол, снять техфол, удаление. Удаление — с подтверждением.
+/// У говорящего свайп отключён — его карточка раскрыта и управляется кнопками.
 private struct PenaltySwipe: ViewModifier {
     let game: GameController
     let seat: SeatState
+    let isEnabled: Bool
     let onRemove: () -> Void
     @State private var offset: CGFloat = 0
     @State private var axis: Axis?
@@ -226,13 +228,13 @@ private struct PenaltySwipe: ViewModifier {
         case cancel
     }
 
-    private var direction: Direction { offset < 0 ? .add : .cancel }
+    private var direction: Direction { offset > 0 ? .add : .cancel }
 
     func body(content: Content) -> some View {
         content
             .offset(x: offset)
             .background { backdrop }
-            .simultaneousGesture(drag, including: seat.isAlive ? .all : .subviews)
+            .simultaneousGesture(drag, including: isEnabled ? .all : .subviews)
             .sensoryFeedback(.selection, trigger: tier)
     }
 
@@ -289,7 +291,7 @@ private struct PenaltySwipe: ViewModifier {
             let current = action
             RoundedRectangle(cornerRadius: 20, style: .continuous)
                 .fill(tier == 0 ? Color(.systemGray4) : current.color)
-                .overlay(alignment: direction == .add ? .trailing : .leading) {
+                .overlay(alignment: direction == .add ? .leading : .trailing) {
                     Label(current.title, systemImage: current.icon)
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(.white)
@@ -413,7 +415,7 @@ private struct PenaltyRow: View {
                     .buttonBorderShape(.circle)
                     .tint(.red)
             }
-            Text("Свайп влево — фол, техфол, удаление. Вправо — снять.")
+            Text("Свайп вправо — фол, техфол, удаление. Влево — снять.")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
         }
