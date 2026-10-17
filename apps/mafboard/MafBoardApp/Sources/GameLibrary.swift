@@ -82,8 +82,9 @@ struct Evening: Codable, Identifiable, Equatable {
 
     var isOpen: Bool { closedAt == nil && Date.now.timeIntervalSince(updatedAt) < Self.idleLimit }
 
+    /// «Спорт · Фанка · 17 октября» — папка на главном экране.
     var title: String {
-        "\(format.displayName) · \(createdAt.formatted(.dateTime.day().month(.wide)))"
+        "\(variant.shortName) · \(format.displayName) · \(createdAt.formatted(.dateTime.day().month(.wide)))"
     }
 }
 

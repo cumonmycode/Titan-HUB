@@ -1,32 +1,49 @@
 import SwiftUI
 import MafBoardCore
 
-/// Вкладка «Игры»: идущая игра, открытые вечера и история.
+/// Вкладка «Игры»: папки по типу игры, режиму и дате. Сверху активные (в них идёт игра или вечер продолжается),
+/// ниже завершённые — от новых к старым. Идущая игра живёт внутри своей папки.
 struct GamesView: View {
     @Environment(GameLibrary.self) private var library
     let onNewGame: (Evening?) -> Void
 
     var body: some View {
+        let running = library.active
+        let runningFolder = running?.session.setup.seriesID
+        let active = library.evenings
+            .filter { $0.isOpen || $0.id == runningFolder }
+            .sorted { $0.updatedAt > $1.updatedAt }
+        let completed = library.closedEvenings.filter { $0.id != runningFolder }
+        // Игра без своей папки (сыграна до папок или папка не найдена) — отдельной карточкой.
+        let orphan = running.flatMap { game in active.contains { $0.id == runningFolder } ? nil : game }
+
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
-                    if let active = library.active {
-                        ActiveGameCard(game: active)
+                VStack(alignment: .leading, spacing: 14) {
+                    if !active.isEmpty || orphan != nil {
+                        FolderSectionTitle("Активные")
                     }
-                    ForEach(library.openEvenings) { evening in
-                        EveningCard(evening: evening, isGameRunning: library.active != nil) { onNewGame(evening) }
+                    if let orphan {
+                        RunningGameBlock(game: orphan).folderCard()
                     }
-                    if library.active == nil, library.openEvenings.isEmpty {
+                    ForEach(active) { evening in
+                        FolderCard(
+                            evening: evening,
+                            running: running?.session.setup.seriesID == evening.id ? running : nil,
+                            isGameRunning: running != nil
+                        ) { onNewGame(evening) }
+                    }
+                    if active.isEmpty, orphan == nil {
                         StartCard { onNewGame(nil) }
                     }
-                    if !library.closedEvenings.isEmpty {
-                        Text("История").font(.title2.bold()).padding(.top, 8)
+                    if !completed.isEmpty {
+                        FolderSectionTitle("Завершённые").padding(.top, 10)
                         VStack(spacing: 10) {
-                            ForEach(library.closedEvenings) { evening in
+                            ForEach(completed) { evening in
                                 NavigationLink {
                                     EveningDetailView(evening: evening)
                                 } label: {
-                                    HistoryEveningCard(evening: evening)
+                                    CompletedFolderRow(evening: evening)
                                 }
                                 .buttonStyle(.plain)
                             }
@@ -41,6 +58,62 @@ struct GamesView: View {
             .navigationTitle("Игры")
             .profileButton()
         }
+    }
+}
+
+private struct FolderSectionTitle: View {
+    let text: String
+
+    init(_ text: String) { self.text = text }
+
+    var body: some View {
+        Text(text).font(.title2.bold()).padding(.horizontal, 4)
+    }
+}
+
+extension GameVariant {
+    /// «Спорт», «Город» — в названиях папок.
+    var shortName: String {
+        switch self {
+        case .sport: "Спорт"
+        case .city: "Город"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .sport: "person.3.sequence.fill"
+        case .city: "building.2.fill"
+        }
+    }
+}
+
+extension View {
+    /// Карточка папки на главном экране — стекло.
+    func folderCard(padding: CGFloat = 16) -> some View {
+        self.padding(padding)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .glassEffect(.regular, in: .rect(cornerRadius: 26, style: .continuous))
+    }
+}
+
+/// Значок папки: цвет режима, внутри — значок типа игры.
+private struct FolderIcon: View {
+    let evening: Evening
+    var size: CGFloat = 46
+
+    var body: some View {
+        ZStack {
+            Image(systemName: "folder.fill")
+                .font(.system(size: size))
+                .foregroundStyle(evening.format.tint.gradient)
+            Image(systemName: evening.variant.icon)
+                .font(.system(size: size * 0.3, weight: .semibold))
+                .foregroundStyle(.white)
+                .offset(y: size * 0.06)
+        }
+        .frame(width: size + 6, height: size)
+        .accessibilityHidden(true)
     }
 }
 
@@ -106,7 +179,8 @@ private struct WinsBar: View {
 
 // MARK: - Идущая игра
 
-private struct ActiveGameCard: View {
+/// Идущая игра: шаг, время, места и «Продолжить». Внутри своей папки или отдельно.
+private struct RunningGameBlock: View {
     let game: SavedGame
     @Environment(GameLibrary.self) private var library
     @State private var isConfirmingDelete = false
@@ -114,7 +188,7 @@ private struct ActiveGameCard: View {
     var body: some View {
         let state = game.session.state
         let setup = game.session.setup
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Label("Идёт игра", systemImage: "circle.fill")
                     .font(.caption.weight(.bold))
@@ -122,17 +196,18 @@ private struct ActiveGameCard: View {
                     .symbolEffect(.pulse, options: .repeating)
                     .textCase(.uppercase)
                 Spacer()
-                FormatTag(format: setup.format)
                 Menu {
                     Button("Удалить игру", systemImage: "trash", role: .destructive) { isConfirmingDelete = true }
                 } label: {
-                    Image(systemName: "ellipsis.circle").font(.title3).foregroundStyle(.secondary)
+                    Image(systemName: "ellipsis").font(.subheadline.weight(.semibold)).frame(width: 28, height: 28)
                 }
+                .buttonStyle(.glass)
+                .buttonBorderShape(.circle)
             }
             VStack(alignment: .leading, spacing: 4) {
-                Text(state.currentStep.title(in: state)).font(.title2.bold())
+                Text(state.currentStep.title(in: state)).font(.title3.bold())
                 TimelineView(.periodic(from: .now, by: 60)) { context in
-                    Text("\(setup.variant.displayName) · \(state.moment.displayName) · идёт \(durationText(from: setup.createdAt, to: context.date))")
+                    Text("\(state.moment.displayName) · идёт \(durationText(from: setup.createdAt, to: context.date))")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
@@ -141,12 +216,11 @@ private struct ActiveGameCard: View {
             Button {
                 library.resumeActive()
             } label: {
-                Label("Продолжить", systemImage: "play.fill").frame(maxWidth: .infinity)
+                Label("Продолжить", systemImage: "play.fill").font(.headline).frame(maxWidth: .infinity)
             }
             .buttonStyle(.glassProminent)
             .controlSize(.large)
         }
-        .contentCard(padding: 18)
         .confirmationDialog("Удалить игру?", isPresented: $isConfirmingDelete, titleVisibility: .visible) {
             Button("Удалить", role: .destructive) { library.discardActive() }
         } message: {
@@ -201,8 +275,8 @@ private struct StartCard: View {
                 .foregroundStyle(.tint)
                 .padding(.top, 8)
             VStack(spacing: 6) {
-                Text("Начните вечер").font(.title2.bold())
-                Text("Выберите игру и режим, посадите игроков — приложение раздаст роли и проведёт игру.")
+                Text("Создайте первую папку").font(.title2.bold())
+                Text("Выберите игру и режим — игры одного типа и дня соберутся в одну папку.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -214,15 +288,17 @@ private struct StartCard: View {
             .controlSize(.large)
         }
         .frame(maxWidth: .infinity)
-        .contentCard(padding: 20)
+        .folderCard(padding: 20)
     }
 }
 
-// MARK: - Вечер
+// MARK: - Активная папка
 
-/// Открытый вечер: побед по командам, игры, «Следующая игра» и итоги.
-private struct EveningCard: View {
+/// Активная папка: тип, режим и дата, идущая игра, сыгранные игры, «Следующая игра» и «Итоги».
+private struct FolderCard: View {
     let evening: Evening
+    /// Идущая игра этой папки.
+    let running: SavedGame?
     let isGameRunning: Bool
     let onNext: () -> Void
     @Environment(GameLibrary.self) private var library
@@ -231,20 +307,28 @@ private struct EveningCard: View {
     var body: some View {
         let games = library.games(of: evening)
         VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .firstTextBaseline) {
+            HStack(spacing: 12) {
+                FolderIcon(evening: evening)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(evening.title).font(.title3.bold())
-                    Text("\(evening.variant.displayName) · \(gamesPlayed(games.count))")
+                    Text("\(evening.variant.shortName) · \(evening.format.displayName)").font(.title3.bold()).lineLimit(1)
+                    Text("\(evening.createdAt.formatted(.dateTime.day().month(.wide))) · \(gamesPlayed(games.count))")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
-                Spacer()
-                FormatTag(format: evening.format)
+                Spacer(minLength: 4)
                 Menu {
-                    Button("Завершить вечер", systemImage: "checkmark.circle") { isConfirmingClose = true }
+                    Button("Завершить папку", systemImage: "checkmark.circle") { isConfirmingClose = true }
                 } label: {
-                    Image(systemName: "ellipsis.circle").font(.title3).foregroundStyle(.secondary)
+                    Image(systemName: "ellipsis").font(.subheadline.weight(.semibold)).frame(width: 28, height: 28)
                 }
+                .buttonStyle(.glass)
+                .buttonBorderShape(.circle)
+            }
+
+            if let running {
+                RunningGameBlock(game: running)
+                    .padding(14)
+                    .background(Color.accentColor.opacity(0.08), in: .rect(cornerRadius: 20, style: .continuous))
             }
 
             if !games.isEmpty {
@@ -260,35 +344,42 @@ private struct EveningCard: View {
                         if index < games.count - 1 { Divider().padding(.leading, 16) }
                     }
                 }
-                .background(Color.primary.opacity(0.05), in: .rect(cornerRadius: 16, style: .continuous))
-            } else {
+                .background(Color.primary.opacity(0.05), in: .rect(cornerRadius: 18, style: .continuous))
+            } else if running == nil {
                 Text("Игр пока нет — начните первую.").font(.subheadline).foregroundStyle(.secondary)
             }
 
-            HStack(spacing: 10) {
-                if !isGameRunning {
-                    Button(action: onNext) {
-                        Label(games.isEmpty ? "Первая игра" : "Следующая игра", systemImage: "plus")
-                            .frame(maxWidth: .infinity)
+            if !isGameRunning || !games.isEmpty {
+                GlassEffectContainer(spacing: 10) {
+                    HStack(spacing: 10) {
+                        if !isGameRunning {
+                            Button(action: onNext) {
+                                Label(games.isEmpty ? "Первая игра" : "Следующая игра", systemImage: "plus")
+                                    .font(.headline)
+                                    .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.glassProminent)
+                        }
+                        if !games.isEmpty {
+                            NavigationLink {
+                                EveningDetailView(evening: evening)
+                            } label: {
+                                Label("Итоги", systemImage: "list.number")
+                                    .font(.headline)
+                                    .frame(maxWidth: isGameRunning ? .infinity : nil)
+                            }
+                            .buttonStyle(.glass)
+                        }
                     }
-                    .buttonStyle(.glassProminent)
-                }
-                if !games.isEmpty {
-                    NavigationLink {
-                        EveningDetailView(evening: evening)
-                    } label: {
-                        Label("Итоги", systemImage: "list.number").frame(maxWidth: isGameRunning ? .infinity : nil)
-                    }
-                    .buttonStyle(.glass)
+                    .controlSize(.large)
                 }
             }
-            .controlSize(.large)
         }
-        .contentCard(padding: 18)
-        .confirmationDialog("Завершить вечер?", isPresented: $isConfirmingClose, titleVisibility: .visible) {
-            Button("Завершить") { library.closeEvening(evening.id) }
+        .folderCard(padding: 16)
+        .confirmationDialog("Завершить папку?", isPresented: $isConfirmingClose, titleVisibility: .visible) {
+            Button("Завершить") { withAnimation(.smooth) { library.closeEvening(evening.id) } }
         } message: {
-            Text("Вечер уйдёт в историю вместе с итогами.")
+            Text("Папка уйдёт вниз, в завершённые, вместе с играми и итогами. Новая игра этого типа откроет новую папку.")
         }
     }
 }
@@ -319,47 +410,29 @@ private struct GameLine: View {
     }
 }
 
-// MARK: - История
+// MARK: - Завершённые папки
 
-/// Прошлый вечер: листок календаря, режим, число игр и полоса побед.
-private struct HistoryEveningCard: View {
+/// Завершённая папка: значок, тип и режим, дата, число игр и полоса побед.
+private struct CompletedFolderRow: View {
     let evening: Evening
     @Environment(GameLibrary.self) private var library
 
     var body: some View {
         let games = library.games(of: evening)
-        HStack(spacing: 14) {
-            VStack(spacing: 0) {
-                Text(evening.createdAt.formatted(.dateTime.month(.abbreviated)))
-                    .font(.caption2.weight(.bold))
-                    .textCase(.uppercase)
-                    .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 2)
-                    .background(evening.format.tint)
-                Text(evening.createdAt.formatted(.dateTime.day()))
-                    .font(.title2.bold())
-                    .monospacedDigit()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
-            .frame(width: 52, height: 56)
-            .background(Color.primary.opacity(0.06))
-            .clipShape(.rect(cornerRadius: 12, style: .continuous))
-
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 6) {
-                    Text(evening.format.displayName).font(.headline)
-                    Text(evening.variant.displayName).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
-                }
-                Text(gamesPlayed(games.count))
+        HStack(spacing: 12) {
+            FolderIcon(evening: evening, size: 40)
+            VStack(alignment: .leading, spacing: 5) {
+                Text("\(evening.variant.shortName) · \(evening.format.displayName)").font(.headline).lineLimit(1)
+                Text("\(evening.createdAt.formatted(.dateTime.day().month(.wide).year())) · \(gamesPlayed(games.count))")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                 MiniWinsBar(winners: games.map(\.record.outcome.winner))
             }
+            Spacer(minLength: 4)
             Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
         }
-        .contentCard(padding: 12)
+        .folderCard(padding: 12)
         .contentShape(.rect)
     }
 }
