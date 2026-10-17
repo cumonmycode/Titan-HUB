@@ -41,11 +41,15 @@ struct GamesView: View {
                         VStack(spacing: 10) {
                             ForEach(completed) { evening in
                                 NavigationLink {
-                                    EveningDetailView(evening: evening)
+                                    EveningDetailView(evening: evening, onAnotherGame: running == nil ? { anotherGame(in: evening) } : nil)
                                 } label: {
                                     CompletedFolderRow(evening: evening)
                                 }
                                 .buttonStyle(.plain)
+                                .contextMenu {
+                                    Button("Ещё одна игра", systemImage: "plus") { anotherGame(in: evening) }
+                                        .disabled(running != nil)
+                                }
                             }
                         }
                     }
@@ -58,6 +62,12 @@ struct GamesView: View {
             .navigationTitle("Игры")
             .profileButton()
         }
+    }
+
+    /// Ещё одна игра в завершённой серии — серия снова активна, состав последней игры уже на местах.
+    private func anotherGame(in evening: Evening) {
+        guard let reopened = library.reopenEvening(evening.id) else { return }
+        withAnimation(.smooth) { onNewGame(reopened) }
     }
 }
 
@@ -275,8 +285,8 @@ private struct StartCard: View {
                 .foregroundStyle(.tint)
                 .padding(.top, 8)
             VStack(spacing: 6) {
-                Text("Создайте первую папку").font(.title2.bold())
-                Text("Выберите игру и режим — игры одного типа и дня соберутся в одну папку.")
+                Text("Начните первую серию").font(.title2.bold())
+                Text("Выберите игру и режим — игры одного типа и дня соберутся в одну серию.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -317,7 +327,7 @@ private struct FolderCard: View {
                 }
                 Spacer(minLength: 4)
                 Menu {
-                    Button("Завершить папку", systemImage: "checkmark.circle") { isConfirmingClose = true }
+                    Button("Завершить серию", systemImage: "checkmark.circle") { isConfirmingClose = true }
                 } label: {
                     Image(systemName: "ellipsis").font(.subheadline.weight(.semibold)).frame(width: 28, height: 28)
                 }
@@ -376,10 +386,10 @@ private struct FolderCard: View {
             }
         }
         .folderCard(padding: 16)
-        .confirmationDialog("Завершить папку?", isPresented: $isConfirmingClose, titleVisibility: .visible) {
+        .confirmationDialog("Завершить серию?", isPresented: $isConfirmingClose, titleVisibility: .visible) {
             Button("Завершить") { withAnimation(.smooth) { library.closeEvening(evening.id) } }
         } message: {
-            Text("Папка уйдёт вниз, в завершённые, вместе с играми и итогами. Новая игра этого типа откроет новую папку.")
+            Text("Серия уйдёт вниз, в завершённые, вместе с играми и итогами. Добавить игру потом можно кнопкой «Ещё одна игра».")
         }
     }
 }
@@ -454,7 +464,10 @@ private struct MiniWinsBar: View {
 /// Вечер: подиум итогов и все его игры.
 struct EveningDetailView: View {
     let evening: Evening
+    /// «Ещё одна игра» — для завершённой серии. `nil` — кнопки нет (серия активна или идёт игра).
+    var onAnotherGame: (() -> Void)?
     @Environment(GameLibrary.self) private var library
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         let games = library.games(of: evening)
@@ -471,10 +484,20 @@ struct EveningDetailView: View {
                     }
                     if !games.isEmpty { WinsBar(winners: games.map(\.record.outcome.winner)) }
                     Text(evening.format.countsTowardStandings
-                         ? "Сумма баллов за вечер. Нажмите на игрока — подробности по баллам, ролям и играм."
-                         : "Фанка в рейтинги не идёт — это сумма баллов за вечер. Нажмите на игрока — подробности.")
+                         ? "Сумма баллов за серию. Нажмите на игрока — подробности по баллам, ролям и играм."
+                         : "Фанка в рейтинги не идёт — это сумма баллов за серию. Нажмите на игрока — подробности.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
+                    if let onAnotherGame {
+                        Button {
+                            dismiss()
+                            onAnotherGame()
+                        } label: {
+                            Label("Ещё одна игра", systemImage: "plus").font(.headline).frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.glassProminent)
+                        .controlSize(.large)
+                    }
                 }
                 .contentCard(padding: 18)
 

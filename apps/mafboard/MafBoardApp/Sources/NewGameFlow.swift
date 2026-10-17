@@ -249,7 +249,7 @@ private struct FormatStep: View {
         .ambientBackground()
         .navigationTitle("Режим")
         .confirmationDialog(
-            "Продолжить вечер?",
+            "Продолжить серию?",
             isPresented: Binding(get: { openEvening != nil }, set: { if !$0 { openEvening = nil } }),
             titleVisibility: .visible,
             presenting: openEvening
@@ -259,12 +259,12 @@ private struct FormatStep: View {
                 if draft.filled == 0 { draft.seat(evening.lastPlayers) }
                 onNext()
             }
-            Button("Начать новый вечер") {
+            Button("Начать новую серию") {
                 draft.evening = nil
                 onNext()
             }
         } message: { evening in
-            Text("Уже сыграно: \(gamesPlayed(library.games(of: evening).count)). Игры одного вечера складываются в общие итоги.")
+            Text("Уже сыграно: \(gamesPlayed(library.games(of: evening).count)). Игры одной серии складываются в общие итоги.")
         }
     }
 
@@ -295,7 +295,7 @@ private struct FormatCard: View {
     private var summary: String {
         switch format {
         case .funky: "Результат только за игру. В рейтинг не идёт, но остаётся в истории."
-        case .rating: "Рейтинг клуба: баллы игроков суммируются за вечер и за любой период."
+        case .rating: "Рейтинг клуба: баллы игроков суммируются за серию и за любой период."
         case .miniCup: "Как рейтинг, но своя отдельная таблица."
         case .tournament: "Отдельное мероприятие со своей таблицей."
         }

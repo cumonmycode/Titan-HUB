@@ -10,7 +10,7 @@ struct StandingsView: View {
     @State private var variant: GameVariant?
 
     enum Period: String, CaseIterable, Identifiable {
-        case evening = "Вечер"
+        case evening = "Серия"
         case month = "Месяц"
         case year = "Год"
         case all = "Всё время"
@@ -69,7 +69,7 @@ struct StandingsView: View {
                         ForEach(Period.allCases) { Text($0.rawValue).tag($0) }
                     }
                     if period == .evening {
-                        Picker("Вечер", selection: Binding(get: { eveningID ?? evenings.first?.id }, set: { eveningID = $0 })) {
+                        Picker("Серия", selection: Binding(get: { eveningID ?? evenings.first?.id }, set: { eveningID = $0 })) {
                             ForEach(evenings) { Text($0.title).tag(Optional($0.id)) }
                         }
                     }
