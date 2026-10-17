@@ -52,9 +52,17 @@ public struct PlayerStanding: Codable, Sendable, Equatable, Identifiable {
     public let bonus: Points
     public let penalty: Points
     public let bestMoves: Int
+    /// Сколько раз игрока убивали в первую ночь.
+    public let firstNightDeaths: Int
     public let roles: [RoleStatistics]
 
     public var id: PlayerID { playerID }
+    /// Допбаллы с учётом штрафов (ФСМ 8.7.2).
+    public var extraPoints: Points { bonus - penalty }
+    /// Победы доном или шерифом (ФСМ 8.7.4).
+    public var keyRoleWins: Int {
+        roles.filter { $0.role == .don || $0.role == .sheriff }.reduce(0) { $0 + $1.wins }
+    }
     public var losses: Int { gamesPlayed - wins - draws }
     public var averagePoints: Double { gamesPlayed > 0 ? points.doubleValue / Double(gamesPlayed) : 0 }
     public var winRate: Double { gamesPlayed > 0 ? Double(wins) / Double(gamesPlayed) : 0 }
@@ -67,8 +75,15 @@ public enum StandingsTiebreaker: String, Codable, Sendable {
     case bonus
     case fewerPenalties
     case fewerGames
+    /// Допбаллы с учётом штрафов.
+    case extraPoints
+    /// Победы доном или шерифом.
+    case keyRoleWins
+    /// Больше смертей в первую ночь.
+    case firstNightDeaths
 
-    public static let defaultOrder: [StandingsTiebreaker] = [.points, .wins, .bonus, .fewerPenalties]
+    /// ФСМ 8.7: баллы → допбаллы со штрафами → победы → победы доном или шерифом → смерти в первую ночь.
+    public static let defaultOrder: [StandingsTiebreaker] = [.points, .extraPoints, .wins, .keyRoleWins, .firstNightDeaths]
 }
 
 public enum StandingsCalculator {
@@ -113,6 +128,7 @@ public enum StandingsCalculator {
             bonus: scores.map(\.bonus).sum(),
             penalty: scores.map(\.penalty).sum(),
             bestMoves: bestMoves,
+            firstNightDeaths: scores.filter(\.isFirstKilled).count,
             roles: roles
         )
     }
@@ -129,6 +145,10 @@ public enum StandingsCalculator {
             case .bonus where lhs.bonus != rhs.bonus: return lhs.bonus > rhs.bonus
             case .fewerPenalties where lhs.penalty != rhs.penalty: return lhs.penalty < rhs.penalty
             case .fewerGames where lhs.gamesPlayed != rhs.gamesPlayed: return lhs.gamesPlayed < rhs.gamesPlayed
+            case .extraPoints where lhs.extraPoints != rhs.extraPoints: return lhs.extraPoints > rhs.extraPoints
+            case .keyRoleWins where lhs.keyRoleWins != rhs.keyRoleWins: return lhs.keyRoleWins > rhs.keyRoleWins
+            case .firstNightDeaths where lhs.firstNightDeaths != rhs.firstNightDeaths:
+                return lhs.firstNightDeaths > rhs.firstNightDeaths
             default: continue
             }
         }

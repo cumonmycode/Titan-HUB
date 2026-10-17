@@ -39,16 +39,27 @@ public struct Elimination: Codable, Sendable, Equatable {
     public let moment: GameMoment
 }
 
+/// Вид технического фола (ФСМ 6.7.1): обычный −0.3 или большой −0.6.
+public enum TechFoulKind: String, Codable, Sendable {
+    case ordinary
+    case big
+}
+
 public struct SeatState: Codable, Sendable, Equatable, Identifiable {
     public let seat: Seat
     public let playerID: PlayerID
     public let role: Role
     public internal(set) var elimination: Elimination?
     public internal(set) var fouls = 0
-    public internal(set) var techFouls = 0
+    /// Техфолы по порядку получения.
+    public internal(set) var techFoulKinds: [TechFoulKind] = []
     public internal(set) var warnings = 0
-    /// Игрок пропустит ближайшую речь (3-й фол).
+    /// Игрок пропустит ближайшую речь (3-й фол в городской мафии).
     public internal(set) var missesNextSpeech = false
+    /// Ближайшая речь игрока — вдвое короче (3-й фол в спортивной мафии).
+    public internal(set) var halvesNextSpeech = false
+    /// Удалён «на критике» — штраф больше обычного (ФСМ 8.2.4).
+    public internal(set) var isCriticalRemoval = false
 
     init(_ assignment: SeatAssignment) {
         seat = assignment.seat
@@ -59,6 +70,54 @@ public struct SeatState: Codable, Sendable, Equatable, Identifiable {
     public var id: Seat { seat }
     public var team: Team { role.team }
     public var isAlive: Bool { elimination == nil }
+    public var techFouls: Int { techFoulKinds.count }
+    public var bigTechFouls: Int { techFoulKinds.filter { $0 == .big }.count }
+    /// Удалён за нарушения (фолы, техфолы, дисквалификация).
+    public var isRemoved: Bool {
+        if case .removed = elimination?.cause { true } else { false }
+    }
+}
+
+extension SeatState {
+    private enum CodingKeys: String, CodingKey {
+        case seat, playerID, role, elimination, fouls, techFouls, techFoulKinds, warnings,
+             missesNextSpeech, halvesNextSpeech, isCriticalRemoval
+    }
+
+    /// Записи до видов техфолов хранили только их число — все такие техфолы обычные.
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        seat = try container.decode(Seat.self, forKey: .seat)
+        playerID = try container.decode(PlayerID.self, forKey: .playerID)
+        role = try container.decode(Role.self, forKey: .role)
+        elimination = try container.decodeIfPresent(Elimination.self, forKey: .elimination)
+        fouls = try container.decode(Int.self, forKey: .fouls)
+        if let kinds = try container.decodeIfPresent([TechFoulKind].self, forKey: .techFoulKinds) {
+            techFoulKinds = kinds
+        } else {
+            techFoulKinds = Array(repeating: .ordinary, count: try container.decode(Int.self, forKey: .techFouls))
+        }
+        warnings = try container.decode(Int.self, forKey: .warnings)
+        missesNextSpeech = try container.decode(Bool.self, forKey: .missesNextSpeech)
+        halvesNextSpeech = try container.decodeIfPresent(Bool.self, forKey: .halvesNextSpeech) ?? false
+        isCriticalRemoval = try container.decodeIfPresent(Bool.self, forKey: .isCriticalRemoval) ?? false
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(seat, forKey: .seat)
+        try container.encode(playerID, forKey: .playerID)
+        try container.encode(role, forKey: .role)
+        try container.encodeIfPresent(elimination, forKey: .elimination)
+        try container.encode(fouls, forKey: .fouls)
+        // Число — для старых версий приложения, которые читают записи с сервера.
+        try container.encode(techFouls, forKey: .techFouls)
+        try container.encode(techFoulKinds, forKey: .techFoulKinds)
+        try container.encode(warnings, forKey: .warnings)
+        try container.encode(missesNextSpeech, forKey: .missesNextSpeech)
+        try container.encode(halvesNextSpeech, forKey: .halvesNextSpeech)
+        try container.encode(isCriticalRemoval, forKey: .isCriticalRemoval)
+    }
 }
 
 // MARK: - Состояние игры
@@ -74,17 +133,23 @@ public struct GameState: Codable, Sendable, Equatable {
     /// Выставленные кандидатуры текущего дня в порядке выставления.
     public internal(set) var nominations: [Nomination] = []
     public internal(set) var isVotingCancelledToday = false
+    /// Игрока удалили ночью или после итогов голосования — завтра голосования нет (ФСМ 7.1–7.2).
+    public internal(set) var isNextDayVotingCancelled = false
     /// Игрок, открывавший текущий (последний) день. От него считается очередь следующего дня.
     public internal(set) var dayOpener: Seat?
     /// Открывавший день пропустил речь из-за фолов — добора ему не положено.
     public internal(set) var isOpenerSilencedToday = false
     public internal(set) var nights: [NightReport] = []
     public internal(set) var votings: [VotingRecord] = []
-    /// Игрок, получивший право лучшего хода.
-    public internal(set) var bestMoveAuthor: Seat?
-    public internal(set) var bestMove: BestMove?
+    /// Игроки, получившие право лучшего хода, по порядку: «слом» при десяти, затем ПУ.
+    public internal(set) var bestMoveAuthors: [Seat] = []
+    public internal(set) var bestMoves: [BestMove] = []
+    /// Чья речь сейчас идёт вдвое короче (3-й фол).
+    public internal(set) var halvedSpeaker: Seat?
     public internal(set) var doctorLastTarget: Seat?
     public internal(set) var scoreAdjustments: [ScoreAdjustment] = []
+    /// Протоколы выбывших игроков (по одному на игрока, последний заменяет прежний).
+    public internal(set) var protocols: [ColorProtocol] = []
     public internal(set) var outcome: GameOutcome?
     public internal(set) var events: [GameEvent] = []
 
@@ -97,6 +162,21 @@ public struct GameState: Codable, Sendable, Equatable {
 
 extension GameState {
     public var ruleset: Ruleset { setup.ruleset }
+    /// Первый убитый (ПУ) — убитый в первую ночь после договорки (ФСМ 1.5).
+    public var firstKilled: Seat? { nights.firstKilled }
+    /// Последний игрок, получивший право лучшего хода.
+    public var bestMoveAuthor: Seat? { bestMoveAuthors.last }
+    /// Последний записанный лучший ход.
+    public var bestMove: BestMove? { bestMoves.last }
+
+    public func bestMove(by author: Seat) -> BestMove? {
+        bestMoves.first { $0.author == author }
+    }
+
+    /// Право лучшего хода есть, а ход ещё не записан.
+    public func awaitsBestMove(from seat: Seat) -> Bool {
+        bestMoveAuthors.contains(seat) && bestMove(by: seat) == nil
+    }
     public var isFinished: Bool { phase == .finished }
 
     /// Можно ли нажать «Далее». Нельзя во время ввода голосов и после конца игры.
@@ -181,8 +261,8 @@ extension GameState {
         let timing = ruleset.timing
         return switch currentStep {
         case let .timed(step, _): step.seconds
-        case .farewell: timing.farewellSeconds
-        case .speech: timing.speechSeconds
+        case let .farewell(seat): seat == halvedSpeaker ? timing.farewellSeconds / 2 : timing.farewellSeconds
+        case let .speech(seat): seat == halvedSpeaker ? timing.speechSeconds / 2 : timing.speechSeconds
         case .tieSpeech: timing.tieSpeechSeconds
         case .ballot, .liftBallot, .dusk, .night, .finished: nil
         }
@@ -221,5 +301,12 @@ extension GameState {
         case .dusk:
             return .dusk
         }
+    }
+}
+
+extension [NightReport] {
+    /// Первый убитый (ПУ): жертва первой ночи после договорки. Если в ту ночь был промах, ПУ нет.
+    public var firstKilled: Seat? {
+        first { $0.number == 1 }?.victims.first?.seat
     }
 }

@@ -40,13 +40,148 @@ struct ScoringTests {
         #expect(scores[5]?.total == 1.2)
     }
 
-    @Test("Удаление штрафуется")
+    @Test("Удаление −0.6, на критике −1")
     func removalPenalty() throws {
         var session = try Fixture.session()
-        try session.run(.disqualify(7, note: nil), .declareOutcome(.red, note: nil))
+        try session.run(.disqualify(7, note: nil), .foul(9), .foul(9), .foul(9), .foul(9))
+        try session.run(.markCriticalRemoval(9, true), .declareOutcome(.red, note: nil))
         let scores = try scoresBySeat(session)
-        #expect(scores[7]?.total == 0)
+        #expect(scores[7]?.total == 0.4)
         #expect(scores[7]?.components.map(\.kind) == [.result(.win), .removal])
+        #expect(scores[9]?.total == 0)
+        #expect(scores[9]?.components.map(\.kind) == [.result(.win), .criticalRemoval])
+        #expect(throws: GameError.notRemoved(1)) { try session.perform(.markCriticalRemoval(1, true)) }
+    }
+
+    @Test("Техфол −0.3, большой −0.6, без удвоения и без штрафа за удаление вторым техфолом")
+    func techFoulPenalties() throws {
+        var session = try Fixture.session()
+        try session.run(.techFoul(2), .techFoul(2), .bigTechFoul(9), .techFoul(5), .bigTechFoul(5))
+        #expect(session.state.seat(2)?.elimination?.cause == .removed(.techFouls))
+        try session.run(.declareOutcome(.red, note: nil))
+        let scores = try scoresBySeat(session)
+        #expect(scores[2]?.total == 0.4)
+        #expect(scores[9]?.total == 0.4)
+        #expect(scores[5]?.total == 0.1)
+        #expect(scores[5]?.components.map(\.kind) == [.result(.win), .techFouls(count: 2)])
+    }
+
+    @Test("Отмена техфола снимает последний, какого бы вида он ни был")
+    func cancelLastTechFoul() throws {
+        var session = try Fixture.session()
+        try session.run(.techFoul(5), .bigTechFoul(9), .cancelTechFoul(9))
+        #expect(session.state.seat(9)?.techFouls == 0)
+        #expect(session.state.seat(5)?.techFoulKinds == [.ordinary])
+    }
+
+    @Test("ППК: команда нарушителя проигрывает, нарушитель −1.5")
+    func forfeit() throws {
+        var session = try Fixture.session()
+        try session.run(.forfeit(5, note: "Клятва"))
+        #expect(session.state.outcome?.winner == .black)
+        let scores = try scoresBySeat(session)
+        #expect(scores[5]?.total == -1.5)
+        #expect(scores[1]?.total == 0)
+        #expect(scores[3]?.total == 1)
+    }
+
+    @Test("Ничья: плюсы не начисляются, штрафы остаются")
+    func drawCancelsBonuses() throws {
+        var session = try Fixture.session()
+        try session.advance(until: \.isNight)
+        try session.run(.night(.shot(1)), .night(.skip), .night(.skip))
+        try session.run(
+            .recordBestMove([3, 6, 8]),
+            .techFoul(9),
+            .adjustScore(ScoreAdjustment(seat: 5, points: 0.5, note: "Лучший игрок")),
+            .declareOutcome(.draw, note: nil)
+        )
+        let scores = try scoresBySeat(session)
+        #expect(scores[1]?.total == 0)
+        #expect(scores[1]?.components.map(\.kind) == [.result(.draw), .bestMove(guessed: 3)])
+        #expect(scores[5]?.total == 0)
+        #expect(scores[9]?.total == -0.3)
+    }
+
+    @Test("Протокол ПУ: чёрные, красные и версия суммируются, не больше 0.8")
+    func firstKilledProtocol() throws {
+        var session = try Fixture.session()
+        try session.advance(until: \.isNight)
+        try session.run(.night(.shot(1)), .night(.skip), .night(.skip))
+        #expect(session.state.firstKilled == 1)
+        // Чёрные — 3, 6, 8; шериф — 4. Все чёрные верно (+0.8) и два красных (+0.3) — потолок 0.8.
+        try session.run(.recordProtocol(ColorProtocol(author: 1, blacks: [3, 6, 8], reds: [2, 5])))
+        try session.run(.declareOutcome(.red, note: nil))
+        #expect(try protocolPoints(session, seat: 1) == 0.8)
+
+        // Чёрные 2 верно и 1 ошибка (0.5 − 0.2), красный с ошибкой (−0.2), неверная версия (−0.4).
+        try session.undo()
+        try session.run(.recordProtocol(ColorProtocol(
+            author: 1, blacks: [3, 6, 9], reds: [8], version: SheriffVersion(sheriff: 10, value: 0.4)
+        )))
+        try session.run(.declareOutcome(.red, note: nil))
+        #expect(try protocolPoints(session, seat: 1) == -0.3)
+
+        // Красные суммируются: 3 верно (+0.5) и 1 ошибка (−0.2); верная версия за 0.2.
+        try session.undo()
+        try session.run(.recordProtocol(ColorProtocol(
+            author: 1, blacks: [], reds: [2, 5, 7, 8], version: SheriffVersion(sheriff: 4, value: 0.2)
+        )))
+        try session.run(.declareOutcome(.red, note: nil))
+        #expect(try protocolPoints(session, seat: 1) == 0.5)
+
+        // Пять верных красных: 0.1 + 0.2 × 4 = 0.9, но не больше 0.8.
+        try session.undo()
+        try session.run(.recordProtocol(ColorProtocol(author: 1, blacks: [], reds: [2, 4, 5, 7, 9])))
+        try session.run(.declareOutcome(.red, note: nil))
+        #expect(try protocolPoints(session, seat: 1) == 0.8)
+    }
+
+    @Test("Шериф-ПУ не получает плюс за красных, которых проверил сам")
+    func sheriffCheckedRedsUnscored() throws {
+        var session = try Fixture.session()
+        try session.advance(until: \.isNight)
+        try session.run(.night(.shot(4)), .night(.skip), .night(.check(2)))
+        try session.run(.recordProtocol(ColorProtocol(author: 4, blacks: [], reds: [2, 5])))
+        try session.run(.declareOutcome(.red, note: nil))
+        #expect(try protocolPoints(session, seat: 4) == 0.1)
+    }
+
+    @Test("ПУ — только убитый в первую ночь: после промаха протокол оценивается как обычный")
+    func firstKilledOnlyOnFirstNight() throws {
+        var session = try Fixture.session()
+        try session.advance(until: \.isNight)
+        try session.run(.night(.shot(nil)), .night(.skip), .night(.skip))
+        try session.advance(until: \.isNight)
+        try session.run(.night(.shot(1)), .night(.skip), .night(.skip))
+        #expect(session.state.firstKilled == nil)
+        try session.run(.recordProtocol(ColorProtocol(author: 1, blacks: [3, 6, 8], reds: [])))
+        try session.run(.declareOutcome(.red, note: nil))
+        let scores = try scoresBySeat(session)
+        #expect(scores[1]?.components.first { $0.kind == .colorProtocol(firstKilled: false) }?.points == 0.4)
+    }
+
+    @Test("Протокол не ПУ: всё верно +0.4, хоть одна ошибка −0.4; удалённый протокол не оставляет")
+    func othersProtocol() throws {
+        var session = try Fixture.session()
+        try session.advance(until: \.isNight)
+        try session.run(.night(.shot(1)), .night(.skip), .night(.skip))
+        try session.run(.eliminateByHost(5, note: nil), .disqualify(9, note: nil))
+        try session.run(.recordProtocol(ColorProtocol(author: 5, blacks: [8], reds: [2])))
+        #expect(throws: GameError.invalidProtocol(.authorRemoved)) {
+            try session.run(.recordProtocol(ColorProtocol(author: 9, blacks: [3], reds: [])))
+        }
+        #expect(throws: GameError.invalidProtocol(.authorInGame)) {
+            try session.run(.recordProtocol(ColorProtocol(author: 4, blacks: [3], reds: [])))
+        }
+        #expect(throws: GameError.invalidProtocol(.duplicateSeats)) {
+            try session.run(.recordProtocol(ColorProtocol(
+                author: 5, blacks: [8], reds: [2], version: SheriffVersion(sheriff: 2, value: 0.4)
+            )))
+        }
+        try session.run(.declareOutcome(.red, note: nil))
+        let scores = try scoresBySeat(session)
+        #expect(scores[5]?.components.first { $0.kind == .colorProtocol(firstKilled: false) }?.points == 0.4)
     }
 
     @Test("Лучший ход чёрного игрока не даёт бонуса")
@@ -57,6 +192,12 @@ struct ScoringTests {
         try session.run(.recordBestMove([6, 8]), .declareOutcome(.red, note: nil))
         let scores = try scoresBySeat(session)
         #expect(scores[3]?.bonus == 0)
+    }
+
+    private func protocolPoints(_ session: GameSession, seat: Seat) throws -> Points? {
+        try scoresBySeat(session)[seat]?.components.first { component in
+            if case .colorProtocol = component.kind { true } else { false }
+        }?.points
     }
 
     private func scoresBySeat(_ session: GameSession) throws -> [Seat: PlayerGameScore] {
@@ -102,7 +243,11 @@ struct StandingsTests {
         #expect(table[0].playerID == players[0])
         #expect(table[0].points == 1.5)
         #expect(table[0].place == 1)
-        #expect(table.dropFirst().allSatisfy { $0.place == 2 && $0.points == 1 })
+        #expect(table.dropFirst().allSatisfy { $0.points == 1 })
+        // При равных баллах выше победы доном или шерифом (ФСМ 8.7.4): шериф выиграл первую игру, дон — вторую.
+        let secondPlace = Set(table.filter { $0.place == 2 }.map(\.playerID))
+        #expect(secondPlace == [players[3], players[5]])
+        #expect(table.dropFirst(3).allSatisfy { $0.place == 4 })
         #expect(table.allSatisfy { $0.gamesPlayed == 2 })
 
         let miniCup = StandingsCalculator.standings(StandingsQuery(format: .miniCup, scope: .allTime), from: records)
@@ -124,6 +269,24 @@ struct StandingsTests {
 
         let funky = StandingsCalculator.standings(StandingsQuery(format: .funky, scope: .allTime), from: records)
         #expect(funky.isEmpty)
+    }
+
+    @Test("Равные баллы: выше тот, у кого больше допбаллов, даже при меньшем числе побед (ФСМ 8.7.2)")
+    func tiebreakByExtraPoints() throws {
+        let bonus = ScoreAdjustment(seat: 3, points: 0.5, note: "Лучший игрок")
+        let records = [
+            try record(.rating, winner: .red, adjustments: [bonus]),
+            try record(.rating, winner: .red, hoursLater: 1, adjustments: [bonus]),
+            try record(.rating, winner: .black, hoursLater: 2),
+        ]
+        let table = StandingsCalculator.standings(StandingsQuery(format: .rating, scope: .allTime), from: records)
+        let red = try #require(table.first { $0.playerID == players[0] })
+        let black = try #require(table.first { $0.playerID == players[2] })
+        #expect(red.points == 2)
+        #expect(black.points == 2)
+        #expect(red.wins == 2)
+        #expect(black.extraPoints == 1)
+        #expect(black.place < red.place)
     }
 
     @Test("Статистика по ролям")

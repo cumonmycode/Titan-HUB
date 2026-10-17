@@ -16,15 +16,28 @@ public enum GameAction: Codable, Sendable, Equatable {
     // Дисциплина
     case foul(Seat)
     case cancelFoul(Seat)
+    /// Обычный технический фол (ФСМ 6.7: −0.3).
     case techFoul(Seat)
+    /// Большой технический фол (ФСМ 6.7: −0.6).
+    case bigTechFoul(Seat)
+    /// Отменяет последний техфол игрока, какого бы вида он ни был.
     case cancelTechFoul(Seat)
     case warning(Seat)
     case disqualify(Seat, note: String?)
     /// Ручное выбывание по решению ведущего — без штрафа (способности ролей, которые движок не ведёт).
     case eliminateByHost(Seat, note: String?)
+    /// Удаление было «на критике» — штраф −1 вместо −0.6 (ФСМ 8.2.4). Можно отметить и после игры.
+    case markCriticalRemoval(Seat, Bool)
+    /// ППК: нарушение игрока — поражение его команде и штраф −1.5 (ФСМ 6.9, 8.2.5).
+    case forfeit(Seat, note: String?)
 
     // Итоги
+    /// Лучший ход последнего игрока, получившего на него право (записи до нескольких ЛХ за игру).
     case recordBestMove([Seat])
+    /// Лучший ход конкретного игрока: ПУ или выбывшего при полном столе.
+    case recordBestMoveBy(author: Seat, seats: [Seat])
+    /// Протокол выбывшего игрока после его последней речи: кого считает чёрными, кого красными.
+    case recordProtocol(ColorProtocol)
     /// Ручное объявление результата (ППК, ничья по регламенту и т.п.).
     case declareOutcome(Winner, note: String?)
     case adjustScore(ScoreAdjustment)
@@ -69,6 +82,35 @@ public enum NightInput: Codable, Sendable, Equatable {
     case check(Seat)
     case heal(Seat)
     case skip
+}
+
+/// Протокол выбывшего игрока после заключительной речи: только цвета и роли (ФСМ 4.8.7).
+public struct ColorProtocol: Codable, Sendable, Equatable {
+    public let author: Seat
+    public let blacks: [Seat]
+    public let reds: [Seat]
+    /// Версия ПУ на шерифа: кого из вскрывшихся он считает настоящим шерифом.
+    public let version: SheriffVersion?
+
+    public init(author: Seat, blacks: [Seat], reds: [Seat], version: SheriffVersion? = nil) {
+        self.author = author
+        self.blacks = blacks
+        self.reds = reds
+        self.version = version
+    }
+}
+
+/// Версия на шерифа (ФСМ 8.3.9.5, 8.3.9.10). Цена зависит от ситуации за столом:
+/// «шериф / дон» и «шериф или дон / красный» — 0.4, «красный / красный» и «чёрный / чёрный» — 0.2,
+/// одно вскрытие или версия на недостоверной информации шерифа — 0.
+public struct SheriffVersion: Codable, Sendable, Equatable {
+    public let sheriff: Seat
+    public let value: Points
+
+    public init(sheriff: Seat, value: Points) {
+        self.sheriff = sheriff
+        self.value = value
+    }
 }
 
 /// Ручная корректировка баллов игрока (доп. баллы, штраф ведущего).

@@ -28,7 +28,8 @@ extension Transition {
     mutating func beginDay(afterNightVictims victims: [Seat]) {
         state.dayNumber += 1
         state.nominations = []
-        state.isVotingCancelledToday = false
+        state.isVotingCancelledToday = state.isNextDayVotingCancelled
+        state.isNextDayVotingCancelled = false
         emit(.dayStarted(state.dayNumber), moment: .day(state.dayNumber))
         startFarewell(victims, context: .afterNight)
     }
@@ -41,6 +42,7 @@ extension Transition {
             return
         }
         state.phase = .day(.farewell(FarewellQueue(seats: seats, index: 0, context: context)))
+        startSpeech(of: first)
         emit(.farewell(first))
     }
 
@@ -52,10 +54,12 @@ extension Transition {
             return
         }
         state.phase = .day(.farewell(updated))
+        startSpeech(of: next)
         emit(.farewell(next))
     }
 
     private mutating func finishFarewell(_ context: FarewellContext) {
+        state.halvedSpeaker = nil
         switch context {
         case .afterNight: startSpeeches()
         case .afterVoting: enterDusk()
@@ -101,10 +105,22 @@ extension Transition {
             var updated = round
             updated.index = index
             state.phase = .day(.speeches(updated))
+            startSpeech(of: seat)
             emit(.speech(seat))
             return
         }
+        state.halvedSpeaker = nil
         enterExtraStep(from: 0)
+    }
+
+    /// Начало речи (обычной или заключительной): 3-й фол съедает половину ближайшей из них.
+    private mutating func startSpeech(of seat: Seat) {
+        guard let index = state.seats.firstIndex(where: { $0.seat == seat }), state.seats[index].halvesNextSpeech else {
+            state.halvedSpeaker = nil
+            return
+        }
+        state.seats[index].halvesNextSpeech = false
+        state.halvedSpeaker = seat
     }
 
     // MARK: Дополнительные шаги (добор, общая минута)

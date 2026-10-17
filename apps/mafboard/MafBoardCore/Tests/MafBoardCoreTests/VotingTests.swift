@@ -5,8 +5,8 @@ import Testing
 @Suite("Голосование")
 struct VotingTests {
     /// Первый день спортивной игры: кандидатуры выставлены, речи закончились.
-    private func sessionAtVoting(_ nominations: [(candidate: Seat, by: Seat)]) throws -> GameSession {
-        var session = try Fixture.session()
+    private func sessionAtVoting(_ nominations: [(candidate: Seat, by: Seat)], ruleset: Ruleset = .sport) throws -> GameSession {
+        var session = try Fixture.session(ruleset: ruleset)
         try session.advance(times: 2)
         for _ in 0..<10 {
             if let nomination = nominations.first(where: { $0.by == session.state.currentSpeaker }) {
@@ -29,7 +29,7 @@ struct VotingTests {
         #expect(session.state.votings.last?.eliminated == [8])
     }
 
-    @Test("Попил → оправдания → переголосование → подъём проходит")
+    @Test("Деление → речи → переголосование → подъём проходит")
     func repeatedTieLiftPasses() throws {
         var session = try sessionAtVoting([(3, 1), (8, 2)])
         try session.run(.submitBallot(split))
@@ -60,9 +60,26 @@ struct VotingTests {
         #expect(session.state.aliveSeats.count == 10)
     }
 
-    @Test("Лидеров в переголосовании стало меньше — ещё один попил только между ними")
-    func shrinkingTieRevotesAgain() throws {
+    @Test("Первый день: деление на троих не переголосовывается — сразу ночь (ФСМ 4.5.10)")
+    func firstDayThreeWayTieEndsDay() throws {
         var session = try sessionAtVoting([(3, 1), (8, 2), (5, 4)])
+        try session.run(.submitBallot(.handCount([
+            CandidateVotes(3, votes: 3), CandidateVotes(8, votes: 3), CandidateVotes(5, votes: 4),
+        ])))
+        #expect(session.state.votings.last?.eliminated == [5])
+        try session.undo()
+        try session.run(.submitBallot(.handCount([
+            CandidateVotes(3, votes: 3), CandidateVotes(8, votes: 3), CandidateVotes(5, votes: 3),
+        ])))
+        #expect(session.state.isDusk)
+        #expect(session.state.aliveSeats.count == 10)
+    }
+
+    @Test("Лидеров в переголосовании стало меньше — ещё одно деление только между ними")
+    func shrinkingTieRevotesAgain() throws {
+        var rules = Ruleset.sport
+        rules.voting.firstDayMaxTie = nil
+        var session = try sessionAtVoting([(3, 1), (8, 2), (5, 4)], ruleset: rules)
         try session.run(.submitBallot(.handCount([
             CandidateVotes(3, votes: 3), CandidateVotes(8, votes: 3), CandidateVotes(5, votes: 3),
         ])))

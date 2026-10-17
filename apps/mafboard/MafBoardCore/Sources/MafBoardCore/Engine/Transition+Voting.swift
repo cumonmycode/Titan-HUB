@@ -1,4 +1,4 @@
-/// Голосование: основной круг → попил (оправдания + переголосование) → «поднять всех».
+/// Голосование: основной круг → деление (речи по 30 секунд + переголосование) → подъём.
 extension Transition {
     mutating func startVoting(_ candidates: [Seat]) {
         let session = VotingSession(nominees: candidates, candidates: candidates, stage: .ballot(.main), rounds: [])
@@ -45,12 +45,18 @@ extension Transition {
 
     /// Итог голосования: выбывшие покидают стол, затем прощальные речи или сумерки.
     mutating func completeVoting(_ record: VotingRecord) {
+        let isFullTable = state.aliveSeats.count == state.seats.count
         state.votings.append(record)
         emit(.votingFinished(record))
         for seat in record.eliminated {
             eliminate(seat, cause: .votedOut)
         }
         if concludeIfGameOver() { return }
+        // «Слом» при десяти: выбывший получает лучший ход перед заключительной минутой (ФСМ 7.13).
+        if isFullTable, rules.bestMove.isEnabled, rules.bestMove.grantsFullTableVoteOut == true,
+           record.eliminated.count == 1, let seat = record.eliminated.first {
+            grantBestMove(to: seat)
+        }
         if record.eliminated.isEmpty {
             enterDusk()
         } else {
@@ -93,6 +99,12 @@ extension Transition {
             finishVoting(updated, eliminated: leaders)
             return
         }
+        // В первый день деление на троих и больше не переголосовывается — сразу ночь (ФСМ 4.5.10).
+        if round.kind == .main, state.dayNumber == 1, let maxTie = rules.voting.firstDayMaxTie, leaders.count > maxTie {
+            emit(.tie(candidates: leaders))
+            finishVoting(updated, eliminated: [])
+            return
+        }
         let tieShrank = leaders.count < session.candidates.count && rules.voting.revoteWhenTieShrinks
         if round.kind == .main || tieShrank {
             startTie(updated, leaders: leaders)
@@ -118,6 +130,12 @@ extension Transition {
     private mutating func resolveRepeatedTie(_ session: VotingSession, leaders: [Seat]) {
         switch rules.voting.onRepeatedTie {
         case .liftVote:
+            let sheriffKilledFirst = state.firstKilled.flatMap { state.seat($0)?.role } == .sheriff
+            guard rules.voting.allowsLift(tied: leaders.count, alive: state.aliveSeats.count, sheriffKilledFirst: sheriffKilledFirst) else {
+                // Деление, при котором подъём запрещён: все остаются за столом.
+                finishVoting(session, eliminated: [])
+                return
+            }
             var updated = session
             updated.candidates = leaders
             updated.stage = .liftBallot

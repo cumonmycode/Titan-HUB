@@ -71,14 +71,21 @@ struct Transition {
         case let .night(input): try handleNight(input)
         case let .foul(seat): try addFoul(seat)
         case let .cancelFoul(seat): try cancelFoul(seat)
-        case let .techFoul(seat): try addTechFoul(seat)
+        case let .techFoul(seat): try addTechFoul(seat, kind: .ordinary)
+        case let .bigTechFoul(seat): try addTechFoul(seat, kind: .big)
         case let .cancelTechFoul(seat): try cancelTechFoul(seat)
         case let .warning(seat): try addWarning(seat)
         case let .disqualify(seat, note): try remove(seat, reason: .disqualified(note: note))
         case let .eliminateByHost(seat, note): try eliminateByHost(seat, note: note)
-        case let .recordBestMove(seats): try recordBestMove(seats)
+        case let .markCriticalRemoval(seat, isCritical): try markCriticalRemoval(seat, isCritical)
+        case let .forfeit(seat, note): try forfeit(seat, note: note)
+        case let .recordBestMove(seats):
+            guard let author = state.bestMoveAuthor else { throw .bestMoveNotAvailable }
+            try recordBestMove(seats, by: author)
+        case let .recordBestMoveBy(author, seats): try recordBestMove(seats, by: author)
         case let .declareOutcome(winner, note): try declareOutcome(winner, note: note)
         case let .adjustScore(adjustment): try adjustScore(adjustment)
+        case let .recordProtocol(proto): try recordProtocol(proto)
         }
     }
 
@@ -119,7 +126,7 @@ struct Transition {
         state.phase = .finished
     }
 
-    /// Ручной итог (ППК, ничья). Исправить уже объявленный итог можно только отменой (`GameSession.undo`).
+    /// Ручной итог (ничья по регламенту и т.п.). Исправить уже объявленный итог можно только отменой (`GameSession.undo`).
     mutating func declareOutcome(_ winner: Winner, note: String?) throws(GameError) {
         try requireInProgress()
         finish(with: GameOutcome(winner: winner, reason: .declaredByHost(note: note)))
@@ -127,8 +134,27 @@ struct Transition {
 
     // MARK: Итоги
 
-    mutating func recordBestMove(_ seats: [Seat]) throws(GameError) {
-        guard let author = state.bestMoveAuthor else { throw .bestMoveNotAvailable }
+    mutating func recordProtocol(_ proto: ColorProtocol) throws(GameError) {
+        let author = try index(of: proto.author)
+        switch state.seats[author].elimination?.cause {
+        case nil: throw .invalidProtocol(.authorInGame)
+        case .removed: throw .invalidProtocol(.authorRemoved)
+        default: break
+        }
+        let named = proto.blacks + proto.reds + (proto.version.map { [$0.sheriff] } ?? [])
+        guard !named.isEmpty else { throw .invalidProtocol(.empty) }
+        guard !named.contains(proto.author) else { throw .invalidProtocol(.includesAuthor) }
+        guard Set(named).count == named.count else { throw .invalidProtocol(.duplicateSeats) }
+        for seat in named {
+            _ = try index(of: seat)
+        }
+        state.protocols.removeAll { $0.author == proto.author }
+        state.protocols.append(proto)
+        emit(.protocolRecorded(proto))
+    }
+
+    mutating func recordBestMove(_ seats: [Seat], by author: Seat) throws(GameError) {
+        guard state.bestMoveAuthors.contains(author) else { throw .bestMoveNotAvailable }
         let maxSeats = rules.bestMove.maxSeats(playerCount: state.seats.count)
         guard (1...max(1, maxSeats)).contains(seats.count) else {
             throw .invalidBestMove(.seatCount(max: maxSeats))
@@ -139,8 +165,16 @@ struct Transition {
             _ = try index(of: seat)
         }
         let move = BestMove(author: author, seats: seats.sorted())
-        state.bestMove = move
+        state.bestMoves.removeAll { $0.author == author }
+        state.bestMoves.append(move)
         emit(.bestMove(move))
+    }
+
+    /// Право лучшего хода: ведущий запишет его перед заключительной речью игрока.
+    mutating func grantBestMove(to seat: Seat) {
+        guard !state.bestMoveAuthors.contains(seat) else { return }
+        state.bestMoveAuthors.append(seat)
+        emit(.bestMoveAvailable(seat))
     }
 
     mutating func adjustScore(_ adjustment: ScoreAdjustment) throws(GameError) {

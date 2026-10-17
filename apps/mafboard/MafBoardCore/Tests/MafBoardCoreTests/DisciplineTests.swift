@@ -4,9 +4,26 @@ import Testing
 
 @Suite("Фолы и удаления")
 struct DisciplineTests {
-    @Test("Третий фол — игрок пропускает ближайшую речь")
-    func thirdFoulSkipsNextSpeech() throws {
+    @Test("Спортивная: третий фол — ближайшая речь вдвое короче (ФСМ 6.4)")
+    func thirdFoulHalvesNextSpeech() throws {
         var session = try Fixture.session()
+        try session.advance(times: 2)
+        try session.run(.foul(5), .foul(5), .foul(5))
+        #expect(session.state.seat(5)?.halvesNextSpeech == true)
+        #expect(session.state.events.contains { $0.kind == .speechHalved(5) })
+
+        try session.advance(times: 4)
+        #expect(session.step == .speech(5))
+        #expect(session.state.timerSeconds == 30)
+        try session.advance()
+        #expect(session.step == .speech(6))
+        #expect(session.state.timerSeconds == 60)
+        #expect(session.state.seat(5)?.halvesNextSpeech == false)
+    }
+
+    @Test("Городская: третий фол — игрок пропускает ближайшую речь")
+    func thirdFoulSkipsNextSpeech() throws {
+        var session = try Fixture.session(ruleset: .city, roles: Fixture.cityRoles)
         try session.advance(times: 2)
         try session.run(.foul(5), .foul(5), .foul(5))
         #expect(session.state.seat(5)?.missesNextSpeech == true)

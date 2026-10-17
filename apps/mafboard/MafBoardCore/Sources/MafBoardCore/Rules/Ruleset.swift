@@ -35,7 +35,7 @@ public struct Ruleset: Codable, Sendable, Equatable {
 }
 
 extension Ruleset {
-    /// Спортивная мафия (по мотивам регламента ФИИМ): 10 игроков, номинации, попил и подъём.
+    /// Спортивная мафия по официальным правилам ФСМ: 10 игроков, выставления, деление и подъём.
     public static let sport = Ruleset(
         variant: .sport,
         allowedPlayerCounts: 10...10,
@@ -58,24 +58,33 @@ extension Ruleset {
             abstainersVoteForLastCandidate: true,
             onRepeatedTie: .liftVote,
             revoteWhenTieShrinks: true,
-            cancelOnDayRemoval: true
+            cancelOnDayRemoval: true,
+            liftSplits: [10: [2], 8: [2, 4], 6: [2, 3], 4: [2]],
+            liftAnySplitAfterSheriffKilledFirst: true,
+            firstDayMaxTie: 2,
+            removalCancelsNextDayVoting: true
         ),
         night: NightPolicy(
             steps: [.mafiaShot, .donCheck, .sheriffCheck],
             doctorMayRepeatTarget: false,
-            immuneToNightKill: []
+            immuneToNightKill: [],
+            drawAfterQuietNights: 3,
+            donCannotCheckFirstShotTarget: true
         ),
         discipline: DisciplinePolicy(
-            foulsToSilence: 3,
+            foulsToSilence: nil,
             foulsToRemoval: 4,
             techFoulsToRemoval: 2,
-            warningsPerFoul: nil
+            warningsPerFoul: nil,
+            foulsToHalveSpeech: 3
         ),
         bestMove: BestMovePolicy(
             isEnabled: true,
             eligibility: .firstNightVictim,
             defaultSeats: 3,
-            seatsByPlayerCount: [:]
+            seatsByPlayerCount: [:],
+            firstDayLeaversCancellingBestMove: 2,
+            grantsFullTableVoteOut: true
         )
     )
 

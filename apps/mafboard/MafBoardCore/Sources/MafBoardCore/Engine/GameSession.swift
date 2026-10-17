@@ -64,7 +64,7 @@ public struct GameSession: Sendable, Equatable {
         log.lastIndex { entry in
             switch (cause, entry.action) {
             case let (.removed(.fouls), .foul(target)): target == seat
-            case let (.removed(.techFouls), .techFoul(target)): target == seat
+            case let (.removed(.techFouls), .techFoul(target)), let (.removed(.techFouls), .bigTechFoul(target)): target == seat
             case let (.removed(.disqualified), .disqualify(target, _)): target == seat
             case let (.hostDecision, .eliminateByHost(target, _)): target == seat
             default: false

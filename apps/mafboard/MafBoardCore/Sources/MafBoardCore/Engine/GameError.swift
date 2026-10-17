@@ -17,8 +17,13 @@ public enum GameError: Error, Sendable, Equatable {
     case unexpectedNightInput(NightStep)
     case cannotTargetSelf(Seat)
     case doctorCannotRepeatTarget(Seat)
+    /// В первую ночь отстрела дон не проверяет того, в кого стреляли (ФСМ 4.6.9).
+    case donCannotCheckShotTarget(Seat)
+    /// Отметить «на критике» можно только удаление за фолы или дисквалификацию.
+    case notRemoved(Seat)
     case bestMoveNotAvailable
     case invalidBestMove(BestMoveProblem)
+    case invalidProtocol(ProtocolProblem)
     case nothingToCancel(Seat)
     case nothingToUndo
     /// Удалённого игрока не вернуть: без его удаления журнал игры не сходится.
@@ -84,6 +89,7 @@ extension GameError: LocalizedError {
         case let .notAllowedNow(restriction): restriction.message
         case let .invalidBallot(problem): "Голосование: \(problem.message)"
         case let .invalidBestMove(problem): "Лучший ход: \(problem.message)"
+        case let .invalidProtocol(problem): "Протокол: \(problem.message)"
         case let .unknownSeat(seat): "За столом нет игрока №\(seat)"
         case let .seatNotAlive(seat): "Игрок №\(seat) уже выбыл"
         case .gameFinished: "Игра уже завершена"
@@ -94,7 +100,9 @@ extension GameError: LocalizedError {
         case let .unexpectedNightInput(step): "Сейчас шаг «\(step.displayName)»"
         case let .cannotTargetSelf(seat): "Игрок №\(seat) не может выбрать себя"
         case let .doctorCannotRepeatTarget(seat): "Доктор не может лечить игрока №\(seat) две ночи подряд"
-        case .bestMoveNotAvailable: "Право лучшего хода ещё никто не получил"
+        case let .donCannotCheckShotTarget(seat): "В первую ночь отстрела дон не проверяет игрока №\(seat), в которого стреляли"
+        case let .notRemoved(seat): "Игрок №\(seat) не удалён за фолы или дисквалификацию"
+        case .bestMoveNotAvailable: "У этого игрока нет права на лучший ход"
         case let .nothingToCancel(seat): "У игрока №\(seat) нечего отменять"
         case .nothingToUndo: "Нечего отменять"
         case let .cannotReinstate(seat): "Игрока №\(seat) не вернуть: после удаления игра ушла дальше. Отмените шаги кнопкой «Назад»"
@@ -154,7 +162,7 @@ extension Restriction {
         case .notVoting:
             "Сейчас не идёт голосование"
         case .tieSpeechesFirst:
-            "Сначала оправдательные речи игроков в попиле"
+            "Сначала речи игроков, поделивших голоса"
         case .ballotRequired:
             "Сначала введите результаты голосования"
         case .notNight:
@@ -174,6 +182,25 @@ extension BallotProblem {
         case .tooManyVotes: "голосов больше, чем живых игроков"
         case .liftBallotExpected: "сейчас голосование «поднять всех»"
         case .regularBallotExpected: "сейчас обычное голосование, а не «поднять всех»"
+        }
+    }
+}
+
+public enum ProtocolProblem: Sendable, Equatable {
+    /// Протокол оставляет только выбывший игрок (убитый или заголосованный).
+    case authorInGame
+    case authorRemoved
+    case includesAuthor
+    case duplicateSeats
+    case empty
+
+    public var message: String {
+        switch self {
+        case .authorInGame: "его оставляет выбывший игрок после последней речи"
+        case .authorRemoved: "удалённый игрок протокол не оставляет"
+        case .includesAuthor: "себя назвать нельзя"
+        case .duplicateSeats: "один номер назван дважды"
+        case .empty: "не назван ни один игрок"
         }
     }
 }

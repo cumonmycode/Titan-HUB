@@ -36,6 +36,10 @@ extension Transition {
             }
             emit(.shot(step.killer ?? .mafia, shot))
         case let (.donCheck, .check(target)), let (.sheriffCheck, .check(target)):
+            if step == .donCheck, progress.number == 1, rules.night.donCannotCheckFirstShotTarget == true,
+               progress.actions.mafiaShot?.seat == target {
+                throw .donCannotCheckShotTarget(target)
+            }
             let check = try performCheck(step, target: target)
             updated.actions.checks.append(check)
             emit(.check(check))
@@ -129,7 +133,21 @@ extension Transition {
         grantBestMoveIfEligible(report)
 
         if concludeIfGameOver() { return }
+        if let quiet = rules.night.drawAfterQuietNights, isTableUnchanged(sinceNight: progress.number - quiet + 1) {
+            finish(with: GameOutcome(winner: .draw, reason: .quietNights(quiet)))
+            return
+        }
         beginDay(afterNightVictims: victims.map(\.seat))
+    }
+
+    /// С начала ночи `first` по сей момент никто не покинул стол.
+    private func isTableUnchanged(sinceNight first: Int) -> Bool {
+        guard first >= 1,
+              let start = state.events.lastIndex(where: { $0.kind == .nightStarted(first) })
+        else { return false }
+        return !state.events[start...].contains { event in
+            if case .eliminated = event.kind { true } else { false }
+        }
     }
 
     private func isImmuneAtNight(_ seat: Seat) -> Bool {
@@ -139,20 +157,22 @@ extension Transition {
 
     private mutating func grantBestMoveIfEligible(_ report: NightReport) {
         let policy = rules.bestMove
-        guard policy.isEnabled, state.bestMoveAuthor == nil,
-              let victim = report.victims.first(where: { $0.killer == .mafia })
-        else { return }
+        guard policy.isEnabled, let victim = report.victims.first(where: { $0.killer == .mafia }) else { return }
 
         switch policy.eligibility {
         case .firstNightVictim:
             guard report.number == 1 else { return }
+            // Если в первый день ушли двое и больше (подъём), у ПУ лучшего хода нет (ФСМ 7.10).
+            if let limit = policy.firstDayLeaversCancellingBestMove {
+                let leavers = state.votings.filter { $0.day == 1 }.reduce(0) { $0 + $1.eliminated.count }
+                guard leavers < limit else { return }
+            }
         case .firstNightKill:
             let earlierKills = state.nights.dropLast().contains { night in
                 night.victims.contains { $0.killer == .mafia }
             }
             guard !earlierKills else { return }
         }
-        state.bestMoveAuthor = victim.seat
-        emit(.bestMoveAvailable(victim.seat))
+        grantBestMove(to: victim.seat)
     }
 }

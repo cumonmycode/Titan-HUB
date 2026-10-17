@@ -98,6 +98,25 @@ public struct VotingPolicy: Codable, Sendable, Equatable {
     public var revoteWhenTieShrinks: Bool
     /// Удаление игрока днём отменяет голосование этого дня.
     public var cancelOnDayRemoval: Bool
+    /// Подъём только при этих делениях: игроков за столом → сколько кандидатов поделили голоса
+    /// (ФСМ 7.11.5: 5/10, 4/8, 2/8, 3/6, 2/6, 2/4 — «по столько голосов при стольких за столом»).
+    /// При остальных повторных делениях все остаются. `nil` — подъём при любом повторном делении.
+    public var liftSplits: [Int: [Int]]?
+    /// Шериф убит в первую ночь — подъём разрешён при любом делении и без штрафа красным (ФСМ 7.11.2).
+    public var liftAnySplitAfterSheriffKilledFirst: Bool?
+    /// В первый день деление между большим числом кандидатов не переголосовывается — сразу ночь (ФСМ 4.5.10).
+    public var firstDayMaxTie: Int?
+    /// Удаление ночью или после итогов голосования отменяет голосование следующего дня (ФСМ 7.1–7.2).
+    public var removalCancelsNextDayVoting: Bool?
+
+    /// Можно ли голосовать за подъём: `alive` игроков за столом, `tied` поделили голоса.
+    func allowsLift(tied: Int, alive: Int, sheriffKilledFirst: Bool) -> Bool {
+        guard let liftSplits else { return true }
+        // Подъём всех, кто сидит за столом, не проводится (ФСМ 7.8).
+        guard tied < alive else { return false }
+        if liftAnySplitAfterSheriffKilledFirst == true, sheriffKilledFirst { return true }
+        return liftSplits[alive]?.contains(tied) ?? false
+    }
 }
 
 // MARK: - Ночь
@@ -150,6 +169,10 @@ public struct NightPolicy: Codable, Sendable, Equatable {
     public var doctorMayRepeatTarget: Bool
     /// Массив, а не множество: так JSON правил получается одинаковым при каждом сохранении.
     public var immuneToNightKill: [Role]
+    /// Ничья, если столько ночей подряд никто не покидал стол (ФСМ 7.7). `nil` — без такой ничьей.
+    public var drawAfterQuietNights: Int?
+    /// В первую ночь отстрела дон не проверяет того, в кого стреляла мафия (ФСМ 4.6.9).
+    public var donCannotCheckFirstShotTarget: Bool?
 }
 
 // MARK: - Дисциплина
@@ -163,6 +186,8 @@ public struct DisciplinePolicy: Codable, Sendable, Equatable {
     public var techFoulsToRemoval: Int?
     /// Каждые N предупреждений превращаются в фол. `nil` — предупреждения только фиксируются.
     public var warningsPerFoul: Int?
+    /// На этом фоле игрок теряет половину ближайшей речи (ФСМ 6.4). `nil` — правило не используется.
+    public var foulsToHalveSpeech: Int?
 }
 
 // MARK: - Лучший ход
@@ -179,6 +204,10 @@ public struct BestMovePolicy: Codable, Sendable, Equatable {
     public var eligibility: BestMoveEligibility
     public var defaultSeats: Int
     public var seatsByPlayerCount: [Int: Int]
+    /// Лучшего хода нет, если в первый день по голосованию ушло столько игроков или больше (ФСМ 7.10).
+    public var firstDayLeaversCancellingBestMove: Int?
+    /// Лучший ход и у игрока, выбывшего по голосованию при полном столе — «слом» при десяти (ФСМ 7.13).
+    public var grantsFullTableVoteOut: Bool?
 
     public func maxSeats(playerCount: Int) -> Int {
         seatsByPlayerCount[playerCount] ?? defaultSeats

@@ -10,9 +10,15 @@ extension Transition {
         let policy = rules.discipline
         if let limit = policy.foulsToRemoval, total >= limit {
             try remove(seat, reason: .fouls)
-        } else if let silence = policy.foulsToSilence, total == silence {
+            return
+        }
+        if let silence = policy.foulsToSilence, total == silence {
             state.seats[index].missesNextSpeech = true
             emit(.silenced(seat))
+        }
+        if let halve = policy.foulsToHalveSpeech, total == halve {
+            state.seats[index].halvesNextSpeech = true
+            emit(.speechHalved(seat))
         }
     }
 
@@ -25,15 +31,21 @@ extension Transition {
         if let silence = rules.discipline.foulsToSilence, state.seats[index].fouls < silence {
             state.seats[index].missesNextSpeech = false
         }
+        if let halve = rules.discipline.foulsToHalveSpeech, state.seats[index].fouls < halve {
+            state.seats[index].halvesNextSpeech = false
+        }
         emit(.foulCancelled(seat, total: state.seats[index].fouls))
     }
 
-    mutating func addTechFoul(_ seat: Seat) throws(GameError) {
+    mutating func addTechFoul(_ seat: Seat, kind: TechFoulKind) throws(GameError) {
         try requireInProgress()
         let index = try aliveIndex(of: seat)
-        state.seats[index].techFouls += 1
+        state.seats[index].techFoulKinds.append(kind)
         let total = state.seats[index].techFouls
-        emit(.techFoul(seat, total: total))
+        switch kind {
+        case .ordinary: emit(.techFoul(seat, total: total))
+        case .big: emit(.bigTechFoul(seat, total: total))
+        }
         if let limit = rules.discipline.techFoulsToRemoval, total >= limit {
             try remove(seat, reason: .techFouls)
         }
@@ -43,7 +55,7 @@ extension Transition {
         try requireInProgress()
         let index = try aliveIndex(of: seat)
         guard state.seats[index].techFouls > 0 else { throw .nothingToCancel(seat) }
-        state.seats[index].techFouls -= 1
+        state.seats[index].techFoulKinds.removeLast()
         emit(.techFoulCancelled(seat, total: state.seats[index].techFouls))
     }
 
@@ -67,6 +79,25 @@ extension Transition {
         applyConsequences(ofLeaving: seat, cancelsVoting: rules.voting.cancelOnDayRemoval)
     }
 
+    /// Удаление «на критике» отмечается и после игры: судья решает это, когда видит весь расклад.
+    mutating func markCriticalRemoval(_ seat: Seat, _ isCritical: Bool) throws(GameError) {
+        let index = try index(of: seat)
+        switch state.seats[index].elimination?.cause {
+        case .removed(.fouls), .removed(.disqualified): break
+        default: throw .notRemoved(seat)
+        }
+        state.seats[index].isCriticalRemoval = isCritical
+        emit(.criticalRemovalMarked(seat, isCritical))
+    }
+
+    /// ППК: команда нарушителя проигрывает. Нарушение возможно и в заключительную минуту (ФСМ 6.9.5).
+    mutating func forfeit(_ seat: Seat, note: String?) throws(GameError) {
+        try requireInProgress()
+        let index = try index(of: seat)
+        let winner: Winner = state.seats[index].team == .red ? .black : .red
+        finish(with: GameOutcome(winner: winner, reason: .forfeit(by: seat, note: note)))
+    }
+
     mutating func eliminateByHost(_ seat: Seat, note: String?) throws(GameError) {
         try requireInProgress()
         _ = try aliveIndex(of: seat)
@@ -79,11 +110,17 @@ extension Transition {
     /// пропускаем его ночной шаг и при необходимости отменяем голосование дня.
     private mutating func applyConsequences(ofLeaving seat: Seat, cancelsVoting: Bool) {
         state.nominations.removeAll { $0.candidate == seat }
+        // Удаление ночью или после итогов голосования отменяет ближайшее голосование — завтрашнее.
+        let cancelsTomorrow = cancelsVoting && rules.voting.removalCancelsNextDayVoting == true
 
         switch state.phase {
-        case .nightZero, .finished:
+        case .finished:
+            return
+        case .nightZero:
+            if cancelsTomorrow { state.isNextDayVotingCancelled = true }
             return
         case let .night(progress):
+            if cancelsTomorrow { state.isNextDayVotingCancelled = true }
             moveToAvailableStep(progress, isNewStep: false)
             return
         case .day:
@@ -113,7 +150,7 @@ extension Transition {
                 dropCandidate(seat, from: session)
             }
         case .farewell, .dusk:
-            break
+            if cancelsTomorrow { state.isNextDayVotingCancelled = true }
         }
     }
 }

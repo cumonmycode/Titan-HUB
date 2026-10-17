@@ -35,6 +35,10 @@ public struct GameOutcome: Codable, Sendable, Equatable {
         case allBlackEliminated
         case blackReachedParity
         case declaredByHost(note: String?)
+        /// Несколько ночей подряд никто не покидал стол (ФСМ 7.7).
+        case quietNights(Int)
+        /// ППК: нарушение игрока — поражение его команде (ФСМ 6.9).
+        case forfeit(by: Seat, note: String?)
     }
 
     public let winner: Winner
@@ -179,12 +183,17 @@ public struct GameEvent: Codable, Sendable, Equatable {
         case foul(Seat, total: Int)
         case foulCancelled(Seat, total: Int)
         case techFoul(Seat, total: Int)
+        case bigTechFoul(Seat, total: Int)
         case techFoulCancelled(Seat, total: Int)
         case warning(Seat, total: Int)
         case silenced(Seat)
+        /// 3-й фол: ближайшая речь вдвое короче.
+        case speechHalved(Seat)
+        case criticalRemovalMarked(Seat, Bool)
         case bestMoveAvailable(Seat)
         case bestMove(BestMove)
         case scoreAdjusted(ScoreAdjustment)
+        case protocolRecorded(ColorProtocol)
         case gameFinished(GameOutcome)
     }
 
