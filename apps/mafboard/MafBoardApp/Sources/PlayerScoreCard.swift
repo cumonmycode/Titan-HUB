@@ -161,8 +161,10 @@ private struct PickerRow: View {
         HStack {
             Text(title).font(.subheadline)
             Spacer()
+            // Значение не со шкалы (старые пресеты) тоже показываем — иначе пикер пустой.
+            let options = values.contains(selection.wrappedValue) ? values : (values + [selection.wrappedValue]).sorted { abs($0) < abs($1) }
             Picker(title, selection: selection) {
-                ForEach(values, id: \.self) { Text(Points(hundredths: $0).signed).tag($0) }
+                ForEach(options, id: \.self) { Text(Points(hundredths: $0).signed).tag($0) }
             }
             .pickerStyle(.menu)
             .labelsHidden()

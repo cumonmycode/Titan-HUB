@@ -84,9 +84,11 @@ public struct ScoringPolicy: Codable, Sendable, Equatable {
         protocolScoring: .fsm
     )
 
-    public static func `default`(for format: CompetitionFormat) -> ScoringPolicy {
-        switch format {
-        case .funky, .rating, .miniCup, .tournament: .fsm
+    /// Спортивная мафия — по правилам ФСМ, городская — прежние баллы MafBoard.
+    public static func `default`(for format: CompetitionFormat, variant: GameVariant) -> ScoringPolicy {
+        switch variant {
+        case .sport: .fsm
+        case .city: .standard
         }
     }
 
@@ -331,7 +333,8 @@ public enum GameScorer {
     /// Стол дважды поделился, а все остались: каждый красный за столом получает штраф (ФСМ 4.5.14).
     /// Если шериф убит в первую ночь, деление разрешено и не наказывается.
     private static func doubleSplitPenalties(in record: GameRecord, policy: ScoringPolicy) -> [Seat: ScoreComponent] {
-        guard let penalty = policy.doubleSplitPenalty,
+        // Штраф — часть правил деления ФСМ: без ограничений подъёма (городская) его нет.
+        guard let penalty = policy.doubleSplitPenalty, record.setup.ruleset.voting.liftSplits != nil,
               record.firstKilled.flatMap({ record.seat($0)?.role }) != .sheriff
         else { return [:] }
         // Голосование, прерванное удалением, — не «стол остался после деления».

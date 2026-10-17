@@ -80,7 +80,7 @@ struct ResultsCard: View {
             penalty: Binding(get: { extras(of: seat).penalty }, set: { setExtras(seat, bonus: extras(of: seat).bonus, penalty: $0) }),
             onProtocol: state.mayLeaveProtocol(seat) ? { onProtocol(seat) } : nil,
             onBestMove: state.bestMoveAuthors.contains(seat) ? { onBestMove(seat) } : nil,
-            isCriticalRemoval: isRemoved
+            isCriticalRemoval: isRemoved && record.setup.scoring.criticalRemovalPenalty != nil
                 ? Binding(get: { game.state.seat(seat)?.isCriticalRemoval ?? false },
                           set: { game.perform(.markCriticalRemoval(seat, $0)) })
                 : nil

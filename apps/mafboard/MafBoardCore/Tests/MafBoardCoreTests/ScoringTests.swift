@@ -53,6 +53,21 @@ struct ScoringTests {
         #expect(throws: GameError.notRemoved(1)) { try session.perform(.markCriticalRemoval(1, true)) }
     }
 
+    @Test("Удалённого «на критике» можно вернуть: отметка уходит вместе с удалением")
+    func reinstateCriticalRemoval() throws {
+        var session = try Fixture.session()
+        try session.run(.disqualify(9, note: nil), .markCriticalRemoval(9, true))
+        try session.reinstate(9)
+        #expect(session.state.isAlive(9))
+        #expect(session.state.seat(9)?.isCriticalRemoval == false)
+    }
+
+    @Test("Городская мафия считается по прежним баллам, без штрафа за деление")
+    func cityKeepsStandardScoring() throws {
+        let session = try Fixture.session(ruleset: .city, roles: Fixture.cityRoles)
+        #expect(session.setup.scoring == .standard)
+    }
+
     @Test("Техфол −0.3, большой −0.6, без удвоения и без штрафа за удаление вторым техфолом")
     func techFoulPenalties() throws {
         var session = try Fixture.session()

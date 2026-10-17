@@ -47,6 +47,11 @@ public struct GameSession: Sendable, Equatable {
         }
         var remaining = log
         let removed = remaining.remove(at: index)
+        // Отметка «на критике» относится к этому удалению и без него не имеет смысла.
+        remaining = remaining.enumerated().filter { offset, entry in
+            guard offset >= index, case let .markCriticalRemoval(target, _) = entry.action else { return true }
+            return target != seat
+        }.map(\.element)
         let replayed: GameState
         do {
             replayed = try Self.replay(setup: setup, log: remaining)

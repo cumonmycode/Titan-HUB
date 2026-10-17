@@ -185,8 +185,9 @@ struct PlayerCard: View {
             }
             if let critical = scoring.criticalRemovalPenalty {
                 Button("Дисквалифицировать на критике (\((-critical).signed))", role: .destructive) {
-                    game.perform(.disqualify(seat.seat, note: nil))
-                    game.perform(.markCriticalRemoval(seat.seat, true))
+                    if game.perform(.disqualify(seat.seat, note: nil)) {
+                        game.perform(.markCriticalRemoval(seat.seat, true))
+                    }
                 }
             }
             Button("Выбыл по решению ведущего") { game.perform(.eliminateByHost(seat.seat, note: nil)) }

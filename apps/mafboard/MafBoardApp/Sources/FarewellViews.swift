@@ -89,7 +89,7 @@ struct BestMoveSheet: View {
     var body: some View {
         NavigationStack {
             VStack(alignment: .leading, spacing: 16) {
-                Text("№\(author) \(game.name(of: author)) называет до \(limit) номеров, кого считает чёрными. Изменить или дописать номера потом нельзя.")
+                Text("№\(author) \(game.name(of: author)) называет до \(limit) номеров, кого считает чёрными. Названные номера по правилам не меняются — правка здесь только для ошибки ввода.")
                     .foregroundStyle(.secondary)
                 Keypad(count: game.state.seats.count) { number in
                     let seat = Seat(number)
@@ -112,8 +112,7 @@ struct BestMoveSheet: View {
                 ToolbarItem(placement: .cancellationAction) { Button("Отмена", systemImage: "xmark") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Принято", systemImage: "checkmark") {
-                        game.perform(.recordBestMoveBy(author: author, seats: selected.sorted()))
-                        dismiss()
+                        if game.perform(.recordBestMoveBy(author: author, seats: selected.sorted())) { dismiss() }
                     }
                     .disabled(selected.isEmpty)
                 }
@@ -223,8 +222,7 @@ struct ProtocolSheet: View {
                 ToolbarItem(placement: .cancellationAction) { Button("Отмена", systemImage: "xmark") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Готово", systemImage: "checkmark") {
-                        game.perform(.recordProtocol(draft))
-                        dismiss()
+                        if game.perform(.recordProtocol(draft)) { dismiss() }
                     }
                     .disabled(marks.isEmpty)
                 }

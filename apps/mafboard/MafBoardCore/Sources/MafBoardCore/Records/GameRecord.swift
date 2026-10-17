@@ -130,7 +130,7 @@ public struct Series: Identifiable, Codable, Sendable, Equatable {
         self.title = title
         self.format = format
         self.ruleset = ruleset ?? variant.defaultRuleset
-        self.scoring = scoring ?? .default(for: format)
+        self.scoring = scoring ?? .default(for: format, variant: variant)
         self.createdAt = createdAt
         closedAt = nil
     }

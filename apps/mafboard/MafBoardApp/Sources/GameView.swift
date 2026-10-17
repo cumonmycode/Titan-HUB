@@ -41,13 +41,15 @@ final class GameController: Identifiable {
         profile(at: seat)?.nickname ?? "Игрок \(seat)"
     }
 
-    func perform(_ action: GameAction) {
+    /// Возвращает `false`, если движок отклонил действие (ошибка уже показана ведущему).
+    @discardableResult
+    func perform(_ action: GameAction) -> Bool {
         let step = state.currentStep
         do throws(GameError) {
             try session.perform(action)
         } catch {
             errorMessage = error.message
-            return
+            return false
         }
         if case .night(.check) = action, case let .check(check)? = state.events.last(where: \.isCheck)?.kind {
             checkResult = check
@@ -56,6 +58,7 @@ final class GameController: Identifiable {
         save()
         // Законченная игра (и любые правки после конца — доп. баллы, лучший ход) — в историю и на сервер.
         if state.isFinished, let record { onFinish?(record, players) }
+        return true
     }
 
     func undo() {

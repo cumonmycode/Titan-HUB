@@ -46,7 +46,7 @@ public struct GameSetup: Sendable, Equatable {
         self.gameID = gameID
         self.format = format
         self.ruleset = ruleset
-        self.scoring = scoring ?? .default(for: format)
+        self.scoring = scoring ?? .default(for: format, variant: ruleset.variant)
         self.seriesID = seriesID
         self.host = host
         self.seats = zip(players, roles).enumerated().map { index, pair in
