@@ -38,6 +38,18 @@ struct FSMRulesTests {
         #expect(scores[3]?.total == 0)
     }
 
+    @Test("Голосование после двух делений прервано удалением — штрафа нет")
+    func abortedDoubleSplitIsNotPenalized() throws {
+        var session = try Fixture.session()
+        try session.advance(times: 2)
+        try session.speak(nominating: [(3, 1), (8, 2)])
+        let split = Ballot.handCount([CandidateVotes(3, votes: 5), CandidateVotes(8, votes: 5)])
+        try session.run(.submitBallot(split), .advance, .advance, .submitBallot(split), .disqualify(9, note: nil))
+        #expect(session.state.votings.last?.skipReason == .cancelledByRemoval)
+        try session.run(.declareOutcome(.red, note: nil))
+        #expect(try scoresBySeat(session)[1]?.total == 1)
+    }
+
     @Test("Деление троих при девяти: подъёма нет и красным −0.3, а после убитого шерифа — подъём без штрафа")
     func threeWaySplitAtNine() throws {
         for (victim, sheriffKilled) in [(1 as Seat, false), (4 as Seat, true)] {

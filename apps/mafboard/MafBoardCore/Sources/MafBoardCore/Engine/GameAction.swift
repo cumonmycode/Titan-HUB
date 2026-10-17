@@ -41,6 +41,8 @@ public enum GameAction: Codable, Sendable, Equatable {
     /// Ручное объявление результата (ППК, ничья по регламенту и т.п.).
     case declareOutcome(Winner, note: String?)
     case adjustScore(ScoreAdjustment)
+    /// Допбаллы игрока целиком: заменяют все прежние корректировки этого игрока (правка итогов после игры).
+    case setScoreAdjustments(Seat, [ScoreAdjustment])
 }
 
 /// Голоса одного круга голосования.

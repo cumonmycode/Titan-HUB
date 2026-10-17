@@ -193,6 +193,7 @@ public struct GameEvent: Codable, Sendable, Equatable {
         case bestMoveAvailable(Seat)
         case bestMove(BestMove)
         case scoreAdjusted(ScoreAdjustment)
+        case scoreAdjustmentsSet(Seat, [ScoreAdjustment])
         case protocolRecorded(ColorProtocol)
         case gameFinished(GameOutcome)
     }

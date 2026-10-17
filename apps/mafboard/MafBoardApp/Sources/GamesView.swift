@@ -483,13 +483,7 @@ struct FinishedGameView: View {
 
     private var record: GameRecord { game.record }
 
-    private var reason: String {
-        switch record.outcome.reason {
-        case .allBlackEliminated: "Все чёрные выбыли"
-        case .blackReachedParity: "Чёрных не меньше, чем красных"
-        case let .declaredByHost(note): note ?? "Итог объявил ведущий"
-        }
-    }
+    private var reason: String { record.outcome.reason.text }
 
     var body: some View {
         let winner = record.outcome.winner
@@ -517,13 +511,24 @@ struct FinishedGameView: View {
                 }
                 .contentCard(padding: 18)
 
-                if let bestMove = record.bestMove {
+                ForEach(record.bestMoves, id: \.author) { bestMove in
                     let guessed = bestMove.seats.filter { record.seat($0)?.team == .black }.count
                     VStack(alignment: .leading, spacing: 6) {
                         Label("Лучший ход игрока №\(bestMove.author)", systemImage: "star.fill").font(.headline)
                         Text("Назвал \(bestMove.seats.map { "№\($0)" }.joined(separator: ", ")) — угадано чёрных: \(guessed)")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
+                    }
+                    .contentCard()
+                }
+                if !record.protocols.isEmpty {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Label("Протоколы", systemImage: "list.clipboard.fill").font(.headline)
+                        ForEach(record.protocols, id: \.author) { proto in
+                            Text("№\(proto.author): " + proto.summary.lowercased())
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                     .contentCard()
                 }
@@ -540,17 +545,12 @@ struct FinishedGameView: View {
                 }
                 .buttonStyle(.plain)
 
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("Игроки").font(.title3.bold())
-                    VStack(spacing: 0) {
-                        let scores = GameScorer.score(record)
-                        ForEach(Array(scores.enumerated()), id: \.element.id) { index, score in
-                            ResultLine(score: score, player: game.profile(at: score.seat), isWinner: score.result == .win)
-                            if index < scores.count - 1 { Divider().padding(.leading, 52) }
-                        }
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Игроки и баллы").font(.title3.bold()).padding(.horizontal, 4)
+                    ForEach(GameScorer.score(record)) { score in
+                        PlayerScoreCard(score: score, player: game.profile(at: score.seat), status: record.scoreStatus(of: score.seat))
                     }
                 }
-                .contentCard(padding: 18)
             }
             .padding(.horizontal)
             .padding(.bottom, 24)
@@ -558,30 +558,5 @@ struct FinishedGameView: View {
         .ambientBackground()
         .navigationTitle("Игра \(number)")
         .navigationBarTitleDisplayMode(.inline)
-    }
-}
-
-private struct ResultLine: View {
-    let score: PlayerGameScore
-    let player: PlayerProfile?
-    let isWinner: Bool
-
-    var body: some View {
-        let name = player?.nickname ?? "Игрок \(score.seat)"
-        HStack(spacing: 12) {
-            PlayerAvatar(name: name, url: player?.avatarURL, seat: score.seat.number, size: 36)
-            VStack(alignment: .leading, spacing: 1) {
-                HStack(spacing: 4) {
-                    Text(name).lineLimit(1)
-                    if isWinner { Image(systemName: "checkmark.seal.fill").font(.caption).foregroundStyle(.green) }
-                }
-                Text(score.role.displayName).font(.caption.weight(.medium)).foregroundStyle(score.role.team.tint)
-            }
-            Spacer()
-            if score.bonus > .zero { Text("+\(score.bonus.description)").font(.caption).foregroundStyle(.green) }
-            if score.penalty > .zero { Text("−\(score.penalty.description)").font(.caption).foregroundStyle(.red) }
-            Text(score.total.description).font(.headline).monospacedDigit().frame(minWidth: 32, alignment: .trailing)
-        }
-        .padding(.vertical, 8)
     }
 }

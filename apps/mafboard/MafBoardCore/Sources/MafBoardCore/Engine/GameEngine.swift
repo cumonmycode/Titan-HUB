@@ -85,6 +85,7 @@ struct Transition {
         case let .recordBestMoveBy(author, seats): try recordBestMove(seats, by: author)
         case let .declareOutcome(winner, note): try declareOutcome(winner, note: note)
         case let .adjustScore(adjustment): try adjustScore(adjustment)
+        case let .setScoreAdjustments(seat, adjustments): try setScoreAdjustments(adjustments, for: seat)
         case let .recordProtocol(proto): try recordProtocol(proto)
         }
     }
@@ -181,6 +182,14 @@ struct Transition {
         _ = try index(of: adjustment.seat)
         state.scoreAdjustments.append(adjustment)
         emit(.scoreAdjusted(adjustment))
+    }
+
+    mutating func setScoreAdjustments(_ adjustments: [ScoreAdjustment], for seat: Seat) throws(GameError) {
+        _ = try index(of: seat)
+        if let stranger = adjustments.first(where: { $0.seat != seat }) { throw .unknownSeat(stranger.seat) }
+        state.scoreAdjustments.removeAll { $0.seat == seat }
+        state.scoreAdjustments.append(contentsOf: adjustments.filter { $0.points != .zero })
+        emit(.scoreAdjustmentsSet(seat, adjustments))
     }
 }
 

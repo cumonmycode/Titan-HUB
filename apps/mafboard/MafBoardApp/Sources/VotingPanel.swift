@@ -71,6 +71,8 @@ struct KeypadKey: View {
     var style: Style = .normal
     /// Компактная клавиша — для выставления в карточке игрока.
     var isCompact = false
+    /// Цвет выбранной клавиши (например, чёрный или красный в протоколе).
+    var tint: Color?
     let action: () -> Void
 
     var body: some View {
@@ -87,7 +89,7 @@ struct KeypadKey: View {
         Group {
             switch style {
             case .selected:
-                Button(action: action) { label }.buttonStyle(.glassProminent)
+                Button(action: action) { label }.buttonStyle(.glassProminent).tint(tint)
             case .marked:
                 Button(action: action) { label.foregroundStyle(.secondary) }.buttonStyle(.glass)
             case .normal:
@@ -223,6 +225,131 @@ private struct CandidateChip: View {
     }
 }
 
+// MARK: - Простой режим: число голосов
+
+/// Простой режим голосования: за каждого кандидата — одно нажатие на число голосов.
+/// В спортивной мафии последний выставленный получает остаток: не проголосовавшие голосуют за него (ФСМ 4.5.8).
+struct CountVotingPanel: View {
+    let game: GameController
+    let candidates: [Seat]
+    let kind: VotingRoundKind
+    @State private var counts: [Seat: Int] = [:]
+    @State private var current: Seat?
+
+    private var state: GameState { game.state }
+    private var voters: Int { state.aliveSeats.count }
+    private var autoLast: Bool { state.ruleset.voting.abstainersVoteForLastCandidate && candidates.count > 1 }
+    /// Кандидаты, за которых голоса вводит ведущий (последнему при `autoLast` достаётся остаток).
+    private var entered: [Seat] { autoLast ? Array(candidates.dropLast()) : candidates }
+    private var given: Int { entered.reduce(0) { $0 + (counts[$1] ?? 0) } }
+    private var remainder: Int { max(0, voters - given) }
+    private var selected: Seat? {
+        current ?? entered.first { counts[$0] == nil } ?? entered.last
+    }
+
+    private func votes(for candidate: Seat) -> Int? {
+        if autoLast, candidate == candidates.last { return remainder }
+        return counts[candidate]
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            ScrollView(.horizontal) {
+                HStack(spacing: 8) {
+                    ForEach(candidates, id: \.self) { candidate in
+                        let isAuto = autoLast && candidate == candidates.last
+                        Button {
+                            withAnimation(.snappy) { current = candidate }
+                        } label: {
+                            CountChip(
+                                seat: candidate, name: game.name(of: candidate), votes: votes(for: candidate),
+                                caption: isAuto ? "остаток" : nil, isSelected: candidate == selected
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(isAuto)
+                    }
+                }
+                .padding(.vertical, 2)
+            }
+            .scrollIndicators(.hidden)
+
+            if let selected {
+                Text("Сколько голосов за №\(selected) \(game.name(of: selected))?").font(.headline)
+                CountPad(maximum: autoLast ? remainder + (counts[selected] ?? 0) : voters, selected: counts[selected]) { number in
+                    counts[selected] = number
+                    advance(from: selected)
+                }
+            }
+
+            if autoLast, let last = candidates.last {
+                Text("За №\(last) — остальные \(remainder): не проголосовавшие отдают голос последней кандидатуре.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+
+            Button {
+                var ballot = entered.map { CandidateVotes($0, votes: counts[$0] ?? 0) }
+                if autoLast, let last = candidates.last { ballot.append(CandidateVotes(last, votes: remainder)) }
+                game.perform(.submitBallot(.handCount(ballot)))
+            } label: {
+                Label("Подсчитать", systemImage: "checkmark").frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.glassProminent)
+            .controlSize(.large)
+        }
+        .gameCard()
+    }
+
+    /// После ввода — к следующему кандидату без голосов.
+    private func advance(from seat: Seat) {
+        guard let index = entered.firstIndex(of: seat) else { return }
+        let next = entered[(index + 1)...].first { counts[$0] == nil }
+        withAnimation(.snappy) { current = next ?? seat }
+    }
+}
+
+/// Числа голосов крупными клавишами: 0–5 и 6–10 — одно нажатие.
+struct CountPad: View {
+    let maximum: Int
+    let selected: Int?
+    let onPick: (Int) -> Void
+
+    private static let columns = 6
+
+    var body: some View {
+        let numbers = Array(0...max(0, maximum))
+        GlassEffectContainer(spacing: 8) {
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: Self.columns), spacing: 8) {
+                ForEach(numbers, id: \.self) { number in
+                    KeypadKey(number: number, style: number == selected ? .selected : .normal) { onPick(number) }
+                }
+            }
+        }
+    }
+}
+
+private struct CountChip: View {
+    let seat: Seat
+    let name: String
+    let votes: Int?
+    let caption: String?
+    let isSelected: Bool
+
+    var body: some View {
+        VStack(spacing: 2) {
+            Text("№\(seat)").font(.headline).monospacedDigit()
+            Text(caption ?? name).font(.caption).lineLimit(1)
+            Text(votes.map(String.init) ?? "—").font(.title3.bold()).monospacedDigit().contentTransition(.numericText())
+        }
+        .frame(minWidth: 76)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .foregroundStyle(isSelected ? AnyShapeStyle(.white) : AnyShapeStyle(.primary))
+        .background(isSelected ? AnyShapeStyle(.tint) : AnyShapeStyle(Color(.tertiarySystemFill)), in: .rect(cornerRadius: 16, style: .continuous))
+    }
+}
+
 // MARK: - «Поднять всех»
 
 /// Голосование «поднять всех»: отмечаете голосующих «за»; больше половины живых — выбывают все кандидаты.
@@ -230,10 +357,14 @@ struct LiftPanel: View {
     let game: GameController
     let candidates: [Seat]
     @State private var voters: Set<Seat> = []
+    /// Простой режим: только число «за».
+    @State private var count: Int?
 
     private var state: GameState { game.state }
     private var alive: Int { state.aliveSeats.count }
-    private var passes: Bool { voters.count * 2 > alive }
+    private var isSimple: Bool { state.ruleset.voting.ballotStyle == .handCount }
+    private var liftVotes: Int { isSimple ? count ?? 0 : voters.count }
+    private var passes: Bool { liftVotes * 2 > alive }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -242,22 +373,26 @@ struct LiftPanel: View {
             Text("Кто за? Нужно больше половины живых — \(alive / 2 + 1) из \(alive).")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
-            Keypad(count: state.seats.count) { number in
-                let seat = Seat(number)
-                let style: KeypadKey.Style = !state.isAlive(seat) ? .disabled : (voters.contains(seat) ? .selected : .normal)
-                KeypadKey(number: number, style: style) {
-                    if voters.contains(seat) { voters.remove(seat) } else { voters.insert(seat) }
+            if isSimple {
+                CountPad(maximum: alive, selected: count) { count = $0 }
+            } else {
+                Keypad(count: state.seats.count) { number in
+                    let seat = Seat(number)
+                    let style: KeypadKey.Style = !state.isAlive(seat) ? .disabled : (voters.contains(seat) ? .selected : .normal)
+                    KeypadKey(number: number, style: style) {
+                        if voters.contains(seat) { voters.remove(seat) } else { voters.insert(seat) }
+                    }
                 }
             }
             HStack {
-                Text("За: \(voters.count) из \(alive)").font(.headline).monospacedDigit()
+                Text("За: \(liftVotes) из \(alive)").font(.headline).monospacedDigit()
                 Spacer()
                 Text(passes ? "Выбывают" : "Остаются")
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(passes ? .red : .green)
             }
             Button {
-                game.perform(.submitBallot(.lift(voters: voters.sorted())))
+                game.perform(.submitBallot(isSimple ? .liftCount(liftVotes) : .lift(voters: voters.sorted())))
             } label: {
                 Label("Подсчитать", systemImage: "checkmark").frame(maxWidth: .infinity)
             }

@@ -22,8 +22,18 @@ final class NewGameDraft {
     /// Роли по местам после раздачи.
     var roles: [Role] = []
 
+    /// «Простой режим» спортивной мафии: в голосовании вводится число голосов, а не кто голосовал.
+    /// Запоминается на телефоне для всех следующих игр.
+    static let simpleVotingKey = "sportSimpleVoting"
+
     var playerCount: Int { variant == .sport ? 10 : cityCount }
-    var ruleset: Ruleset { variant.defaultRuleset }
+    var ruleset: Ruleset {
+        var rules = variant.defaultRuleset
+        if variant == .sport {
+            rules.voting.ballotStyle = UserDefaults.standard.bool(forKey: Self.simpleVotingKey) ? .handCount : .perVoter
+        }
+        return rules
+    }
     var taken: Set<PlayerID> { Set(slots.compactMap { $0.player?.id }) }
     var filled: Int { slots.filter { $0.player != nil }.count }
     var freeSeats: Int { playerCount - filled }
@@ -129,6 +139,7 @@ private struct GameTypeStep: View {
     let onNext: () -> Void
     @Environment(NewGameDraft.self) private var draft
     @Environment(\.dismiss) private var dismiss
+    @AppStorage(NewGameDraft.simpleVotingKey) private var isSimpleVoting = false
 
     var body: some View {
         List {
@@ -141,6 +152,12 @@ private struct GameTypeStep: View {
                         VariantCard(variant: variant)
                     }
                     .foregroundStyle(.primary)
+                    if variant == .sport {
+                        Toggle(isOn: $isSimpleVoting) {
+                            Text("Простой режим")
+                            Text("В голосовании — только число голосов за кандидата, без отметки, кто голосовал")
+                        }
+                    }
                 }
             }
         }
@@ -161,7 +178,7 @@ private struct VariantCard: View {
     private var icon: String { variant == .sport ? "person.3.sequence.fill" : "building.2.fill" }
     private var facts: [String] {
         switch variant {
-        case .sport: ["10 игроков", "Выставления, попил и «поднять всех»", "Дон, две мафии, шериф"]
+        case .sport: ["10 игроков", "Правила ФСМ: выставления, деление и подъём", "Дон, две мафии, шериф"]
         case .city: ["8–20 игроков", "Голосование за всех живых", "Доктор, маньяк и другие роли"]
         }
     }

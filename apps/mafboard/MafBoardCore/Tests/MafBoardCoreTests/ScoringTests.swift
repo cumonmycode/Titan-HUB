@@ -85,6 +85,24 @@ struct ScoringTests {
         #expect(scores[3]?.total == 1)
     }
 
+    @Test("Допбаллы игрока можно задать заново после игры — прежние заменяются")
+    func setAdjustmentsReplaces() throws {
+        var session = try Fixture.session()
+        try session.run(
+            .declareOutcome(.red, note: nil),
+            .adjustScore(ScoreAdjustment(seat: 5, points: 0.2, note: "Доп. балл")),
+            .adjustScore(ScoreAdjustment(seat: 5, points: -0.3, note: "Минус")),
+            .adjustScore(ScoreAdjustment(seat: 7, points: 0.4, note: "Доп. балл")),
+            .setScoreAdjustments(5, [ScoreAdjustment(seat: 5, points: 0.6, note: "Доп. балл"), ScoreAdjustment(seat: 5, points: 0, note: "Минус")])
+        )
+        let scores = try scoresBySeat(session)
+        #expect(scores[5]?.total == 1.6)
+        #expect(scores[7]?.total == 1.4)
+        #expect(throws: GameError.unknownSeat(7)) {
+            try session.perform(.setScoreAdjustments(5, [ScoreAdjustment(seat: 7, points: 0.2, note: "")]))
+        }
+    }
+
     @Test("Ничья: плюсы не начисляются, штрафы остаются")
     func drawCancelsBonuses() throws {
         var session = try Fixture.session()

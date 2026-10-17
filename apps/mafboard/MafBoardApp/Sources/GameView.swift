@@ -43,7 +43,6 @@ final class GameController: Identifiable {
 
     func perform(_ action: GameAction) {
         let step = state.currentStep
-        let wasFinished = state.isFinished
         do throws(GameError) {
             try session.perform(action)
         } catch {
@@ -166,13 +165,17 @@ private extension GameAction {
         case let .foul(seat): "фол №\(seat)"
         case let .cancelFoul(seat): "снятие фола №\(seat)"
         case let .techFoul(seat): "техфол №\(seat)"
+        case let .bigTechFoul(seat): "большой техфол №\(seat)"
         case let .cancelTechFoul(seat): "снятие техфола №\(seat)"
         case let .warning(seat): "предупреждение №\(seat)"
         case let .disqualify(seat, _): "удаление №\(seat)"
         case let .eliminateByHost(seat, _): "выбывание №\(seat)"
-        case .recordBestMove: "лучший ход"
+        case let .markCriticalRemoval(seat, _): "«на критике» №\(seat)"
+        case .forfeit: "ППК"
+        case .recordBestMove, .recordBestMoveBy: "лучший ход"
+        case let .recordProtocol(proto): "протокол №\(proto.author)"
         case .declareOutcome: "итог игры"
-        case .adjustScore: "баллы"
+        case .adjustScore, .setScoreAdjustments: "баллы"
         }
     }
 }
@@ -187,7 +190,9 @@ struct GameScreen: View {
     @State private var isShowingLog = false
     /// Раскрытые карточки: говорящий раскрыт всегда, остальные — по касанию, независимо друг от друга.
     @State private var expanded: Set<Seat> = []
-    @State private var isPickingBestMove = false
+    @State private var bestMovePick: SeatPick?
+    @State private var protocolPick: SeatPick?
+    @State private var forfeitPick: SeatPick?
 
     private var state: GameState { game.state }
 
@@ -202,16 +207,21 @@ struct GameScreen: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 12) {
-                    PhaseHeader(game: game) { isPickingBestMove = true }
+                    PhaseHeader(game: game) { bestMovePick = SeatPick(seat: $0) }
                     stepContent
                     if !state.isFinished {
                         VStack(spacing: 8) {
                             ForEach(state.seats) { seat in
-                                PlayerCard(game: game, seat: seat, isExpanded: expanded.contains(seat.seat)) {
-                                    withAnimation(.snappy) {
-                                        if expanded.contains(seat.seat) { expanded.remove(seat.seat) } else { expanded.insert(seat.seat) }
-                                    }
-                                }
+                                PlayerCard(
+                                    game: game, seat: seat, isExpanded: expanded.contains(seat.seat),
+                                    onToggle: {
+                                        withAnimation(.snappy) {
+                                            if expanded.contains(seat.seat) { expanded.remove(seat.seat) } else { expanded.insert(seat.seat) }
+                                        }
+                                    },
+                                    onBestMove: { bestMovePick = SeatPick(seat: seat.seat) },
+                                    onProtocol: { protocolPick = SeatPick(seat: seat.seat) }
+                                )
                             }
                         }
                     }
@@ -230,7 +240,27 @@ struct GameScreen: View {
                     if let speaker { expanded.insert(speaker) }
                 }
             }
-            .sheet(isPresented: $isPickingBestMove) { BestMoveSheet(game: game) }
+            // Лучший ход записывают перед заключительной минутой — лист открывается сам.
+            .onChange(of: state.currentStep, initial: true) { _, step in
+                if case let .farewell(seat) = step, state.awaitsBestMove(from: seat) {
+                    bestMovePick = SeatPick(seat: seat)
+                }
+            }
+            .sheet(item: $bestMovePick) { BestMoveSheet(game: game, author: $0.seat) }
+            .sheet(item: $protocolPick) { ProtocolSheet(game: game, author: $0.seat) }
+            .confirmationDialog(
+                forfeitPick.map { "ППК: нарушение №\($0.seat) \(game.name(of: $0.seat))?" } ?? "",
+                isPresented: Binding(get: { forfeitPick != nil }, set: { if !$0 { forfeitPick = nil } }),
+                titleVisibility: .visible,
+                presenting: forfeitPick
+            ) { pick in
+                Button("Присудить поражение команде (\((-(state.setup.scoring.forfeitPenalty ?? .zero)).signed))", role: .destructive) {
+                    game.perform(.forfeit(pick.seat, note: nil))
+                }
+            } message: { pick in
+                let team = state.seat(pick.seat)?.team == .black ? "чёрных" : "красных"
+                Text("Клятва, пари, шантаж, подсказки из зала — команда \(team) проигрывает (ФСМ 6.9).")
+            }
             .sheet(isPresented: $isShowingLog) {
                 NavigationStack {
                     GameLogView(events: game.state.events) { game.name(of: $0) }
@@ -265,8 +295,14 @@ struct GameScreen: View {
     private var stepContent: some View {
         switch state.currentStep {
         case let .ballot(candidates, kind):
-            VotingPanel(game: game, candidates: candidates, kind: kind)
-                .id("\(candidates)|\(kind.rawValue)")
+            Group {
+                if state.ruleset.voting.ballotStyle == .handCount {
+                    CountVotingPanel(game: game, candidates: candidates, kind: kind)
+                } else {
+                    VotingPanel(game: game, candidates: candidates, kind: kind)
+                }
+            }
+            .id("\(candidates)|\(kind.rawValue)")
         case let .liftBallot(candidates):
             LiftPanel(game: game, candidates: candidates)
         case let .timed(_, speaker) where speaker == nil:
@@ -277,7 +313,8 @@ struct GameScreen: View {
             if let record = game.record {
                 ResultsCard(
                     game: game, record: record,
-                    onBestMove: { isPickingBestMove = true },
+                    onBestMove: { bestMovePick = SeatPick(seat: $0) },
+                    onProtocol: { protocolPick = SeatPick(seat: $0) },
                     onNextGame: onNextGame.map { next in { next(); dismiss() } }
                 )
             }
@@ -297,8 +334,21 @@ struct GameScreen: View {
                 game.showsRoles.toggle()
             }
             Menu("Ещё", systemImage: "ellipsis") {
-                if state.bestMoveAuthor != nil, state.bestMove == nil {
-                    Button("Лучший ход", systemImage: "star") { isPickingBestMove = true }
+                ForEach(state.pendingBestMoveAuthors, id: \.self) { author in
+                    Button("Лучший ход №\(author)", systemImage: "star") { bestMovePick = SeatPick(seat: author) }
+                }
+                let protocolAuthors = state.seats.map(\.seat).filter(state.mayLeaveProtocol)
+                if !protocolAuthors.isEmpty {
+                    Menu("Протокол", systemImage: "list.clipboard") {
+                        ForEach(protocolAuthors, id: \.self) { author in
+                            Button("№\(author) \(game.name(of: author))") { protocolPick = SeatPick(seat: author) }
+                        }
+                    }
+                }
+                Menu("ППК", systemImage: "exclamationmark.octagon") {
+                    ForEach(state.seats) { seat in
+                        Button("№\(seat.seat) \(game.name(of: seat.seat))") { forfeitPick = SeatPick(seat: seat.seat) }
+                    }
                 }
                 Section("Завершить вручную") {
                     ForEach([Winner.red, .black, .draw], id: \.self) { winner in

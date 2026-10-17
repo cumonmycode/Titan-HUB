@@ -283,20 +283,30 @@ public enum GameScorer {
     }
 
     private static func protocolComponents(for seat: SeatState, in record: GameRecord, policy: ScoringPolicy) -> [ScoreComponent] {
-        guard let scoring = policy.protocolScoring,
-              let proto = record.protocols.first(where: { $0.author == seat.seat })
+        guard let proto = record.protocols.first(where: { $0.author == seat.seat }),
+              let points = protocolPoints(proto, seats: record.seats, nights: record.nights, policy: policy)
         else { return [] }
-        let blacks = Set(record.seats.filter { $0.team == .black }.map(\.seat))
-        let isFirstKilled = record.firstKilled == seat.seat
+        return [ScoreComponent(kind: .colorProtocol(firstKilled: record.firstKilled == seat.seat), points: points)]
+    }
+
+    /// Баллы за протокол. Работает и для идущей игры — ведущий видит оценку сразу. `nil` — протокол не оценивается.
+    public static func protocolPoints(
+        _ proto: ColorProtocol,
+        seats: [SeatState],
+        nights: [NightReport],
+        policy: ScoringPolicy
+    ) -> Points? {
+        guard let scoring = policy.protocolScoring else { return nil }
+        let blacks = Set(seats.filter { $0.team == .black }.map(\.seat))
         // Шериф не получает плюс за красных, которых сам проверил (ФСМ 8.3.9.9).
-        let checkedReds = seat.role == .sheriff
-            ? Set(record.nights.flatMap(\.actions.checks).filter { $0.by == seat.seat && $0.checker == .sheriff && !$0.isPositive }.map(\.target))
+        let isSheriff = seats.first { $0.seat == proto.author }?.role == .sheriff
+        let checkedReds = isSheriff
+            ? Set(nights.flatMap(\.actions.checks).filter { $0.by == proto.author && $0.checker == .sheriff && !$0.isPositive }.map(\.target))
             : []
-        let points = scoring.points(
-            for: proto, blacks: blacks, sheriff: record.seats.first { $0.role == .sheriff }?.seat,
-            unscoredReds: checkedReds, isFirstKilled: isFirstKilled
+        return scoring.points(
+            for: proto, blacks: blacks, sheriff: seats.first { $0.role == .sheriff }?.seat,
+            unscoredReds: checkedReds, isFirstKilled: nights.firstKilled == proto.author
         )
-        return [ScoreComponent(kind: .colorProtocol(firstKilled: isFirstKilled), points: points)]
     }
 
     private static func disciplineComponents(for seat: SeatState, in record: GameRecord, policy: ScoringPolicy) -> [ScoreComponent] {
@@ -324,8 +334,10 @@ public enum GameScorer {
         guard let penalty = policy.doubleSplitPenalty,
               record.firstKilled.flatMap({ record.seat($0)?.role }) != .sheriff
         else { return [:] }
+        // Голосование, прерванное удалением, — не «стол остался после деления».
         let splitDays = record.votings.filter { voting in
-            voting.eliminated.isEmpty && voting.rounds.filter { $0.kind != .lift && $0.leaders.count > 1 }.count >= 2
+            voting.skipReason == nil && voting.eliminated.isEmpty
+                && voting.rounds.filter { $0.kind != .lift && $0.leaders.count > 1 }.count >= 2
         }.map(\.day)
         var result: [Seat: ScoreComponent] = [:]
         for seat in record.seats where seat.team == .red {

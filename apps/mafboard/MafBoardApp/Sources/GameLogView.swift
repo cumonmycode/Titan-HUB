@@ -112,6 +112,16 @@ private extension GameEvent {
             return line("arrow.uturn.backward", .secondary, "Снят фол \(who(seat)), осталось \(total)")
         case let .techFoul(seat, total):
             return line("exclamationmark.triangle.fill", .red, "Техфол \(who(seat)) — \(total)-й")
+        case let .bigTechFoul(seat, total):
+            return line("exclamationmark.octagon.fill", .red, "Большой техфол \(who(seat)) — \(total)-й")
+        case let .speechHalved(seat):
+            return line("timer", .orange, "\(who(seat)): 3 фола — ближайшая речь полминуты")
+        case let .criticalRemovalMarked(seat, isCritical):
+            return line("person.fill.xmark", .red, isCritical ? "Удаление \(who(seat)) — на критике" : "Удаление \(who(seat)) — не на критике")
+        case let .bestMoveAvailable(seat):
+            return line("star", .yellow, "\(who(seat)) получает право лучшего хода")
+        case let .protocolRecorded(proto):
+            return line("list.clipboard.fill", .accentColor, "Протокол \(who(proto.author)): " + proto.summary.lowercased())
         case let .techFoulCancelled(seat, total):
             return line("arrow.uturn.backward", .secondary, "Снят техфол \(who(seat)), осталось \(total)")
         case let .warning(seat, total):
@@ -122,11 +132,14 @@ private extension GameEvent {
             return line("speaker.slash", .secondary, "\(who(seat)) пропускает речь")
         case let .bestMove(move):
             return line("star.fill", .yellow, "Лучший ход №\(move.author): " + move.seats.map { "№\($0)" }.joined(separator: ", "))
+        case let .scoreAdjustmentsSet(seat, adjustments):
+            let values = adjustments.filter { $0.points != .zero }.map(\.points.signed)
+            return line("plusminus.circle.fill", .accentColor, "Допбаллы \(who(seat)): " + (values.isEmpty ? "нет" : values.joined(separator: ", ")))
         case let .scoreAdjusted(adjustment):
             let sign = adjustment.points > .zero ? "+" : ""
             return line("plusminus.circle.fill", .accentColor, "Баллы \(who(adjustment.seat)): \(sign)\(adjustment.points.description)")
         case let .gameFinished(outcome):
-            return line("flag.checkered", outcome.winner.dot, outcome.winner.displayName)
+            return line("flag.checkered", outcome.winner.dot, "\(outcome.winner.displayName). \(outcome.reason.text)")
         default:
             return nil
         }
