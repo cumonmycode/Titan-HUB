@@ -141,7 +141,7 @@ struct NewGameFlow: View {
             draft.choose(variant: evening.variant)
             draft.format = evening.format
             draft.evening = evening
-            draft.seat(evening.lastPlayers)
+            draft.seat(library.lastLineup(of: evening))
             path = [.format, .players]
         }
     }
@@ -256,7 +256,7 @@ private struct FormatStep: View {
         ) { evening in
             Button("Продолжить «\(evening.title)»") {
                 draft.evening = evening
-                if draft.filled == 0 { draft.seat(evening.lastPlayers) }
+                if draft.filled == 0 { draft.seat(library.lastLineup(of: evening)) }
                 onNext()
             }
             Button("Начать новую серию") {

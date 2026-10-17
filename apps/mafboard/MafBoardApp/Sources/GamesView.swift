@@ -266,6 +266,7 @@ private struct FolderCard: View {
     let onNext: () -> Void
     @Environment(GameLibrary.self) private var library
     @State private var isConfirmingClose = false
+    @State private var isConfirmingSwitch = false
 
     var body: some View {
         let games = library.games(of: evening)
@@ -291,9 +292,12 @@ private struct FolderCard: View {
                 .buttonStyle(.plain)
                 .background(Color.primary.opacity(0.05), in: .rect(cornerRadius: 16, style: .continuous))
             }
-            if running == nil, !isGameRunning {
+            if running == nil {
                 HStack(spacing: 8) {
-                    Button(action: onNext) {
+                    Button {
+                        // Ведётся одна игра за раз: если идёт игра другой серии — спросим, что с ней делать.
+                        if isGameRunning { isConfirmingSwitch = true } else { onNext() }
+                    } label: {
                         Label(games.isEmpty ? "Первая игра" : "Ещё одна игра", systemImage: "plus")
                             .font(.subheadline.weight(.semibold))
                             .frame(maxWidth: .infinity)
@@ -311,6 +315,15 @@ private struct FolderCard: View {
             }
         }
         .folderCard(padding: 12)
+        .confirmationDialog("Идёт другая игра", isPresented: $isConfirmingSwitch, titleVisibility: .visible) {
+            Button("Продолжить идущую игру") { library.resumeActive() }
+            Button("Удалить её и начать новую", role: .destructive) {
+                library.discardActive()
+                onNext()
+            }
+        } message: {
+            Text("Одновременно ведётся одна игра. Идущая игра другой серии не попадёт в историю, если её удалить.")
+        }
         .confirmationDialog("Завершить серию?", isPresented: $isConfirmingClose, titleVisibility: .visible) {
             Button("Завершить") { withAnimation(.smooth) { library.closeEvening(evening.id) } }
         } message: {

@@ -450,6 +450,12 @@ final class GameLibrary {
         saveEvenings()
     }
 
+    /// Состав для «Ещё одной игры»: игроки последней сыгранной игры серии на тех же местах.
+    /// Серии, восстановленные с сервера, своего запомненного состава не знают — берём его из самой игры.
+    func lastLineup(of evening: Evening) -> [PlayerProfile] {
+        games(of: evening).last?.seatedPlayers ?? evening.lastPlayers
+    }
+
     /// Игры вечера по порядку.
     func games(of evening: Evening) -> [FinishedGame] {
         history.filter { $0.eveningID == evening.id }.sorted { $0.record.finishedAt < $1.record.finishedAt }

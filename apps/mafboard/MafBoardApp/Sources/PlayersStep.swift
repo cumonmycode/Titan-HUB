@@ -97,7 +97,7 @@ struct PlayersStep: View {
                 }
                 .buttonStyle(.glassProminent)
                 .disabled(draft.filled < 2)
-                if let last = draft.evening?.lastPlayers, !last.isEmpty {
+                if let last = draft.evening.map(library.lastLineup(of:)), !last.isEmpty {
                     Button {
                         withAnimation(.snappy) { draft.seat(last) }
                     } label: {
