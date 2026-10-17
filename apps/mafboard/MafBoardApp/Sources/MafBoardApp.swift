@@ -105,6 +105,8 @@ struct MainTabView: View {
     @Environment(GameLibrary.self) private var library
     @State private var tab = AppTab.games
     @State private var newGame: NewGameRequest?
+    /// «Следующая игра» с экрана итогов: откроется, когда игра закроется.
+    @State private var nextEvening: Evening?
 
     var body: some View {
         @Bindable var library = library
@@ -120,12 +122,24 @@ struct MainTabView: View {
         .fullScreenCover(item: $library.presented, onDismiss: {
             // Вышли из игры — к списку игр, где она ждёт в «Продолжить игру».
             tab = .games
-        }) { GameScreen(game: $0) }
+            if let evening = nextEvening {
+                nextEvening = nil
+                newGame = NewGameRequest(evening: evening)
+            }
+        }) { game in
+            GameScreen(game: game, onNextGame: openEvening(of: game).map { evening in { nextEvening = evening } })
+        }
         .alert("Игры", isPresented: Binding(get: { library.errorMessage != nil }, set: { if !$0 { library.errorMessage = nil } })) {
             Button("OK", role: .cancel) {}
         } message: {
             Text(library.errorMessage ?? "")
         }
+    }
+
+    /// Открытый вечер игры — из него можно начать следующую игру тем же составом.
+    private func openEvening(of game: GameController) -> Evening? {
+        guard let id = game.session.setup.seriesID else { return nil }
+        return library.evenings.first { $0.id == id && $0.isOpen }
     }
 
     private func screen(_ which: AppTab, @ViewBuilder content: () -> some View) -> some View {

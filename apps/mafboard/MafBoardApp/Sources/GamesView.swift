@@ -528,6 +528,18 @@ struct FinishedGameView: View {
                     .contentCard()
                 }
 
+                NavigationLink {
+                    GameLogView(events: record.events) { game.profile(at: $0)?.nickname ?? "Игрок \($0)" }
+                } label: {
+                    HStack {
+                        Label("Ход игры", systemImage: "list.bullet.rectangle.portrait").font(.headline)
+                        Spacer()
+                        Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
+                    }
+                    .contentCard()
+                }
+                .buttonStyle(.plain)
+
                 VStack(alignment: .leading, spacing: 10) {
                     Text("Игроки").font(.title3.bold())
                     VStack(spacing: 0) {

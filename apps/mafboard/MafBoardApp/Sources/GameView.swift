@@ -55,7 +55,8 @@ final class GameController: Identifiable {
         }
         if state.currentStep != step { resetTimer() }
         save()
-        if !wasFinished, state.isFinished, let record { onFinish?(record, players) }
+        // Законченная игра (и любые правки после конца — доп. баллы, лучший ход) — в историю и на сервер.
+        if state.isFinished, let record { onFinish?(record, players) }
     }
 
     func undo() {
@@ -69,6 +70,7 @@ final class GameController: Identifiable {
         }
         if state.currentStep != step { resetTimer() }
         if wasFinished, !state.isFinished { onReopen?(id) }
+        if state.isFinished, let record { onFinish?(record, players) }
         save()
     }
 
@@ -179,12 +181,22 @@ private extension GameAction {
 
 struct GameScreen: View {
     @Bindable var game: GameController
+    /// «Следующая игра» вечера с экрана итогов. `nil` — вечер уже закрыт.
+    var onNextGame: (() -> Void)?
     @Environment(\.dismiss) private var dismiss
+    @State private var isShowingLog = false
     /// Раскрытые карточки: говорящий раскрыт всегда, остальные — по касанию, независимо друг от друга.
     @State private var expanded: Set<Seat> = []
     @State private var isPickingBestMove = false
 
     private var state: GameState { game.state }
+
+    private var isNight: Bool {
+        switch state.phase {
+        case .night, .nightZero: true
+        default: false
+        }
+    }
 
     var body: some View {
         NavigationStack {
@@ -207,7 +219,7 @@ struct GameScreen: View {
                 .padding(.horizontal)
                 .padding(.bottom, 16)
             }
-            .ambientBackground()
+            .ambientBackground(mood: isNight ? .night : .accent)
             .navigationTitle(state.moment.displayName)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { toolbar }
@@ -219,6 +231,17 @@ struct GameScreen: View {
                 }
             }
             .sheet(isPresented: $isPickingBestMove) { BestMoveSheet(game: game) }
+            .sheet(isPresented: $isShowingLog) {
+                NavigationStack {
+                    GameLogView(events: game.state.events) { game.name(of: $0) }
+                        .toolbar {
+                            ToolbarItem(placement: .confirmationAction) {
+                                Button("Готово", systemImage: "checkmark") { isShowingLog = false }
+                            }
+                        }
+                }
+                .presentationDetents([.medium, .large])
+            }
             .alert("Ошибка", isPresented: Binding(get: { game.errorMessage != nil }, set: { if !$0 { game.errorMessage = nil } })) {
                 Button("OK", role: .cancel) {}
             } message: {
@@ -252,7 +275,11 @@ struct GameScreen: View {
             NightPanel(game: game, step: step)
         case .finished:
             if let record = game.record {
-                ResultsCard(record: record) { game.profile(at: $0) }
+                ResultsCard(
+                    game: game, record: record,
+                    onBestMove: { isPickingBestMove = true },
+                    onNextGame: onNextGame.map { next in { next(); dismiss() } }
+                )
             }
         default:
             EmptyView()
@@ -265,6 +292,7 @@ struct GameScreen: View {
             Button("Закрыть", systemImage: "xmark") { dismiss() }
         }
         ToolbarItemGroup(placement: .topBarTrailing) {
+            Button("Ход игры", systemImage: "list.bullet.rectangle.portrait") { isShowingLog = true }
             Button(game.showsRoles ? "Скрыть роли" : "Показать роли", systemImage: game.showsRoles ? "eye.slash" : "eye") {
                 game.showsRoles.toggle()
             }

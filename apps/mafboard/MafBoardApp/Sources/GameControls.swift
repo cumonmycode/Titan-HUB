@@ -31,6 +31,13 @@ struct PhaseHeader: View {
         return "\(state.setup.variant.displayName) · в игре \(state.aliveSeats.count) из \(state.seats.count)"
     }
 
+    /// Итог прошедшей ночи — в начале дня ведущий объявляет его столу.
+    private var morning: String? {
+        guard case .day = state.phase, let report = state.nights.last, report.number == state.dayNumber - 1 else { return nil }
+        if report.victims.isEmpty { return "Ночь прошла без жертв" }
+        return "Ночью убит " + report.victims.map { "№\($0.seat) \(game.name(of: $0.seat))" }.joined(separator: ", ")
+    }
+
     private var outcomeReason: String {
         switch state.outcome?.reason {
         case .allBlackEliminated: "Все чёрные выбыли"
@@ -53,6 +60,14 @@ struct PhaseHeader: View {
                 .font(.title.bold())
                 .contentTransition(.opacity)
             Text(subtitle).font(.subheadline).foregroundStyle(.secondary)
+            if let morning {
+                Label(morning, systemImage: "sunrise.fill")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.orange)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(Color.orange.opacity(0.14), in: .capsule)
+            }
             if !state.nominations.isEmpty, !state.isFinished {
                 Text("Выставлены: " + state.nominations.map { "№\($0.candidate)" }.joined(separator: ", "))
                     .font(.subheadline.weight(.medium))
@@ -332,7 +347,16 @@ struct TimerView: View {
                 let remaining = timer.remaining(at: context.date)
                 VStack(spacing: 8) {
                     HStack(spacing: 8) {
+                        // Вибро за 10 секунд до конца и на нуле — только у идущего таймера.
+                        let stage = !timer.isRunning ? 0 : (remaining <= 0 ? 2 : (remaining <= 10 ? 1 : 0))
                         Text(Duration.seconds(remaining.rounded(.up)).formatted(.time(pattern: .minuteSecond)))
+                            .sensoryFeedback(trigger: stage) { _, new in
+                                switch new {
+                                case 1: .warning
+                                case 2: .error
+                                default: nil
+                                }
+                            }
                             .font(.system(size: 44, weight: .light))
                             .monospacedDigit()
                             .foregroundStyle(remaining <= 10 ? AnyShapeStyle(.red) : AnyShapeStyle(.primary))
@@ -486,12 +510,26 @@ struct NightPanel: View {
             .joined(separator: ", ")
     }
 
+    /// Прошлые проверки этой роли — ведущему, если проверяющий спросит.
+    private var pastChecks: [NightCheck] {
+        guard step == .donCheck || step == .sheriffCheck else { return [] }
+        let checker: Role = step == .donCheck ? .don : .sheriff
+        var checks = game.state.nights.flatMap(\.actions.checks)
+        if case let .night(progress) = game.state.phase { checks += progress.actions.checks }
+        return checks.filter { $0.checker == checker }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             if !performers.isEmpty {
                 Label("Ходит: \(performers)", systemImage: "moon.fill")
                     .font(.headline)
                     .foregroundStyle(.indigo)
+            }
+            if !pastChecks.isEmpty {
+                Text("Уже проверял: " + pastChecks.map { "№\($0.target) — \($0.verdictText)" }.joined(separator: ", "))
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
             }
             Text("Нажмите на игрока ниже — это его цель.").foregroundStyle(.secondary)
             HStack(spacing: 10) {
@@ -514,20 +552,84 @@ struct NightPanel: View {
 
 // MARK: - Итоги
 
+/// Итоги на экране игры: победитель, баллы с доп. баллами ведущего, лучший ход и «Следующая игра».
 struct ResultsCard: View {
+    let game: GameController
     let record: GameRecord
-    let profile: (Seat) -> PlayerProfile?
+    let onBestMove: () -> Void
+    let onNextGame: (() -> Void)?
+
+    /// Доп. баллы и штрафы ведущего, в сотых.
+    private static let bonuses = [10, 20, 30, 40, 50]
+    private static let penalties = [-25, -50]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 10) {
                 Circle().fill(record.outcome.winner.dot).frame(width: 12, height: 12)
                 Text(record.outcome.winner.displayName).font(.title2.bold())
             }
+            if let author = game.state.bestMoveAuthor, game.state.bestMove == nil {
+                Button("Лучший ход игрока №\(author)", systemImage: "star.fill", action: onBestMove)
+                    .buttonStyle(.bordered)
+            }
             Divider()
-            GameResultsList(record: record, profile: profile)
+            ForEach(GameScorer.score(record)) { score in
+                HStack(spacing: 10) {
+                    ResultRow(score: score, player: game.profile(at: score.seat))
+                    Menu {
+                        Section("Доп. баллы") {
+                            ForEach(Self.bonuses, id: \.self) { value in
+                                Button("+\(Points(hundredths: value).description)") { adjust(score.seat, value) }
+                            }
+                        }
+                        Section("Штраф") {
+                            ForEach(Self.penalties, id: \.self) { value in
+                                Button(Points(hundredths: value).description, role: .destructive) { adjust(score.seat, value) }
+                            }
+                        }
+                    } label: {
+                        Image(systemName: "plusminus.circle").font(.title3).foregroundStyle(.tint)
+                    }
+                    .accessibilityLabel("Доп. баллы")
+                }
+            }
+            Text("± — доп. баллы или штраф ведущего. Отменить — кнопкой «Назад».")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            if let onNextGame {
+                Button(action: onNextGame) {
+                    Label("Следующая игра", systemImage: "plus").frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.glassProminent)
+                .controlSize(.large)
+            }
         }
         .gameCard()
+    }
+
+    private func adjust(_ seat: Seat, _ hundredths: Int) {
+        let points = Points(hundredths: hundredths)
+        game.perform(.adjustScore(ScoreAdjustment(seat: seat, points: points, note: hundredths > 0 ? "Доп. балл" : "Штраф ведущего")))
+    }
+}
+
+private struct ResultRow: View {
+    let score: PlayerGameScore
+    let player: PlayerProfile?
+
+    var body: some View {
+        HStack(spacing: 12) {
+            PlayerAvatar(name: player?.nickname ?? "Игрок \(score.seat)", url: player?.avatarURL, seat: score.seat.number, size: 36)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(player?.nickname ?? "Игрок \(score.seat)").lineLimit(1)
+                Text(score.role.displayName).font(.subheadline).foregroundStyle(score.role.team.tint)
+            }
+            Spacer()
+            if score.bonus > .zero { Text("+\(score.bonus.description)").font(.subheadline).foregroundStyle(.green) }
+            if score.penalty > .zero { Text("−\(score.penalty.description)").font(.subheadline).foregroundStyle(.red) }
+            Text(score.total.description).font(.headline).monospacedDigit().frame(minWidth: 32, alignment: .trailing)
+        }
     }
 }
 

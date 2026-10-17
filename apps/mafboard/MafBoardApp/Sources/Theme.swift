@@ -82,7 +82,14 @@ enum AppearanceChoice: String, CaseIterable, Identifiable {
 /// Фон приложения: mesh-градиент в оттенках акцента, медленно перетекает.
 /// В тёмной теме — глубокий со светящимися пятнами, в светлой — пастельный.
 /// При «Уменьшении движения» стоит на месте.
+/// Настроение фона: акцент приложения или ночь (во время ночных фаз игры).
+enum AmbientMood: Equatable {
+    case accent
+    case night
+}
+
 struct AmbientBackground: View {
+    var mood: AmbientMood = .accent
     @AppStorage(AccentChoice.storageKey) private var accent = AccentChoice.blue
     @Environment(\.colorScheme) private var scheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -97,6 +104,7 @@ struct AmbientBackground: View {
         }
         .ignoresSafeArea()
         .animation(.easeInOut(duration: 0.6), value: accent)
+        .animation(.easeInOut(duration: 1.2), value: mood)
     }
 
     /// Углы на месте, края скользят вдоль себя, центр плавает. Периоды разные — узор не повторяется заметно.
@@ -114,15 +122,17 @@ struct AmbientBackground: View {
     }
 
     private var palette: [Color] {
-        let hue = accent.hue
+        // Ночью — глубокий индиго независимо от акцента.
+        let hue = mood == .night ? 0.68 : accent.hue
+        let dim = mood == .night ? 0.7 : 1.0
         func tone(_ shift: Double, _ saturation: Double, _ brightness: Double) -> Color {
             Color(hue: (hue + shift + 1).truncatingRemainder(dividingBy: 1), saturation: saturation, brightness: brightness)
         }
         if scheme == .dark {
             return [
-                tone(-0.06, 0.85, 0.32), tone(0.00, 0.90, 0.16), tone(0.07, 0.80, 0.34),
-                tone(0.04, 0.70, 0.10), tone(0.00, 0.95, 0.48), tone(-0.05, 0.75, 0.12),
-                tone(0.08, 0.80, 0.22), tone(-0.03, 0.85, 0.08), tone(0.02, 0.90, 0.36),
+                tone(-0.06, 0.85, 0.32 * dim), tone(0.00, 0.90, 0.16 * dim), tone(0.07, 0.80, 0.34 * dim),
+                tone(0.04, 0.70, 0.10 * dim), tone(0.00, 0.95, 0.48 * dim), tone(-0.05, 0.75, 0.12 * dim),
+                tone(0.08, 0.80, 0.22 * dim), tone(-0.03, 0.85, 0.08 * dim), tone(0.02, 0.90, 0.36 * dim),
             ]
         }
         return [
@@ -135,9 +145,9 @@ struct AmbientBackground: View {
 
 extension View {
     /// Живой фон под списком или прокруткой экрана.
-    func ambientBackground() -> some View {
+    func ambientBackground(mood: AmbientMood = .accent) -> some View {
         scrollContentBackground(.hidden)
-            .background { AmbientBackground() }
+            .background { AmbientBackground(mood: mood) }
     }
 }
 
