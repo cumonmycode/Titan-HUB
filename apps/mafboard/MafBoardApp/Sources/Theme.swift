@@ -24,6 +24,20 @@ enum AccentChoice: String, CaseIterable, Identifiable {
         }
     }
 
+    /// Тон акцента для фона (0…1 по кругу цветов).
+    var hue: Double {
+        switch self {
+        case .blue: 0.60
+        case .indigo: 0.67
+        case .purple: 0.77
+        case .pink: 0.93
+        case .red: 0.99
+        case .orange: 0.07
+        case .green: 0.37
+        case .teal: 0.50
+        }
+    }
+
     var title: String {
         switch self {
         case .blue: "Синий"
@@ -60,6 +74,70 @@ enum AppearanceChoice: String, CaseIterable, Identifiable {
         case .dark: .dark
         case .light: .light
         }
+    }
+}
+
+// MARK: - Живой фон
+
+/// Фон приложения: mesh-градиент в оттенках акцента, медленно перетекает.
+/// В тёмной теме — глубокий со светящимися пятнами, в светлой — пастельный.
+/// При «Уменьшении движения» стоит на месте.
+struct AmbientBackground: View {
+    @AppStorage(AccentChoice.storageKey) private var accent = AccentChoice.blue
+    @Environment(\.colorScheme) private var scheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 30, paused: reduceMotion)) { context in
+            MeshGradient(
+                width: 3, height: 3,
+                points: Self.points(at: reduceMotion ? 0 : context.date.timeIntervalSinceReferenceDate),
+                colors: palette
+            )
+        }
+        .ignoresSafeArea()
+        .animation(.easeInOut(duration: 0.6), value: accent)
+    }
+
+    /// Углы на месте, края скользят вдоль себя, центр плавает. Периоды разные — узор не повторяется заметно.
+    private static func points(at time: Double) -> [SIMD2<Float>] {
+        func wave(_ speed: Double, _ phase: Double, _ amplitude: Float) -> Float {
+            Float(sin(time * speed + phase)) * amplitude
+        }
+        return [
+            [0, 0], [0.5 + wave(0.21, 0.0, 0.2), 0], [1, 0],
+            [0, 0.5 + wave(0.17, 1.3, 0.22)],
+            [0.5 + wave(0.13, 2.1, 0.24), 0.5 + wave(0.19, 0.4, 0.24)],
+            [1, 0.5 + wave(0.15, 3.0, 0.22)],
+            [0, 1], [0.5 + wave(0.23, 4.2, 0.2), 1], [1, 1],
+        ]
+    }
+
+    private var palette: [Color] {
+        let hue = accent.hue
+        func tone(_ shift: Double, _ saturation: Double, _ brightness: Double) -> Color {
+            Color(hue: (hue + shift + 1).truncatingRemainder(dividingBy: 1), saturation: saturation, brightness: brightness)
+        }
+        if scheme == .dark {
+            return [
+                tone(-0.06, 0.85, 0.32), tone(0.00, 0.90, 0.16), tone(0.07, 0.80, 0.34),
+                tone(0.04, 0.70, 0.10), tone(0.00, 0.95, 0.48), tone(-0.05, 0.75, 0.12),
+                tone(0.08, 0.80, 0.22), tone(-0.03, 0.85, 0.08), tone(0.02, 0.90, 0.36),
+            ]
+        }
+        return [
+            tone(-0.06, 0.24, 1.00), tone(0.00, 0.10, 1.00), tone(0.07, 0.26, 0.99),
+            tone(0.04, 0.08, 1.00), tone(0.00, 0.36, 0.98), tone(-0.05, 0.14, 1.00),
+            tone(0.08, 0.20, 0.99), tone(-0.03, 0.08, 1.00), tone(0.02, 0.30, 0.97),
+        ]
+    }
+}
+
+extension View {
+    /// Живой фон под списком или прокруткой экрана.
+    func ambientBackground() -> some View {
+        scrollContentBackground(.hidden)
+            .background { AmbientBackground() }
     }
 }
 

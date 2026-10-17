@@ -583,6 +583,7 @@ struct BestMoveSheet: View {
                 Spacer()
             }
             .padding()
+            .background { AmbientBackground() }
             .navigationTitle("Лучший ход")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

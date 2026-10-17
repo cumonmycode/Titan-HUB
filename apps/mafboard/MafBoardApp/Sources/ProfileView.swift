@@ -101,6 +101,7 @@ struct ProfileView: View {
                         }
                 }
             }
+            .ambientBackground()
             .navigationTitle("Профиль")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

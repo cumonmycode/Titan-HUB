@@ -86,6 +86,7 @@ struct StandingsView: View {
                     }
                 }
             }
+            .ambientBackground()
             .overlay {
                 if standings.isEmpty {
                     ContentUnavailableView(

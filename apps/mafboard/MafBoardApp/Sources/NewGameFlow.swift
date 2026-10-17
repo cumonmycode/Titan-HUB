@@ -144,6 +144,7 @@ private struct GameTypeStep: View {
                 }
             }
         }
+        .ambientBackground()
         .listSectionSpacing(14)
         .navigationTitle("Какая игра?")
         .toolbar {
@@ -214,6 +215,7 @@ private struct FormatStep: View {
                 }
             }
         }
+        .ambientBackground()
         .navigationTitle("Режим")
         .confirmationDialog(
             "Продолжить вечер?",
@@ -387,6 +389,7 @@ private struct PlayersStep: View {
                         .disabled(draft.filled == 0)
                 }
             }
+            .ambientBackground()
             .onChange(of: editingSlot) { _, slot in
                 guard let slot else { return }
                 withAnimation { proxy.scrollTo(slot, anchor: .top) }
@@ -660,6 +663,7 @@ private struct RolesStep: View {
                 Button("Перераздать роли", systemImage: "shuffle") { deal() }
             }
         }
+        .ambientBackground()
         .navigationTitle("Роли")
         .safeAreaInset(edge: .bottom) {
             Button(action: start) {

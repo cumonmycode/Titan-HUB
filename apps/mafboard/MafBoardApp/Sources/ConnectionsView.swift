@@ -20,6 +20,7 @@ struct GoMafiaConnectionView: View {
                 loginForm
             }
         }
+        .ambientBackground()
         .navigationTitle("GoMafia")
         .navigationBarTitleDisplayMode(.inline)
     }
@@ -167,6 +168,7 @@ struct TelegramConnectionView: View {
                 }
             }
         }
+        .ambientBackground()
         .navigationTitle("Telegram")
         .navigationBarTitleDisplayMode(.inline)
     }
@@ -179,6 +181,7 @@ struct DevicesView: View {
         List {
             SessionsSection()
         }
+        .ambientBackground()
         .navigationTitle("Устройства")
         .navigationBarTitleDisplayMode(.inline)
     }
@@ -221,6 +224,7 @@ struct AppearanceView: View {
                 .padding(.vertical, 8)
             }
         }
+        .ambientBackground()
         .navigationTitle("Оформление")
         .navigationBarTitleDisplayMode(.inline)
     }

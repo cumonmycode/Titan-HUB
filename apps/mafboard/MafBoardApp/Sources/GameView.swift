@@ -207,7 +207,7 @@ struct GameScreen: View {
                 .padding(.horizontal)
                 .padding(.bottom, 16)
             }
-            .background(Color(.systemGroupedBackground))
+            .ambientBackground()
             .navigationTitle(state.moment.displayName)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { toolbar }

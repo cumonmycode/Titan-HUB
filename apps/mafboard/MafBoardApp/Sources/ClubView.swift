@@ -32,6 +32,7 @@ struct ClubView: View {
                 }
             }
         }
+        .ambientBackground()
         .overlay { placeholder }
         .navigationTitle(club?.title ?? "Мой клуб")
         .navigationBarTitleDisplayMode(.inline)

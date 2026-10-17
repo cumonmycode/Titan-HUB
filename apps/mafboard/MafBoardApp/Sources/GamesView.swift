@@ -34,6 +34,7 @@ struct GamesView: View {
                     }
                 }
             }
+            .ambientBackground()
             .navigationTitle("Игры")
             .profileButton()
         }
@@ -242,6 +243,7 @@ struct EveningDetailView: View {
                 }
             }
         }
+        .ambientBackground()
         .navigationTitle(evening.title)
         .navigationBarTitleDisplayMode(.inline)
     }
@@ -269,6 +271,7 @@ struct FinishedGameView: View {
                 GameResultsList(record: game.record) { game.profile(at: $0) }
             }
         }
+        .ambientBackground()
         .navigationTitle("Игра \(number)")
         .navigationBarTitleDisplayMode(.inline)
     }
