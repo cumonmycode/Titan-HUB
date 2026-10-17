@@ -265,49 +265,50 @@ struct GameScreen: View {
 
 // MARK: - Шаги: «Назад» и «Далее»
 
-/// Крупные кнопки шагов внизу: «Назад» отменяет последнее действие, «Далее» ведёт к следующему шагу.
+/// Кнопки шагов внизу: «Назад» отменяет последнее действие, «Далее» ведёт к следующему шагу.
+/// Под каждой — короткая подпись, что именно произойдёт.
 private struct StepBar: View {
     let game: GameController
     let onFinish: () -> Void
 
     var body: some View {
-        GlassEffectContainer(spacing: 12) {
-            HStack(spacing: 12) {
+        GlassEffectContainer(spacing: 10) {
+            HStack(spacing: 10) {
                 Button {
                     game.undo()
                 } label: {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Label("Назад", systemImage: "chevron.backward").font(.headline)
-                        Text(game.backHint).font(.caption).lineLimit(1).opacity(0.8)
+                    HStack(spacing: 6) {
+                        Image(systemName: "chevron.backward").font(.subheadline.weight(.bold))
+                        VStack(alignment: .leading, spacing: 0) {
+                            Text("Назад").font(.subheadline.weight(.semibold))
+                            Text(game.backHint).font(.caption2).lineLimit(1).opacity(0.75)
+                        }
                     }
-                    .frame(maxWidth: .infinity, minHeight: 50, alignment: .leading)
-                    .padding(.horizontal, 6)
+                    .frame(maxWidth: 130, alignment: .leading)
                 }
                 .buttonStyle(.glass)
                 .disabled(!game.session.canUndo)
-                .frame(maxWidth: 150)
 
                 Button {
                     if game.state.isFinished { onFinish() } else { game.perform(.advance) }
                 } label: {
-                    VStack(alignment: .trailing, spacing: 2) {
-                        HStack(spacing: 6) {
-                            Text(game.state.isFinished ? "Готово" : "Далее")
-                            Image(systemName: game.state.isFinished ? "checkmark" : "chevron.forward")
+                    HStack(spacing: 8) {
+                        VStack(alignment: .leading, spacing: 0) {
+                            Text(game.state.isFinished ? "Готово" : "Далее").font(.subheadline.weight(.semibold))
+                            Text(game.nextHint).font(.caption2).lineLimit(1).opacity(0.85)
                         }
-                        .font(.headline)
-                        Text(game.nextHint).font(.caption).lineLimit(1).opacity(0.85)
+                        Spacer(minLength: 0)
+                        Image(systemName: game.state.isFinished ? "checkmark" : "chevron.forward")
+                            .font(.subheadline.weight(.bold))
                     }
-                    .frame(maxWidth: .infinity, minHeight: 50, alignment: .trailing)
-                    .padding(.horizontal, 6)
+                    .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.glassProminent)
                 .disabled(!game.state.canAdvance && !game.state.isFinished)
             }
         }
-        .controlSize(.large)
-        .padding(.horizontal)
-        .padding(.bottom, 4)
+        .padding(.horizontal, 20)
+        .padding(.bottom, 6)
     }
 }
 

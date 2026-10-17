@@ -3,31 +3,47 @@ import MafBoardCore
 
 // MARK: - Клавиатура номеров
 
-/// Ряды номеров как на телефонной клавиатуре: 1–9 тройками, 10 — под 8, дальше (городская) снова тройками.
-func keypadRows(count: Int) -> [[Int?]] {
+/// Раскладка номеров: телефонная (1–9 тройками, 10 под 8) или ровная сетка по N в ряд.
+enum KeypadLayout {
+    case phone
+    case grid(columns: Int)
+
+    var columns: Int {
+        switch self {
+        case .phone: 3
+        case let .grid(columns): columns
+        }
+    }
+}
+
+func keypadRows(count: Int, layout: KeypadLayout = .phone) -> [[Int?]] {
+    let width = layout.columns
     func chunked(_ numbers: [Int]) -> [[Int?]] {
-        stride(from: 0, to: numbers.count, by: 3).map { start in
-            (0..<3).map { offset in start + offset < numbers.count ? numbers[start + offset] : nil }
+        stride(from: 0, to: numbers.count, by: width).map { start in
+            (0..<width).map { offset in start + offset < numbers.count ? numbers[start + offset] : nil }
         }
     }
     guard count > 0 else { return [] }
+    guard case .phone = layout else { return chunked(Array(1...count)) }
     var rows = chunked(Array(1...min(count, 9)))
     if count >= 10 { rows.append([nil, 10, nil]) }
     if count > 10 { rows += chunked(Array(11...count)) }
     return rows
 }
 
-/// Номера игроков раскладкой телефонной клавиатуры.
+/// Номера игроков: телефонная раскладка или сетка.
 struct Keypad<Key: View>: View {
     let count: Int
+    var layout: KeypadLayout = .phone
+    var spacing: CGFloat = 10
     @ViewBuilder let key: (Int) -> Key
 
     var body: some View {
-        GlassEffectContainer(spacing: 10) {
-            Grid(horizontalSpacing: 10, verticalSpacing: 10) {
-                ForEach(Array(keypadRows(count: count).enumerated()), id: \.offset) { _, row in
+        GlassEffectContainer(spacing: spacing) {
+            Grid(horizontalSpacing: spacing, verticalSpacing: spacing) {
+                ForEach(Array(keypadRows(count: count, layout: layout).enumerated()), id: \.offset) { _, row in
                     GridRow {
-                        ForEach(0..<3, id: \.self) { column in
+                        ForEach(0..<layout.columns, id: \.self) { column in
                             if let number = row[column] {
                                 key(number)
                             } else {
@@ -53,14 +69,20 @@ struct KeypadKey: View {
     let number: Int
     var caption: String?
     var style: Style = .normal
+    /// Компактная клавиша — для выставления в карточке игрока.
+    var isCompact = false
     let action: () -> Void
 
     var body: some View {
         let label = VStack(spacing: 0) {
-            Text("\(number)").font(.title2.weight(.semibold)).monospacedDigit()
-            Text(caption ?? " ").font(.caption2.weight(.medium)).opacity(caption == nil ? 0 : 1)
+            Text("\(number)")
+                .font(isCompact ? .headline : .title2.weight(.semibold))
+                .monospacedDigit()
+            if !isCompact || caption != nil {
+                Text(caption ?? " ").font(.caption2.weight(.medium)).opacity(caption == nil ? 0 : 1)
+            }
         }
-        .frame(maxWidth: .infinity, minHeight: 56)
+        .frame(maxWidth: .infinity, minHeight: isCompact ? 36 : 56)
 
         Group {
             switch style {
@@ -74,7 +96,7 @@ struct KeypadKey: View {
                 Button(action: action) { label }.buttonStyle(.glass).disabled(true).opacity(0.3)
             }
         }
-        .buttonBorderShape(.roundedRectangle(radius: 16))
+        .buttonBorderShape(.roundedRectangle(radius: isCompact ? 12 : 16))
         .sensoryFeedback(.selection, trigger: style)
         .accessibilityLabel("Игрок \(number)")
     }
