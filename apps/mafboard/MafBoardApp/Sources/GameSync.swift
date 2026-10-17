@@ -94,15 +94,20 @@ final class GameSync {
         if !reachedServer { schedule(after: Self.retryDelay) }
     }
 
-    /// Идущая игра с сервера — если на телефоне её нет или там она старее.
+    /// С сервера: законченные игры, которых нет на телефоне, и идущая игра, если на телефоне её нет или она старее.
     private func restore() async {
         guard model.phase == .signedIn else { return }
-        guard let remote = await model.activeGames() else {
+        library.ensureLoaded()
+        guard library.isLoaded else { return }
+        guard let finished = await model.myGames(since: library.lastUploadedFinish),
+              let active = await model.activeGames()
+        else {
             isServerReachable = false
             return
         }
         isServerReachable = true
-        library.adoptRemote(remote)
+        library.mergeRemoteHistory(finished)
+        library.adoptRemote(active)
     }
 }
 

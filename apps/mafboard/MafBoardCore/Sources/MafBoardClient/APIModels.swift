@@ -45,7 +45,35 @@ struct PlayersResponse: Decodable {
 }
 
 struct GamesResponse: Decodable {
-    let games: [GameRecord]
+    let games: [HostedGame]
+}
+
+/// Законченная игра для истории на сервере: запись движка и игроки (имена, аватары).
+/// В JSON игроки лежат рядом с полями записи — сервер хранит тело целиком и отдаёт его обратно.
+/// Записи, загруженные до появления игроков, читаются с пустым списком.
+public struct HostedGame: Codable, Sendable, Equatable {
+    public let record: GameRecord
+    public let players: [PlayerProfile]
+
+    public init(record: GameRecord, players: [PlayerProfile]) {
+        self.record = record
+        self.players = players
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case players
+    }
+
+    public init(from decoder: any Decoder) throws {
+        record = try GameRecord(from: decoder)
+        players = try decoder.container(keyedBy: CodingKeys.self).decodeIfPresent([PlayerProfile].self, forKey: .players) ?? []
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        try record.encode(to: encoder)
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(players, forKey: .players)
+    }
 }
 
 struct SessionsResponse: Decodable {

@@ -35,6 +35,8 @@ final class AppModel {
     }
 
     func bootstrap() async {
+        // Только при запуске: экран под полноэкранной игрой «появляется» заново, но входить второй раз не нужно.
+        guard phase == .loading else { return }
         if let session = await store.load() {
             account = session.account
             phase = .signedIn
@@ -196,11 +198,11 @@ final class AppModel {
     private static let maxRosterPages = 12
 
     /// Законченная игра — в историю на сервере (личную или клуба). `true` — сервер её принял (или уже имел).
-    func uploadGame(_ record: GameRecord) async -> SyncResult {
+    func uploadGame(_ game: HostedGame) async -> SyncResult {
         guard phase == .signedIn else { return .offline }
-        guard record.host != nil else { return .rejected }
+        guard game.record.host != nil else { return .rejected }
         do throws(APIError) {
-            try await withAuth { () async throws(APIError) in try await api.uploadGame(record) }
+            try await withAuth { () async throws(APIError) in try await api.uploadGame(game) }
             return .done
         } catch {
             return SyncResult(error)
@@ -228,6 +230,25 @@ final class AppModel {
             return SyncResult(error)
         }
     }
+
+    /// Законченные игры ведущего на сервере после `since` (все страницы). `nil` — сервер недоступен.
+    func myGames(since: Date?) async -> [HostedGame]? {
+        guard phase == .signedIn else { return nil }
+        var games: [HostedGame] = []
+        var cursor = since
+        for _ in 0..<Self.maxHistoryPages {
+            guard let page = try? await withAuth({ () async throws(APIError) in try await api.myGames(since: cursor) }) else {
+                return nil
+            }
+            games += page
+            guard page.count >= Self.historyPageSize, let last = page.last?.record.finishedAt else { break }
+            cursor = last
+        }
+        return games
+    }
+
+    private static let historyPageSize = 50
+    private static let maxHistoryPages = 20
 
     /// Идущие игры ведущего на сервере. `nil` — сервер недоступен.
     func activeGames() async -> [ActiveGameEnvelope]? {

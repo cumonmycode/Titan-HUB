@@ -45,9 +45,11 @@ public protocol MafBoardAPI: Sendable {
     func clubRoster(clubID: Int, page: Int) async throws(APIError) -> [GoMafiaPlayer]
 
     // История игр
-    func uploadGame(_ record: GameRecord) async throws(APIError)
-    func clubGames(clubID: Int, since: Date?) async throws(APIError) -> [GameRecord]
-    func myGames(since: Date?) async throws(APIError) -> [GameRecord]
+    /// Законченная игра в историю. Повторная отправка той же игры обновляет запись.
+    func uploadGame(_ game: HostedGame) async throws(APIError)
+    func clubGames(clubID: Int, since: Date?) async throws(APIError) -> [HostedGame]
+    /// Игры ведущего по порядку окончания; не больше страницы за раз — дальше `since`.
+    func myGames(since: Date?) async throws(APIError) -> [HostedGame]
 
     // Идущие игры
     /// `true` — снимок сохранён; `false` — на сервере снимок новее или игра уже закончена.
@@ -142,16 +144,16 @@ public struct MafBoardAPIClient: MafBoardAPI {
 
     // MARK: История игр
 
-    public func uploadGame(_ record: GameRecord) async throws(APIError) {
-        let _: EmptyResponse = try await send(.post, "v1/games", body: record)
+    public func uploadGame(_ game: HostedGame) async throws(APIError) {
+        let _: EmptyResponse = try await send(.post, "v1/games", body: game)
     }
 
-    public func clubGames(clubID: Int, since: Date?) async throws(APIError) -> [GameRecord] {
+    public func clubGames(clubID: Int, since: Date?) async throws(APIError) -> [HostedGame] {
         let response: GamesResponse = try await send(.get, "v1/clubs/\(clubID)/games", query: sinceQuery(since))
         return response.games
     }
 
-    public func myGames(since: Date?) async throws(APIError) -> [GameRecord] {
+    public func myGames(since: Date?) async throws(APIError) -> [HostedGame] {
         let response: GamesResponse = try await send(.get, "v1/me/games", query: sinceQuery(since))
         return response.games
     }

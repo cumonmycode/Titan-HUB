@@ -295,3 +295,21 @@ describe('идущие игры', () => {
     assert.deepEqual(late.json, { stored: false })
   })
 })
+
+describe('история на сервере', () => {
+  it('игра уходит вместе с игроками; повторная загрузка ведущим обновляет запись', async () => {
+    const ctx = createTestContext()
+    const host = await signIn(ctx)
+    const record = { ...gameRecord(host.account.id, 'funky', null), players: [{ id: 'p1', nickname: 'Шерлок' }] }
+    assert.equal((await call(ctx, 'POST', '/v1/games', { token: host.accessToken, body: record })).status, 201)
+
+    const corrected = { ...record, outcome: { winner: 'black', reason: { blackReachedParity: {} } } }
+    assert.equal((await call(ctx, 'POST', '/v1/games', { token: host.accessToken, body: corrected })).status, 200)
+
+    const mine = await call(ctx, 'GET', '/v1/me/games', { token: host.accessToken })
+    assert.equal(mine.json.games.length, 1)
+    assert.equal(mine.json.games[0].outcome.winner, 'black')
+    assert.equal(mine.json.games[0].players[0].nickname, 'Шерлок')
+  })
+})
+

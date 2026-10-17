@@ -240,14 +240,39 @@ struct APIClientTests {
         try session.perform(.declareOutcome(.red, note: nil))
         let record = try GameRecord(session: session)
 
+        let players = [PlayerProfile(nickname: "Шерлок")]
         let transport = StubTransport(status: 201, json: "")
-        try await client(transport).uploadGame(record)
+        try await client(transport).uploadGame(HostedGame(record: record, players: players))
 
         let request = await transport.lastRequest
         #expect(request?.httpMethod == "POST")
         #expect(request?.url?.path == "/v1/games")
-        let decoded = try APICoding.makeDecoder().decode(GameRecord.self, from: try #require(request?.httpBody))
+        let body = try #require(request?.httpBody)
+        // Сервер видит обычную запись игры (игроки — рядом с её полями) и хранит тело целиком.
+        let decoded = try APICoding.makeDecoder().decode(GameRecord.self, from: body)
         #expect(decoded.id == record.id)
         #expect(decoded.outcome == record.outcome)
+        let hosted = try APICoding.makeDecoder().decode(HostedGame.self, from: body)
+        #expect(hosted.players == players)
+    }
+
+    @Test("История с сервера: игроки читаются, старые записи без игроков — тоже")
+    func myGamesWithPlayers() async throws {
+        var session = try GameSession(setup: GameSetup(
+            format: .funky, ruleset: .sport,
+            players: (1...10).map { PlayerID.goMafia($0) },
+            roles: [.civilian, .civilian, .mafia, .sheriff, .civilian, .don, .civilian, .mafia, .civilian, .civilian]
+        ))
+        try session.perform(.declareOutcome(.black, note: nil))
+        let record = try GameRecord(session: session)
+        let withPlayers = try APICoding.makeEncoder().encode(HostedGame(record: record, players: [PlayerProfile(nickname: "Ватсон")]))
+        let bare = try APICoding.makeEncoder().encode(record)
+        let json = #"{"games":["# + String(decoding: withPlayers, as: UTF8.self) + "," + String(decoding: bare, as: UTF8.self) + "]}"
+
+        let games = try await client(StubTransport(json: json)).myGames(since: nil)
+        #expect(games.count == 2)
+        #expect(games[0].players.first?.nickname == "Ватсон")
+        #expect(games[1].players.isEmpty)
+        #expect(games[1].record.outcome.winner == .black)
     }
 }

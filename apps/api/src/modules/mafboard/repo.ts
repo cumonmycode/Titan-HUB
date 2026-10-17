@@ -79,7 +79,7 @@ export interface MafboardRepo {
   revokeRefreshToken(tokenHash: string, at: Date, replacedBy: string | null): Promise<boolean>
 
   // ─── Игры ──────────────────────────────────────────────────────────────────
-  /** Идемпотентно: та же игра того же ведущего — 'exists', чужая с тем же id — 'conflict'. */
+  /** Та же игра того же ведущего — запись обновляется ('exists'), чужая с тем же id — 'conflict'. */
   insertGame(game: StoredGame): Promise<'inserted' | 'exists' | 'conflict'>
   gamesByHost(userId: string, since: Date | null, limit: number): Promise<StoredGame[]>
   gamesByClub(clubId: number, since: Date | null, limit: number): Promise<StoredGame[]>

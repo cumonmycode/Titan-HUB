@@ -119,7 +119,6 @@ struct MainTabView: View {
         .sheet(item: $newGame, onDismiss: library.presentPending) { NewGameFlow(evening: $0.evening) }
         .fullScreenCover(item: $library.presented, onDismiss: {
             // Вышли из игры — к списку игр, где она ждёт в «Продолжить игру».
-            library.reload()
             tab = .games
         }) { GameScreen(game: $0) }
         .alert("Игры", isPresented: Binding(get: { library.errorMessage != nil }, set: { if !$0 { library.errorMessage = nil } })) {

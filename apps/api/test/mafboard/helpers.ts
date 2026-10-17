@@ -192,9 +192,9 @@ export class MemoryRepo implements MafboardRepo {
 
   async insertGame(game: StoredGame) {
     const existing = this.games.get(game.id)
-    if (existing) return existing.hostUserId === game.hostUserId ? 'exists' : 'conflict'
+    if (existing && existing.hostUserId !== game.hostUserId) return 'conflict'
     this.games.set(game.id, game)
-    return 'inserted'
+    return existing ? 'exists' : 'inserted'
   }
 
   async gamesByHost(userId: string, since: Date | null, limit: number) {

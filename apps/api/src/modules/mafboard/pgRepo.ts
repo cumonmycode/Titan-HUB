@@ -399,17 +399,22 @@ export class PgMafboardRepo implements MafboardRepo {
   // ─── Игры ──────────────────────────────────────────────────────────────────
 
   async insertGame(game: StoredGame): Promise<'inserted' | 'exists' | 'conflict'> {
-    const inserted = await this.query(sql`
+    // Та же игра того же ведущего — обновляем запись (ведущий мог отменить конец игры и доиграть иначе).
+    const saved = await this.query(sql`
       INSERT INTO mb_games (id, host_user_id, club_id, format, variant, started_at, finished_at, schema_version, record)
       VALUES (${game.id}::uuid, ${game.hostUserId}::uuid, ${game.clubId}, ${game.format}, ${game.variant},
               ${iso(game.startedAt)}::timestamptz, ${iso(game.finishedAt)}::timestamptz, ${game.schemaVersion},
               ${JSON.stringify(game.record)}::jsonb)
-      ON CONFLICT (id) DO NOTHING
-      RETURNING id
+      ON CONFLICT (id) DO UPDATE
+        SET club_id = EXCLUDED.club_id, format = EXCLUDED.format, variant = EXCLUDED.variant,
+            started_at = EXCLUDED.started_at, finished_at = EXCLUDED.finished_at,
+            schema_version = EXCLUDED.schema_version, record = EXCLUDED.record
+        WHERE mb_games.host_user_id = EXCLUDED.host_user_id
+      RETURNING (xmax = 0) AS inserted
     `)
-    if (inserted.length > 0) return 'inserted'
-    const existing = await this.one(sql`SELECT host_user_id FROM mb_games WHERE id = ${game.id}::uuid`)
-    return existing && String(existing['host_user_id']) === game.hostUserId ? 'exists' : 'conflict'
+    const row = saved[0]
+    if (!row) return 'conflict'
+    return row['inserted'] === true || row['inserted'] === 't' ? 'inserted' : 'exists'
   }
 
   async gamesByHost(userId: string, since: Date | null, limit: number): Promise<StoredGame[]> {

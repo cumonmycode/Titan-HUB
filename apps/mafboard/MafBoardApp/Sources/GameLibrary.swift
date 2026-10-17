@@ -90,7 +90,7 @@ struct Evening: Codable, Identifiable, Equatable {
 /// Файлы игр. У каждого ведущего своя папка — игры разных ведущих на одном телефоне не смешиваются.
 @MainActor
 enum GameFiles {
-    /// Папка вошедшего ведущего (`users/<id>`). `nil` — никто не вошёл, файлов нет.
+    /// Папка вошедшего ведущего (`users/<id>`). `nil` — никто не вошёл.
     static var userFolder: String?
 
     private static let names = ["current-game.json", "history.json", "evenings.json"]
@@ -122,24 +122,29 @@ enum GameFiles {
         try JSONEncoder().encode(value).write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
     }
 
-    /// `nil` — файла нет. Повреждённый файл откладывается рядом (а не удаляется молча) и даёт ошибку;
-    /// файл, который просто не прочитался (например, телефон ещё не разблокирован), остаётся на месте.
-    static func read<T: Decodable>(_ type: T.Type, from url: URL) throws -> T? {
+    enum ReadFailure: Error {
+        /// Файл есть, но сейчас не читается (например, телефон ещё не разблокирован) — оставлен на месте.
+        case unavailable
+        /// Файл повреждён — отложен рядом, чтобы ничего не потерять.
+        case corrupted
+    }
+
+    /// `nil` — файла нет.
+    static func read<T: Decodable>(_ type: T.Type, from url: URL) throws(ReadFailure) -> T? {
         guard FileManager.default.fileExists(atPath: url.path()) else { return nil }
-        let data = try Data(contentsOf: url)
+        guard let data = try? Data(contentsOf: url) else { throw .unavailable }
         do {
             return try JSONDecoder().decode(type, from: data)
         } catch {
             let stamp = Int(Date.now.timeIntervalSince1970)
             try? FileManager.default.moveItem(at: url, to: directory.appending(path: "unreadable-\(stamp)-\(url.lastPathComponent)"))
-            throw error
+            throw .corrupted
         }
     }
 }
 
 @MainActor
 enum SavedGameStore {
-    static func load() throws -> SavedGame? { try GameFiles.read(SavedGame.self, from: GameFiles.active) }
     static func save(_ game: SavedGame) throws { try GameFiles.write(game, to: GameFiles.active) }
     static func clear() { try? FileManager.default.removeItem(at: GameFiles.active) }
 }
@@ -156,30 +161,38 @@ struct SummaryRow: Identifiable {
 
 // MARK: - Библиотека игр
 
+/// Игры ведущего. Во время работы источник правды — память: файлы читаются один раз при входе
+/// ведущего и дальше только записываются (и только после того, как прочитаны), сервер — резервная копия.
 @Observable @MainActor
 final class GameLibrary {
     private(set) var active: SavedGame?
     private(set) var history: [FinishedGame] = []
     private(set) var evenings: [Evening] = []
+    /// Удалённые на телефоне идущие игры, которые ещё надо удалить на сервере.
+    private(set) var pendingDeletions: [GameID] = []
+    /// Файлы ведущего прочитаны. До этого ничего не записываем — чтобы не затереть историю пустой.
+    private(set) var isLoaded = false
     /// Открытая на экране игра.
     var presented: GameController?
     /// Игра, созданная в листе «Новая игра» — откроется, когда лист закроется.
     private var pending: GameController?
     var errorMessage: String?
     /// Выгрузка законченной игры на сервер (задаёт приложение).
-    var uploader: (@MainActor (GameRecord) async -> SyncResult)?
+    var uploader: (@MainActor (HostedGame) async -> SyncResult)?
     /// Идущая игра изменилась — пора отправить её на сервер.
     var onActiveChanged: (@MainActor () -> Void)?
-    /// Удалённые на телефоне идущие игры, которые ещё надо удалить на сервере.
-    private(set) var pendingDeletions: [GameID] = []
+
+    private var user: UserID?
     /// Последняя ревизия каждой игры — чтобы после отмены конца игры ревизия не пошла заново.
     private var lastRevision: [GameID: Int] = [:]
 
+    // MARK: Вход ведущего
+
     /// Вошёл другой ведущий (или вышел): показываем только его игры.
     func switchUser(_ userID: UserID?) {
-        let folder = userID?.description
-        guard folder != GameFiles.userFolder || (history.isEmpty && evenings.isEmpty && active == nil) else { return }
-        GameFiles.userFolder = folder
+        guard userID != user || !isLoaded else { return }
+        user = userID
+        isLoaded = false
         presented = nil
         pending = nil
         active = nil
@@ -187,25 +200,51 @@ final class GameLibrary {
         evenings = []
         pendingDeletions = []
         lastRevision = [:]
-        guard folder != nil else { return }
+        GameFiles.userFolder = userID?.description
+        guard userID != nil else { return }
         GameFiles.adoptLegacyFiles()
-        reload()
+        load()
     }
 
-    func reload() {
-        guard GameFiles.userFolder != nil else { return }
-        do {
-            active = try SavedGameStore.load()
-            history = try GameFiles.read([FinishedGame].self, from: GameFiles.history) ?? []
-            evenings = try GameFiles.read([Evening].self, from: GameFiles.evenings) ?? []
-            pendingDeletions = try GameFiles.read([GameID].self, from: GameFiles.pendingDeletions) ?? []
-        } catch {
-            errorMessage = "Часть сохранённых игр не удалось прочитать — файл отложен. \(error.localizedDescription)"
+    /// Дочитать файлы, если в прошлый раз телефон их не отдал.
+    func ensureLoaded() {
+        guard user != nil, !isLoaded else { return }
+        load()
+    }
+
+    /// Каждый файл читается отдельно: сбой одного не мешает остальным.
+    private func load() {
+        var unavailable = false
+        var corrupted = false
+        func read<T: Decodable>(_ type: T.Type, _ url: URL) -> T? {
+            do throws(GameFiles.ReadFailure) {
+                return try GameFiles.read(type, from: url)
+            } catch {
+                switch error {
+                case .unavailable: unavailable = true
+                case .corrupted: corrupted = true
+                }
+                return nil
+            }
+        }
+        active = read(SavedGame.self, GameFiles.active)
+        history = read([FinishedGame].self, GameFiles.history) ?? []
+        evenings = read([Evening].self, GameFiles.evenings) ?? []
+        pendingDeletions = read([GameID].self, GameFiles.pendingDeletions) ?? []
+        if let active { lastRevision[active.id] = active.revision }
+
+        if unavailable {
+            errorMessage = "Игры на телефоне пока недоступны — разблокируйте телефон, приложение прочитает их снова."
+            return
+        }
+        isLoaded = true
+        if corrupted {
+            errorMessage = "Часть сохранённых данных повреждена — файл отложен, игры подтянутся с сервера."
         }
         adoptOrphanGames()
     }
 
-    // MARK: Игры
+    // MARK: Идущая игра
 
     func start(setup: GameSetup, players: [PlayerProfile]) {
         let session = GameSession(setup: setup)
@@ -222,12 +261,12 @@ final class GameLibrary {
         lastRevision[id] = revision
         let game = SavedGame(session: session, players: players, revision: revision,
                              syncedRevision: previous?.syncedRevision ?? 0, updatedAt: .now)
+        active = game
         do {
             try SavedGameStore.save(game)
         } catch {
-            errorMessage = "Игра не сохранилась на устройстве: \(error.localizedDescription)"
+            errorMessage = "Игра не сохранилась на телефоне: \(error.localizedDescription)"
         }
-        active = game
         onActiveChanged?()
     }
 
@@ -235,35 +274,8 @@ final class GameLibrary {
     func markSynced(_ id: GameID, revision: Int) {
         guard var game = active, game.id == id, revision > game.syncedRevision else { return }
         game.syncedRevision = revision
-        try? SavedGameStore.save(game)
         active = game
-    }
-
-    /// Игра с сервера: продолжаем её, если на телефоне нет идущей игры или там она старее.
-    func adoptRemote(_ remotes: [ActiveGameEnvelope]) {
-        guard presented == nil, pending == nil else { return }
-        let finished = Set(history.map(\.id))
-        let candidates = remotes.filter { !finished.contains($0.id) && !pendingDeletions.contains($0.id) }
-        guard let newest = candidates.max(by: { $0.updatedAt < $1.updatedAt }) else { return }
-        if let active, !(active.id == newest.id && newest.revision > active.revision) { return }
-
-        let game = SavedGame(session: newest.snapshot.session, players: newest.snapshot.players,
-                             revision: newest.revision, syncedRevision: newest.revision, updatedAt: newest.updatedAt)
         try? SavedGameStore.save(game)
-        active = game
-        lastRevision[game.id] = newest.revision
-        let setup = game.session.setup
-        if let id = setup.seriesID, !evenings.contains(where: { $0.id == id }) {
-            evenings.append(Evening(id: id, format: setup.format, variant: setup.variant, createdAt: setup.createdAt,
-                                    updatedAt: .now, closedAt: nil, lastPlayers: []))
-            saveEvenings()
-        }
-    }
-
-    /// Удалённая на сервере идущая игра больше не ждёт отправки.
-    func deletionSynced(_ id: GameID) {
-        pendingDeletions.removeAll { $0 == id }
-        try? GameFiles.write(pendingDeletions, to: GameFiles.pendingDeletions)
     }
 
     func presentPending() {
@@ -277,9 +289,10 @@ final class GameLibrary {
     }
 
     func discardActive() {
-        if let id = active?.id, !pendingDeletions.contains(id) {
+        guard let id = active?.id else { return }
+        if !pendingDeletions.contains(id) {
             pendingDeletions.append(id)
-            try? GameFiles.write(pendingDeletions, to: GameFiles.pendingDeletions)
+            savePendingDeletions()
         }
         SavedGameStore.clear()
         active = nil
@@ -294,44 +307,108 @@ final class GameLibrary {
         return controller
     }
 
+    // MARK: Законченные игры
+
+    /// Игра закончилась: в историю (сразу видна в своём вечере) и на сервер.
     private func archive(_ record: GameRecord, players: [PlayerProfile]) {
         let game = FinishedGame(record: record, players: players, isUploaded: false)
         history.removeAll { $0.id == record.id }
         history.insert(game, at: 0)
-        if let id = record.seriesID, let index = evenings.firstIndex(where: { $0.id == id }) {
-            evenings[index].updatedAt = record.finishedAt
-            evenings[index].lastPlayers = game.seatedPlayers
-            saveEvenings()
+        if let id = record.seriesID {
+            ensureEvening(id, for: record)
+            if let index = evenings.firstIndex(where: { $0.id == id }) {
+                evenings[index].updatedAt = record.finishedAt
+                evenings[index].lastPlayers = game.seatedPlayers
+            }
         }
-        SavedGameStore.clear()
-        active = nil
+        if active?.id == record.id {
+            SavedGameStore.clear()
+            active = nil
+        }
         saveHistory()
-        // Законченная игра уходит в историю на сервере, а её черновик там удаляется.
+        saveEvenings()
         onActiveChanged?()
     }
 
-    /// Ведущий отменил последний ход уже законченной игры — она снова идёт.
+    /// Ведущий отменил конец игры — она снова идёт; когда закончится, запись на сервере обновится.
     private func unarchive(_ id: GameID) {
-        history.removeAll { $0.id == id && !$0.isUploaded }
+        history.removeAll { $0.id == id }
         saveHistory()
     }
 
     /// Отправить законченные игры. `false` — не было связи, надо повторить позже.
     @discardableResult
     func uploadPending() async -> Bool {
-        guard let uploader else { return true }
+        guard let uploader, isLoaded else { return true }
         var reachedServer = true
+        var changed = false
         for game in history where !game.isUploaded && game.isUploadRejected != true {
-            let result = await uploader(game.record)
+            let result = await uploader(HostedGame(record: game.record, players: game.players))
             guard let index = history.firstIndex(where: { $0.id == game.id }) else { continue }
             switch result {
-            case .done: history[index].isUploaded = true
-            case .rejected: history[index].isUploadRejected = true
-            case .offline: reachedServer = false
+            case .done:
+                history[index].isUploaded = true
+                changed = true
+            case .rejected:
+                history[index].isUploadRejected = true
+                changed = true
+            case .offline:
+                reachedServer = false
             }
         }
-        saveHistory()
+        if changed { saveHistory() }
         return reachedServer
+    }
+
+    /// Самая поздняя игра, уже лежащая на сервере: с неё и подтягиваем недостающие.
+    var lastUploadedFinish: Date? {
+        history.filter(\.isUploaded).map(\.record.finishedAt).max()
+    }
+
+    /// Законченные игры с сервера, которых нет на телефоне (переустановка, другое устройство).
+    func mergeRemoteHistory(_ games: [HostedGame]) {
+        guard isLoaded else { return }
+        let known = Set(history.map(\.id))
+        let fresh = games.filter { !known.contains($0.record.id) && $0.record.id != active?.id }
+        guard !fresh.isEmpty else { return }
+        for game in fresh {
+            history.append(FinishedGame(record: game.record, players: game.players, isUploaded: true))
+            if let id = game.record.seriesID { ensureEvening(id, for: game.record) }
+        }
+        history.sort { $0.record.finishedAt > $1.record.finishedAt }
+        adoptOrphanGames()
+        saveHistory()
+        saveEvenings()
+    }
+
+    /// Идущая игра с сервера — если на телефоне её нет (или там она старее). Брошенные давно не воскрешаем.
+    func adoptRemote(_ remotes: [ActiveGameEnvelope]) {
+        guard isLoaded, presented == nil, pending == nil else { return }
+        let finished = Set(history.map(\.id))
+        let candidates = remotes.filter {
+            !finished.contains($0.id) && !pendingDeletions.contains($0.id)
+                && ($0.id == active?.id || Date.now.timeIntervalSince($0.updatedAt) < Evening.idleLimit)
+        }
+        guard let newest = candidates.max(by: { $0.updatedAt < $1.updatedAt }) else { return }
+        if let active, !(active.id == newest.id && newest.revision > active.revision) { return }
+
+        let game = SavedGame(session: newest.snapshot.session, players: newest.snapshot.players,
+                             revision: newest.revision, syncedRevision: newest.revision, updatedAt: newest.updatedAt)
+        active = game
+        lastRevision[game.id] = newest.revision
+        try? SavedGameStore.save(game)
+        let setup = game.session.setup
+        if let id = setup.seriesID, !evenings.contains(where: { $0.id == id }) {
+            evenings.append(Evening(id: id, format: setup.format, variant: setup.variant, createdAt: setup.createdAt,
+                                    updatedAt: .now, closedAt: nil, lastPlayers: []))
+            saveEvenings()
+        }
+    }
+
+    /// Удалённая на сервере идущая игра больше не ждёт отправки.
+    func deletionSynced(_ id: GameID) {
+        pendingDeletions.removeAll { $0 == id }
+        savePendingDeletions()
     }
 
     // MARK: Вечера
@@ -370,7 +447,8 @@ final class GameLibrary {
         var rows: [PlayerID: SummaryRow] = [:]
         for game in games(of: evening) {
             for score in GameScorer.score(game.record) {
-                guard let player = game.players.first(where: { $0.id == score.playerID }) else { continue }
+                let player = game.players.first(where: { $0.id == score.playerID })
+                    ?? PlayerProfile(nickname: "Игрок \(score.seat)", id: score.playerID)
                 let current = rows[score.playerID]
                 rows[score.playerID] = SummaryRow(
                     player: player,
@@ -381,6 +459,13 @@ final class GameLibrary {
             }
         }
         return rows.values.sorted { ($0.points, $0.wins) > ($1.points, $1.wins) }
+    }
+
+    /// Вечер игры есть всегда: если на телефоне его нет (игра с сервера), создаём по самой игре.
+    private func ensureEvening(_ id: SeriesID, for record: GameRecord) {
+        guard !evenings.contains(where: { $0.id == id }) else { return }
+        evenings.append(Evening(id: id, format: record.format, variant: record.variant, createdAt: record.startedAt,
+                                updatedAt: record.finishedAt, closedAt: nil, lastPlayers: []))
     }
 
     /// Игры, сыгранные до появления вечеров: собираем их в закрытые вечера по дню, режиму и варианту.
@@ -415,9 +500,10 @@ final class GameLibrary {
                 updatedAt: record.finishedAt, closedAt: record.finishedAt, lastPlayers: [])
     }
 
-    // MARK: Сохранение
+    // MARK: Сохранение (только после чтения — иначе можно затереть историю пустой)
 
     private func saveHistory() {
+        guard isLoaded else { return }
         do {
             try GameFiles.write(history, to: GameFiles.history)
         } catch {
@@ -426,11 +512,17 @@ final class GameLibrary {
     }
 
     private func saveEvenings() {
+        guard isLoaded else { return }
         do {
             try GameFiles.write(evenings, to: GameFiles.evenings)
         } catch {
             errorMessage = "Вечера не сохранились: \(error.localizedDescription)"
         }
+    }
+
+    private func savePendingDeletions() {
+        guard isLoaded else { return }
+        try? GameFiles.write(pendingDeletions, to: GameFiles.pendingDeletions)
     }
 }
 
