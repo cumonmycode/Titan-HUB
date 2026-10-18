@@ -278,16 +278,15 @@ private struct ExtraStepper: View {
     }
 }
 
-/// Техфолы после игры: «−» снимает последний, «+» — обычный техфол, удержание «+» — большой.
+/// Техфолы после игры: «−» снимает последний, «МТФ» и «БТФ» добавляют.
 private struct TechFoulStepper: View {
     let editing: ScoreEditing
 
     private var kinds: [TechFoulKind] { editing.techFouls }
 
-    private var detail: String? {
-        guard !kinds.isEmpty else { return nil }
-        let big = kinds.filter { $0 == .big }.count
-        return big == 0 ? nil : "из них больших: \(big)"
+    /// «МТФ, БТФ» — по порядку получения.
+    private var detail: String {
+        kinds.isEmpty ? "нет" : kinds.map(\.shortName).joined(separator: ", ")
     }
 
     var body: some View {
@@ -295,9 +294,7 @@ private struct TechFoulStepper: View {
             IconBadge(icon: "exclamationmark.triangle.fill", tint: .red)
             VStack(alignment: .leading, spacing: 1) {
                 Text("Техфолы").font(.subheadline.weight(.semibold))
-                if let detail {
-                    Text(detail).font(.caption).foregroundStyle(.secondary)
-                }
+                Text(detail).font(.caption).foregroundStyle(kinds.isEmpty ? AnyShapeStyle(.secondary) : AnyShapeStyle(Color.red))
             }
             Spacer(minLength: 4)
             GlassEffectContainer(spacing: 6) {
@@ -308,31 +305,16 @@ private struct TechFoulStepper: View {
                     .buttonStyle(.glass)
                     .buttonBorderShape(.circle)
                     .disabled(kinds.isEmpty)
-                    .accessibilityLabel("Снять техфол")
+                    .accessibilityLabel("Снять последний техфол")
 
-                    Text("\(kinds.count)")
-                        .font(.headline)
-                        .monospacedDigit()
-                        .foregroundStyle(kinds.isEmpty ? AnyShapeStyle(.secondary) : AnyShapeStyle(Color.red))
-                        .contentTransition(.numericText(value: Double(kinds.count)))
-                        .frame(minWidth: 54, minHeight: 26)
-
-                    Menu {
-                        Button("Техфол \((-editing.techFoulPenalty).signed)", systemImage: "exclamationmark.triangle.fill") {
-                            editing.onTechFoul(.ordinary)
+                    ForEach([TechFoulKind.ordinary, .big], id: \.self) { kind in
+                        Button { editing.onTechFoul(kind) } label: {
+                            Text("+" + kind.shortName).font(.subheadline.weight(.bold)).frame(minHeight: 26)
                         }
-                        Button("Большой техфол \((-editing.bigTechFoulPenalty).signed)", systemImage: "exclamationmark.octagon.fill") {
-                            editing.onTechFoul(.big)
-                        }
-                    } label: {
-                        Image(systemName: "plus").font(.body.weight(.bold)).frame(width: 26, height: 26)
-                    } primaryAction: {
-                        editing.onTechFoul(.ordinary)
+                        .buttonStyle(.glass)
+                        .buttonBorderShape(.capsule)
+                        .accessibilityLabel("\(kind.fullName) \((-(kind == .big ? editing.bigTechFoulPenalty : editing.techFoulPenalty)).signed)")
                     }
-                    .buttonStyle(.glass)
-                    .buttonBorderShape(.circle)
-                    .accessibilityLabel("Поставить техфол")
-                    .accessibilityHint("Удержание — большой техфол")
                 }
             }
         }
@@ -477,7 +459,7 @@ extension PlayerGameScore {
             switch component.kind {
             case .bestMove: "star.fill"
             case .colorProtocol: "list.clipboard.fill"
-            case .techFouls: "exclamationmark.triangle.fill"
+            case .techFoul: "exclamationmark.triangle.fill"
             case .removal, .criticalRemoval: "person.fill.xmark"
             case .forfeit: "exclamationmark.octagon.fill"
             case .result, .adjustment, .doubleSplit: nil
@@ -496,7 +478,7 @@ extension PlayerGameScore {
             if extraBonus != .zero { lines.append(ScoreLine(id: "bonus", icon: "plus", tint: .green, title: "Доп +", points: extraBonus)) }
             if extraPenalty != .zero { lines.append(ScoreLine(id: "penalty", icon: "minus", tint: .red, title: "Доп −", points: extraPenalty)) }
         }
-        for component in components {
+        for (index, component) in components.enumerated() {
             switch component.kind {
             case let .colorProtocol(firstKilled):
                 lines.append(ScoreLine(id: "protocol", icon: "list.clipboard.fill", tint: .blue,
@@ -506,9 +488,10 @@ extension PlayerGameScore {
                 lines.append(ScoreLine(id: "bestMove", icon: "star.fill", tint: .orange, title: "Лучший ход",
                                        detail: "угадано чёрных: \(guessed)", points: component.points,
                                        action: editing?.onBestMove))
-            case let .techFouls(count):
-                lines.append(ScoreLine(id: "techFouls", icon: "exclamationmark.triangle.fill", tint: .red,
-                                       title: count == 1 ? "Техфол" : "Техфолы ×\(count)", points: component.points))
+            case let .techFoul(kind, doubled):
+                lines.append(ScoreLine(id: "techFoul\(index)", icon: kind == .big ? "exclamationmark.octagon.fill" : "exclamationmark.triangle.fill",
+                                       tint: .red, title: kind.shortName, detail: doubled ? "второй, удалил — вдвое" : kind.fullName.lowercased(),
+                                       points: component.points))
             case .removal:
                 lines.append(ScoreLine(id: "removal", icon: "person.fill.xmark", tint: .red, title: "Удаление", points: component.points))
             case .criticalRemoval:

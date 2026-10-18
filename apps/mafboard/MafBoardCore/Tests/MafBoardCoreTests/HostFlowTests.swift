@@ -252,6 +252,7 @@ struct HostFlowTests {
         #expect(session.state.isAlive(2))
         try session.run(.cancelTechFoul(2))
 
+        // После игры техфол не удаляет — и не удваивается: МТФ −0.3 + БТФ −0.6.
         let scores = GameScorer.score(try GameRecord(session: session))
         #expect(scores.first { $0.seat == 1 }?.total == 0.1)
         #expect(scores.first { $0.seat == 2 }?.total == 0.7)

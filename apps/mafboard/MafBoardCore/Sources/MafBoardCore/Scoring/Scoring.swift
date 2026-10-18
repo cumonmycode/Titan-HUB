@@ -41,6 +41,8 @@ public struct ScoringPolicy: Codable, Sendable, Equatable {
     public var bigTechFoulPenalty: Points?
     /// Удаление вторым техфолом штрафуется ещё и как удаление. По ФСМ — нет: штраф только за сами техфолы.
     public var penalizesTechFoulRemoval = true
+    /// Удаляющий (второй) техфол — вдвое: МТФ+МТФ −0.9, БТФ+МТФ −1.2, МТФ+БТФ −1.5, БТФ+БТФ −1.8.
+    public var doublesRemovingTechFoul = false
     /// Удаление «на критике». `nil` — как обычное удаление.
     public var criticalRemovalPenalty: Points?
     /// ППК — нарушителю. `nil` — без штрафа.
@@ -65,7 +67,7 @@ public struct ScoringPolicy: Codable, Sendable, Equatable {
     )
 
     /// Официальные правила ФСМ (раздел 8) с поправками клуба: победа 1, ЛХ 0.1 / 0.3 / 0.6,
-    /// удаление −0.6 (на критике −1), техфол −0.3 (большой −0.6) без удвоения и без штрафа за удаление,
+    /// удаление −0.6 (решающее −1), МТФ −0.3, БТФ −0.6, удаляющий второй техфол — вдвое, без отдельного штрафа за удаление,
     /// ППК −1.5, двойное деление −0.3 красным, протокол ПУ до +0.8, протокол остальных ±0.4.
     public static let fsm = ScoringPolicy(
         win: 1,
@@ -77,6 +79,7 @@ public struct ScoringPolicy: Codable, Sendable, Equatable {
         techFoulPenalty: 0.3,
         bigTechFoulPenalty: 0.6,
         penalizesTechFoulRemoval: false,
+        doublesRemovingTechFoul: true,
         criticalRemovalPenalty: 1,
         forfeitPenalty: 1.5,
         doubleSplitPenalty: 0.3,
@@ -107,17 +110,18 @@ public struct ScoringPolicy: Codable, Sendable, Equatable {
         return bestMove[nearest] ?? .zero
     }
 
-    /// Штраф за техфолы игрока: обычные и большие, без удвоения второго.
-    public func techFoulPoints(ordinary: Int, big: Int) -> Points {
-        techFoulPenalty * ordinary + (bigTechFoulPenalty ?? techFoulPenalty) * big
+    /// Штраф за один техфол: МТФ или БТФ; удаляющий — вдвое, если так в правилах.
+    public func techFoulPenalty(_ kind: TechFoulKind, removes: Bool) -> Points {
+        let base = kind == .big ? (bigTechFoulPenalty ?? techFoulPenalty) : techFoulPenalty
+        return removes && doublesRemovingTechFoul ? base * 2 : base
     }
 }
 
 extension ScoringPolicy {
     private enum CodingKeys: String, CodingKey {
         case win, draw, loss, bestMove, bestMoveOnlyForRedTeam, removalPenalty, techFoulPenalty, bigTechFoulPenalty,
-             penalizesTechFoulRemoval, criticalRemovalPenalty, forfeitPenalty, doubleSplitPenalty, drawCancelsBonuses,
-             protocolScoring
+             penalizesTechFoulRemoval, doublesRemovingTechFoul, criticalRemovalPenalty, forfeitPenalty, doubleSplitPenalty,
+             drawCancelsBonuses, protocolScoring
     }
 
     /// Правила, сохранённые до появления новых полей, читаются как раньше.
@@ -132,6 +136,8 @@ extension ScoringPolicy {
         techFoulPenalty = try container.decode(Points.self, forKey: .techFoulPenalty)
         bigTechFoulPenalty = try container.decodeIfPresent(Points.self, forKey: .bigTechFoulPenalty)
         penalizesTechFoulRemoval = try container.decodeIfPresent(Bool.self, forKey: .penalizesTechFoulRemoval) ?? true
+        // Правила с большим техфолом — это правила ФСМ: удвоение удаляющего техфола действует и в сохранённых сериях.
+        doublesRemovingTechFoul = try container.decodeIfPresent(Bool.self, forKey: .doublesRemovingTechFoul) ?? (bigTechFoulPenalty != nil)
         criticalRemovalPenalty = try container.decodeIfPresent(Points.self, forKey: .criticalRemovalPenalty)
         forfeitPenalty = try container.decodeIfPresent(Points.self, forKey: .forfeitPenalty)
         doubleSplitPenalty = try container.decodeIfPresent(Points.self, forKey: .doubleSplitPenalty)
@@ -197,7 +203,8 @@ public struct ScoreComponent: Codable, Sendable, Equatable {
         case removal
         /// Удаление «на критике».
         case criticalRemoval
-        case techFouls(count: Int)
+        /// Один техфол: МТФ или БТФ; `doubled` — удаляющий, посчитан вдвое.
+        case techFoul(TechFoulKind, doubled: Bool)
         /// ППК.
         case forfeit
         /// Стол дважды поделился, и все остались (штраф красным).
@@ -323,14 +330,26 @@ public enum GameScorer {
                 components.append(ScoreComponent(kind: .removal, points: -policy.removalPenalty))
             }
         }
-        let techFoulPoints = policy.techFoulPoints(ordinary: seat.techFouls - seat.bigTechFouls, big: seat.bigTechFouls)
-        if seat.techFouls > 0, techFoulPoints != .zero {
-            components.append(ScoreComponent(kind: .techFouls(count: seat.techFouls), points: -techFoulPoints))
+        let removingIndex = removingTechFoulIndex(of: seat, rules: record.setup.ruleset)
+        for (index, kind) in seat.techFoulKinds.enumerated() {
+            let removes = index == removingIndex
+            let points = policy.techFoulPenalty(kind, removes: removes)
+            if points != .zero {
+                components.append(ScoreComponent(kind: .techFoul(kind, doubled: removes && policy.doublesRemovingTechFoul), points: -points))
+            }
         }
         if case let .forfeit(offender, _) = record.outcome.reason, offender == seat.seat, let penalty = policy.forfeitPenalty {
             components.append(ScoreComponent(kind: .forfeit, points: -penalty))
         }
         return components
+    }
+
+    /// Какой по счёту техфол удалил игрока (второй при двух до удаления). `nil` — техфолами не удалён.
+    private static func removingTechFoulIndex(of seat: SeatState, rules: Ruleset) -> Int? {
+        guard case .removed(.techFouls) = seat.elimination?.cause, let limit = rules.discipline.techFoulsToRemoval,
+              limit > 0, seat.techFouls >= limit
+        else { return nil }
+        return limit - 1
     }
 
     /// Стол дважды поделился, а все остались: каждый красный за столом получает штраф (ФСМ 4.5.14).

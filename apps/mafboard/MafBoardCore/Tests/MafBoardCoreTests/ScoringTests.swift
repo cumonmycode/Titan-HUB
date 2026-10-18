@@ -78,17 +78,36 @@ struct ScoringTests {
         #expect(session.setup.scoring == .standard)
     }
 
-    @Test("Техфол −0.3, большой −0.6, без удвоения и без штрафа за удаление вторым техфолом")
+    @Test("МТФ −0.3, БТФ −0.6; удаляющий второй техфол — вдвое, отдельного штрафа за удаление нет")
     func techFoulPenalties() throws {
         var session = try Fixture.session()
-        try session.run(.techFoul(2), .techFoul(2), .bigTechFoul(9), .techFoul(5), .bigTechFoul(5))
+        try session.run(
+            .techFoul(1), .techFoul(1),        // МТФ + МТФ = −0.9
+            .bigTechFoul(2), .techFoul(2),     // БТФ + МТФ = −1.2
+            .techFoul(5), .bigTechFoul(5),     // МТФ + БТФ = −1.5
+            .bigTechFoul(3), .bigTechFoul(3),  // БТФ + БТФ = −1.8 (чёрный)
+            .bigTechFoul(9)                    // один БТФ = −0.6
+        )
         #expect(session.state.seat(2)?.elimination?.cause == .removed(.techFouls))
         try session.run(.declareOutcome(.red, note: nil))
         let scores = try scoresBySeat(session)
-        #expect(scores[2]?.total == 0.4)
+        #expect(scores[1]?.total == 0.1)
+        #expect(scores[2]?.total == -0.2)
+        #expect(scores[5]?.total == -0.5)
+        #expect(scores[3]?.total == -1.8)
         #expect(scores[9]?.total == 0.4)
-        #expect(scores[5]?.total == 0.1)
-        #expect(scores[5]?.components.map(\.kind) == [.result(.win), .techFouls(count: 2)])
+        #expect(scores[5]?.components.map(\.kind) == [.result(.win), .techFoul(.ordinary, doubled: false), .techFoul(.big, doubled: true)])
+    }
+
+    @Test("Сохранённые правила ФСМ без новой настройки удваивают удаляющий техфол, городские — нет")
+    func legacyScoringDecodesTechFoulDoubling() throws {
+        func decodedWithoutDoubling(_ policy: ScoringPolicy) throws -> ScoringPolicy {
+            var json = try #require(try JSONSerialization.jsonObject(with: JSONEncoder().encode(policy)) as? [String: Any])
+            json["doublesRemovingTechFoul"] = nil
+            return try JSONDecoder().decode(ScoringPolicy.self, from: JSONSerialization.data(withJSONObject: json))
+        }
+        #expect(try decodedWithoutDoubling(.fsm).doublesRemovingTechFoul)
+        #expect(try !decodedWithoutDoubling(.standard).doublesRemovingTechFoul)
     }
 
     @Test("Отмена техфола снимает последний, какого бы вида он ни был")

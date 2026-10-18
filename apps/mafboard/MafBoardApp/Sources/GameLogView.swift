@@ -123,9 +123,9 @@ private extension GameEvent {
         case let .foulCancelled(seat, total):
             return line("arrow.uturn.backward", .secondary, "Снят фол \(who(seat)), осталось \(total)")
         case let .techFoul(seat, total):
-            return line("exclamationmark.triangle.fill", .red, "Техфол \(who(seat)) — \(total)-й")
+            return line("exclamationmark.triangle.fill", .red, "МТФ \(who(seat)) — \(total)-й техфол")
         case let .bigTechFoul(seat, total):
-            return line("exclamationmark.octagon.fill", .red, "Большой техфол \(who(seat)) — \(total)-й")
+            return line("exclamationmark.octagon.fill", .red, "БТФ \(who(seat)) — \(total)-й техфол")
         case let .speechHalved(seat):
             return line("timer", .orange, "\(who(seat)): 3 фола — ближайшая речь полминуты")
         case let .sheriffClaimMarked(seat, claimed):

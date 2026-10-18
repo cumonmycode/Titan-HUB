@@ -88,7 +88,7 @@ struct PhaseHeader: View {
 // MARK: - Игрок
 
 /// Карточка игрока. Свёрнута — номер, имя, фолы точками. Раскрыта — таймер (если говорит),
-/// выставление и фолы, а на заключительной речи — лучший ход и протокол. Свайпы — быстрые фолы и техфолы.
+/// выставление и нарушения (фол, МТФ, БТФ), а на заключительной речи — лучший ход и протокол. Свайпы — быстрые фол и МТФ.
 struct PlayerCard: View {
     let game: GameController
     let seat: SeatState
@@ -167,7 +167,7 @@ struct PlayerCard: View {
                     NominationPad(game: game, speaker: seat.seat)
                 }
                 if seat.isAlive {
-                    PenaltyRow(game: game, seat: seat) { isConfirmingRemoval = true }
+                    DisciplinePanel(game: game, seat: seat) { isConfirmingRemoval = true }
                 }
             }
         }
@@ -196,7 +196,7 @@ struct PlayerCard: View {
         HStack(spacing: 10) {
             identity.opacity(seat.isAlive || isFarewell ? 1 : 0.5)
             Spacer(minLength: 4)
-            PenaltyDots(fouls: seat.fouls, techFouls: seat.techFoulKinds)
+            PenaltyMarks(fouls: seat.fouls, techFouls: seat.techFoulKinds)
             if nightAction != nil {
                 Text("Выбрать").font(.subheadline.weight(.semibold)).foregroundStyle(.tint)
             } else if isRemoved {
@@ -215,19 +215,16 @@ struct PlayerCard: View {
         .contentShape(.rect)
     }
 
+    /// Фото и номер — одним значком: номер в углу фото. Говорящий — акцент, выставленный — оранжевый.
     private var identity: some View {
-        HStack(spacing: 10) {
-            Text("\(seat.seat.number)")
-                .font(.subheadline.weight(.bold))
-                .monospacedDigit()
-                .foregroundStyle(isSpeaker ? .white : (nomination != nil ? Color.orange : .primary))
-                .frame(width: 30, height: 30)
-                .background(numberBackground, in: .circle)
-                // Выставленный — оранжевое кольцо вокруг номера: видно и в свёрнутой карточке.
-                .overlay {
-                    if nomination != nil, !isSpeaker { Circle().stroke(.orange, lineWidth: 2) }
-                }
-            PlayerAvatar(name: game.name(of: seat.seat), url: game.profile(at: seat.seat)?.avatarURL, size: 34)
+        HStack(spacing: 12) {
+            PlayerAvatar(
+                name: game.name(of: seat.seat), url: game.profile(at: seat.seat)?.avatarURL,
+                seat: seat.seat.number, size: 44, seatTint: seatTint
+            )
+            .overlay {
+                if nomination != nil, !isSpeaker { Circle().stroke(.orange, lineWidth: 2) }
+            }
             VStack(alignment: .leading, spacing: 1) {
                 Text(game.name(of: seat.seat)).font(.body.weight(.semibold)).lineLimit(1)
                 if game.showsRoles || status != nil {
@@ -249,15 +246,15 @@ struct PlayerCard: View {
 }
 
 private extension PlayerCard {
-    var numberBackground: AnyShapeStyle {
-        if isSpeaker { return AnyShapeStyle(.tint) }
-        if nomination != nil { return AnyShapeStyle(Color.orange.opacity(0.16)) }
-        return AnyShapeStyle(Color(.tertiarySystemFill))
+    var seatTint: Color {
+        if isSpeaker { return .accentColor }
+        if nomination != nil { return .orange }
+        return Color(.systemGray)
     }
 }
 
-/// Фолы и техфолы точками в свёрнутой строке — только если они есть. Большой техфол — вдвое шире.
-private struct PenaltyDots: View {
+/// Фолы точками и техфолы метками в свёрнутой строке — только если они есть. МТФ — контур, БТФ — заливка.
+private struct PenaltyMarks: View {
     let fouls: Int
     let techFouls: [TechFoulKind]
 
@@ -268,22 +265,16 @@ private struct PenaltyDots: View {
                     ForEach(0..<fouls, id: \.self) { _ in Circle().fill(.orange).frame(width: 7, height: 7) }
                 }
             }
-            if !techFouls.isEmpty {
-                HStack(spacing: 2) {
-                    ForEach(Array(techFouls.enumerated()), id: \.offset) { _, kind in
-                        RoundedRectangle(cornerRadius: 1.5).fill(.red).frame(width: kind == .big ? 14 : 7, height: 7)
-                    }
-                }
-            }
+            ForEach(Array(techFouls.enumerated()), id: \.offset) { _, kind in TechFoulChip(kind: kind) }
         }
         .accessibilityElement()
-        .accessibilityLabel("Фолов \(fouls), техфолов \(techFouls.count)")
+        .accessibilityLabel("Фолов \(fouls)" + (techFouls.isEmpty ? "" : ", техфолы: " + techFouls.map(\.shortName).joined(separator: ", ")))
     }
 }
 
 // MARK: - Свайпы
 
-/// Свайпы по карточке ступенями, как в «Почте»: вправо — фол, дальше — техфол;
+/// Свайпы по карточке ступенями, как в «Почте»: вправо — фол, дальше — МТФ;
 /// влево — снять фол, дальше — снять техфол. Удаление свайпом нет — только кнопкой.
 /// У говорящего свайп отключён — его карточка раскрыта и управляется кнопками.
 private struct PenaltySwipe: ViewModifier {
@@ -351,7 +342,7 @@ private struct PenaltySwipe: ViewModifier {
         let shown = max(tier, 1)
         return switch (direction, shown) {
         case (.add, 1): ("Фол", "hand.raised.fill", .orange)
-        case (.add, _): ("Техфол", "exclamationmark.triangle.fill", Color(red: 0.85, green: 0.25, blue: 0.2))
+        case (.add, _): ("МТФ", "exclamationmark.triangle.fill", Color(red: 0.85, green: 0.25, blue: 0.2))
         case (.cancel, 1): ("Снять фол", "arrow.uturn.backward", .teal)
         case (.cancel, _): ("Снять техфол", "arrow.uturn.backward", .blue)
         }
@@ -425,76 +416,217 @@ private struct NominationPad: View {
     }
 }
 
-// MARK: - Фолы
+// MARK: - Нарушения
 
-/// Фол и техфол — капсулы с точками до удаления: нажатие добавляет, долгое нажатие — снять.
-private struct PenaltyRow: View {
+/// Нарушения двумя строками со своими «−» и «+»: фолы (точки до удаления) и техфолы (полученные МТФ/БТФ,
+/// «−» снимает последний). Если нарушение удалит игрока, «+» краснеет, строка показывает итог, а нажатие просит подтверждения.
+private struct DisciplinePanel: View {
     let game: GameController
     let seat: SeatState
     let onRemove: () -> Void
+    @State private var pending: Penalty?
+
+    private enum Penalty: Hashable {
+        case foul
+        case techFoul(TechFoulKind)
+    }
+
+    private var rules: DisciplinePolicy { game.state.ruleset.discipline }
+    private var scoring: ScoringPolicy { game.state.setup.scoring }
+    private var foulLimit: Int { rules.foulsToRemoval ?? 4 }
+    private var nextFoulRemoves: Bool { rules.foulsToRemoval.map { seat.fouls + 1 >= $0 } ?? false }
+    private var nextTechFoulRemoves: Bool { rules.techFoulsToRemoval.map { seat.techFouls + 1 >= $0 } ?? false }
+
+    /// Штраф за все техфолы игрока вместе с этим удаляющим: он вдвое (МТФ + БТФ = −1.5).
+    private func techFoulTotal(adding kind: TechFoulKind) -> Points {
+        let earlier = seat.techFoulKinds.map { scoring.techFoulPenalty($0, removes: false) }.sum()
+        let removal = scoring.penalizesTechFoulRemoval ? scoring.removalPenalty : .zero
+        return earlier + scoring.techFoulPenalty(kind, removes: true) + removal
+    }
 
     var body: some View {
-        let rules = game.state.ruleset.discipline
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 8) {
-                PenaltyPill(title: "Фол", count: seat.fouls, limit: rules.foulsToRemoval ?? 4, tint: .orange,
-                            add: { game.perform(.foul(seat.seat)) }, remove: { game.perform(.cancelFoul(seat.seat)) })
-                PenaltyPill(title: "Техфол", count: seat.techFouls, limit: rules.techFoulsToRemoval ?? 2, tint: .red,
-                            add: { game.perform(.techFoul(seat.seat)) }, remove: { game.perform(.cancelTechFoul(seat.seat)) },
-                            addBig: { game.perform(.bigTechFoul(seat.seat)) })
-                Spacer(minLength: 0)
-                Button("Удалить", systemImage: "person.fill.xmark", role: .destructive, action: onRemove)
-                    .labelStyle(.iconOnly)
-                    .buttonStyle(.bordered)
-                    .buttonBorderShape(.circle)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Нарушения").font(.caption.weight(.semibold)).foregroundStyle(.secondary).textCase(.uppercase)
+                Spacer()
+                Button("Удалить игрока…", systemImage: "person.fill.xmark", role: .destructive, action: onRemove)
+                    .font(.caption.weight(.semibold))
+                    .buttonStyle(.borderless)
                     .tint(.red)
             }
-            Text("Свайп вправо — фол, дальше — техфол. Влево — снять. Удержание «Техфол» — большой техфол.")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
+            VStack(spacing: 12) {
+                foulRow
+                Divider()
+                techFoulRow
+            }
+            .padding(12)
+            .background(Color.primary.opacity(0.05), in: .rect(cornerRadius: 16, style: .continuous))
+        }
+        .sensoryFeedback(.impact(weight: .medium), trigger: seat.fouls)
+        .sensoryFeedback(.impact(weight: .heavy), trigger: seat.techFouls)
+        .confirmationDialog(
+            "Удалить №\(seat.seat.number) \(game.name(of: seat.seat))?",
+            isPresented: Binding(get: { pending != nil }, set: { if !$0 { pending = nil } }),
+            titleVisibility: .visible,
+            presenting: pending
+        ) { penalty in
+            Button(confirmButton(penalty), role: .destructive) { perform(penalty) }
+        } message: { penalty in
+            Text(confirmMessage(penalty))
+        }
+    }
+
+    // MARK: Фолы
+
+    private var foulRow: some View {
+        HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Фолы").font(.subheadline.weight(.semibold))
+                HStack(spacing: 4) {
+                    ForEach(0..<foulLimit, id: \.self) { index in
+                        Circle()
+                            .fill(index < seat.fouls ? Color.orange : Color(.tertiaryLabel).opacity(0.5))
+                            .frame(width: 8, height: 8)
+                    }
+                    if nextFoulRemoves {
+                        Text("\(foulLimit)-й удалит").font(.caption2.weight(.bold)).foregroundStyle(.red).padding(.leading, 4)
+                    }
+                }
+            }
+            Spacer(minLength: 4)
+            GlassEffectContainer(spacing: 6) {
+                HStack(spacing: 8) {
+                    StepButton(icon: "minus", label: "Снять фол") { game.perform(.cancelFoul(seat.seat)) }
+                        .disabled(seat.fouls == 0)
+                    Text("\(seat.fouls)")
+                        .font(.title3.weight(.bold))
+                        .monospacedDigit()
+                        .foregroundStyle(seat.fouls == 0 ? AnyShapeStyle(.secondary) : AnyShapeStyle(Color.orange))
+                        .contentTransition(.numericText(value: Double(seat.fouls)))
+                        .frame(minWidth: 22)
+                    StepButton(icon: "plus", label: "Фол", tint: nextFoulRemoves ? .red : nil) { add(.foul) }
+                }
+            }
+        }
+    }
+
+    // MARK: Техфолы
+
+    private var techFoulRow: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            techFoulControls
+            if nextTechFoulRemoves {
+                Text("Второй техфол удалит: +МТФ \((-techFoulTotal(adding: .ordinary)).signed) · +БТФ \((-techFoulTotal(adding: .big)).signed)")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(.red)
+            }
+        }
+    }
+
+    private var techFoulControls: some View {
+        HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Техфолы").font(.subheadline.weight(.semibold))
+                if seat.techFoulKinds.isEmpty {
+                    Text("нет").font(.caption).foregroundStyle(.secondary)
+                } else {
+                    HStack(spacing: 4) {
+                        ForEach(Array(seat.techFoulKinds.enumerated()), id: \.offset) { _, kind in TechFoulChip(kind: kind) }
+                    }
+                }
+            }
+            Spacer(minLength: 4)
+            GlassEffectContainer(spacing: 6) {
+                HStack(spacing: 6) {
+                    StepButton(icon: "minus", label: "Снять последний техфол") { game.perform(.cancelTechFoul(seat.seat)) }
+                        .disabled(seat.techFouls == 0)
+                    ForEach([TechFoulKind.ordinary, .big], id: \.self) { kind in
+                        Button { add(.techFoul(kind)) } label: {
+                            Text("+" + kind.shortName)
+                                .font(.subheadline.weight(.bold))
+                                .foregroundStyle(nextTechFoulRemoves ? Color.red : Color.primary)
+                                .frame(minHeight: 30)
+                        }
+                        .buttonStyle(.glass)
+                        .buttonBorderShape(.capsule)
+                        .accessibilityLabel("\(kind.fullName) \((-scoring.techFoulPenalty(kind, removes: false)).signed)")
+                    }
+                }
+            }
+        }
+    }
+
+    /// Удаляющее нарушение — с подтверждением.
+    private func add(_ penalty: Penalty) {
+        let removes = switch penalty {
+        case .foul: nextFoulRemoves
+        case .techFoul: nextTechFoulRemoves
+        }
+        if removes { pending = penalty } else { perform(penalty) }
+    }
+
+    private func perform(_ penalty: Penalty) {
+        switch penalty {
+        case .foul: game.perform(.foul(seat.seat))
+        case .techFoul(.ordinary): game.perform(.techFoul(seat.seat))
+        case .techFoul(.big): game.perform(.bigTechFoul(seat.seat))
+        }
+    }
+
+    private func confirmButton(_ penalty: Penalty) -> String {
+        switch penalty {
+        case .foul: "\(foulLimit)-й фол — удалить"
+        case let .techFoul(kind): "\(kind.shortName) — удалить"
+        }
+    }
+
+    private func confirmMessage(_ penalty: Penalty) -> String {
+        switch penalty {
+        case .foul:
+            return "\(foulLimit)-й фол удаляет игрока из игры."
+        case let .techFoul(kind):
+            let chain = (seat.techFoulKinds + [kind]).map(\.shortName).joined(separator: " + ")
+            return "Второй техфол удаляет игрока и считается вдвое: \(chain) = \((-techFoulTotal(adding: kind)).signed)."
         }
     }
 }
 
-private struct PenaltyPill: View {
-    let title: String
-    let count: Int
-    let limit: Int
-    let tint: Color
-    let add: () -> Void
-    let remove: () -> Void
-    /// Большой техфол (ФСМ 6.7: −0.6) — в меню удержания.
-    var addBig: (() -> Void)?
+/// Круглая кнопка «−» или «+» в строке нарушений.
+private struct StepButton: View {
+    let icon: String
+    let label: String
+    var tint: Color?
+    let action: () -> Void
 
     var body: some View {
-        Button(action: add) {
-            HStack(spacing: 6) {
-                Text(title).font(.subheadline.weight(.semibold))
-                HStack(spacing: 3) {
-                    ForEach(0..<max(limit, 1), id: \.self) { index in
-                        Circle()
-                            .fill(index < count ? tint : Color(.tertiaryLabel).opacity(0.5))
-                            .frame(width: 6, height: 6)
-                    }
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.body.weight(.bold))
+                .foregroundStyle(tint.map(AnyShapeStyle.init) ?? AnyShapeStyle(.primary))
+                .frame(width: 30, height: 30)
+        }
+        .buttonStyle(.glass)
+        .buttonBorderShape(.circle)
+        .accessibilityLabel(label)
+    }
+}
+
+/// Метка техфола: МТФ — красный контур, БТФ — красная заливка.
+struct TechFoulChip: View {
+    let kind: TechFoulKind
+
+    var body: some View {
+        Text(kind.shortName)
+            .font(.caption2.weight(.heavy))
+            .foregroundStyle(kind == .big ? Color.white : Color.red)
+            .padding(.horizontal, 5)
+            .padding(.vertical, 1)
+            .background {
+                if kind == .big {
+                    Capsule().fill(Color.red)
+                } else {
+                    Capsule().stroke(Color.red, lineWidth: 1.2)
                 }
             }
-            .padding(.horizontal, 2)
-        }
-        .buttonStyle(.bordered)
-        .buttonBorderShape(.capsule)
-        .tint(count > 0 ? tint : .secondary)
-        .contextMenu {
-            if let addBig {
-                Button(action: addBig) {
-                    Label("Большой техфол −0.6", systemImage: "exclamationmark.octagon.fill")
-                    Text("Угроза ППК, жест «Кто?», просьба о завещании «под протокол», обсуждение судейства, «за обе роли»")
-                }
-            }
-            Button("Снять \(title.lowercased())", systemImage: "arrow.uturn.backward", action: remove)
-                .disabled(count == 0)
-        }
-        .sensoryFeedback(.impact(weight: .medium), trigger: count)
-        .accessibilityLabel(title)
-        .accessibilityValue("\(count) из \(limit)")
     }
 }

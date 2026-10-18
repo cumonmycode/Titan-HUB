@@ -60,7 +60,7 @@ extension Points {
 }
 
 extension ScoreComponent {
-    /// «ЛХ (2) +0.3», «Техфолы ×2 −0.6». `nil` — баллы за результат, они видны отдельно.
+    /// «ЛХ (2) +0.3», «БТФ ×2 −1.2». `nil` — баллы за результат, они видны отдельно.
     var label: String? {
         let title: String
         switch kind {
@@ -69,7 +69,7 @@ extension ScoreComponent {
         case .removal: title = "Удаление"
         // Слово «критика» — игровой термин, в интерфейсе его нет: видно только, что штраф больше.
         case .criticalRemoval: title = "Удаление"
-        case let .techFouls(count): title = count == 1 ? "Техфол" : "Техфолы ×\(count)"
+        case let .techFoul(kind, doubled): title = doubled ? "\(kind.shortName) ×2" : kind.shortName
         case .forfeit: title = "ППК"
         case .doubleSplit: title = "Двойное деление"
         case let .adjustment(note): title = note
@@ -80,9 +80,26 @@ extension ScoreComponent {
 }
 
 extension PlayerGameScore {
-    /// «ЛХ (2) +0.3 · Техфол −0.3». Пусто, если баллы только за результат.
+    /// «ЛХ (2) +0.3 · МТФ −0.3». Пусто, если баллы только за результат.
     var breakdown: String {
         components.compactMap(\.label).joined(separator: " · ")
+    }
+}
+
+extension TechFoulKind {
+    /// МТФ — маленький техфол, БТФ — большой.
+    var shortName: String {
+        switch self {
+        case .ordinary: "МТФ"
+        case .big: "БТФ"
+        }
+    }
+
+    var fullName: String {
+        switch self {
+        case .ordinary: "Маленький техфол"
+        case .big: "Большой техфол"
+        }
     }
 }
 

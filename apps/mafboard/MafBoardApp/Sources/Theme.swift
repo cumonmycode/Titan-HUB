@@ -225,6 +225,8 @@ struct PlayerAvatar: View {
     var url: URL?
     var seat: Int?
     var size: CGFloat = 40
+    /// Цвет значка с номером. `nil` — акцент приложения.
+    var seatTint: Color?
 
     private var initials: String {
         let words = name.split(separator: " ").prefix(2)
@@ -255,7 +257,7 @@ struct PlayerAvatar: View {
                     .monospacedDigit()
                     .foregroundStyle(.white)
                     .frame(minWidth: size * 0.44, minHeight: size * 0.44)
-                    .background(.tint, in: .circle)
+                    .background(seatTint.map(AnyShapeStyle.init) ?? AnyShapeStyle(.tint), in: .circle)
                     .overlay(Circle().stroke(Color(.systemBackground), lineWidth: 2))
                     .offset(x: size * 0.08, y: size * 0.08)
             }
