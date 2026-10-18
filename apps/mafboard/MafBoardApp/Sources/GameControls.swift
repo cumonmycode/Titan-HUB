@@ -100,18 +100,17 @@ struct PlayerCard: View {
 
     private var state: GameState { game.state }
     private var isSpeaker: Bool { state.currentSpeaker == seat.seat }
-    private var isFarewell: Bool {
-        if case .farewell = state.currentStep { isSpeaker } else { false }
-    }
-    private var scoring: ScoringPolicy { state.setup.scoring }
+    /// Игрок на заключительной минуте: лучший ход, речь или протокол. Он ещё за столом, пока не оставит протокол.
+    private var isFarewell: Bool { state.currentStep.farewellSeat == seat.seat }
+    private var nomination: Nomination? { state.nominations.first { $0.candidate == seat.seat } }
 
-    /// Ночью нажатие на игрока — ход текущей роли.
+    /// Ночью нажатие на игрока — ход текущей роли. Проверить можно и выбывшего, выстрелить и лечить — только живого.
     private var nightAction: GameAction? {
-        guard seat.isAlive, case let .night(step) = state.currentStep else { return nil }
-        return switch step {
-        case .mafiaShot, .maniacShot: .night(.shot(seat.seat))
-        case .donCheck, .sheriffCheck: .night(.check(seat.seat))
-        case .doctorHeal: .night(.heal(seat.seat))
+        guard case let .night(step) = state.currentStep else { return nil }
+        switch step {
+        case .mafiaShot, .maniacShot: return seat.isAlive ? .night(.shot(seat.seat)) : nil
+        case .donCheck, .sheriffCheck: return .night(.check(seat.seat))
+        case .doctorHeal: return seat.isAlive ? .night(.heal(seat.seat)) : nil
         }
     }
 
@@ -129,14 +128,16 @@ struct PlayerCard: View {
     }
 
     private var status: String? {
-        if isFarewell { return state.halvedSpeaker == seat.seat ? "Заключительная речь · 3 фола, 30 секунд" : "Заключительная речь" }
-        if let elimination = seat.elimination {
-            return elimination.cause.label + (seat.isCriticalRemoval ? " · на критике" : "")
+        switch state.currentStep {
+        case .farewellBestMove where isFarewell: return "Лучший ход"
+        case .farewellProtocol where isFarewell: return "Протокол"
+        case .farewell where isFarewell:
+            return state.halvedSpeaker == seat.seat ? "Заключительная речь · 3 фола, 30 секунд" : "Заключительная речь"
+        default: break
         }
+        if let elimination = seat.elimination { return elimination.cause.label }
         if isSpeaker { return state.halvedSpeaker == seat.seat ? "Говорит · 3 фола, полминуты" : "Говорит" }
-        if let nomination = state.nominations.first(where: { $0.candidate == seat.seat }) {
-            return "Выставлен игроком №\(nomination.by)"
-        }
+        if let nomination { return "Выставлен игроком №\(nomination.by)" }
         if seat.missesNextSpeech { return "Пропускает речь" }
         if seat.halvesNextSpeech { return "Ближайшая речь — полминуты" }
         return nil
@@ -147,8 +148,11 @@ struct PlayerCard: View {
             // Касание, а не кнопка: отпускание пальца после свайпа не раскрывает и не сворачивает карточку.
             header
                 .onTapGesture {
-                    guard seat.isAlive || isFarewell else { return }
-                    if let nightAction { game.perform(nightAction) } else { onToggle() }
+                    if let nightAction {
+                        game.perform(nightAction)
+                    } else if seat.isAlive || isFarewell {
+                        onToggle()
+                    }
                 }
                 .accessibilityAddTraits(.isButton)
 
@@ -175,20 +179,14 @@ struct PlayerCard: View {
             }
         }
         .modifier(PenaltySwipe(game: game, seat: seat, isEnabled: seat.isAlive && !isSpeaker))
+        // Штраф не показываем: он зависит от команды игрока, а экран ведущего видят за столом.
         .confirmationDialog(
             "Удалить №\(seat.seat) \(game.name(of: seat.seat))?",
             isPresented: $isConfirmingRemoval,
             titleVisibility: .visible
         ) {
-            Button("Дисквалифицировать (\((-scoring.removalPenalty).signed))", role: .destructive) {
+            Button("Дисквалифицировать", role: .destructive) {
                 game.perform(.disqualify(seat.seat, note: nil))
-            }
-            if let critical = scoring.criticalRemovalPenalty {
-                Button("Дисквалифицировать на критике (\((-critical).signed))", role: .destructive) {
-                    if game.perform(.disqualify(seat.seat, note: nil)) {
-                        game.perform(.markCriticalRemoval(seat.seat, true))
-                    }
-                }
             }
             Button("Выбыл по решению ведущего") { game.perform(.eliminateByHost(seat.seat, note: nil)) }
         }
@@ -196,17 +194,17 @@ struct PlayerCard: View {
 
     private var header: some View {
         HStack(spacing: 10) {
-            identity.opacity(seat.isAlive ? 1 : 0.5)
+            identity.opacity(seat.isAlive || isFarewell ? 1 : 0.5)
             Spacer(minLength: 4)
             PenaltyDots(fouls: seat.fouls, techFouls: seat.techFoulKinds)
-            if isRemoved {
+            if nightAction != nil {
+                Text("Выбрать").font(.subheadline.weight(.semibold)).foregroundStyle(.tint)
+            } else if isRemoved {
                 Button("Вернуть", systemImage: "arrow.uturn.backward") { game.reinstate(seat.seat) }
                     .font(.subheadline.weight(.semibold))
                     .buttonStyle(.bordered)
                     .buttonBorderShape(.capsule)
                     .controlSize(.small)
-            } else if nightAction != nil {
-                Text("Выбрать").font(.subheadline.weight(.semibold)).foregroundStyle(.tint)
             } else if seat.isAlive || isFarewell {
                 Image(systemName: "chevron.down")
                     .font(.caption.weight(.semibold))
@@ -222,9 +220,13 @@ struct PlayerCard: View {
             Text("\(seat.seat.number)")
                 .font(.subheadline.weight(.bold))
                 .monospacedDigit()
-                .foregroundStyle(isSpeaker ? .white : .primary)
+                .foregroundStyle(isSpeaker ? .white : (nomination != nil ? Color.orange : .primary))
                 .frame(width: 30, height: 30)
-                .background(isSpeaker ? AnyShapeStyle(.tint) : AnyShapeStyle(Color(.tertiarySystemFill)), in: .circle)
+                .background(numberBackground, in: .circle)
+                // Выставленный — оранжевое кольцо вокруг номера: видно и в свёрнутой карточке.
+                .overlay {
+                    if nomination != nil, !isSpeaker { Circle().stroke(.orange, lineWidth: 2) }
+                }
             PlayerAvatar(name: game.name(of: seat.seat), url: game.profile(at: seat.seat)?.avatarURL, size: 34)
             VStack(alignment: .leading, spacing: 1) {
                 Text(game.name(of: seat.seat)).font(.body.weight(.semibold)).lineLimit(1)
@@ -234,12 +236,23 @@ struct PlayerCard: View {
                             Text(seat.role.displayName).font(.caption.weight(.medium)).foregroundStyle(seat.role.team.tint)
                         }
                         if let status {
-                            Text(status).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                            Text(status)
+                                .font(.caption.weight(nomination != nil && seat.isAlive ? .semibold : .regular))
+                                .foregroundStyle(nomination != nil && seat.isAlive ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary))
+                                .lineLimit(1)
                         }
                     }
                 }
             }
         }
+    }
+}
+
+private extension PlayerCard {
+    var numberBackground: AnyShapeStyle {
+        if isSpeaker { return AnyShapeStyle(.tint) }
+        if nomination != nil { return AnyShapeStyle(Color.orange.opacity(0.16)) }
+        return AnyShapeStyle(Color(.tertiarySystemFill))
     }
 }
 
@@ -365,27 +378,42 @@ private struct PenaltySwipe: ViewModifier {
 
 // MARK: - Выставление
 
-/// Выставление кандидатуры говорящим — номера сеткой 5×2.
+/// Выставление кандидатуры говорящим — номера сеткой 5×2. Синий — выставил говорящий (нажатие снимает),
+/// оранжевый с номером — уже выставлен другим, зачёркнут — выбыл. Пока говорящий кого-то выставил, остальные приглушены.
 private struct NominationPad: View {
     let game: GameController
     let speaker: Seat
 
+    private var state: GameState { game.state }
+    private var ownNomination: Nomination? { state.nominations.first { $0.by == speaker } }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Выставить").font(.caption.weight(.semibold)).foregroundStyle(.secondary).textCase(.uppercase)
-            Keypad(count: game.state.seats.count, layout: .grid(columns: 5), spacing: 6) { number in
-                let seat = Seat(number)
-                let nomination = game.state.nominations.first { $0.candidate == seat }
-                let style: KeypadKey.Style = if !game.state.isAlive(seat) {
-                    .disabled
-                } else if nomination?.by == speaker {
-                    .selected
-                } else if nomination != nil {
-                    .marked
-                } else {
-                    .normal
+            HStack {
+                Text("Выставить").font(.caption.weight(.semibold)).foregroundStyle(.secondary).textCase(.uppercase)
+                Spacer()
+                if let ownNomination {
+                    Text("Выставлен №\(ownNomination.candidate.number) · нажмите, чтобы снять")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.tint)
                 }
-                KeypadKey(number: number, style: style, isCompact: true) {
+            }
+            Keypad(count: state.seats.count, layout: .grid(columns: 5), spacing: 6) { number in
+                let seat = Seat(number)
+                let nomination = state.nominations.first { $0.candidate == seat }
+                let (style, caption): (KeypadKey.Style, String?) = if !state.isAlive(seat) {
+                    (.disabled, "выбыл")
+                } else if nomination?.by == speaker {
+                    (.selected, "выставил")
+                } else if let nomination {
+                    (.taken, "от №\(nomination.by)")
+                } else if ownNomination != nil {
+                    (.dimmed, nil)
+                } else {
+                    (.normal, nil)
+                }
+                KeypadKey(number: number, caption: caption, style: style, isCompact: true) {
+                    guard style != .taken else { return }
                     if nomination?.by == speaker {
                         game.perform(.withdrawNomination(by: speaker))
                     } else {
@@ -468,58 +496,5 @@ private struct PenaltyPill: View {
         .sensoryFeedback(.impact(weight: .medium), trigger: count)
         .accessibilityLabel(title)
         .accessibilityValue("\(count) из \(limit)")
-    }
-}
-
-// MARK: - Ночь
-
-struct NightPanel: View {
-    let game: GameController
-    let step: NightStep
-
-    private var performers: String {
-        game.state.seats
-            .filter { $0.isAlive && step.isPerformed(by: $0.role) }
-            .map { "№\($0.seat)" }
-            .joined(separator: ", ")
-    }
-
-    /// Прошлые проверки этой роли — ведущему, если проверяющий спросит.
-    private var pastChecks: [NightCheck] {
-        guard step == .donCheck || step == .sheriffCheck else { return [] }
-        let checker: Role = step == .donCheck ? .don : .sheriff
-        var checks = game.state.nights.flatMap(\.actions.checks)
-        if case let .night(progress) = game.state.phase { checks += progress.actions.checks }
-        return checks.filter { $0.checker == checker }
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            if !performers.isEmpty {
-                Label("Ходит: \(performers)", systemImage: "moon.fill")
-                    .font(.headline)
-                    .foregroundStyle(.indigo)
-            }
-            if !pastChecks.isEmpty {
-                Text("Уже проверял: " + pastChecks.map { "№\($0.target) — \($0.verdictText)" }.joined(separator: ", "))
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
-            Text("Нажмите на игрока ниже — это его цель.").foregroundStyle(.secondary)
-            HStack(spacing: 10) {
-                if step.killer != nil {
-                    Button { game.perform(.night(.shot(nil))) } label: {
-                        Label("Промах", systemImage: "scope").frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.bordered)
-                }
-                Button { game.perform(.night(.skip)) } label: {
-                    Label("Пропустить", systemImage: "forward").frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.bordered)
-            }
-            .controlSize(.large)
-        }
-        .gameCard()
     }
 }

@@ -63,12 +63,20 @@ struct Transition {
     }
 
     mutating func perform(_ action: GameAction) throws(GameError) {
+        let step = state.currentStep
+        try dispatch(action)
+        // Время, взятое за фолы, относится только к той речи, на которой его взяли.
+        if state.currentStep != step { state.extraSeconds = nil }
+    }
+
+    private mutating func dispatch(_ action: GameAction) throws(GameError) {
         switch action {
         case .advance: try advance()
         case let .nominate(candidate, by): try nominate(candidate, by: by)
         case let .withdrawNomination(by): try withdrawNomination(by: by)
         case let .submitBallot(ballot): try submit(ballot)
         case let .night(input): try handleNight(input)
+        case let .extraTime(seat): try takeExtraTime(seat)
         case let .foul(seat): try addFoul(seat)
         case let .cancelFoul(seat): try cancelFoul(seat)
         case let .techFoul(seat): try addTechFoul(seat, kind: .ordinary)
@@ -153,6 +161,10 @@ struct Transition {
         state.protocols.removeAll { $0.author == proto.author }
         state.protocols.append(proto)
         emit(.protocolRecorded(proto))
+        // Протокол оставлен — игрок покидает стол, слово следующему.
+        if case let .day(.farewell(queue)) = state.phase, queue.stage == .colorProtocol, queue.current == proto.author {
+            moveToNextFarewell(queue)
+        }
     }
 
     mutating func recordBestMove(_ seats: [Seat], by author: Seat) throws(GameError) {
@@ -170,6 +182,10 @@ struct Transition {
         state.bestMoves.removeAll { $0.author == author }
         state.bestMoves.append(move)
         emit(.bestMove(move))
+        // Лучший ход назван — начинается заключительная речь.
+        if case let .day(.farewell(queue)) = state.phase, queue.stage == .bestMove, queue.current == author {
+            startFarewellSpeech(queue)
+        }
     }
 
     /// Право лучшего хода: ведущий запишет его перед заключительной речью игрока.

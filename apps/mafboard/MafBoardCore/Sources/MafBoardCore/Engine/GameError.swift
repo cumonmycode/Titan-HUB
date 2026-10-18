@@ -28,6 +28,27 @@ public enum GameError: Error, Sendable, Equatable {
     case nothingToUndo
     /// Удалённого игрока не вернуть: без его удаления журнал игры не сходится.
     case cannotReinstate(Seat)
+    /// Дополнительное время дало бы игроку больше `max` фолов.
+    case tooManyFoulsForExtraTime(Seat, max: Int)
+    /// На этой речи игрок взял время за фолы — снять их можно только отменой «+30».
+    case extraTimeFoulsLocked(Seat)
+    case invalidMiss(MissProblem)
+}
+
+public enum MissProblem: Sendable, Equatable {
+    /// Этот игрок не стреляет за мафию.
+    case notShooter(Seat)
+    case duplicateShooter(Seat)
+    /// Все выстрелили в одного живого — это попадание.
+    case sameTarget(Seat)
+
+    public var message: String {
+        switch self {
+        case let .notShooter(seat): "игрок №\(seat) не стреляет за мафию"
+        case let .duplicateShooter(seat): "выстрел игрока №\(seat) указан дважды"
+        case let .sameTarget(seat): "все выстрелили в №\(seat) — это попадание, а не промах"
+        }
+    }
 }
 
 public enum SetupProblem: Sendable, Equatable {
@@ -58,6 +79,7 @@ public enum Restriction: Sendable, Equatable {
     case tieSpeechesFirst
     case ballotRequired
     case notNight
+    case extraTimeOnlyForSpeaker(current: Seat?)
 }
 
 public enum BallotProblem: Sendable, Equatable {
@@ -106,6 +128,9 @@ extension GameError: LocalizedError {
         case let .nothingToCancel(seat): "У игрока №\(seat) нечего отменять"
         case .nothingToUndo: "Нечего отменять"
         case let .cannotReinstate(seat): "Игрока №\(seat) не вернуть: после удаления игра ушла дальше. Отмените шаги кнопкой «Назад»"
+        case let .tooManyFoulsForExtraTime(seat, max): "У игрока №\(seat) станет больше \(max) фолов — дополнительного времени нет"
+        case let .extraTimeFoulsLocked(seat): "Игрок №\(seat) взял за фолы дополнительное время. Снять их — кнопкой «Назад» (отменить +30)"
+        case let .invalidMiss(problem): "Промах: \(problem.message)"
         }
     }
 }
@@ -167,6 +192,9 @@ extension Restriction {
             "Сначала введите результаты голосования"
         case .notNight:
             "Ночные действия доступны только ночью"
+        case let .extraTimeOnlyForSpeaker(current):
+            current.map { "Дополнительное время берёт только говорящий — игрок №\($0)" }
+                ?? "Сейчас никто не говорит"
         }
     }
 }

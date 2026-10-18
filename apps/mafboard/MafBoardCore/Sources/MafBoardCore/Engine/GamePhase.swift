@@ -24,10 +24,19 @@ public enum FarewellContext: String, Codable, Sendable {
     case afterVoting
 }
 
+/// Шаг заключительной минуты текущего игрока (`FarewellPolicy`).
+public enum FarewellStage: String, Codable, Sendable {
+    case bestMove
+    case speech
+    case colorProtocol
+}
+
 public struct FarewellQueue: Codable, Sendable, Equatable {
     public let seats: [Seat]
     public internal(set) var index: Int
     public let context: FarewellContext
+    /// `nil` — речь в правилах без отдельных шагов ЛХ и протокола.
+    public internal(set) var stage: FarewellStage?
 
     public var current: Seat? {
         seats.indices.contains(index) ? seats[index] : nil

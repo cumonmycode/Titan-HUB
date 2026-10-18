@@ -21,8 +21,12 @@ struct SportGameTests {
         try session.run(.submitBallot(.perVoter([
             Vote(1, for: 3), Vote(2, for: 3), Vote(4, for: 3), Vote(5, for: 3), Vote(7, for: 3), Vote(9, for: 3),
         ])))
-        #expect(session.step == .farewell(3))
+        // «Слом» при десяти: сначала лучший ход, затем заключительная речь.
+        #expect(session.step == .farewellBestMove(3))
         #expect(!session.state.isAlive(3))
+        try session.run(.recordBestMove([8, 6, 2]))
+        #expect(session.state.bestMove == BestMove(author: 3, seats: [2, 6, 8]))
+        #expect(session.step == .farewell(3))
         try session.advance()
         #expect(session.step == .dusk)
 
@@ -33,13 +37,14 @@ struct SportGameTests {
         let night = try #require(session.state.nights.first)
         #expect(night.victims == [NightVictim(seat: 1, killer: .mafia)])
         #expect(night.actions.checks.map(\.isPositive) == [true, true])
-        #expect(session.state.bestMoveAuthor == 1)
+        // Накануне ушёл заголосованный — у первого убитого лучшего хода нет: сразу речь, после неё протокол.
+        #expect(session.state.bestMoveAuthors == [3])
         #expect(session.step == .farewell(1))
-        try session.run(.recordBestMove([8, 6, 2]))
-        #expect(session.state.bestMove == BestMove(author: 1, seats: [2, 6, 8]))
+        try session.advance()
+        #expect(session.step == .farewellProtocol(1))
+        try session.run(.recordProtocol(ColorProtocol(author: 1, blacks: [8], reds: [2])))
 
         // День 2 открывает следующий живой после 1. Одна кандидатура уходит без голосования.
-        try session.advance()
         #expect(session.step == .speech(2))
         try session.advance()
         try session.run(.nominate(candidate: 6, by: 4))
@@ -52,6 +57,8 @@ struct SportGameTests {
         #expect(session.state.nightSteps == [.mafiaShot, .sheriffCheck])
         try session.run(.night(.shot(4)), .night(.check(8)))
         #expect(session.step == .farewell(4))
+        try session.advance()
+        #expect(session.step == .farewellProtocol(4))
         try session.advance()
         #expect(session.step == .speech(5))
 
@@ -94,16 +101,22 @@ struct SportGameTests {
         #expect(session.step == .speech(2))
     }
 
-    @Test("Лучший ход — только у убитого в первую ночь")
-    func bestMoveOnlyAfterFirstNight() throws {
+    @Test("Лучший ход — у первого убитого за игру, даже если первая ночь была промахом")
+    func bestMoveForFirstKillAfterMiss() throws {
         var session = try Fixture.session()
         try session.advance(until: \.isNight)
         try session.run(.night(.shot(nil)), .night(.skip), .night(.skip))
         try session.advance(until: \.isNight)
         try session.run(.night(.shot(5)), .night(.skip), .night(.skip))
         #expect(!session.state.isAlive(5))
-        #expect(session.state.bestMoveAuthor == nil)
-        #expect(throws: GameError.bestMoveNotAvailable) { try session.perform(.recordBestMove([3])) }
+        #expect(session.state.bestMoveAuthor == 5)
+        #expect(session.step == .farewellBestMove(5))
+
+        // Второй убитый лучшего хода уже не получает.
+        try session.advance(until: \.isNight)
+        try session.run(.night(.shot(7)), .night(.skip), .night(.skip))
+        #expect(session.state.bestMoveAuthors == [5])
+        #expect(session.step == .farewell(7))
     }
 
     @Test("Лучший ход проверяется: не себя и не больше трёх номеров")

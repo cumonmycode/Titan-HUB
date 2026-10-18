@@ -45,6 +45,20 @@ public struct TimingPolicy: Codable, Sendable, Equatable {
     public var farewellSeconds: Int
 }
 
+/// Порядок заключительной минуты выбывшего: лучший ход — до речи, протокол — после неё.
+/// В правилах без этой настройки (старые игры) ЛХ и протокол записываются во время самой речи.
+public struct FarewellPolicy: Codable, Sendable, Equatable {
+    /// Лучший ход — отдельный шаг перед заключительной речью.
+    public var bestMoveBeforeSpeech: Bool
+    /// Убитый ночью после речи оставляет протокол — отдельный шаг, затем говорит следующий.
+    public var protocolAfterSpeech: Bool
+
+    public init(bestMoveBeforeSpeech: Bool, protocolAfterSpeech: Bool) {
+        self.bestMoveBeforeSpeech = bestMoveBeforeSpeech
+        self.protocolAfterSpeech = protocolAfterSpeech
+    }
+}
+
 // MARK: - День
 
 public enum CandidateSource: String, Codable, Sendable {
@@ -188,6 +202,30 @@ public struct DisciplinePolicy: Codable, Sendable, Equatable {
     public var warningsPerFoul: Int?
     /// На этом фоле игрок теряет половину ближайшей речи (ФСМ 6.4). `nil` — правило не используется.
     public var foulsToHalveSpeech: Int?
+    /// «+30 секунд» к речи в обмен на фолы. `nil` — по стандарту (`ExtraTimePolicy.standard`): так и в играх до этой настройки.
+    public var extraTime: ExtraTimePolicy?
+    /// Движок сам отмечает удаление, которое решает исход игры (штраф больше обычного, ФСМ 8.2.4).
+    /// `nil` — да (и в играх до этой настройки), `false` — только ручная отметка.
+    public var detectsDecisiveRemoval: Bool?
+
+    /// Действующее правило дополнительного времени.
+    public var extraTimeRule: ExtraTimePolicy { extraTime ?? .standard }
+}
+
+/// Дополнительное время к речи: говорящий берёт его фолами и только пока фолов после этого не больше `maxFouls`.
+public struct ExtraTimePolicy: Codable, Sendable, Equatable {
+    public var seconds: Int
+    public var fouls: Int
+    public var maxFouls: Int
+
+    /// +30 секунд за 2 фола, если всего фолов станет не больше трёх.
+    public static let standard = ExtraTimePolicy(seconds: 30, fouls: 2, maxFouls: 3)
+
+    public init(seconds: Int, fouls: Int, maxFouls: Int) {
+        self.seconds = seconds
+        self.fouls = fouls
+        self.maxFouls = maxFouls
+    }
 }
 
 // MARK: - Лучший ход
@@ -197,6 +235,8 @@ public enum BestMoveEligibility: String, Codable, Sendable {
     case firstNightVictim
     /// Первый убитый мафией игрок, в какую бы ночь это ни случилось.
     case firstNightKill
+    /// Первый убитый мафией за игру, если в предыдущий день никто не ушёл по голосованию.
+    case firstKillWithoutVoteOutDayBefore
 }
 
 public struct BestMovePolicy: Codable, Sendable, Equatable {

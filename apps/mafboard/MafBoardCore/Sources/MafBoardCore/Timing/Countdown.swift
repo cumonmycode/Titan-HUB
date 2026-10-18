@@ -47,12 +47,18 @@ public struct Countdown: Codable, Sendable, Equatable {
         runningSince = nil
     }
 
+    /// Время вышло — таймер останавливается ровно на нуле, а не идёт дальше.
+    public mutating func finish() {
+        elapsedBeforeRun = duration
+        runningSince = nil
+    }
+
     public mutating func reset() {
         elapsedBeforeRun = 0
         runningSince = nil
     }
 
-    /// «+30 секунд» к текущей речи.
+    /// «+30 секунд» к текущей речи (отрицательное — снять их обратно).
     public mutating func extend(bySeconds seconds: Int) {
         duration += TimeInterval(seconds)
     }

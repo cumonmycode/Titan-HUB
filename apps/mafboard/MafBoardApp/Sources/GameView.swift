@@ -74,13 +74,20 @@ final class GameController: Identifiable {
     func undo() {
         let step = state.currentStep
         let wasFinished = state.isFinished
+        let undone: GameAction
         do throws(GameError) {
-            try session.undo()
+            undone = try session.undo()
         } catch {
             errorMessage = error.message
             return
         }
-        if state.currentStep != step { resetTimer() }
+        if state.currentStep != step {
+            resetTimer()
+        } else if case .extraTime = undone {
+            // Отменили «+30» — время речи возвращается к прежнему.
+            countdown?.extend(bySeconds: -state.ruleset.discipline.extraTimeRule.seconds)
+            timerChanged()
+        }
         if wasFinished, !state.isFinished { onReopen?(id) }
         if state.isFinished, let record { onFinish?(record, players) }
         save()
@@ -130,8 +137,20 @@ final class GameController: Identifiable {
         timerChanged()
     }
 
-    func extendTimer() {
-        countdown?.extend(bySeconds: 30)
+    /// «+30 за 2 фола» говорящему: `nil` — на этом шаге не положено.
+    var extraTimeOffer: ExtraTimeOffer? {
+        guard let speaker = state.currentSpeaker, state.timerSeconds != nil else { return nil }
+        return ExtraTimeOffer(policy: state.ruleset.discipline.extraTimeRule, isAllowed: state.canTakeExtraTime(speaker))
+    }
+
+    /// Говорящий берёт время фолами. Если время уже вышло, таймер снова идёт.
+    func takeExtraTime() {
+        guard let speaker = state.currentSpeaker else { return }
+        let policy = state.ruleset.discipline.extraTimeRule
+        let wasOver = countdown.map { !$0.isRunning && $0.isExpired(at: .now) } ?? false
+        guard perform(.extraTime(speaker)) else { return }
+        countdown?.extend(bySeconds: policy.seconds)
+        if wasOver { countdown?.start(at: .now) }
         timerChanged()
     }
 
@@ -168,8 +187,10 @@ final class GameController: Identifiable {
         timerChanged()
     }
 
+    /// Старые правила: ЛХ записывают во время заключительной речи, и таймер ждёт его. В новых ЛХ — отдельный шаг до речи.
     private var isWaitingForBestMove: Bool {
-        if case let .farewell(seat) = state.currentStep { state.awaitsBestMove(from: seat) } else { false }
+        guard state.ruleset.farewell == nil, case let .farewell(seat) = state.currentStep else { return false }
+        return state.awaitsBestMove(from: seat)
     }
 
     /// Экран игры открыт заново или приложение перезапущено — время текущей речи продолжается.
@@ -186,23 +207,53 @@ final class GameController: Identifiable {
     private var timerStepKey: String { "\(state.moment.displayName)|\(state.currentStep)" }
 
     private func timerChanged() {
+        storeTimer()
+        scheduleExpiry()
+    }
+
+    private func storeTimer() {
         if let countdown, !state.isFinished {
             TimerStore.save(countdown, gameID: id, step: timerStepKey)
         } else {
             TimerStore.clear(gameID: id)
         }
-        scheduleExpiry()
     }
 
-    /// «Дальше по окончании»: когда время выйдет (и ещё пара секунд), игра сама идёт к следующему шагу.
+    /// Время выйдет — таймер встанет на нуле. С «Дальше по окончании» через пару секунд — следующий шаг.
     private func scheduleExpiry() {
         expiryTask?.cancel()
         expiryTask = nil
-        guard autoAdvances, let timer = countdown, timer.isRunning else { return }
-        let delay = timer.remaining(at: .now) + TimerSettings.advanceGrace
+        guard let timer = countdown else { return }
         let step = state.currentStep
+        if timer.isRunning {
+            let delay = timer.remaining(at: .now)
+            expiryTask = Task { [weak self] in
+                try? await Task.sleep(for: .seconds(delay))
+                guard !Task.isCancelled else { return }
+                self?.timerRanOut(on: step)
+            }
+        } else if timer.isExpired(at: .now) {
+            scheduleAdvance(from: step)
+        }
+    }
+
+    private func timerRanOut(on step: CurrentStep) {
+        guard state.currentStep == step, var timer = countdown, timer.isRunning else { return }
+        // Проснулись чуть раньше, чем вышло время, — ждём остаток.
+        guard timer.isExpired(at: .now) else {
+            scheduleExpiry()
+            return
+        }
+        timer.finish()
+        countdown = timer
+        storeTimer()
+        scheduleAdvance(from: step)
+    }
+
+    private func scheduleAdvance(from step: CurrentStep) {
+        guard autoAdvances else { return }
         expiryTask = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(delay))
+            try? await Task.sleep(for: .seconds(TimerSettings.advanceGrace))
             guard !Task.isCancelled else { return }
             self?.advanceAfterExpiry(from: step)
         }
@@ -210,7 +261,7 @@ final class GameController: Identifiable {
 
     private func advanceAfterExpiry(from step: CurrentStep) {
         guard autoAdvances, state.currentStep == step, state.canAdvance,
-              let timer = countdown, timer.isRunning, timer.isExpired(at: .now)
+              let timer = countdown, !timer.isRunning, timer.isExpired(at: .now)
         else { return }
         perform(.advance)
     }
@@ -226,6 +277,12 @@ final class GameController: Identifiable {
         guard !state.isFinished else { return }
         onSave?(session, players)
     }
+}
+
+/// «+30 за 2 фола» на текущей речи: правила и можно ли взять сейчас.
+struct ExtraTimeOffer {
+    let policy: ExtraTimePolicy
+    let isAllowed: Bool
 }
 
 private extension GameEvent {
@@ -252,10 +309,12 @@ private extension GameAction {
         case let .night(input):
             switch input {
             case .shot: "выстрел"
+            case .miss: "промах"
             case .check: "проверку"
             case .heal: "лечение"
             case .skip: "пропуск"
             }
+        case let .extraTime(seat): "+30 сек №\(seat)"
         case let .foul(seat): "фол №\(seat)"
         case let .cancelFoul(seat): "снятие фола №\(seat)"
         case let .techFoul(seat): "техфол №\(seat)"
@@ -264,7 +323,7 @@ private extension GameAction {
         case let .warning(seat): "предупреждение №\(seat)"
         case let .disqualify(seat, _): "удаление №\(seat)"
         case let .eliminateByHost(seat, _): "выбывание №\(seat)"
-        case let .markCriticalRemoval(seat, _): "«на критике» №\(seat)"
+        case let .markCriticalRemoval(seat, _): "отметку удаления №\(seat)"
         case let .markSheriffClaim(seat, _): "вскрытие №\(seat)"
         case .forfeit: "ППК"
         case .recordBestMove, .recordBestMoveBy: "лучший ход"
@@ -288,6 +347,7 @@ struct GameScreen: View {
     @State private var bestMovePick: SeatPick?
     @State private var protocolPick: SeatPick?
     @State private var forfeitPick: SeatPick?
+    @State private var scrollTask: Task<Void, Never>?
 
     private var state: GameState { game.state }
 
@@ -300,29 +360,37 @@ struct GameScreen: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(spacing: 12) {
-                    PhaseHeader(game: game) { bestMovePick = SeatPick(seat: $0) }
-                    stepContent
-                    if !state.isFinished {
-                        VStack(spacing: 8) {
-                            ForEach(state.seats) { seat in
-                                PlayerCard(
-                                    game: game, seat: seat, isExpanded: expanded.contains(seat.seat),
-                                    onToggle: {
-                                        withAnimation(.snappy) {
-                                            if expanded.contains(seat.seat) { expanded.remove(seat.seat) } else { expanded.insert(seat.seat) }
-                                        }
-                                    },
-                                    onBestMove: { bestMovePick = SeatPick(seat: seat.seat) },
-                                    onProtocol: { protocolPick = SeatPick(seat: seat.seat) }
-                                )
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(spacing: 12) {
+                        PhaseHeader(game: game) { bestMovePick = SeatPick(seat: $0) }
+                            .id(ScrollTarget.top)
+                        stepContent
+                        if !state.isFinished {
+                            VStack(spacing: 8) {
+                                ForEach(state.seats) { seat in
+                                    PlayerCard(
+                                        game: game, seat: seat, isExpanded: expanded.contains(seat.seat),
+                                        onToggle: {
+                                            withAnimation(.snappy) {
+                                                if expanded.contains(seat.seat) { expanded.remove(seat.seat) } else { expanded.insert(seat.seat) }
+                                            }
+                                        },
+                                        onBestMove: { bestMovePick = SeatPick(seat: seat.seat) },
+                                        onProtocol: { protocolPick = SeatPick(seat: seat.seat) }
+                                    )
+                                    .id(ScrollTarget.seat(seat.seat))
+                                }
                             }
                         }
                     }
+                    .padding(.horizontal)
+                    .padding(.bottom, 16)
                 }
-                .padding(.horizontal)
-                .padding(.bottom, 16)
+                // Новый шаг — экран сам едет к нему: к карточке говорящего или наверх (ночь, голосование, итоги).
+                .onChange(of: state.currentStep, initial: true) { _, _ in
+                    scrollToActiveStep(proxy)
+                }
             }
             .ambientBackground(mood: isNight ? .night : .accent)
             .navigationTitle(state.moment.displayName)
@@ -335,10 +403,17 @@ struct GameScreen: View {
                     if let speaker { expanded.insert(speaker) }
                 }
             }
-            // Лучший ход записывают перед заключительной минутой — лист открывается сам.
+            // Лучший ход — до заключительной речи, протокол — после: листы открываются сами.
             .onChange(of: state.currentStep, initial: true) { _, step in
-                if case let .farewell(seat) = step, state.awaitsBestMove(from: seat) {
+                switch step {
+                case let .farewellBestMove(seat):
                     bestMovePick = SeatPick(seat: seat)
+                case let .farewellProtocol(seat):
+                    protocolPick = SeatPick(seat: seat)
+                case let .farewell(seat) where state.ruleset.farewell == nil && state.awaitsBestMove(from: seat):
+                    bestMovePick = SeatPick(seat: seat)
+                default:
+                    break
                 }
             }
             .sheet(item: $bestMovePick) { BestMoveSheet(game: game, author: $0.seat) }
@@ -352,13 +427,13 @@ struct GameScreen: View {
                 Button("Присудить поражение команде (\((-(state.setup.scoring.forfeitPenalty ?? .zero)).signed))", role: .destructive) {
                     game.perform(.forfeit(pick.seat, note: nil))
                 }
-            } message: { pick in
-                let team = state.seat(pick.seat)?.team == .black ? "чёрных" : "красных"
-                Text("Клятва, пари, шантаж, подсказки из зала — команда \(team) проигрывает (ФСМ 6.9).")
+            } message: { _ in
+                // Команду не называем: экран ведущего видят за столом.
+                Text("Клятва, пари, шантаж, подсказки из зала — команда нарушителя проигрывает (ФСМ 6.9).")
             }
             .sheet(isPresented: $isShowingLog) {
                 NavigationStack {
-                    GameLogView(events: game.state.events) { game.name(of: $0) }
+                    GameLogView(events: game.state.events, revealsRoles: game.showsRoles || state.isFinished) { game.name(of: $0) }
                         .toolbar {
                             ToolbarItem(placement: .confirmationAction) {
                                 Button("Готово", systemImage: "checkmark") { isShowingLog = false }
@@ -372,18 +447,31 @@ struct GameScreen: View {
             } message: {
                 Text(game.errorMessage ?? "")
             }
-            .alert(
-                game.checkResult.map { "\($0.checker.displayName) проверил №\($0.target)" } ?? "",
-                isPresented: Binding(get: { game.checkResult != nil }, set: { if !$0 { game.checkResult = nil } })
-            ) {
-                Button("OK", role: .cancel) {}
-            } message: {
-                Text(game.checkResult.map(\.verdict) ?? "")
+        }
+        // Результат проверки — крупной карточкой поверх экрана, а не системным окном.
+        .overlay {
+            if let check = game.checkResult {
+                CheckResultOverlay(check: check, name: game.name(of: check.target)) {
+                    withAnimation(.smooth(duration: 0.25)) { game.checkResult = nil }
+                }
+                .transition(.opacity.combined(with: .scale(scale: 0.94)))
             }
         }
+        .animation(.spring(duration: 0.35, bounce: 0.25), value: game.checkResult)
         .connectionIndicator()
         .onAppear { UIApplication.shared.isIdleTimerDisabled = true }
         .onDisappear { UIApplication.shared.isIdleTimerDisabled = false }
+    }
+
+    /// Ждём, пока раскроется карточка говорящего, и докручиваем к ней.
+    private func scrollToActiveStep(_ proxy: ScrollViewProxy) {
+        let target = state.currentSpeaker.map(ScrollTarget.seat) ?? .top
+        scrollTask?.cancel()
+        scrollTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(180))
+            guard !Task.isCancelled else { return }
+            withAnimation(.smooth(duration: 0.4)) { proxy.scrollTo(target, anchor: .top) }
+        }
     }
 
     @ViewBuilder
@@ -505,11 +593,8 @@ private struct StepBar: View {
     }
 }
 
-private extension NightCheck {
-    var verdict: String {
-        switch checker {
-        case .don: isPositive ? "Это шериф" : "Не шериф"
-        default: isPositive ? "Чёрный 👎" : "Красный 👍"
-        }
-    }
+/// Куда докручивать экран игры.
+private enum ScrollTarget: Hashable {
+    case top
+    case seat(Seat)
 }

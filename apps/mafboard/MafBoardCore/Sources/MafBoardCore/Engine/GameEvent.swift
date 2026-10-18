@@ -129,6 +129,8 @@ public struct NightCheck: Codable, Sendable, Equatable {
 
 public struct NightActions: Codable, Sendable, Equatable {
     public internal(set) var mafiaShot: ShotTarget?
+    /// Промах мафии: кто куда стрелял. `nil` — промах без подробностей или попадание.
+    public internal(set) var missedShots: [MissedShot]?
     public internal(set) var maniacShot: ShotTarget?
     public internal(set) var checks: [NightCheck] = []
     public internal(set) var heal: Seat?
@@ -176,10 +178,14 @@ public struct GameEvent: Codable, Sendable, Equatable {
         case nightStep(NightStep)
         case nightStepSkipped(NightStep)
         case shot(Killer, ShotTarget)
+        /// Подробности промаха мафии.
+        case missedShots([MissedShot])
         case check(NightCheck)
         case heal(Seat)
         case nightResolved(NightReport)
         case eliminated(Seat, EliminationCause)
+        /// Говорящий взял дополнительное время за фолы.
+        case extraTime(Seat, seconds: Int)
         case foul(Seat, total: Int)
         case foulCancelled(Seat, total: Int)
         case techFoul(Seat, total: Int)

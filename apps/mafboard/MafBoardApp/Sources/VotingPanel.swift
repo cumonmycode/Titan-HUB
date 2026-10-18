@@ -63,6 +63,11 @@ struct KeypadKey: View {
         case normal
         case selected
         case marked
+        /// Уже занят другим (выставлен другим игроком): цветная, но не нажимается.
+        case taken
+        /// Сейчас недоступна, но игрок за столом (говорящий уже выставил кандидатуру).
+        case dimmed
+        /// Игрок выбыл или номер нельзя выбрать: номер зачёркнут.
         case disabled
     }
 
@@ -80,6 +85,7 @@ struct KeypadKey: View {
             Text("\(number)")
                 .font(isCompact ? .headline : .title2.weight(.semibold))
                 .monospacedDigit()
+                .strikethrough(style == .disabled)
             if !isCompact || caption != nil {
                 Text(caption ?? " ").font(.caption2.weight(.medium)).opacity(caption == nil ? 0 : 1)
             }
@@ -92,8 +98,12 @@ struct KeypadKey: View {
                 Button(action: action) { label }.buttonStyle(.glassProminent).tint(tint)
             case .marked:
                 Button(action: action) { label.foregroundStyle(.secondary) }.buttonStyle(.glass)
+            case .taken:
+                Button(action: action) { label }.buttonStyle(.glassProminent).tint(.orange).allowsHitTesting(false)
             case .normal:
                 Button(action: action) { label }.buttonStyle(.glass)
+            case .dimmed:
+                Button(action: action) { label }.buttonStyle(.glass).disabled(true).opacity(0.45)
             case .disabled:
                 Button(action: action) { label }.buttonStyle(.glass).disabled(true).opacity(0.3)
             }

@@ -96,23 +96,19 @@ struct ResultsCard: View {
 
     private func editing(for seat: Seat) -> ScoreEditing {
         let state = game.state
-        let seatState = state.seat(seat)
-        let isRemoved = switch seatState?.elimination?.cause {
-        case .removed(.fouls), .removed(.disqualified): true
-        default: false
-        }
+        let scoring = record.setup.scoring
         return ScoreEditing(
             bonus: Binding(get: { extras(of: seat).bonus }, set: { setExtras(seat, bonus: $0, penalty: extras(of: seat).penalty) }),
             penalty: Binding(get: { extras(of: seat).penalty }, set: { setExtras(seat, bonus: extras(of: seat).bonus, penalty: $0) }),
             onProtocol: state.mayLeaveProtocol(seat) ? { onProtocol(seat) } : nil,
             onBestMove: state.bestMoveAuthors.contains(seat) ? { onBestMove(seat) } : nil,
-            isCriticalRemoval: isRemoved && record.setup.scoring.criticalRemovalPenalty != nil
-                ? Binding(get: { game.state.seat(seat)?.isCriticalRemoval ?? false },
-                          set: { game.perform(.markCriticalRemoval(seat, $0)) })
-                : nil,
-            criticalPenalty: record.setup.scoring.criticalRemovalPenalty,
             sheriffClaim: Binding(get: { game.state.seat(seat)?.claimedSheriff ?? false },
-                                  set: { game.perform(.markSheriffClaim(seat, $0)) })
+                                  set: { game.perform(.markSheriffClaim(seat, $0)) }),
+            techFouls: state.seat(seat)?.techFoulKinds ?? [],
+            techFoulPenalty: scoring.techFoulPenalty,
+            bigTechFoulPenalty: scoring.bigTechFoulPenalty ?? scoring.techFoulPenalty,
+            onTechFoul: { kind in game.perform(kind == .big ? .bigTechFoul(seat) : .techFoul(seat)) },
+            onCancelTechFoul: { game.perform(.cancelTechFoul(seat)) }
         )
     }
 
@@ -196,13 +192,12 @@ private struct LimitGauge: View {
 }
 
 extension GameRecord {
-    /// Подпись в карточке баллов: «ПУ · убит мафией», «заголосован», «удалён за фолы · на критике».
+    /// Подпись в карточке баллов: «ПУ · убит мафией», «заголосован», «удалён за фолы».
     func scoreStatus(of seat: Seat) -> String? {
-        guard let state = self.seat(seat), let elimination = state.elimination else { return nil }
+        guard let elimination = self.seat(seat)?.elimination else { return nil }
         var parts: [String] = []
         if firstKilled == seat { parts.append("ПУ") }
         parts.append(elimination.cause.label.lowercased())
-        if state.isCriticalRemoval { parts.append("на критике") }
         return parts.joined(separator: " · ")
     }
 }

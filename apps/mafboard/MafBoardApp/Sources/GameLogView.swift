@@ -4,12 +4,14 @@ import MafBoardCore
 /// «Ход игры»: что происходило по фазам — для ведущего во время игры и для разборов после.
 struct GameLogView: View {
     let events: [GameEvent]
+    /// Во время игры журнал могут увидеть за столом: строки, выдающие состав команды, — только при открытых ролях.
+    var revealsRoles = true
     let name: (Seat) -> String
 
     private var sections: [(moment: GameMoment, lines: [LogLine])] {
         var result: [(moment: GameMoment, lines: [LogLine])] = []
         for (index, event) in events.enumerated() {
-            guard let line = event.logLine(id: index, name: name) else { continue }
+            guard revealsRoles || !event.revealsTeam, let line = event.logLine(id: index, name: name) else { continue }
             if let last = result.last, last.moment == event.moment {
                 result[result.count - 1].lines.append(line)
             } else {
@@ -71,6 +73,11 @@ extension NightCheck {
 }
 
 private extension GameEvent {
+    /// «Кто куда стрелял» перечисляет всю живую мафию.
+    var revealsTeam: Bool {
+        if case .missedShots = kind { true } else { false }
+    }
+
     /// Строка журнала. Служебные события (начало шага, очередная речь) не показываем.
     func logLine(id: Int, name: (Seat) -> String) -> LogLine? {
         func who(_ seat: Seat) -> String { "№\(seat) \(name(seat))" }
@@ -97,6 +104,9 @@ private extension GameEvent {
             let shooter = killer == .mafia ? "Мафия" : "Маньяк"
             let text = target.seat.map { "\(shooter) стреляет в \(who($0))" } ?? "\(shooter): промах"
             return line("scope", .red, text)
+        case let .missedShots(shots):
+            let details = shots.map { shot in shot.target.map { "№\(shot.shooter) → №\($0)" } ?? "№\(shot.shooter) не стрелял" }
+            return line("scope", .secondary, "Кто куда стрелял: " + details.joined(separator: ", "))
         case let .check(check):
             return line("magnifyingglass", .indigo, "\(check.checker.displayName) проверяет \(who(check.target)): \(check.verdictText)")
         case let .heal(seat):
@@ -106,6 +116,8 @@ private extension GameEvent {
             return line("sunrise.fill", .orange, "Утро: убит " + report.victims.map { who($0.seat) }.joined(separator: ", "))
         case let .eliminated(seat, cause):
             return line("person.fill.xmark", .red, "\(who(seat)) — \(cause.label.lowercased())")
+        case let .extraTime(seat, seconds):
+            return line("plus.circle.fill", .orange, "\(who(seat)) берёт +\(seconds) сек за фолы")
         case let .foul(seat, total):
             return line("hand.raised.fill", .orange, "Фол \(who(seat)) — \(total)-й")
         case let .foulCancelled(seat, total):
@@ -116,8 +128,6 @@ private extension GameEvent {
             return line("exclamationmark.octagon.fill", .red, "Большой техфол \(who(seat)) — \(total)-й")
         case let .speechHalved(seat):
             return line("timer", .orange, "\(who(seat)): 3 фола — ближайшая речь полминуты")
-        case let .criticalRemovalMarked(seat, isCritical):
-            return line("person.fill.xmark", .red, isCritical ? "Удаление \(who(seat)) — на критике" : "Удаление \(who(seat)) — не на критике")
         case let .sheriffClaimMarked(seat, claimed):
             return line("checkmark.shield.fill", .orange, claimed ? "\(who(seat)) вскрылся шерифом" : "Снята отметка вскрытия \(who(seat))")
         case let .bestMoveAvailable(seat):

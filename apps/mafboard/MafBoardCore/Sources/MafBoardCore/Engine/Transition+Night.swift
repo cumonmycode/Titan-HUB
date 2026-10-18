@@ -35,6 +35,12 @@ extension Transition {
                 updated.actions.maniacShot = shot
             }
             emit(.shot(step.killer ?? .mafia, shot))
+        case let (.mafiaShot, .miss(shots)):
+            let details = try validateMiss(shots, step: step)
+            updated.actions.mafiaShot = .miss
+            updated.actions.missedShots = details
+            emit(.shot(.mafia, .miss))
+            emit(.missedShots(details))
         case let (.donCheck, .check(target)), let (.sheriffCheck, .check(target)):
             if step == .donCheck, progress.number == 1, rules.night.donCannotCheckFirstShotTarget == true,
                progress.actions.mafiaShot?.seat == target {
@@ -87,12 +93,30 @@ extension Transition {
         guard let checker = state.seats.first(where: { $0.isAlive && $0.role == checkerRole }) else {
             throw .unexpectedNightInput(step)
         }
-        let targetIndex = try aliveIndex(of: target)
+        // Проверить можно и того, кто уже покинул стол.
+        let targetIndex = try index(of: target)
         guard target != checker.seat else { throw .cannotTargetSelf(target) }
 
         let targetRole = state.seats[targetIndex].role
         let isPositive = step == .donCheck ? targetRole == .sheriff : targetRole.team == .black
         return NightCheck(checker: checkerRole, by: checker.seat, target: target, isPositive: isPositive)
+    }
+
+    /// Промах с подробностями: стреляли живые игроки мафии, каждый не больше раза. Не названные — не стреляли.
+    /// Если все стрелявшие попали в одного живого — это не промах, а выстрел.
+    private func validateMiss(_ shots: [MissedShot], step: NightStep) throws(GameError) -> [MissedShot] {
+        let shooters = state.seats.filter { $0.isAlive && step.isPerformed(by: $0.role) }.map(\.seat)
+        var seen = Set<Seat>()
+        for shot in shots {
+            guard shooters.contains(shot.shooter) else { throw .invalidMiss(.notShooter(shot.shooter)) }
+            guard seen.insert(shot.shooter).inserted else { throw .invalidMiss(.duplicateShooter(shot.shooter)) }
+            if let target = shot.target { _ = try index(of: target) }
+        }
+        let targets = Set(shooters.map { shooter in shots.first { $0.shooter == shooter }?.target })
+        if targets.count == 1, let only = targets.first, let target = only, state.isAlive(target) {
+            throw .invalidMiss(.sameTarget(target))
+        }
+        return shooters.map { shooter in shots.first { $0.shooter == shooter } ?? MissedShot(shooter, at: nil) }
     }
 
     private func validateHeal(_ target: Seat) throws(GameError) {
@@ -150,6 +174,13 @@ extension Transition {
         }
     }
 
+    /// Мафия уже убивала в одну из прошлых ночей (последняя ночь — только что разобранная).
+    private var hasEarlierMafiaKill: Bool {
+        state.nights.dropLast().contains { night in
+            night.victims.contains { $0.killer == .mafia }
+        }
+    }
+
     private func isImmuneAtNight(_ seat: Seat) -> Bool {
         guard let role = state.seat(seat)?.role else { return false }
         return rules.night.immuneToNightKill.contains(role)
@@ -168,10 +199,11 @@ extension Transition {
                 guard leavers < limit else { return }
             }
         case .firstNightKill:
-            let earlierKills = state.nights.dropLast().contains { night in
-                night.victims.contains { $0.killer == .mafia }
-            }
-            guard !earlierKills else { return }
+            guard !hasEarlierMafiaKill else { return }
+        case .firstKillWithoutVoteOutDayBefore:
+            // Ночь N идёт после дня N: в этот день никто не должен был уйти по голосованию.
+            let votedOutDayBefore = state.votings.contains { $0.day == report.number && !$0.eliminated.isEmpty }
+            guard !hasEarlierMafiaKill, !votedOutDayBefore else { return }
         }
         grantBestMove(to: victim.seat)
     }

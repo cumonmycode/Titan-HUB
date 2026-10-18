@@ -22,13 +22,14 @@ struct FSMRulesTests {
         #expect(Ruleset.city.voting.allowsLift(tied: 3, alive: 9, sheriffKilledFirst: false))
     }
 
-    @Test("Стол дважды поделился и все остались — каждому красному −0.3 (4.5.14)")
+    @Test("Стол дважды поделился и все остались после ночного убийства — каждому красному −0.3 (4.5.14)")
     func doubleSplitPenalizesReds() throws {
         var session = try Fixture.session()
-        try session.advance(times: 2)
+        try session.advance(until: \.isNight)
+        try session.run(.night(.shot(10)), .night(.skip), .night(.skip))
         try session.speak(nominating: [(3, 1), (8, 2)])
-        let split = Ballot.handCount([CandidateVotes(3, votes: 5), CandidateVotes(8, votes: 5)])
-        try session.run(.submitBallot(split), .advance, .advance, .submitBallot(split), .submitBallot(.liftCount(4)))
+        let split = Ballot.handCount([CandidateVotes(3, votes: 4), CandidateVotes(8, votes: 4)])
+        try session.run(.submitBallot(split), .advance, .advance, .submitBallot(split))
         #expect(session.state.isDusk)
         try session.run(.declareOutcome(.red, note: nil))
 
@@ -36,6 +37,31 @@ struct FSMRulesTests {
         #expect(scores[1]?.total == 0.7)
         #expect(scores[4]?.components.map(\.kind) == [.result(.win), .doubleSplit])
         #expect(scores[3]?.total == 0)
+        // Убитый в ночь перед этим днём за столом не сидел.
+        #expect(scores[10]?.total == 1)
+    }
+
+    @Test("Нулевое голосование и день после промаха не штрафуются за двойное деление")
+    func doubleSplitBeforeAnyKillIsNotPenalized() throws {
+        // День 1: до него никого не убивали.
+        var firstDay = try Fixture.session()
+        try firstDay.advance(times: 2)
+        try firstDay.speak(nominating: [(3, 1), (8, 2)])
+        let split = Ballot.handCount([CandidateVotes(3, votes: 5), CandidateVotes(8, votes: 5)])
+        try firstDay.run(.submitBallot(split), .advance, .advance, .submitBallot(split), .submitBallot(.liftCount(4)))
+        #expect(firstDay.state.isDusk)
+        try firstDay.run(.declareOutcome(.red, note: nil))
+        #expect(try scoresBySeat(firstDay)[1]?.total == 1)
+
+        // День 2 после промаха: убийства ещё не было.
+        var afterMiss = try Fixture.session()
+        try afterMiss.advance(until: \.isNight)
+        try afterMiss.run(.night(.shot(nil)), .night(.skip), .night(.skip))
+        try afterMiss.speak(nominating: [(3, 2), (8, 4)])
+        try afterMiss.run(.submitBallot(split), .advance, .advance, .submitBallot(split), .submitBallot(.liftCount(4)))
+        #expect(afterMiss.state.isDusk)
+        try afterMiss.run(.declareOutcome(.red, note: nil))
+        #expect(try scoresBySeat(afterMiss)[2]?.total == 1)
     }
 
     @Test("Голосование после двух делений прервано удалением — штрафа нет")
@@ -104,7 +130,7 @@ struct FSMRulesTests {
         try session.run(.night(.check(4)))
     }
 
-    @Test("Если в первый день ушли двое, у ПУ нет лучшего хода (7.10)")
+    @Test("Если накануне кто-то ушёл по голосованию, у первого убитого нет лучшего хода")
     func noBestMoveAfterDoubleLeave() throws {
         var session = try Fixture.session()
         try session.advance(times: 2)
@@ -118,28 +144,28 @@ struct FSMRulesTests {
         #expect(session.state.bestMoveAuthors.isEmpty)
     }
 
-    @Test("«Слом» при десяти: лучший ход у выбывшего, и у ПУ — тоже (7.13)")
+    @Test("«Слом» при десяти: лучший ход у выбывшего, а у убитого следующей ночью — нет (7.13)")
     func bestMoveForFullTableVoteOut() throws {
         var session = try Fixture.session()
         try session.advance(times: 2)
         try session.speak(nominating: [(3, 1), (5, 2)])
         try session.run(.submitBallot(.handCount([CandidateVotes(3, votes: 3), CandidateVotes(5, votes: 7)])))
-        #expect(session.step == .farewell(5))
+        #expect(session.step == .farewellBestMove(5))
         #expect(session.state.awaitsBestMove(from: 5))
         try session.run(.recordBestMoveBy(author: 5, seats: [3, 6, 8]))
+        #expect(session.step == .farewell(5))
 
         try session.advance(until: \.isNight)
         try session.run(.night(.shot(1)), .night(.skip), .night(.skip))
-        #expect(session.state.bestMoveAuthors == [5, 1])
-        try session.run(.recordBestMoveBy(author: 1, seats: [3, 2]))
-        #expect(throws: GameError.bestMoveNotAvailable) { try session.perform(.recordBestMoveBy(author: 2, seats: [3])) }
+        #expect(session.state.bestMoveAuthors == [5])
+        #expect(throws: GameError.bestMoveNotAvailable) { try session.perform(.recordBestMoveBy(author: 1, seats: [3])) }
         try session.run(.declareOutcome(.red, note: nil))
 
         let record = try GameRecord(session: session)
-        #expect(record.bestMoves.map(\.author) == [5, 1])
+        #expect(record.bestMoves.map(\.author) == [5])
         let scores = try scoresBySeat(session)
         #expect(scores[5]?.total == 1.6)
-        #expect(scores[1]?.total == 1.1)
+        #expect(scores[1]?.total == 1)
     }
 
     @Test("Удаление ночью отменяет голосование следующего дня (7.1)")

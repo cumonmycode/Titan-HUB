@@ -26,9 +26,25 @@ extension GameState {
     var pendingBestMoveAuthors: [Seat] {
         bestMoveAuthors.filter(awaitsBestMove)
     }
+
+    /// После речи протокол просят отдельным шагом — во время речи кнопку протокола не показываем.
+    func takesProtocolAfterSpeech(_ seat: Seat) -> Bool {
+        guard ruleset.farewell?.protocolAfterSpeech == true, case .killed = self.seat(seat)?.elimination?.cause else { return false }
+        return true
+    }
 }
 
-/// Кнопки в карточке говорящего на заключительной речи: лучший ход — до речи, протокол — после.
+extension CurrentStep {
+    /// Выбывший на заключительной минуте: лучший ход, речь или протокол.
+    var farewellSeat: Seat? {
+        switch self {
+        case let .farewellBestMove(seat), let .farewell(seat), let .farewellProtocol(seat): seat
+        default: nil
+        }
+    }
+}
+
+/// Кнопки в карточке выбывшего: на шаге ЛХ — лучший ход, на речи — записанный ЛХ, после речи — протокол.
 struct FarewellActions: View {
     let game: GameController
     let seat: Seat
@@ -36,8 +52,33 @@ struct FarewellActions: View {
     let onProtocol: () -> Void
 
     var body: some View {
-        let state = game.state
+        switch game.state.currentStep {
+        case .farewellBestMove:
+            stepPrompt(title: "Лучший ход", icon: "star.fill", tint: .orange, action: onBestMove,
+                       hint: "Сначала лучший ход, затем заключительная речь. Отказался — «Далее».")
+        case .farewellProtocol:
+            stepPrompt(title: "Протокол", icon: "list.clipboard.fill", tint: .accentColor, action: onProtocol,
+                       hint: "После протокола игрок покидает стол, говорит следующий. Без протокола — «Далее».")
+        default:
+            speechActions
+        }
+    }
+
+    private func stepPrompt(title: String, icon: String, tint: Color, action: @escaping () -> Void, hint: String) -> some View {
         VStack(alignment: .leading, spacing: 8) {
+            Button(action: action) {
+                Label(title, systemImage: icon).font(.headline).frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.glassProminent)
+            .tint(tint)
+            .controlSize(.large)
+            Text(hint).font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    private var speechActions: some View {
+        let state = game.state
+        return VStack(alignment: .leading, spacing: 8) {
             if state.bestMoveAuthors.contains(seat) {
                 if let move = state.bestMove(by: seat) {
                     Button(action: onBestMove) {
@@ -55,7 +96,7 @@ struct FarewellActions: View {
                     .controlSize(.large)
                 }
             }
-            if state.mayLeaveProtocol(seat) {
+            if state.mayLeaveProtocol(seat), !state.takesProtocolAfterSpeech(seat) {
                 let proto = state.colorProtocol(by: seat)
                 Button(action: onProtocol) {
                     Label(proto == nil ? "Протокол" : "Изменить протокол", systemImage: "list.clipboard")

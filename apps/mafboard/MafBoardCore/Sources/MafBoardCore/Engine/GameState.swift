@@ -150,6 +150,8 @@ public struct GameState: Codable, Sendable, Equatable {
     public internal(set) var bestMoves: [BestMove] = []
     /// Чья речь сейчас идёт вдвое короче (3-й фол).
     public internal(set) var halvedSpeaker: Seat?
+    /// Дополнительное время текущей речи, взятое за фолы. Сбрасывается со сменой шага.
+    public internal(set) var extraSeconds: Int?
     public internal(set) var doctorLastTarget: Seat?
     public internal(set) var scoreAdjustments: [ScoreAdjustment] = []
     /// Протоколы выбывших игроков (по одному на игрока, последний заменяет прежний).
@@ -235,7 +237,11 @@ extension GameState {
 /// Что сейчас происходит за столом — удобная проекция фазы для экрана ведущего.
 public enum CurrentStep: Equatable, Sendable {
     case timed(TimedStep, speaker: Seat?)
+    /// Выбывший называет лучший ход — перед заключительной речью.
+    case farewellBestMove(Seat)
     case farewell(Seat)
+    /// Убитый после заключительной речи оставляет протокол.
+    case farewellProtocol(Seat)
     case speech(Seat)
     case ballot(candidates: [Seat], kind: VotingRoundKind)
     case tieSpeech(Seat)
@@ -260,31 +266,50 @@ extension GameState {
         }
     }
 
-    /// Длительность таймера текущего шага в секундах, если у шага есть таймер.
+    /// Длительность таймера текущего шага в секундах (с взятым за фолы временем), если у шага есть таймер.
     public var timerSeconds: Int? {
+        baseTimerSeconds.map { $0 + (extraSeconds ?? 0) }
+    }
+
+    private var baseTimerSeconds: Int? {
         let timing = ruleset.timing
         return switch currentStep {
         case let .timed(step, _): step.seconds
         case let .farewell(seat): seat == halvedSpeaker ? timing.farewellSeconds / 2 : timing.farewellSeconds
         case let .speech(seat): seat == halvedSpeaker ? timing.speechSeconds / 2 : timing.speechSeconds
         case .tieSpeech: timing.tieSpeechSeconds
-        case .ballot, .liftBallot, .dusk, .night, .finished: nil
+        case .farewellBestMove, .farewellProtocol, .ballot, .liftBallot, .dusk, .night, .finished: nil
         }
     }
 
-    /// Кто сейчас говорит (речь, прощальная речь, оправдание, добор).
+    /// Чей сейчас ход днём: речь, заключительная минута (с ЛХ и протоколом), оправдание, добор.
     public var currentSpeaker: Seat? {
         switch currentStep {
-        case let .speech(seat), let .farewell(seat), let .tieSpeech(seat): seat
+        case let .speech(seat), let .farewell(seat), let .tieSpeech(seat),
+             let .farewellBestMove(seat), let .farewellProtocol(seat): seat
         case let .timed(_, speaker): speaker
         case .ballot, .liftBallot, .dusk, .night, .finished: nil
         }
     }
 
+    /// Может ли говорящий взять дополнительное время: идёт его речь с таймером и фолов после этого не станет больше лимита.
+    public func canTakeExtraTime(_ seat: Seat) -> Bool {
+        let policy = ruleset.discipline.extraTimeRule
+        guard !isFinished, baseTimerSeconds != nil, currentSpeaker == seat, let fouls = self.seat(seat)?.fouls else {
+            return false
+        }
+        return fouls + policy.fouls <= policy.maxFouls
+    }
+
     private func currentStep(in stage: DayStage) -> CurrentStep {
         switch stage {
         case let .farewell(queue):
-            return queue.current.map(CurrentStep.farewell) ?? .dusk
+            guard let seat = queue.current else { return .dusk }
+            return switch queue.stage {
+            case .bestMove: .farewellBestMove(seat)
+            case .colorProtocol: .farewellProtocol(seat)
+            case .speech, nil: .farewell(seat)
+            }
         case let .speeches(round):
             return round.current.map(CurrentStep.speech) ?? .dusk
         case let .extra(index):

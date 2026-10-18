@@ -12,11 +12,14 @@ struct ScoreEditing {
     let onProtocol: (() -> Void)?
     /// `nil` — права лучшего хода нет.
     let onBestMove: (() -> Void)?
-    /// `nil` — игрок не удалён за фолы или дисквалификацию, либо правила не штрафуют «на критике».
-    let isCriticalRemoval: Binding<Bool>?
-    let criticalPenalty: Points?
     /// «Вскрылся шерифом» — отметка; баллы за вскрытие судья ставит в Доп+ или Доп−.
     let sheriffClaim: Binding<Bool>
+    /// Техфолы игрока по порядку: судья ставит и снимает их и после игры.
+    let techFouls: [TechFoulKind]
+    let techFoulPenalty: Points
+    let bigTechFoulPenalty: Points
+    let onTechFoul: (TechFoulKind) -> Void
+    let onCancelTechFoul: () -> Void
 
     /// Положительный допбалл — от +0.2 до +1.0 (ФСМ 8.4.3), отрицательный — от −1.0 до −0.2 (8.4.4). По возрастанию.
     static let bonusScale = [0] + Array(stride(from: 20, through: 100, by: 10))
@@ -24,7 +27,7 @@ struct ScoreEditing {
 }
 
 /// Карточка игрока в итогах — стекло. Свёрнута: номер, имя, роль, значки и итог.
-/// Раскрыта: из чего сложился итог, а у ведущего — ещё и правка допбаллов, ЛХ, протокола и «критики».
+/// Раскрыта: из чего сложился итог, а у ведущего — ещё и правка допбаллов, техфолов, ЛХ и протокола.
 struct PlayerScoreCard: View {
     let score: PlayerGameScore
     let player: PlayerProfile?
@@ -131,6 +134,7 @@ struct PlayerScoreCard: View {
                 VStack(spacing: 10) {
                     ExtraStepper(title: "Доп +", icon: "plus", tint: .green, scale: ScoreEditing.bonusScale, value: editing.bonus)
                     ExtraStepper(title: "Доп −", icon: "minus", tint: .red, scale: ScoreEditing.penaltyScale, value: editing.penalty)
+                    TechFoulStepper(editing: editing)
                 }
                 .padding(12)
                 .background(Color.primary.opacity(0.05), in: .rect(cornerRadius: 18, style: .continuous))
@@ -274,7 +278,70 @@ private struct ExtraStepper: View {
     }
 }
 
-/// Действия в раскрытой карточке: записать ЛХ или протокол, отметить «на критике» и вскрытие шерифом.
+/// Техфолы после игры: «−» снимает последний, «+» — обычный техфол, удержание «+» — большой.
+private struct TechFoulStepper: View {
+    let editing: ScoreEditing
+
+    private var kinds: [TechFoulKind] { editing.techFouls }
+
+    private var detail: String? {
+        guard !kinds.isEmpty else { return nil }
+        let big = kinds.filter { $0 == .big }.count
+        return big == 0 ? nil : "из них больших: \(big)"
+    }
+
+    var body: some View {
+        HStack(spacing: 12) {
+            IconBadge(icon: "exclamationmark.triangle.fill", tint: .red)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Техфолы").font(.subheadline.weight(.semibold))
+                if let detail {
+                    Text(detail).font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            Spacer(minLength: 4)
+            GlassEffectContainer(spacing: 6) {
+                HStack(spacing: 6) {
+                    Button(action: editing.onCancelTechFoul) {
+                        Image(systemName: "minus").font(.body.weight(.bold)).frame(width: 26, height: 26)
+                    }
+                    .buttonStyle(.glass)
+                    .buttonBorderShape(.circle)
+                    .disabled(kinds.isEmpty)
+                    .accessibilityLabel("Снять техфол")
+
+                    Text("\(kinds.count)")
+                        .font(.headline)
+                        .monospacedDigit()
+                        .foregroundStyle(kinds.isEmpty ? AnyShapeStyle(.secondary) : AnyShapeStyle(Color.red))
+                        .contentTransition(.numericText(value: Double(kinds.count)))
+                        .frame(minWidth: 54, minHeight: 26)
+
+                    Menu {
+                        Button("Техфол \((-editing.techFoulPenalty).signed)", systemImage: "exclamationmark.triangle.fill") {
+                            editing.onTechFoul(.ordinary)
+                        }
+                        Button("Большой техфол \((-editing.bigTechFoulPenalty).signed)", systemImage: "exclamationmark.octagon.fill") {
+                            editing.onTechFoul(.big)
+                        }
+                    } label: {
+                        Image(systemName: "plus").font(.body.weight(.bold)).frame(width: 26, height: 26)
+                    } primaryAction: {
+                        editing.onTechFoul(.ordinary)
+                    }
+                    .buttonStyle(.glass)
+                    .buttonBorderShape(.circle)
+                    .accessibilityLabel("Поставить техфол")
+                    .accessibilityHint("Удержание — большой техфол")
+                }
+            }
+        }
+        .sensoryFeedback(.impact(weight: .medium), trigger: kinds.count)
+        .accessibilityElement(children: .contain)
+    }
+}
+
+/// Действия в раскрытой карточке: записать ЛХ или протокол, отметить вскрытие шерифом.
 private struct ActionChips: View {
     let score: PlayerGameScore
     let editing: ScoreEditing
@@ -299,12 +366,6 @@ private struct ActionChips: View {
                     .buttonStyle(.glass)
                 }
                 ToggleChip(title: "Вскрылся шерифом", icon: "checkmark.shield.fill", tint: .orange, isOn: editing.sheriffClaim)
-                if let critical = editing.isCriticalRemoval {
-                    ToggleChip(
-                        title: "На критике" + (editing.criticalPenalty.map { " \((-$0).signed)" } ?? ""),
-                        icon: "person.fill.xmark", tint: .red, isOn: critical
-                    )
-                }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -451,7 +512,8 @@ extension PlayerGameScore {
             case .removal:
                 lines.append(ScoreLine(id: "removal", icon: "person.fill.xmark", tint: .red, title: "Удаление", points: component.points))
             case .criticalRemoval:
-                lines.append(ScoreLine(id: "removal", icon: "person.fill.xmark", tint: .red, title: "Удаление на критике", points: component.points))
+                lines.append(ScoreLine(id: "removal", icon: "person.fill.xmark", tint: .red, title: "Удаление",
+                                       detail: "отдало победу соперникам", points: component.points))
             case .forfeit:
                 lines.append(ScoreLine(id: "forfeit", icon: "exclamationmark.octagon.fill", tint: .red, title: "ППК", points: component.points))
             case .doubleSplit:

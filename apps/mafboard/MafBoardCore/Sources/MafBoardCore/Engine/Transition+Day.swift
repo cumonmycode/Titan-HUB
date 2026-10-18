@@ -37,25 +37,66 @@ extension Transition {
     // MARK: Прощальные речи
 
     mutating func startFarewell(_ seats: [Seat], context: FarewellContext) {
-        guard rules.timing.farewellSeconds > 0, let first = seats.first else {
+        guard rules.timing.farewellSeconds > 0, !seats.isEmpty else {
             finishFarewell(context)
             return
         }
-        state.phase = .day(.farewell(FarewellQueue(seats: seats, index: 0, context: context)))
-        startSpeech(of: first)
-        emit(.farewell(first))
+        enterFarewell(FarewellQueue(seats: seats, index: 0, context: context))
     }
 
-    private mutating func advanceFarewell(_ queue: FarewellQueue) {
-        var updated = queue
-        updated.index += 1
-        guard let next = updated.current else {
+    /// Заключительная минута игрока очереди: сначала лучший ход (если он положен), затем речь.
+    private mutating func enterFarewell(_ queue: FarewellQueue) {
+        guard let seat = queue.current else {
             finishFarewell(queue.context)
             return
         }
+        guard rules.farewell?.bestMoveBeforeSpeech == true, state.awaitsBestMove(from: seat) else {
+            startFarewellSpeech(queue)
+            return
+        }
+        var updated = queue
+        updated.stage = .bestMove
+        state.halvedSpeaker = nil
         state.phase = .day(.farewell(updated))
-        startSpeech(of: next)
-        emit(.farewell(next))
+    }
+
+    mutating func startFarewellSpeech(_ queue: FarewellQueue) {
+        guard let seat = queue.current else { return }
+        var updated = queue
+        updated.stage = rules.farewell == nil ? nil : .speech
+        state.phase = .day(.farewell(updated))
+        startSpeech(of: seat)
+        emit(.farewell(seat))
+    }
+
+    /// «Далее»: без ЛХ — к речи; после речи убитого — к протоколу; дальше — следующий игрок.
+    private mutating func advanceFarewell(_ queue: FarewellQueue) {
+        switch queue.stage ?? .speech {
+        case .bestMove:
+            startFarewellSpeech(queue)
+        case .speech where takesProtocolStep(queue.current):
+            var updated = queue
+            updated.stage = .colorProtocol
+            state.halvedSpeaker = nil
+            state.phase = .day(.farewell(updated))
+        case .speech, .colorProtocol:
+            moveToNextFarewell(queue)
+        }
+    }
+
+    mutating func moveToNextFarewell(_ queue: FarewellQueue) {
+        var updated = queue
+        updated.index += 1
+        updated.stage = nil
+        enterFarewell(updated)
+    }
+
+    /// Протокол — отдельный шаг у убитого ночью, если он его ещё не оставил (ФСМ 4.8.4).
+    private func takesProtocolStep(_ seat: Seat?) -> Bool {
+        guard rules.farewell?.protocolAfterSpeech == true, let seat,
+              case .killed = state.seat(seat)?.elimination?.cause
+        else { return false }
+        return !state.protocols.contains { $0.author == seat }
     }
 
     private mutating func finishFarewell(_ context: FarewellContext) {

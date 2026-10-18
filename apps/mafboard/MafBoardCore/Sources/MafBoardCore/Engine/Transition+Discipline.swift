@@ -1,5 +1,27 @@
 /// Фолы, техфолы, предупреждения, дисквалификация и ручное выбывание.
 extension Transition {
+    /// «+30 секунд» говорящему за фолы. Выбывший на заключительной речи тоже платит фолами.
+    mutating func takeExtraTime(_ seat: Seat) throws(GameError) {
+        try requireInProgress()
+        let policy = rules.discipline.extraTimeRule
+        let index = try index(of: seat)
+        guard state.timerSeconds != nil, state.currentSpeaker == seat else {
+            throw .notAllowedNow(.extraTimeOnlyForSpeaker(current: state.currentSpeaker))
+        }
+        guard state.canTakeExtraTime(seat) else { throw .tooManyFoulsForExtraTime(seat, max: policy.maxFouls) }
+
+        emit(.extraTime(seat, seconds: policy.seconds))
+        for _ in 0..<policy.fouls {
+            if state.seats[index].isAlive {
+                try addFoul(seat)
+            } else {
+                state.seats[index].fouls += 1
+                emit(.foul(seat, total: state.seats[index].fouls))
+            }
+        }
+        state.extraSeconds = (state.extraSeconds ?? 0) + policy.seconds
+    }
+
     mutating func addFoul(_ seat: Seat) throws(GameError) {
         try requireInProgress()
         let index = try aliveIndex(of: seat)
@@ -27,6 +49,8 @@ extension Transition {
         try requireInProgress()
         let index = try aliveIndex(of: seat)
         guard state.seats[index].fouls > 0 else { throw .nothingToCancel(seat) }
+        // Иначе время осталось бы, а фолы за него — нет. Ошибку исправляют «Назад».
+        if state.extraSeconds != nil, state.currentSpeaker == seat { throw .extraTimeFoulsLocked(seat) }
         state.seats[index].fouls -= 1
         if let silence = rules.discipline.foulsToSilence, state.seats[index].fouls < silence {
             state.seats[index].missesNextSpeech = false
@@ -37,26 +61,29 @@ extension Transition {
         emit(.foulCancelled(seat, total: state.seats[index].fouls))
     }
 
+    /// Во время игры — живому игроку, вплоть до удаления. После игры судья ставит техфол любому игроку: только штраф.
     mutating func addTechFoul(_ seat: Seat, kind: TechFoulKind) throws(GameError) {
-        try requireInProgress()
-        let index = try aliveIndex(of: seat)
+        let index = try techFoulIndex(of: seat)
         state.seats[index].techFoulKinds.append(kind)
         let total = state.seats[index].techFouls
         switch kind {
         case .ordinary: emit(.techFoul(seat, total: total))
         case .big: emit(.bigTechFoul(seat, total: total))
         }
-        if let limit = rules.discipline.techFoulsToRemoval, total >= limit {
+        if !state.isFinished, let limit = rules.discipline.techFoulsToRemoval, total >= limit {
             try remove(seat, reason: .techFouls)
         }
     }
 
     mutating func cancelTechFoul(_ seat: Seat) throws(GameError) {
-        try requireInProgress()
-        let index = try aliveIndex(of: seat)
+        let index = try techFoulIndex(of: seat)
         guard state.seats[index].techFouls > 0 else { throw .nothingToCancel(seat) }
         state.seats[index].techFoulKinds.removeLast()
         emit(.techFoulCancelled(seat, total: state.seats[index].techFouls))
+    }
+
+    private func techFoulIndex(of seat: Seat) throws(GameError) -> Int {
+        state.isFinished ? try index(of: seat) : try aliveIndex(of: seat)
     }
 
     mutating func addWarning(_ seat: Seat) throws(GameError) {
@@ -73,10 +100,25 @@ extension Transition {
     /// Удаление за нарушения: игрок выбывает, днём голосование может отмениться.
     mutating func remove(_ seat: Seat, reason: RemovalReason) throws(GameError) {
         try requireInProgress()
-        _ = try aliveIndex(of: seat)
+        let index = try aliveIndex(of: seat)
+        if rules.discipline.detectsDecisiveRemoval != false, reason != .techFouls, isDecisive(removalOf: state.seats[index]) {
+            state.seats[index].isCriticalRemoval = true
+        }
         eliminate(seat, cause: .removed(reason))
         if concludeIfGameOver() { return }
         applyConsequences(ofLeaving: seat, cancelsVoting: rules.voting.cancelOnDayRemoval)
+    }
+
+    /// Удаление решает исход игры («критика», ФСМ 8.2.4). Красный — когда чёрных не меньше, чем красных без двух:
+    /// без него ошибка города в голосовании или ещё один выстрел мафии отдают ей победу. Чёрный — когда он последний.
+    /// Отметка не попадает в журнал: по ней видно команду игрока.
+    private func isDecisive(removalOf seat: SeatState) -> Bool {
+        let black = state.aliveCount(of: .black)
+        let red = state.aliveSeats.count - black
+        return switch seat.team {
+        case .red: black >= red - 2
+        case .black: black == 1
+        }
     }
 
     /// Удаление «на критике» отмечается и после игры: судья решает это, когда видит весь расклад.

@@ -75,8 +75,9 @@ struct CityGameTests {
         #expect(report.victims == [NightVictim(seat: 1, killer: .mafia), NightVictim(seat: 5, killer: .maniac)])
         #expect(report.actions.checks.last?.isPositive == true)
         #expect(session.state.bestMoveAuthor == 1)
-        #expect(session.step == .farewell(1))
-        try session.advance()
+        #expect(session.step == .farewellBestMove(1))
+        try session.advance(times: 2)
+        // В городской протокол отдельным шагом не оставляют — сразу следующий убитый.
         #expect(session.step == .farewell(5))
     }
 

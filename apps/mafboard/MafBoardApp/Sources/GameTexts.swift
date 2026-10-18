@@ -8,7 +8,9 @@ extension CurrentStep {
         switch self {
         case let .timed(step, speaker):
             speaker.map { "\(step.kind.displayName): №\($0)" } ?? step.kind.displayName
+        case let .farewellBestMove(seat): "Лучший ход №\(seat)"
         case let .farewell(seat): "Заключительная речь №\(seat)"
+        case let .farewellProtocol(seat): "Протокол №\(seat)"
         case let .speech(seat): "Речь №\(seat)"
         case let .ballot(_, kind):
             switch kind {
@@ -65,7 +67,8 @@ extension ScoreComponent {
         case .result: return nil
         case let .bestMove(guessed): title = "ЛХ (\(guessed))"
         case .removal: title = "Удаление"
-        case .criticalRemoval: title = "Удаление на критике"
+        // Слово «критика» — игровой термин, в интерфейсе его нет: видно только, что штраф больше.
+        case .criticalRemoval: title = "Удаление"
         case let .techFouls(count): title = count == 1 ? "Техфол" : "Техфолы ×\(count)"
         case .forfeit: title = "ППК"
         case .doubleSplit: title = "Двойное деление"

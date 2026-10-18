@@ -291,14 +291,17 @@ public enum GameScorer {
         return [ScoreComponent(kind: .colorProtocol(firstKilled: record.firstKilled == seat.seat), points: points)]
     }
 
-    /// Баллы за протокол. Работает и для идущей игры — ведущий видит оценку сразу. `nil` — протокол не оценивается.
+    /// Баллы за протокол. Работает и для идущей игры — ведущий видит оценку сразу.
+    /// `nil` — протокол не оценивается: так в правилах или автор — чёрный (мафия знает своих).
     public static func protocolPoints(
         _ proto: ColorProtocol,
         seats: [SeatState],
         nights: [NightReport],
         policy: ScoringPolicy
     ) -> Points? {
-        guard let scoring = policy.protocolScoring else { return nil }
+        guard let scoring = policy.protocolScoring,
+              seats.first(where: { $0.seat == proto.author })?.team == .red
+        else { return nil }
         let blacks = Set(seats.filter { $0.team == .black }.map(\.seat))
         // Шериф не получает плюс за красных, которых сам проверил (ФСМ 8.3.9.9).
         let isSheriff = seats.first { $0.seat == proto.author }?.role == .sheriff
@@ -331,6 +334,7 @@ public enum GameScorer {
     }
 
     /// Стол дважды поделился, а все остались: каждый красный за столом получает штраф (ФСМ 4.5.14).
+    /// Только если до этого дня ночью уже кого-то убили: нулевое голосование и дни после промахов не наказываются.
     /// Если шериф убит в первую ночь, деление разрешено и не наказывается.
     private static func doubleSplitPenalties(in record: GameRecord, policy: ScoringPolicy) -> [Seat: ScoreComponent] {
         // Штраф — часть правил деления ФСМ: без ограничений подъёма (городская) его нет.
@@ -341,6 +345,7 @@ public enum GameScorer {
         let splitDays = record.votings.filter { voting in
             voting.skipReason == nil && voting.eliminated.isEmpty
                 && voting.rounds.filter { $0.kind != .lift && $0.leaders.count > 1 }.count >= 2
+                && record.nights.contains { $0.number < voting.day && !$0.victims.isEmpty }
         }.map(\.day)
         var result: [Seat: ScoreComponent] = [:]
         for seat in record.seats where seat.team == .red {

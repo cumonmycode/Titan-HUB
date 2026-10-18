@@ -32,6 +32,8 @@ public struct Ruleset: Codable, Sendable, Equatable {
     public var night: NightPolicy
     public var discipline: DisciplinePolicy
     public var bestMove: BestMovePolicy
+    /// `nil` — порядок заключительной минуты из старых игр: ЛХ и протокол во время речи.
+    public var farewell: FarewellPolicy?
 }
 
 extension Ruleset {
@@ -76,16 +78,18 @@ extension Ruleset {
             foulsToRemoval: 4,
             techFoulsToRemoval: 2,
             warningsPerFoul: nil,
-            foulsToHalveSpeech: 3
+            foulsToHalveSpeech: 3,
+            extraTime: .standard,
+            detectsDecisiveRemoval: true
         ),
         bestMove: BestMovePolicy(
             isEnabled: true,
-            eligibility: .firstNightVictim,
+            eligibility: .firstKillWithoutVoteOutDayBefore,
             defaultSeats: 3,
             seatsByPlayerCount: [:],
-            firstDayLeaversCancellingBestMove: 2,
             grantsFullTableVoteOut: true
-        )
+        ),
+        farewell: FarewellPolicy(bestMoveBeforeSpeech: true, protocolAfterSpeech: true)
     )
 
     /// Городская мафия: 8+ игроков, расширенные роли, голосование «по рукам» за всех живых.
@@ -122,14 +126,16 @@ extension Ruleset {
             foulsToSilence: 3,
             foulsToRemoval: 4,
             techFoulsToRemoval: 2,
-            warningsPerFoul: nil
+            warningsPerFoul: nil,
+            extraTime: .standard
         ),
         bestMove: BestMovePolicy(
             isEnabled: true,
-            eligibility: .firstNightVictim,
+            eligibility: .firstKillWithoutVoteOutDayBefore,
             defaultSeats: 5,
             seatsByPlayerCount: [8: 2, 9: 3, 10: 3, 11: 3, 12: 4, 13: 4, 14: 4, 15: 5, 16: 5]
-        )
+        ),
+        farewell: FarewellPolicy(bestMoveBeforeSpeech: true, protocolAfterSpeech: false)
     )
 }
 

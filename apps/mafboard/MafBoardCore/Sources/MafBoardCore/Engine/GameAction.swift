@@ -14,9 +14,11 @@ public enum GameAction: Codable, Sendable, Equatable {
     case night(NightInput)
 
     // Дисциплина
+    /// «+30 секунд» говорящему в обмен на фолы (`DisciplinePolicy.extraTime`).
+    case extraTime(Seat)
     case foul(Seat)
     case cancelFoul(Seat)
-    /// Обычный технический фол (ФСМ 6.7: −0.3).
+    /// Обычный технический фол (ФСМ 6.7: −0.3). После игры — только штраф, без удаления.
     case techFoul(Seat)
     /// Большой технический фол (ФСМ 6.7: −0.6).
     case bigTechFoul(Seat)
@@ -83,9 +85,22 @@ public struct CandidateVotes: Codable, Sendable, Equatable {
 public enum NightInput: Codable, Sendable, Equatable {
     /// Выстрел мафии или ход маньяка. `nil` — промах.
     case shot(Seat?)
+    /// Промах мафии с подробностями: кто куда стрелял. Не названные стрелявшие — не стреляли.
+    case miss([MissedShot])
     case check(Seat)
     case heal(Seat)
     case skip
+}
+
+/// Выстрел одного игрока мафии в ночь промаха. `target == nil` — не стрелял.
+public struct MissedShot: Codable, Sendable, Hashable {
+    public let shooter: Seat
+    public let target: Seat?
+
+    public init(_ shooter: Seat, at target: Seat?) {
+        self.shooter = shooter
+        self.target = target
+    }
 }
 
 /// Протокол выбывшего игрока после заключительной речи: только цвета и роли (ФСМ 4.8.7).

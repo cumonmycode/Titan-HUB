@@ -98,6 +98,9 @@ struct ErrorMessageTests {
         .unexpectedNightInput(.donCheck), .cannotTargetSelf(1), .doctorCannotRepeatTarget(1),
         .bestMoveNotAvailable, .invalidBestMove(.seatCount(max: 3)), .invalidBestMove(.duplicateSeats),
         .invalidBestMove(.includesAuthor), .nothingToCancel(1), .nothingToUndo,
+        .extraTimeFoulsLocked(1), .notAllowedNow(.extraTimeOnlyForSpeaker(current: 1)),
+        .notAllowedNow(.extraTimeOnlyForSpeaker(current: nil)), .tooManyFoulsForExtraTime(1, max: 3),
+        .invalidMiss(.notShooter(1)), .invalidMiss(.duplicateShooter(3)), .invalidMiss(.sameTarget(5)),
     ])
     func everyErrorHasMessage(error: GameError) {
         #expect(!error.message.isEmpty)
@@ -130,5 +133,18 @@ struct CountdownTests {
         #expect(countdown.overtime(at: start + 30) == 0)
         #expect(countdown.overtime(at: start + 65) == 5)
         #expect(countdown.fraction(at: start + 65) == 0)
+    }
+
+    @Test("Время вышло — таймер стоит на нуле, а +30 снова даёт время")
+    func finishStopsAtZero() {
+        let start = Date(timeIntervalSince1970: 0)
+        var countdown = Countdown(seconds: 60)
+        countdown.start(at: start)
+        countdown.finish()
+        #expect(!countdown.isRunning)
+        #expect(countdown.isExpired(at: start + 500))
+        #expect(countdown.overtime(at: start + 500) == 0)
+        countdown.extend(bySeconds: 30)
+        #expect(countdown.remaining(at: start + 500) == 30)
     }
 }
