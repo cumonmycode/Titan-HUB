@@ -75,3 +75,25 @@ Thank you!
 7. **Оплата:** «Пополнить» → сумма → оплата через СБП (дойти до банка; оплачивать необязательно).
 8. **Удаление аккаунта:** «Профиль» → «Удалить аккаунт» → «Удалить» → экран входа. Ввести тот же номер — показать, что вход сейчас закрыт (сообщение «Войти снова можно с …»).
 9. **Демо:** на первом экране «Посмотреть демо» — коротко показать, что всё работает без входа.
+
+## Ответ на Guideline 5.1.1(iv) — разрешения (отказ 2026-10-12, 1.4.0 (15) → сборка 1.4.0 (17))
+
+Претензия: перед системным запросом камеры был свой экран с кнопкой «Разрешить доступ к камере» и кнопкой «Не сейчас», которая позволяла уйти мимо запроса. Исправлено в `apps/client/src/components/login/onboarding-steps.tsx`: на экранах «Уведомления» и «Камера» одна кнопка «Продолжить», которая всегда открывает системный запрос; «Не сейчас» и «Назад» убраны, тексты без «Разрешите/Включите». С главной убрана карточка «Включить / Не сейчас» для уведомлений (включаются переключателем в профиле).
+
+Порядок: в App Store Connect у версии 1.4.0 заменить сборку на 1.4.0 (17) → ответить в App Review текстом ниже → «Отправить на проверку».
+
+```
+Hello,
+
+Thank you for the review. We have updated the permission flow in build 1.4.0 (17):
+
+- The screens shown before the camera and notification permission requests now have a single "Продолжить" ("Continue") button that always proceeds to the system permission request.
+- The "Не сейчас" ("Not now") and back buttons were removed from these screens, so the user can no longer close the message and delay the request.
+- The explanatory text no longer asks users to allow access; it only explains what the permission is used for. The final decision is made in the system dialog.
+- The in-app banner suggesting to enable notifications was removed.
+
+The camera is used only to take a profile photo during registration. If access is denied, the app shows a short note with a link to the Settings app when the user chooses to take a photo.
+
+Thank you!
+```
+
