@@ -138,7 +138,12 @@ export default function AnalyticsScreen() {
 
 /* ─────────────────────────── Итог ─────────────────────────── */
 
-/** Главная цифра (прибыль владельцу, выручка сотруднику) и четыре показателя с изменением. */
+type SummaryTile = { label: string; value: string; delta?: number; caption?: string; negative?: boolean };
+
+/**
+ * Главная цифра — выручка, под ней показатели с изменением. Владельцу первая плитка —
+ * прибыль: нажатие на неё раскрывает, из чего прибыль сложилась.
+ */
 function Summary({
   data,
   owner,
@@ -153,58 +158,79 @@ function Summary({
   onToggle: () => void;
 }) {
   const cur = data.current;
-  const profit = owner && cur.net !== undefined;
-  const value = profit ? (cur.net ?? 0) : cur.revenueNet;
-  const delta = profit ? data.deltas.profit : data.deltas.revenue;
-  const tiles: { label: string; value: string; delta?: number; caption?: string }[] = [
-    { label: 'Выручка', value: money(cur.revenueNet), delta: data.deltas.revenue },
+  const delta = data.deltas.revenue;
+  const net = owner && cur.net !== undefined ? cur.net : null;
+  const profitTile: SummaryTile | null =
+    net === null ? null : { label: net >= 0 ? 'Прибыль' : 'Убыток', value: money(net), delta: data.deltas.profit, negative: net < 0 };
+  const tiles: SummaryTile[] = [
     { label: 'Чеки', value: String(cur.checks), delta: data.deltas.checks },
     { label: 'Средний чек', value: money(Math.round(cur.avgCheck)), delta: pct(Math.round(cur.avgCheck), Math.round(data.previous.avgCheck)) },
     { label: 'Гости', value: guests ? String(guests.unique) : '—', caption: guests ? `новых ${guests.new}` : undefined },
   ];
+  // Без прибыли плиток три — в один ряд, а не «две и одна».
+  const tileStyle = profitTile ? styles.tileHalf : styles.tileThird;
   return (
     <View style={styles.summary}>
-      <Pressable
-        disabled={!profit}
-        onPress={() => (haptic.selection(), onToggle())}
-        accessibilityRole={profit ? 'button' : undefined}
-        accessibilityHint={profit ? 'Показать, из чего сложилась прибыль' : undefined}
-      >
-        <View style={styles.heroHead}>
-          <RNText style={[type.footnote, styles.caps]}>{profit ? (value >= 0 ? 'ПРИБЫЛЬ' : 'УБЫТОК') : 'ВЫРУЧКА'}</RNText>
-          {profit ? <SymbolView name={expanded ? 'chevron.up' : 'chevron.down'} size={12} weight="semibold" tintColor={colors.tertiaryLabel} /> : null}
-        </View>
+      <View>
+        <RNText style={[type.footnote, styles.caps]}>ВЫРУЧКА</RNText>
         <RNText
-          style={[styles.hero, type.amount, value < 0 && styles.negative]}
+          style={[styles.hero, type.amount, cur.revenueNet < 0 && styles.negative]}
           numberOfLines={1}
           adjustsFontSizeToFit
           maxFontSizeMultiplier={FONT_SCALE_MAX.display}
         >
-          {money(value)}
+          {money(cur.revenueNet)}
         </RNText>
         <RNText style={[type.subhead, styles.secondary]} numberOfLines={1}>
           {delta ? <RNText style={{ color: delta > 0 ? colors.green : colors.red, fontWeight: '600' }}>{`${signed(delta)} `}</RNText> : null}
           {delta ? 'к прошлому такому же периоду' : `${cur.checks} ${plural(cur.checks, ['чек', 'чека', 'чеков'])} за период`}
         </RNText>
-      </Pressable>
+      </View>
       <View style={styles.tiles}>
+        {profitTile ? (
+          <Pressable
+            onPress={() => (haptic.selection(), onToggle())}
+            style={({ pressed }) => [tileStyle, pressed && styles.pressed]}
+            accessibilityRole="button"
+            accessibilityState={{ expanded }}
+            accessibilityHint="Показать, из чего сложилась прибыль"
+          >
+            <SummaryTileBody tile={profitTile} chevron={expanded ? 'chevron.up' : 'chevron.down'} />
+          </Pressable>
+        ) : null}
         {tiles.map((tile) => (
-          <View key={tile.label} style={styles.tile}>
-            <RNText style={[type.caption1, styles.secondary]} numberOfLines={1}>
-              {tile.label}
-            </RNText>
-            <RNText style={[type.title3, type.amount, styles.label]} numberOfLines={1} adjustsFontSizeToFit maxFontSizeMultiplier={FONT_SCALE_MAX.compact}>
-              {tile.value}
-            </RNText>
-            {tile.delta ? (
-              <RNText style={[type.caption1, { color: tile.delta > 0 ? colors.green : colors.red, fontWeight: '600' }]}>{signed(tile.delta)}</RNText>
-            ) : tile.caption ? (
-              <RNText style={[type.caption1, styles.secondary]}>{tile.caption}</RNText>
-            ) : null}
+          <View key={tile.label} style={tileStyle}>
+            <SummaryTileBody tile={tile} />
           </View>
         ))}
       </View>
     </View>
+  );
+}
+
+function SummaryTileBody({ tile, chevron }: { tile: SummaryTile; chevron?: SFSymbol }) {
+  return (
+    <>
+      <View style={styles.tileHead}>
+        <RNText style={[type.caption1, styles.secondary]} numberOfLines={1}>
+          {tile.label}
+        </RNText>
+        {chevron ? <SymbolView name={chevron} size={10} weight="semibold" tintColor={colors.tertiaryLabel} /> : null}
+      </View>
+      <RNText
+        style={[type.title3, type.amount, tile.negative ? styles.negative : styles.label]}
+        numberOfLines={1}
+        adjustsFontSizeToFit
+        maxFontSizeMultiplier={FONT_SCALE_MAX.compact}
+      >
+        {tile.value}
+      </RNText>
+      {tile.delta ? (
+        <RNText style={[type.caption1, { color: tile.delta > 0 ? colors.green : colors.red, fontWeight: '600' }]}>{signed(tile.delta)}</RNText>
+      ) : tile.caption ? (
+        <RNText style={[type.caption1, styles.secondary]}>{tile.caption}</RNText>
+      ) : null}
+    </>
   );
 }
 
@@ -610,12 +636,13 @@ function ChartsSection({
 
 const styles = StyleSheet.create({
   summary: { paddingHorizontal: space.lg, paddingVertical: space.lg, gap: space.lg },
-  heroHead: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  tileHead: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   caps: { color: colors.secondaryLabel, fontWeight: '600' },
   hero: { fontSize: 40, lineHeight: 46, color: colors.label },
   negative: { color: colors.red },
   tiles: { flexDirection: 'row', flexWrap: 'wrap', rowGap: space.md },
-  tile: { width: '50%', paddingRight: space.sm, gap: 1 },
+  tileHalf: { width: '50%', paddingRight: space.sm, gap: 1 },
+  tileThird: { width: '33.33%', paddingRight: space.sm, gap: 1 },
   grid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', rowGap: space.sm + 2 },
   report: { backgroundColor: colors.card, borderRadius: 20, borderCurve: 'continuous', padding: space.md, gap: 3, minHeight: 92 },
   reportIcon: { width: 28, height: 28, borderRadius: 8, borderCurve: 'continuous', alignItems: 'center', justifyContent: 'center', marginBottom: 4 },
