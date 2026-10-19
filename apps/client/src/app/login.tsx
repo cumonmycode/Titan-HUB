@@ -201,11 +201,10 @@ export default function LoginScreen() {
     content = <IntroStep onStart={() => void nextAfter('intro').then(go)} onDemo={() => { resetDemo(); enterDemo(); }} />;
   } else if (step === 'notifications') {
     content = (
-      <PermissionStep info={NOTIFICATIONS_PERMISSION} busy={busy} onAllow={() => void allowNotifications()}
-        onSkip={() => void nextAfter('notifications').then(go)} onBack={() => go('intro')} />
+      <PermissionStep info={NOTIFICATIONS_PERMISSION} busy={busy} onContinue={() => void allowNotifications()} />
     );
   } else if (step === 'camera') {
-    content = <PermissionStep info={CAMERA_PERMISSION} busy={busy} onAllow={() => void allowCamera()} onSkip={() => go('phone')} onBack={() => go('intro')} />;
+    content = <PermissionStep info={CAMERA_PERMISSION} busy={busy} onContinue={() => void allowCamera()} />;
   } else if (step === 'phone') {
     content = (
       <PhoneStep digits={digits} onChangeDigits={(d) => { setDigits(d); setError(null); }} busy={busy} error={error}

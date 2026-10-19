@@ -1,5 +1,10 @@
 // Экраны до входа в духе Telegram: знакомство (листаемые страницы с «Начать») и
 // разрешения — объясняем, зачем они, и только потом показываем системный запрос.
+//
+// App Review 5.1.1(iv), 2026-10-12: экран перед системным запросом не должен уговаривать
+// («Разрешить доступ…») и не должен давать уйти мимо запроса («Не сейчас», «Назад»).
+// Поэтому одна нейтральная кнопка «Продолжить», которая всегда открывает системный запрос;
+// решение клиент принимает уже там.
 import { useState } from 'react';
 import { ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import Animated, { FadeIn } from 'react-native-reanimated';
@@ -76,46 +81,41 @@ export interface PermissionInfo {
   title: string;
   text: string;
   points: { icon: IconName; text: string }[];
-  allowTitle: string;
 }
 
 export const NOTIFICATIONS_PERMISSION: PermissionInfo = {
   icon: 'inbox',
   color: colors.violetLight,
   title: 'Уведомления',
-  text: 'Включите уведомления, чтобы не пропускать важное о вашей карте клуба.',
+  text: 'My Titan присылает уведомления о вашей карте клуба. Дальше телефон спросит, разрешить ли их.',
   points: [
     { icon: 'bonus', text: 'Начисление и сгорание бонусов' },
     { icon: 'deposit', text: 'Пополнения депозита и долг' },
     { icon: 'paid', text: 'Подтверждение регистрации и оплат' },
     { icon: 'news', text: 'Новости и события клуба' },
   ],
-  allowTitle: 'Включить уведомления',
 };
 
 export const CAMERA_PERMISSION: PermissionInfo = {
   icon: 'camera',
   color: colors.cyan,
   title: 'Камера',
-  text: 'Разрешите доступ к камере, чтобы сфотографироваться для профиля прямо в приложении.',
+  text: 'Камера нужна, чтобы сфотографироваться для профиля прямо в приложении. Дальше телефон спросит, разрешить ли доступ.',
   points: [
     { icon: 'person', text: 'Фото в профиле — по нему вас узнают в клубе' },
     { icon: 'shield', text: 'Камера включается, только когда вы сами её открываете' },
   ],
-  allowTitle: 'Разрешить доступ к камере',
 };
 
-export function PermissionStep({ info, busy, onAllow, onSkip, onBack }: {
+export function PermissionStep({ info, busy, onContinue }: {
   info: PermissionInfo;
   busy?: boolean;
-  onAllow: () => void;
-  onSkip: () => void;
-  onBack: () => void;
+  /** Всегда показывает системный запрос, затем ведёт дальше — что бы клиент ни выбрал. */
+  onContinue: () => void;
 }) {
   return (
     <OnboardingLayout
       centered
-      onBack={onBack}
       hero={
         <Animated.View entering={FadeIn.duration(300)} style={styles.hero}>
           <Surface tone={info.color} style={styles.bigIcon}>
@@ -125,12 +125,7 @@ export function PermissionStep({ info, busy, onAllow, onSkip, onBack }: {
       }
       title={info.title}
       subtitle={info.text}
-      footer={
-        <>
-          <GlassButton title={info.allowTitle} loading={busy} onPress={onAllow} />
-          <GlassButton title="Не сейчас" variant="ghost" size="md" onPress={onSkip} />
-        </>
-      }
+      footer={<GlassButton title="Продолжить" loading={busy} onPress={onContinue} />}
     >
       <Surface style={styles.points}>
         {info.points.map((p) => (

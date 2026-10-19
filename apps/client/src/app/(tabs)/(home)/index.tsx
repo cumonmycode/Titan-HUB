@@ -5,8 +5,6 @@
 // • «Последние операции» — три свежие, «Все» ведёт во вкладку «История»;
 // • колокольчик в шапке — уведомления.
 import { Stack, useRouter } from 'expo-router';
-import * as SecureStore from 'expo-secure-store';
-import { useEffect, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 
@@ -19,13 +17,11 @@ import { TabScroll } from '@/components/screen';
 import { Divider, EmptyState, IconTile, SectionHeader, Skeleton, Surface } from '@/components/ui';
 import { errorText } from '@/lib/api';
 import { bonus, inDays, money, plural } from '@/lib/format';
-import { pushPermission, registerForPush } from '@/lib/push';
 import { refreshMoney, useFeed, useWallet } from '@/lib/queries';
 import { useSession } from '@/lib/session';
 import { colors, IS_IOS, radius, space, type } from '@/lib/theme';
 import type { Collection, Wallet } from '@/lib/types';
 
-const PUSH_PROMPT_KEY = 'push_prompt_dismissed';
 const RECENT_COUNT = 3;
 
 function greeting(demo: boolean): string {
@@ -112,7 +108,6 @@ export default function HomeScreen() {
 
       {w.registration === 'pending' ? <RegistrationPending /> : null}
       <DepositCard wallet={w} />
-      <PushPrompt />
       <Dues wallet={w} />
       {w.visitProgress.tier === 'newbie' && w.visitProgress.remaining >= 0 ? <ResidentProgress wallet={w} /> : null}
 
@@ -276,42 +271,6 @@ function ResidentProgress({ wallet }: { wallet: Wallet }) {
   );
 }
 
-/** Мягкое предложение включить push — системный запрос только по нажатию. */
-function PushPrompt() {
-  const status = useSession((s) => s.status);
-  const [visible, setVisible] = useState(false);
-  useEffect(() => {
-    if (status !== 'signedIn') return;
-    let alive = true;
-    void (async () => {
-      const dismissed = await SecureStore.getItemAsync(PUSH_PROMPT_KEY).catch(() => null);
-      const perm = await pushPermission().catch(() => 'denied' as const);
-      if (alive) setVisible(!dismissed && perm === 'undetermined');
-    })();
-    return () => { alive = false; };
-  }, [status]);
-  if (!visible) return null;
-  const dismiss = () => { setVisible(false); void SecureStore.setItemAsync(PUSH_PROMPT_KEY, '1'); };
-  return (
-    <Surface tone={colors.violet} style={[styles.card, styles.section]}>
-      <View style={styles.row}>
-        <IconTile name="inbox" color={colors.violetLight} />
-        <View style={styles.flex}>
-          <Text style={type.headline}>Уведомления об операциях</Text>
-          <Text style={[type.caption, styles.promptText]}>Бонусы, пополнения, долг и новости клуба — сразу на телефон.</Text>
-        </View>
-      </View>
-      <View style={styles.promptActions}>
-        <GlassButton title="Не сейчас" variant="ghost" size="md" onPress={dismiss} />
-        <GlassButton title="Включить" size="md" onPress={async () => {
-          await registerForPush(true);
-          dismiss();
-        }} />
-      </View>
-    </Surface>
-  );
-}
-
 const styles = StyleSheet.create({
   flex: { flex: 1 },
   row: { flexDirection: 'row', alignItems: 'center', gap: space.md },
@@ -335,6 +294,5 @@ const styles = StyleSheet.create({
   fill: { height: '100%', borderRadius: 4, experimental_backgroundImage: 'linear-gradient(90deg, #8B5CF6, #4cd7f6)' },
   promptText: { marginTop: 2 },
   pending: { marginTop: space.lg },
-  promptActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: space.sm, marginTop: space.md },
   listLoading: { padding: space.lg, gap: space.md },
 });
