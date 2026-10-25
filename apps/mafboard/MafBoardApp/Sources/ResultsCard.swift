@@ -12,6 +12,7 @@ struct ResultsCard: View {
     let onProtocol: (Seat) -> Void
     let onNextGame: (() -> Void)?
     @State private var isShowingMemo = false
+    @State private var isShowingTimeline = false
 
     /// Ограничения ФСМ 8.4.1: сумма плюсов за игру и сколько игроков с плюсом.
     private static let bonusLimit: Points = 4
@@ -47,6 +48,9 @@ struct ResultsCard: View {
             }
         }
         .sheet(isPresented: $isShowingMemo) { ScoringMemoSheet() }
+        .sheet(isPresented: $isShowingTimeline) {
+            GameTimelineSheet(events: game.state.events, seats: game.state.seats) { game.name(of: $0) }
+        }
     }
 
     /// Шапка итогов: победитель, причина, памятка и лимиты допбаллов ФСМ.
@@ -68,6 +72,10 @@ struct ResultsCard: View {
                 Spacer(minLength: 0)
             }
             HStack(spacing: 8) {
+                Button { isShowingTimeline = true } label: {
+                    Label("Хронология", systemImage: "clock.arrow.circlepath").font(.subheadline.weight(.semibold))
+                }
+                .buttonStyle(.solid)
                 Button { isShowingMemo = true } label: {
                     Label("Памятка", systemImage: "book.pages.fill").font(.subheadline.weight(.semibold))
                 }

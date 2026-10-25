@@ -209,6 +209,7 @@ struct WinnerLabel: View {
 // MARK: - Аватар
 
 /// Фото игрока из GoMafia или монограмма, как в «Контактах». С номером места — в углу.
+/// Единый вид игрока по всему приложению: фото (или монограмма) и номер в углу — место за столом или в таблице.
 struct PlayerAvatar: View {
     let name: String
     var url: URL?
@@ -216,6 +217,8 @@ struct PlayerAvatar: View {
     var size: CGFloat = 40
     /// Цвет значка с номером. `nil` — акцент приложения.
     var seatTint: Color?
+    /// Цветная обводка фото: выставлен на голосование, призовое место.
+    var ring: Color?
 
     private var initials: String {
         let words = name.split(separator: " ").prefix(2)
@@ -235,18 +238,55 @@ struct PlayerAvatar: View {
         }
         .frame(width: size, height: size)
         .clipShape(.circle)
+        .overlay {
+            if let ring {
+                Circle().strokeBorder(ring, lineWidth: max(2, size * 0.05))
+            }
+        }
         .overlay(alignment: .bottomTrailing) {
             if let seat {
-                Text("\(seat)")
-                    .font(.system(size: max(10, size * 0.28), weight: .bold))
-                    .monospacedDigit()
-                    .foregroundStyle(.white)
-                    .frame(minWidth: size * 0.44, minHeight: size * 0.44)
-                    .background(seatTint.map(AnyShapeStyle.init) ?? AnyShapeStyle(.tint), in: .circle)
-                    .overlay(Circle().stroke(Color(.systemBackground), lineWidth: 2))
-                    .offset(x: size * 0.08, y: size * 0.08)
+                SeatNumberBadge(number: seat, tint: seatTint, avatarSize: size)
             }
         }
         .accessibilityLabel(seat.map { "Место \($0), \(name)" } ?? name)
+    }
+}
+
+/// Свободное место: пунктирный круг с «+» и номер места в углу — как у аватара игрока.
+struct EmptySeatAvatar: View {
+    let seat: Int
+    var size: CGFloat = 40
+
+    var body: some View {
+        Circle()
+            .strokeBorder(Color.secondary.opacity(0.5), style: StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
+            .overlay {
+                Image(systemName: "plus")
+                    .font(.system(size: size * 0.38, weight: .semibold))
+                    .foregroundStyle(.tint)
+            }
+            .frame(width: size, height: size)
+            .overlay(alignment: .bottomTrailing) {
+                SeatNumberBadge(number: seat, tint: Color(.systemGray), avatarSize: size)
+            }
+            .accessibilityLabel("Место \(seat) свободно")
+    }
+}
+
+/// Номер в углу аватара. `tint == nil` — акцент приложения.
+private struct SeatNumberBadge: View {
+    let number: Int
+    let tint: Color?
+    let avatarSize: CGFloat
+
+    var body: some View {
+        Text("\(number)")
+            .font(.system(size: max(10, avatarSize * 0.28), weight: .heavy, design: .rounded))
+            .monospacedDigit()
+            .foregroundStyle(.white)
+            .frame(minWidth: avatarSize * 0.44, minHeight: avatarSize * 0.44)
+            .background(tint.map(AnyShapeStyle.init) ?? AnyShapeStyle(.tint), in: .circle)
+            .overlay(Circle().stroke(Color(.systemBackground), lineWidth: 2))
+            .offset(x: avatarSize * 0.08, y: avatarSize * 0.08)
     }
 }

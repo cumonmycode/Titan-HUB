@@ -61,17 +61,7 @@ struct PlayerScoreCard: View {
 
     private var header: some View {
         HStack(spacing: 12) {
-            ZStack(alignment: .bottomTrailing) {
-                PlayerAvatar(name: name, url: player?.avatarURL, size: 44)
-                Text("\(score.seat.number)")
-                    .font(.caption2.weight(.heavy))
-                    .monospacedDigit()
-                    .foregroundStyle(.white)
-                    .frame(minWidth: 18, minHeight: 18)
-                    .background(teamTint.gradient, in: .circle)
-                    .overlay { Circle().stroke(.background, lineWidth: 2) }
-                    .offset(x: 4, y: 4)
-            }
+            PlayerAvatar(name: name, url: player?.avatarURL, seat: score.seat.number, size: 48, seatTint: teamTint)
             VStack(alignment: .leading, spacing: 4) {
                 Text(name).font(.body.weight(.semibold)).lineLimit(1)
                 HStack(spacing: 6) {

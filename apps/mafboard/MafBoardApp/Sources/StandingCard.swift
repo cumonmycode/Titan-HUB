@@ -10,8 +10,9 @@ struct PlayedGame: Identifiable {
     let score: PlayerGameScore
 }
 
-/// Карточка игрока в таблице — стекло. Свёрнута: место, игрок, игры и победы, баллы.
-/// Раскрыта: показатели, роли с победами и баллы по каждой игре.
+/// Карточка игрока в таблице — стекло. Свёрнута: фото с местом в углу (призовые — с обводкой медали), игры и победы,
+/// полоска последних игр, баллы со средним и значимое — допбаллы, штрафы, лучшие ходы, ПУ, победы доном и шерифом.
+/// Раскрыта: все показатели, роли с победами и баллы по каждой игре.
 struct StandingCard: View {
     let standing: PlayerStanding
     let player: PlayerProfile?
@@ -23,21 +24,30 @@ struct StandingCard: View {
 
     private var name: String { player?.nickname ?? "Игрок" }
 
+    /// Золото, серебро, бронза. Ниже третьего места — без медали.
     private var medal: Color? {
         switch standing.place {
-        case 1: .yellow
-        case 2: Color(white: 0.72)
-        case 3: .orange
+        case 1: Color(red: 0.92, green: 0.66, blue: 0.1)
+        case 2: Color(red: 0.6, green: 0.64, blue: 0.7)
+        case 3: Color(red: 0.8, green: 0.48, blue: 0.24)
         default: nil
         }
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            header
-                .contentShape(.rect)
-                .onTapGesture { withAnimation(.smooth(duration: 0.35)) { isExpanded.toggle() } }
-                .accessibilityAddTraits(.isButton)
+        VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 10) {
+                header
+                if !highlights.isEmpty {
+                    FlowRow(spacing: 6) {
+                        ForEach(highlights) { HighlightChip(highlight: $0) }
+                    }
+                    .padding(.leading, 68)
+                }
+            }
+            .contentShape(.rect)
+            .onTapGesture { withAnimation(.smooth(duration: 0.35)) { isExpanded.toggle() } }
+            .accessibilityAddTraits(.isButton)
             if isExpanded {
                 details.transition(.blurReplace.combined(with: .opacity))
             }
@@ -48,27 +58,35 @@ struct StandingCard: View {
     }
 
     private var header: some View {
-        HStack(spacing: 12) {
-            Text("\(standing.place)")
-                .font(.subheadline.weight(.heavy))
-                .monospacedDigit()
-                .frame(width: 32, height: 32)
-                .background((medal ?? Color(.tertiarySystemFill)).opacity(medal == nil ? 1 : 0.35), in: .circle)
-            PlayerAvatar(name: name, url: player?.avatarURL, size: 42)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(name).font(.body.weight(.semibold)).lineLimit(1)
-                Text("Игр \(standing.gamesPlayed) · побед \(standing.wins) · \(percent(standing.winRate))")
+        HStack(spacing: 14) {
+            PlayerAvatar(
+                name: name, url: player?.avatarURL, seat: standing.place, size: 54,
+                seatTint: medal ?? Color(.systemGray), ring: medal
+            )
+            VStack(alignment: .leading, spacing: 4) {
+                Text(name).font(.headline).lineLimit(1)
+                Text("\(gamesPlayed(standing.gamesPlayed)) · \(pluralized(standing.wins, "победа", "победы", "побед")) · \(percent(standing.winRate))")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .monospacedDigit()
+                    .lineLimit(1)
+                if !games.isEmpty {
+                    FormStrip(games: games)
+                }
             }
             Spacer(minLength: 6)
-            Text(standing.points.description)
-                .font(.title3.weight(.bold))
-                .monospacedDigit()
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
-                .background(Color.accentColor.opacity(0.16), in: .capsule)
+            VStack(alignment: .trailing, spacing: 1) {
+                Text(standing.points.description)
+                    .font(.title2.weight(.bold))
+                    .monospacedDigit()
+                Text("ср. " + standing.averagePoints.formatted(.number.precision(.fractionLength(2))))
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(Color.accentColor.opacity(0.16), in: .rect(cornerRadius: 16, style: .continuous))
             Image(systemName: "chevron.down")
                 .font(.footnote.weight(.bold))
                 .foregroundStyle(.tertiary)
@@ -126,6 +144,64 @@ struct StandingCard: View {
 
     private func percent(_ rate: Double) -> String {
         rate.formatted(.percent.precision(.fractionLength(0)))
+    }
+
+    /// Что выделяет игрока: только ненулевое, чтобы строка не шумела.
+    private var highlights: [Highlight] {
+        var result: [Highlight] = []
+        if standing.bonus > .zero { result.append(Highlight(text: "Доп \(standing.bonus.signed)", icon: "plus.circle.fill", tint: .green)) }
+        if standing.penalty > .zero { result.append(Highlight(text: "Штраф \((-standing.penalty).signed)", icon: "minus.circle.fill", tint: .red)) }
+        if standing.bestMoves > 0 { result.append(Highlight(text: "ЛХ \(standing.bestMoves)", icon: "star.fill", tint: .orange)) }
+        if standing.firstNightDeaths > 0 { result.append(Highlight(text: "ПУ \(standing.firstNightDeaths)", icon: "moon.fill", tint: .indigo)) }
+        if standing.keyRoleWins > 0 { result.append(Highlight(text: "Дон/шериф \(standing.keyRoleWins)", icon: "crown.fill", tint: .purple)) }
+        return result
+    }
+}
+
+private struct Highlight: Identifiable {
+    let text: String
+    let icon: String
+    let tint: Color
+    var id: String { text }
+}
+
+private struct HighlightChip: View {
+    let highlight: Highlight
+
+    var body: some View {
+        Label(highlight.text, systemImage: highlight.icon)
+            .font(.caption.weight(.semibold))
+            .monospacedDigit()
+            .foregroundStyle(highlight.tint)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(highlight.tint.opacity(0.13), in: .capsule)
+    }
+}
+
+/// Последние игры по порядку: цвет — команда (красные, чёрные), заливка — победа, контур — поражение, серая — ничья.
+private struct FormStrip: View {
+    let games: [PlayedGame]
+
+    private static let limit = 10
+
+    var body: some View {
+        let recent = games.suffix(Self.limit)
+        HStack(spacing: 3) {
+            ForEach(recent) { game in
+                let tint = game.score.role.team.tint
+                Group {
+                    switch game.score.result {
+                    case .win: Capsule().fill(tint)
+                    case .loss: Capsule().strokeBorder(tint, lineWidth: 1.5)
+                    case .draw: Capsule().fill(Color.secondary.opacity(0.4))
+                    }
+                }
+                .frame(width: 14, height: 7)
+            }
+        }
+        .accessibilityElement()
+        .accessibilityLabel("Последние игры: " + recent.map { "\($0.score.role.displayName), \($0.score.result == .win ? "победа" : $0.score.result == .loss ? "поражение" : "ничья")" }.joined(separator: "; "))
     }
 }
 
@@ -199,7 +275,7 @@ private struct GameScoreLine: View {
 }
 
 /// Элементы в строку с переносом.
-private struct FlowRow: Layout {
+struct FlowRow: Layout {
     var spacing: CGFloat = 8
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {

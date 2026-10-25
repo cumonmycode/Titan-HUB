@@ -196,11 +196,9 @@ struct PlayerIdentity: View {
         HStack(spacing: 12) {
             PlayerAvatar(
                 name: context.name, url: context.game.profile(at: context.seat.seat)?.avatarURL,
-                seat: context.seat.seat.number, size: avatarSize, seatTint: context.seatTint
+                seat: context.seat.seat.number, size: avatarSize, seatTint: context.seatTint,
+                ring: nomination != nil && !context.isSpeaker ? .orange : nil
             )
-            .overlay {
-                if nomination != nil, !context.isSpeaker { Circle().stroke(.orange, lineWidth: 2) }
-            }
             VStack(alignment: .leading, spacing: 1) {
                 Text(context.name).font(isLarge ? .title3.weight(.semibold) : .body.weight(.semibold)).lineLimit(1)
                 if showsRoles || status != nil {

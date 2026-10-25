@@ -437,15 +437,10 @@ struct GameScreen: View {
                 Text("Клятва, пари, шантаж, подсказки из зала — команда нарушителя проигрывает (ФСМ 6.9).")
             }
             .sheet(isPresented: $isShowingLog) {
-                NavigationStack {
-                    GameLogView(events: game.state.events, revealsRoles: game.showsRoles || state.isFinished) { game.name(of: $0) }
-                        .toolbar {
-                            ToolbarItem(placement: .confirmationAction) {
-                                Button("Готово", systemImage: "checkmark") { isShowingLog = false }
-                            }
-                        }
+                // Во время игры экран видят за столом: цвета команд и «кто куда стрелял» — только при открытых ролях.
+                GameTimelineSheet(events: game.state.events, seats: state.seats, revealsRoles: game.showsRoles || state.isFinished) {
+                    game.name(of: $0)
                 }
-                .phoneDetents([.medium, .large])
             }
             .alert("Ошибка", isPresented: Binding(get: { game.errorMessage != nil }, set: { if !$0 { game.errorMessage = nil } })) {
                 Button("OK", role: .cancel) {}
@@ -603,7 +598,7 @@ struct GameScreen: View {
             Button("Закрыть", systemImage: "xmark") { dismiss() }
         }
         ToolbarItemGroup(placement: .topBarTrailing) {
-            Button("Ход игры", systemImage: "list.bullet.rectangle.portrait") { isShowingLog = true }
+            Button("Хронология", systemImage: "clock.arrow.circlepath") { isShowingLog = true }
             Button(game.showsRoles ? "Скрыть роли" : "Показать роли", systemImage: game.showsRoles ? "eye.slash" : "eye") {
                 game.showsRoles.toggle()
             }

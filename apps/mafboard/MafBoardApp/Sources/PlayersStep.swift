@@ -172,14 +172,8 @@ private struct SlotRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            Text("\(number)")
-                .font(.subheadline.weight(.bold))
-                .monospacedDigit()
-                .foregroundStyle(player == nil ? AnyShapeStyle(.secondary) : AnyShapeStyle(.white))
-                .frame(width: 30, height: 30)
-                .background(player == nil ? AnyShapeStyle(Color(.tertiarySystemFill)) : AnyShapeStyle(Color.accentColor.gradient), in: .circle)
             if let player {
-                PlayerAvatar(name: player.nickname, url: player.avatarURL, size: 38)
+                PlayerAvatar(name: player.nickname, url: player.avatarURL, seat: number, size: 44)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(player.nickname).font(.body.weight(.semibold)).lineLimit(1)
                     Text(player.goMafiaID == nil ? "Гость" : "GoMafia").font(.caption).foregroundStyle(.secondary)
@@ -187,10 +181,7 @@ private struct SlotRow: View {
                 Spacer()
                 Image(systemName: "line.3.horizontal").font(.subheadline).foregroundStyle(.tertiary)
             } else {
-                Image(systemName: "plus.circle.fill")
-                    .font(.title2)
-                    .foregroundStyle(.tint)
-                    .frame(width: 38, height: 38)
+                EmptySeatAvatar(seat: number, size: 44)
                 Text("Свободно").foregroundStyle(.secondary)
                 Spacer()
             }

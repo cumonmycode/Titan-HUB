@@ -143,10 +143,15 @@ func durationText(from start: Date, to end: Date) -> String {
 
 /// «1 игра», «3 игры», «5 игр».
 func gamesPlayed(_ count: Int) -> String {
+    pluralized(count, "игра", "игры", "игр")
+}
+
+/// «1 победа», «3 победы», «5 побед».
+func pluralized(_ count: Int, _ one: String, _ few: String, _ many: String) -> String {
     let tail = count % 100
     let last = count % 10
-    if (11...14).contains(tail) || last == 0 || (5...9).contains(last) { return "\(count) игр" }
-    return last == 1 ? "\(count) игра" : "\(count) игры"
+    if (11...14).contains(tail) || last == 0 || (5...9).contains(last) { return "\(count) \(many)" }
+    return last == 1 ? "\(count) \(one)" : "\(count) \(few)"
 }
 
 /// Полоса побед: красная часть — мирные, синяя — мафия, серая — ничьи.
@@ -437,8 +442,8 @@ struct EveningDetailView: View {
                     }
                     if !games.isEmpty { WinsBar(winners: games.map(\.record.outcome.winner)) }
                     Text(evening.format.countsTowardStandings
-                         ? "Сумма баллов за серию. Нажмите на игрока — подробности по баллам, ролям и играм."
-                         : "Фанка в рейтинги не идёт — это сумма баллов за серию. Нажмите на игрока — подробности.")
+                         ? "Сумма баллов за серию. Полоска под именем — игры игрока: цвет — команда, заливка — победа. Нажмите на игрока — подробности по баллам, ролям и играм."
+                         : "Фанка в рейтинги не идёт — это сумма баллов за серию. Полоска под именем — игры игрока: цвет — команда, заливка — победа. Нажмите на игрока — подробности.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
@@ -483,6 +488,13 @@ struct FinishedGameView: View {
     let number: Int
     @Environment(GameLibrary.self) private var library
     @State private var editor: GameController?
+    /// Итоги (баллы игроков) или хронология (ход игры по фазам).
+    @State private var mode = Mode.results
+
+    enum Mode {
+        case results
+        case timeline
+    }
 
     init(game: FinishedGame, number: Int) {
         initial = game
@@ -521,49 +533,46 @@ struct FinishedGameView: View {
                 }
                 .contentCard(padding: 18)
 
-                ForEach(record.bestMoves, id: \.author) { bestMove in
-                    let guessed = bestMove.seats.filter { record.seat($0)?.team == .black }.count
-                    VStack(alignment: .leading, spacing: 6) {
-                        Label("Лучший ход игрока №\(bestMove.author)", systemImage: "star.fill").font(.headline)
-                        Text("Назвал \(bestMove.seats.map { "№\($0)" }.joined(separator: ", ")) — угадано чёрных: \(guessed)")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    }
-                    .contentCard()
+                Picker("Вид", selection: $mode) {
+                    Text("Итоги").tag(Mode.results)
+                    Text("Хронология").tag(Mode.timeline)
                 }
-                if !record.protocols.isEmpty {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Label("Протоколы", systemImage: "list.clipboard.fill").font(.headline)
-                        ForEach(record.protocols, id: \.author) { proto in
-                            Text("№\(proto.author): " + proto.summary.lowercased())
+                .pickerStyle(.segmented)
+
+                if mode == .timeline {
+                    GameTimelineView(events: record.events, seats: record.seats) { game.profile(at: $0)?.nickname ?? "Игрок \($0)" }
+                } else {
+                    ForEach(record.bestMoves, id: \.author) { bestMove in
+                        let guessed = bestMove.seats.filter { record.seat($0)?.team == .black }.count
+                        VStack(alignment: .leading, spacing: 6) {
+                            Label("Лучший ход игрока №\(bestMove.author)", systemImage: "star.fill").font(.headline)
+                            Text("Назвал \(bestMove.seats.map { "№\($0)" }.joined(separator: ", ")) — угадано чёрных: \(guessed)")
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
                         }
+                        .contentCard()
                     }
-                    .contentCard()
-                }
-
-                NavigationLink {
-                    GameLogView(events: record.events) { game.profile(at: $0)?.nickname ?? "Игрок \($0)" }
-                        .tabBarClearance()
-                        .readableColumn()
-                } label: {
-                    HStack {
-                        Label("Ход игры", systemImage: "list.bullet.rectangle.portrait").font(.headline)
-                        Spacer()
-                        Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
+                    if !record.protocols.isEmpty {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Label("Протоколы", systemImage: "list.clipboard.fill").font(.headline)
+                            ForEach(record.protocols, id: \.author) { proto in
+                                Text("№\(proto.author): " + proto.summary.lowercased())
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .contentCard()
                     }
-                    .contentCard()
-                }
-                .buttonStyle(.plain)
 
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Игроки и баллы").font(.title3.bold()).padding(.horizontal, 4)
-                    ForEach(GameScorer.score(record)) { score in
-                        PlayerScoreCard(
-                            score: score, player: game.profile(at: score.seat), status: record.scoreStatus(of: score.seat),
-                            isSheriffClaim: record.seat(score.seat)?.claimedSheriff ?? false
-                        )
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Игроки и баллы").font(.title3.bold()).padding(.horizontal, 4)
+                        ForEach(GameScorer.score(record)) { score in
+                            PlayerScoreCard(
+                                score: score, player: game.profile(at: score.seat), status: record.scoreStatus(of: score.seat),
+                                isSheriffClaim: record.seat(score.seat)?.claimedSheriff ?? false
+                            )
+                        }
                     }
                 }
             }

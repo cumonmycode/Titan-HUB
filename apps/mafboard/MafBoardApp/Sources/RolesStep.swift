@@ -217,12 +217,7 @@ struct RolesStep: View {
             .padding(.horizontal, 4)
             ForEach(Array(draft.seatedPlayers.enumerated()), id: \.offset) { index, player in
                 HStack(spacing: 12) {
-                    Text("\(index + 1)")
-                        .font(.subheadline.weight(.bold))
-                        .monospacedDigit()
-                        .frame(width: 30, height: 30)
-                        .background(Color(.tertiarySystemFill), in: .circle)
-                    PlayerAvatar(name: player.nickname, url: player.avatarURL, size: 36)
+                    PlayerAvatar(name: player.nickname, url: player.avatarURL, seat: index + 1, size: 42, seatTint: Color(.systemGray))
                     Text(player.nickname).font(.body.weight(.medium)).lineLimit(1)
                     Spacer()
                     if draft.roles.indices.contains(index) {
