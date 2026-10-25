@@ -1,12 +1,31 @@
 import SwiftUI
 import MafBoardCore
 
+extension EnvironmentValues {
+    /// Панель действий внизу экрана игры на iPad: карточки в ней без своего фона, номера — в одну строку.
+    @Entry var isInActionDock = false
+}
+
 extension View {
-    /// Карточка на экране игры — системный фон сгруппированного списка.
+    /// Карточка на экране игры — системный фон сгруппированного списка. В панели действий iPad — без фона:
+    /// у панели он свой.
     func gameCard() -> some View {
-        padding(16)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 22, style: .continuous))
+        modifier(GameCard())
+    }
+}
+
+private struct GameCard: ViewModifier {
+    @Environment(\.isInActionDock) private var isDocked
+
+    func body(content: Content) -> some View {
+        if isDocked {
+            content.frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+            content
+                .padding(16)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 22, style: .continuous))
+        }
     }
 }
 
@@ -167,6 +186,8 @@ struct SeatContext {
 struct PlayerIdentity: View {
     let context: SeatContext
     var avatarSize: CGFloat = 44
+    /// Крупный шрифт — на iPad.
+    var isLarge = false
 
     var body: some View {
         let nomination = context.nomination
@@ -181,16 +202,18 @@ struct PlayerIdentity: View {
                 if nomination != nil, !context.isSpeaker { Circle().stroke(.orange, lineWidth: 2) }
             }
             VStack(alignment: .leading, spacing: 1) {
-                Text(context.name).font(.body.weight(.semibold)).lineLimit(1)
+                Text(context.name).font(isLarge ? .title3.weight(.semibold) : .body.weight(.semibold)).lineLimit(1)
                 if showsRoles || status != nil {
                     HStack(spacing: 6) {
                         if showsRoles {
-                            Text(context.seat.role.displayName).font(.caption.weight(.medium)).foregroundStyle(context.seat.role.team.tint)
+                            Text(context.seat.role.displayName)
+                                .font((isLarge ? Font.subheadline : .caption).weight(.medium))
+                                .foregroundStyle(context.seat.role.team.tint)
                         }
                         if let status {
                             let isNominated = nomination != nil && context.seat.isAlive
                             Text(status)
-                                .font(.caption.weight(isNominated ? .semibold : .regular))
+                                .font((isLarge ? Font.subheadline : .caption).weight(isNominated ? .semibold : .regular))
                                 .foregroundStyle(isNominated ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary))
                                 .lineLimit(1)
                         }
@@ -210,7 +233,6 @@ struct PlayerControls: View {
     var isLargeTimer = false
     let onBestMove: () -> Void
     let onProtocol: () -> Void
-    @State private var isConfirmingRemoval = false
 
     var body: some View {
         let game = context.game
@@ -226,19 +248,8 @@ struct PlayerControls: View {
                 NominationPad(game: game, speaker: seat.seat)
             }
             if seat.isAlive {
-                DisciplinePanel(game: game, seat: seat) { isConfirmingRemoval = true }
+                DisciplinePanel(game: game, seat: seat)
             }
-        }
-        // Штраф не показываем: он зависит от команды игрока, а экран ведущего видят за столом.
-        .confirmationDialog(
-            "Удалить №\(seat.seat) \(context.name)?",
-            isPresented: $isConfirmingRemoval,
-            titleVisibility: .visible
-        ) {
-            Button("Дисквалифицировать", role: .destructive) {
-                game.perform(.disqualify(seat.seat, note: nil))
-            }
-            Button("Выбыл по решению ведущего") { game.perform(.eliminateByHost(seat.seat, note: nil)) }
         }
     }
 }
@@ -317,12 +328,14 @@ struct PlayerCard: View {
 struct PenaltyMarks: View {
     let fouls: Int
     let techFouls: [TechFoulKind]
+    /// Крупнее — на iPad.
+    var dotSize: CGFloat = 7
 
     var body: some View {
         HStack(spacing: 6) {
             if fouls > 0 {
                 HStack(spacing: 2) {
-                    ForEach(0..<fouls, id: \.self) { _ in Circle().fill(.orange).frame(width: 7, height: 7) }
+                    ForEach(0..<fouls, id: \.self) { _ in Circle().fill(.orange).frame(width: dotSize, height: dotSize) }
                 }
             }
             ForEach(Array(techFouls.enumerated()), id: \.offset) { _, kind in TechFoulChip(kind: kind) }
@@ -337,10 +350,11 @@ struct PenaltyMarks: View {
 /// Свайпы по карточке ступенями, как в «Почте»: вправо — фол, дальше — МТФ;
 /// влево — снять фол, дальше — снять техфол. Удаление свайпом нет — только кнопкой.
 /// У говорящего свайп отключён — его карточка раскрыта и управляется кнопками.
-private struct PenaltySwipe: ViewModifier {
+struct PenaltySwipe: ViewModifier {
     let game: GameController
     let seat: SeatState
     let isEnabled: Bool
+    var cornerRadius: CGFloat = 20
     @State private var offset: CGFloat = 0
     @State private var axis: Axis?
     @State private var tier = 0
@@ -428,7 +442,7 @@ private struct PenaltySwipe: ViewModifier {
     private var backdrop: some View {
         if offset != 0 {
             let current = action
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
+            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                 .fill(tier == 0 ? Color(.systemGray4) : current.color)
                 .overlay(alignment: direction == .add ? .leading : .trailing) {
                     Label(current.title, systemImage: current.icon)
@@ -447,7 +461,7 @@ private struct PenaltySwipe: ViewModifier {
 
 /// Выставление кандидатуры говорящим — номера сеткой 5×2. Синий — выставил говорящий (нажатие снимает),
 /// оранжевый с номером — уже выставлен другим, зачёркнут — выбыл. Пока говорящий кого-то выставил, остальные приглушены.
-private struct NominationPad: View {
+struct NominationPad: View {
     let game: GameController
     let speaker: Seat
 
@@ -496,11 +510,13 @@ private struct NominationPad: View {
 
 /// Нарушения двумя строками со своими «−» и «+»: фолы (точки до удаления) и техфолы (полученные МТФ/БТФ,
 /// «−» снимает последний). Если нарушение удалит игрока, «+» краснеет, строка показывает итог, а нажатие просит подтверждения.
-private struct DisciplinePanel: View {
+struct DisciplinePanel: View {
     let game: GameController
     let seat: SeatState
-    let onRemove: () -> Void
+    /// Подпись над строками: на iPad в панели действий — с номером и именем игрока.
+    var title = "Нарушения"
     @State private var pending: Penalty?
+    @State private var isConfirmingRemoval = false
 
     private enum Penalty: Hashable {
         case foul
@@ -523,9 +539,9 @@ private struct DisciplinePanel: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text("Нарушения").font(.caption.weight(.semibold)).foregroundStyle(.secondary).textCase(.uppercase)
+                Text(title).font(.caption.weight(.semibold)).foregroundStyle(.secondary).textCase(.uppercase).lineLimit(1)
                 Spacer()
-                Button("Удалить игрока…", systemImage: "person.fill.xmark", role: .destructive, action: onRemove)
+                Button("Удалить игрока…", systemImage: "person.fill.xmark", role: .destructive) { isConfirmingRemoval = true }
                     .font(.caption.weight(.semibold))
                     .buttonStyle(.borderless)
                     .tint(.red)
@@ -549,6 +565,17 @@ private struct DisciplinePanel: View {
             Button(confirmButton(penalty), role: .destructive) { perform(penalty) }
         } message: { penalty in
             Text(confirmMessage(penalty))
+        }
+        // Штраф не показываем: он зависит от команды игрока, а экран ведущего видят за столом.
+        .confirmationDialog(
+            "Удалить №\(seat.seat) \(game.name(of: seat.seat))?",
+            isPresented: $isConfirmingRemoval,
+            titleVisibility: .visible
+        ) {
+            Button("Дисквалифицировать", role: .destructive) {
+                game.perform(.disqualify(seat.seat, note: nil))
+            }
+            Button("Выбыл по решению ведущего") { game.perform(.eliminateByHost(seat.seat, note: nil)) }
         }
     }
 

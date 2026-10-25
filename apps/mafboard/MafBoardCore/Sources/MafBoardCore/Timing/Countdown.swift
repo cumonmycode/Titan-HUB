@@ -13,6 +13,12 @@ public struct Countdown: Codable, Sendable, Equatable {
 
     public var isRunning: Bool { runningSince != nil }
 
+    /// Когда выйдет время, если таймер идёт. На паузе — `nil`: момент конца ещё неизвестен.
+    /// По нему Live Activity сама показывает обратный отсчёт, без обновлений из приложения.
+    public var endDate: Date? {
+        runningSince.map { $0.addingTimeInterval(duration - elapsedBeforeRun) }
+    }
+
     public func elapsed(at date: Date) -> TimeInterval {
         let current = runningSince.map { max(0, date.timeIntervalSince($0)) } ?? 0
         return elapsedBeforeRun + current

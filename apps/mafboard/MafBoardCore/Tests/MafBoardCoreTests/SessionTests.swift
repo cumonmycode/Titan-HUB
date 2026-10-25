@@ -147,4 +147,18 @@ struct CountdownTests {
         countdown.extend(bySeconds: 30)
         #expect(countdown.remaining(at: start + 500) == 30)
     }
+
+    @Test("Момент конца времени — только пока таймер идёт, с учётом паузы и «+30»")
+    func endDate() {
+        let start = Date(timeIntervalSince1970: 0)
+        var countdown = Countdown(seconds: 60)
+        #expect(countdown.endDate == nil)
+        countdown.start(at: start)
+        #expect(countdown.endDate == start + 60)
+        countdown.pause(at: start + 20)
+        #expect(countdown.endDate == nil)
+        countdown.extend(bySeconds: 30)
+        countdown.start(at: start + 100)
+        #expect(countdown.endDate == start + 170)
+    }
 }

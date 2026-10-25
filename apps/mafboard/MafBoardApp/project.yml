@@ -23,11 +23,13 @@ targets:
     sources:
       - Sources
       - Resources
+      - Shared
     dependencies:
       - package: MafBoardCore
         product: MafBoardCore
       - package: MafBoardCore
         product: MafBoardClient
+      - target: MafBoardWidgets
     info:
       path: Generated/Info.plist
       properties:
@@ -46,6 +48,8 @@ targets:
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
         ITSAppUsesNonExemptEncryption: false
+        # Live Activity идущей игры: таймер и говорящий на экране блокировки и в Dynamic Island.
+        NSSupportsLiveActivities: true
     entitlements:
       path: Generated/MafBoard.entitlements
       properties:
@@ -56,3 +60,22 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: ru.titan.mafboard
         TARGETED_DEVICE_FAMILY: "1,2"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+  # Live Activity: экран блокировки и Dynamic Island. Кнопки (LiveActivityIntent) выполняет само приложение.
+  MafBoardWidgets:
+    type: app-extension
+    platform: iOS
+    sources:
+      - Widgets
+      - Shared
+    info:
+      path: Generated/Widgets-Info.plist
+      properties:
+        CFBundleDisplayName: MafBoard
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: ru.titan.mafboard.widgets
+        TARGETED_DEVICE_FAMILY: "1,2"

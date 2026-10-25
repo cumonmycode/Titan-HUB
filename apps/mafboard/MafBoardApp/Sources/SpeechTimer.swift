@@ -82,6 +82,39 @@ struct TimerView: View {
     }
 }
 
+/// Табло таймера без кнопок: цифры, шкала, статус. На iPad оно сверху, на виду у ведущего.
+struct TimerDisplay: View {
+    let game: GameController
+
+    var body: some View {
+        if let timer = game.countdown {
+            VStack(spacing: 10) {
+                TimelineView(.timerTick(timer)) { context in
+                    TimerDial(game: game, timer: timer, now: context.date, isLarge: true)
+                }
+                HStack(spacing: 8) {
+                    TimelineView(.timerTick(timer)) { context in
+                        TimerStatus(timer: timer, now: context.date, autoAdvances: game.autoAdvances)
+                    }
+                    Spacer(minLength: 4)
+                    TimerAutoMenu(game: game)
+                }
+            }
+        }
+    }
+}
+
+/// Кнопки таймера без табло — на iPad в панели действий внизу.
+struct TimerButtons: View {
+    let game: GameController
+
+    var body: some View {
+        if let timer = game.countdown {
+            TimerControls(game: game, timer: timer)
+        }
+    }
+}
+
 extension TimelineSchedule where Self == AnimationTimelineSchedule {
     /// Тик таймера: пока идёт — пять раз в секунду, на паузе и после конца — ни одного.
     static func timerTick(_ timer: Countdown) -> AnimationTimelineSchedule {

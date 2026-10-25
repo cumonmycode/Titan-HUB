@@ -171,6 +171,13 @@ enum SavedGameStore {
         let url = GameFiles.active
         queue.async { try? FileManager.default.removeItem(at: url) }
     }
+
+    /// Дождаться записи всех снимков: кнопка Live Activity будит приложение ненадолго — игра должна успеть лечь на диск.
+    static func flush() async {
+        await withCheckedContinuation { continuation in
+            queue.async { continuation.resume() }
+        }
+    }
 }
 
 /// Строка итогов вечера: сумма баллов игрока за все его игры.

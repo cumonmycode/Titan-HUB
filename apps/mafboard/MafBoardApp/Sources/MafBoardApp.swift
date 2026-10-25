@@ -13,6 +13,7 @@ struct MafBoardApp: App {
         _model = State(initialValue: model)
         _library = State(initialValue: library)
         _sync = State(initialValue: GameSync(library: library, model: model))
+        LiveGameActivity.shared.installActions()
     }
 
     var body: some Scene {
@@ -25,8 +26,17 @@ struct MafBoardApp: App {
                     library.uploader = { [model] record in await model.uploadGame(record) }
                     library.onActiveChanged = { [sync] in sync.activeChanged() }
                     await model.bootstrap()
+                    // Активности прошлого запуска без открытой игры — закрыть, чтобы не висел застывший таймер.
+                    LiveGameActivity.shared.endOrphans()
                 }
-                .onOpenURL { model.handle(url: $0) }
+                .onOpenURL { url in
+                    // Касание Live Activity — обратно в игру.
+                    if url == GameActivityAttributes.openURL {
+                        if library.presented == nil { library.resumeActive() }
+                    } else {
+                        model.handle(url: url)
+                    }
+                }
         }
         .onChange(of: scenePhase) { _, phase in
             guard phase == .active else { return }

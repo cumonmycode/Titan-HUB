@@ -11,7 +11,9 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-for env in scripts/.asc-env ../../mobile/scripts/.asc-env; do
+# В рабочей копии (git worktree) файла нет — тогда берём его из основной копии репозитория.
+MAIN_CHECKOUT="$(cd "$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)/.." 2>/dev/null && pwd || true)"
+for env in scripts/.asc-env ../../mobile/scripts/.asc-env "$MAIN_CHECKOUT/apps/mobile/scripts/.asc-env"; do
   if [ -f "$env" ]; then
     # shellcheck disable=SC1090
     . "$env"
@@ -48,9 +50,10 @@ if ! xcodebuild \
   -project MafBoard.xcodeproj \
   -scheme MafBoard \
   -configuration Debug \
-  -destination 'generic/platform=iOS' \
+  -destination "id=$DEVICE" \
   -derivedDataPath build/DerivedData \
   -allowProvisioningUpdates \
+  -allowProvisioningDeviceRegistration \
   ${AUTH[@]+"${AUTH[@]}"} \
   build >"$LOG" 2>&1; then
   grep -E "error:" "$LOG" | sort -u | head -20 || true

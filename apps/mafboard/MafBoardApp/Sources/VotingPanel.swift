@@ -37,8 +37,15 @@ struct Keypad<Key: View>: View {
     var layout: KeypadLayout = .phone
     var spacing: CGFloat = 10
     @ViewBuilder let key: (Int) -> Key
+    @Environment(\.isInActionDock) private var isDocked
+
+    /// В панели действий iPad — все номера одной строкой: панель низкая, а ширины хватает.
+    private var effectiveLayout: KeypadLayout {
+        isDocked ? .grid(columns: count <= 12 ? count : 8) : layout
+    }
 
     var body: some View {
+        let layout = effectiveLayout
         Grid(horizontalSpacing: spacing, verticalSpacing: spacing) {
             ForEach(Array(keypadRows(count: count, layout: layout).enumerated()), id: \.offset) { _, row in
                 GridRow {
@@ -324,12 +331,15 @@ struct CountPad: View {
     let maximum: Int
     let selected: Int?
     let onPick: (Int) -> Void
+    @Environment(\.isInActionDock) private var isDocked
 
     private static let columns = 6
 
     var body: some View {
         let numbers = Array(0...max(0, maximum))
-        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: Self.columns), spacing: 8) {
+        // В панели действий iPad — одной строкой.
+        let columns = isDocked ? max(numbers.count, 1) : Self.columns
+        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: columns), spacing: 8) {
             ForEach(numbers, id: \.self) { number in
                 KeypadKey(number: number, style: number == selected ? .selected : .normal) { onPick(number) }
             }

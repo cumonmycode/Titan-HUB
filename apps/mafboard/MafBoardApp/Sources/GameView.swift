@@ -125,6 +125,7 @@ final class GameController: Identifiable {
         let back = Self.backHint(for: session, stepBefore: stepBefore)
         if next != nextHint { nextHint = next }
         if back != backHint { backHint = back }
+        LiveGameActivity.shared.setNeedsUpdate(self)
     }
 
     /// Куда ведёт «Далее»: заголовок следующего шага.
@@ -228,6 +229,7 @@ final class GameController: Identifiable {
     }
 
     private func storeTimer() {
+        LiveGameActivity.shared.setNeedsUpdate(self)
         if let countdown, !state.isFinished {
             TimerStore.save(countdown, gameID: id, step: timerStepKey)
         } else {
@@ -361,7 +363,7 @@ struct GameScreen: View {
     @State private var isShowingLog = false
     /// iPhone: раскрытые карточки. Говорящий раскрыт всегда, остальные — по касанию, независимо друг от друга.
     @State private var expanded: Set<Seat> = []
-    /// iPad: игрок в пульте, выбранный касанием на столе. `nil` — пульт следит за говорящим.
+    /// iPad: игрок в панели нарушений, выбранный касанием на столе. `nil` — панель следит за говорящим.
     @State private var focusedSeat: Seat?
     @State private var bestMovePick: SeatPick?
     @State private var protocolPick: SeatPick?
@@ -379,13 +381,23 @@ struct GameScreen: View {
         }
     }
 
-    /// Широкое окно (iPad): стол и пульт рядом. Узкое (iPhone, iPad в узком Split View) — один список.
+    /// Широкое окно (iPad): сверху стол и таймер, снизу панель действий. Узкое (iPhone, iPad в узком Split View) — один список.
     private var usesTable: Bool { sizeClass == .regular }
 
     var body: some View {
         NavigationStack {
             Group {
-                if usesTable { tableLayout } else { listLayout }
+                if usesTable {
+                    TabletGameLayout(
+                        game: game, focusedSeat: $focusedSeat,
+                        onBestMove: { bestMovePick = SeatPick(seat: $0) },
+                        onProtocol: { protocolPick = SeatPick(seat: $0) },
+                        onNextGame: onNextGame.map { next in { next(); dismiss() } },
+                        onFinish: { dismiss() }
+                    )
+                } else {
+                    listLayout
+                }
             }
             .ambientBackground(mood: isNight ? .night : .accent)
             .navigationTitle(state.moment.displayName)
@@ -399,7 +411,7 @@ struct GameScreen: View {
                 }
             }
             .onChange(of: state.currentStep, initial: true) { previous, step in
-                // Новый шаг — пульт iPad снова у того, кто сейчас на шаге (говорящий, выбывший на заключительной минуте).
+                // Новый шаг — панель нарушений iPad снова у того, кто сейчас на шаге (говорящий, выбывший на заключительной минуте).
                 focusedSeat = nil
                 // Ночь кончилась убийством — сначала объявляем, кого убили; лучший ход — потом, по «Далее».
                 if previous.isNight, !step.isNight, let report = state.morningReport, !report.victims.isEmpty {
@@ -449,8 +461,15 @@ struct GameScreen: View {
                 .animation(.snappy(duration: 0.25), value: nightVictims)
         }
         .connectionIndicator()
-        .onAppear { UIApplication.shared.isIdleTimerDisabled = true }
-        .onDisappear { UIApplication.shared.isIdleTimerDisabled = false }
+        .onAppear {
+            UIApplication.shared.isIdleTimerDisabled = true
+            // Свернули приложение — таймер и говорящий остаются на экране блокировки и в Dynamic Island.
+            LiveGameActivity.shared.attach(game)
+        }
+        .onDisappear {
+            UIApplication.shared.isIdleTimerDisabled = false
+            LiveGameActivity.shared.detach(game)
+        }
     }
 
     // MARK: iPhone: один список
@@ -500,116 +519,6 @@ struct GameScreen: View {
             try? await Task.sleep(for: .milliseconds(200))
             guard !Task.isCancelled else { return }
             withAnimation(.snappy(duration: 0.3)) { proxy.scrollTo(target, anchor: .top) }
-        }
-    }
-
-    // MARK: iPad: стол и пульт
-
-    /// Слева стол — все игроки сразу, справа пульт: шаг, таймер, выставление и нарушения игрока, «Назад» и «Далее»
-    /// под правой рукой. Ландшафт — стол в две колонки, портрет — в одну.
-    private var tableLayout: some View {
-        GeometryReader { proxy in
-            let isLandscape = proxy.size.width >= 1100
-            HStack(spacing: 0) {
-                if !state.isFinished {
-                    SeatTable(game: game, focused: focusTarget, columns: isLandscape ? 2 : 1) { seat in
-                        // Касание говорящего или повторное касание выбранного — пульт снова у говорящего.
-                        let current = state.currentSpeaker ?? state.currentStep.farewellSeat
-                        focusedSeat = seat == current || focusTarget == seat ? nil : seat
-                    }
-                    .frame(width: isLandscape ? proxy.size.width * 0.52 : max(340, proxy.size.width * 0.42))
-                }
-                controlPane
-            }
-        }
-    }
-
-    private var controlPane: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                VStack(spacing: 12) {
-                    PhaseHeader(game: game) { bestMovePick = SeatPick(seat: $0) }
-                        .id(ScrollTarget.top)
-                    stepContent(isLarge: true)
-                    if !state.isFinished {
-                        speakerTimer
-                        focusPanel
-                    }
-                }
-                .frame(maxWidth: 760)
-                .frame(maxWidth: .infinity)
-                .padding(.horizontal)
-                .padding(.bottom, 16)
-            }
-            .onChange(of: state.currentStep) { _, _ in
-                withAnimation(.snappy(duration: 0.3)) { proxy.scrollTo(ScrollTarget.top, anchor: .top) }
-            }
-        }
-        .safeAreaInset(edge: .bottom) { StepBar(game: game) { dismiss() }.frame(maxWidth: 760) }
-    }
-
-    /// Игрок в пульте: выбранный на столе, иначе говорящий или выбывший на заключительной минуте. Ночью — никто.
-    private var focusTarget: Seat? {
-        guard !isNight else { return nil }
-        return focusedSeat ?? state.currentSpeaker ?? state.currentStep.farewellSeat
-    }
-
-    /// Выбран не говорящий — таймер речи остаётся на виду над карточкой выбранного. Касание имени — пульт снова у говорящего.
-    @ViewBuilder
-    private var speakerTimer: some View {
-        if let speaker = state.currentSpeaker, let target = focusTarget, target != speaker, game.countdown != nil {
-            VStack(alignment: .leading, spacing: 10) {
-                Button { focusedSeat = nil } label: {
-                    Label("Говорит №\(speaker) \(game.name(of: speaker))", systemImage: "waveform")
-                        .font(.subheadline.weight(.semibold))
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(.tint)
-                TimerView(game: game)
-            }
-            .gameCard()
-        }
-    }
-
-    @ViewBuilder
-    private var focusPanel: some View {
-        if let target = focusTarget, let seat = state.seat(target) {
-            let context = SeatContext(game: game, seat: seat)
-            VStack(alignment: .leading, spacing: 14) {
-                HStack(spacing: 10) {
-                    PlayerIdentity(context: context, avatarSize: 52)
-                    Spacer(minLength: 4)
-                    PenaltyMarks(fouls: seat.fouls, techFouls: seat.techFoulKinds)
-                    if context.isRemoved { ReinstateButton(context: context) }
-                    if focusedSeat != nil {
-                        Button("К говорящему", systemImage: "xmark") { focusedSeat = nil }
-                            .labelStyle(.iconOnly)
-                            .font(.subheadline.weight(.bold))
-                            .buttonStyle(.solid(.circle))
-                    }
-                }
-                if context.isActive {
-                    PlayerControls(
-                        context: context, isLargeTimer: true,
-                        onBestMove: { bestMovePick = SeatPick(seat: target) },
-                        onProtocol: { protocolPick = SeatPick(seat: target) }
-                    )
-                }
-            }
-            .gameCard()
-            .overlay {
-                if context.isSpeaker {
-                    RoundedRectangle(cornerRadius: 22, style: .continuous).stroke(.tint, lineWidth: 1.5)
-                }
-            }
-            // Свой набор состояний у каждого игрока: вопросы об удалении не переезжают к другому.
-            .id(target)
-        } else if !isNight {
-            Label("Нажмите на игрока на столе — фолы, техфолы и удаление.", systemImage: "hand.tap")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 4)
         }
     }
 
@@ -730,8 +639,10 @@ struct GameScreen: View {
 
 /// Кнопки шагов внизу: «Назад» отменяет последнее действие, «Далее» ведёт к следующему шагу.
 /// Под каждой — короткая подпись, что именно произойдёт.
-private struct StepBar: View {
+struct StepBar: View {
     let game: GameController
+    /// В панели действий iPad: крупнее и без своих отступов — их задаёт панель.
+    var isDocked = false
     let onFinish: () -> Void
 
     var body: some View {
@@ -746,7 +657,7 @@ private struct StepBar: View {
                         Text(game.backHint).font(.caption2).lineLimit(1).opacity(0.75)
                     }
                 }
-                .frame(maxWidth: 130, alignment: .leading)
+                .frame(maxWidth: isDocked ? 260 : 130, alignment: .leading)
             }
             .buttonStyle(.floating(.capsule))
             .disabled(!game.session.canUndo)
@@ -768,7 +679,8 @@ private struct StepBar: View {
             .buttonStyle(.solidProminent(.capsule))
             .disabled(!game.state.canAdvance && !game.state.isFinished)
         }
-        .padding(.horizontal, 20)
+        .controlSize(isDocked ? .large : .regular)
+        .padding(.horizontal, isDocked ? 0 : 20)
         .padding(.bottom, 6)
     }
 }
