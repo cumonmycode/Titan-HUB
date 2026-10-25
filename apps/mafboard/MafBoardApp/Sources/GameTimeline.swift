@@ -534,7 +534,7 @@ private struct VotingRow: View {
                         Text("за подъём — \(pluralized(lift, "голос", "голоса", "голосов"))").font(.subheadline.weight(.semibold))
                     }
                     if let voters = round.liftVoters, !voters.isEmpty {
-                        Voters(voters: voters, autoAssigned: [], context: context)
+                        Voters(voters: voters, context: context)
                     }
                 }
             } else {
@@ -561,15 +561,11 @@ private struct VotingRow: View {
                                 }
                             }
                             .frame(height: 6)
+                            // Кто не поднял руку, по правилам голосует за последнюю кандидатуру — это полноценные голоса.
                             if let voters = result.voters, !voters.isEmpty {
-                                Voters(voters: voters, autoAssigned: Set(round.autoAssignedVoters), context: context)
+                                Voters(voters: voters, context: context)
                             }
                         }
-                    }
-                    if !round.autoAssignedVoters.isEmpty {
-                        Text("Бледные номера не голосовали — их голоса ушли последней кандидатуре.")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
                     }
                 }
             }
@@ -579,17 +575,13 @@ private struct VotingRow: View {
 
 private struct Voters: View {
     let voters: [Seat]
-    let autoAssigned: Set<Seat>
     let context: TimelineContext
 
     var body: some View {
         HStack(alignment: .top, spacing: 6) {
             Text("голосовали").font(.caption2.weight(.semibold)).foregroundStyle(.secondary).padding(.top, 5)
             FlowRow(spacing: 4) {
-                ForEach(voters, id: \.self) { voter in
-                    SeatChip(seat: voter, context: context)
-                        .opacity(autoAssigned.contains(voter) ? 0.4 : 1)
-                }
+                ForEach(voters, id: \.self) { SeatChip(seat: $0, context: context) }
             }
         }
     }

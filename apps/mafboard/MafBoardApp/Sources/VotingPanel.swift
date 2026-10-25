@@ -216,7 +216,7 @@ struct VotingPanel: View {
         guard !abstainers.isEmpty else { return "Все проголосовали." }
         let list = abstainers.map { "№\($0)" }.joined(separator: ", ")
         if autoLast, let last = candidates.last {
-            return "Не голосовали: \(list) — их голоса уйдут за №\(last)."
+            return "\(list) голосуют за последнюю кандидатуру №\(last) — это полноценные голоса."
         }
         return "Не голосовали: \(list)."
     }
@@ -300,7 +300,7 @@ struct CountVotingPanel: View {
             }
 
             if autoLast, let last = candidates.last {
-                Text("За №\(last) — остальные \(remainder): не проголосовавшие отдают голос последней кандидатуре.")
+                Text("За №\(last) — \(pluralized(remainder, "голос", "голоса", "голосов")): остальные игроки голосуют за последнюю кандидатуру, это полноценные голоса.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
