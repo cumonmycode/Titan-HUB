@@ -205,10 +205,7 @@ private struct ProfileHeader: View {
 private struct DemoHeader: View {
     var body: some View {
         VStack(spacing: 8) {
-            Image(systemName: "theatermasks.fill")
-                .font(.system(size: 48))
-                .foregroundStyle(.tint)
-                .frame(width: 92, height: 92)
+            SleepMaskLogo(size: 92)
             Text("Демо-режим").font(.title2.weight(.bold))
             Text("Фанки с гостями, игры хранятся только на этом телефоне. Войдите через Telegram, чтобы сохранять историю и вести рейтинг, миникап и турниры клуба GoMafia.")
                 .font(.subheadline)

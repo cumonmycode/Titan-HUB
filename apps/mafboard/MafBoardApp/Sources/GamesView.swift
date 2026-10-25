@@ -241,9 +241,7 @@ private struct StartCard: View {
 
     var body: some View {
         VStack(spacing: 16) {
-            Image(systemName: "theatermasks.fill")
-                .font(.system(size: 48))
-                .foregroundStyle(.tint)
+            SleepMaskLogo(size: 72)
                 .padding(.top, 8)
             VStack(spacing: 6) {
                 Text("Начните первую серию").font(.title2.bold())

@@ -10,9 +10,7 @@ struct LoginView: View {
     var body: some View {
         VStack(spacing: 20) {
             Spacer()
-            Image(systemName: "theatermasks.fill")
-                .font(.system(size: 72))
-                .foregroundStyle(.tint)
+            SleepMaskLogo(size: 104)
                 // Вход проверяющего App Store — долгое нажатие на логотип (описано в заметках для App Review).
                 .onLongPressGesture(minimumDuration: 1) { isShowingReviewLogin = true }
             Text("MafBoard").font(.largeTitle.bold())
