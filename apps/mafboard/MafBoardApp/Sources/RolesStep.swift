@@ -57,7 +57,7 @@ struct RolesStep: View {
                     .font(.headline)
                     .frame(maxWidth: .infinity)
             }
-            .buttonStyle(.glassProminent)
+            .buttonStyle(.solidProminent)
             .controlSize(.large)
             .disabled(!isComplete)
             .padding(.horizontal)
@@ -85,7 +85,7 @@ struct RolesStep: View {
             } label: {
                 Label("Перераздать роли", systemImage: "shuffle").font(.subheadline.weight(.semibold))
             }
-            .buttonStyle(.glassProminent)
+            .buttonStyle(.solidProminent)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(16)
@@ -108,23 +108,21 @@ struct RolesStep: View {
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
             ScrollView(.horizontal) {
-                GlassEffectContainer(spacing: 8) {
-                    HStack(spacing: 8) {
-                        ForEach(Array(slots.enumerated()), id: \.element.id) { index, slot in
-                            Button {
-                                withAnimation(.snappy) { currentSlot = index }
-                            } label: {
-                                VStack(spacing: 2) {
-                                    Text(slot.role.displayName).font(.caption.weight(.semibold)).lineLimit(1)
-                                    Text(slot.seat.map { "№\($0 + 1)" } ?? "—").font(.headline).monospacedDigit()
-                                }
-                                .frame(minWidth: 58, minHeight: 40)
+                HStack(spacing: 8) {
+                    ForEach(Array(slots.enumerated()), id: \.element.id) { index, slot in
+                        Button {
+                            withAnimation(.snappy) { currentSlot = index }
+                        } label: {
+                            VStack(spacing: 2) {
+                                Text(slot.role.displayName).font(.caption.weight(.semibold)).lineLimit(1)
+                                Text(slot.seat.map { "№\($0 + 1)" } ?? "—").font(.headline).monospacedDigit()
                             }
-                            .modifier(RoleChipStyle(isSelected: index == currentSlot, tint: slot.role.team.tint))
+                            .frame(minWidth: 58, minHeight: 40)
                         }
+                        .modifier(RoleChipStyle(isSelected: index == currentSlot, tint: slot.role.team.tint))
                     }
-                    .padding(.vertical, 2)
                 }
+                .padding(.vertical, 2)
             }
             .scrollIndicators(.hidden)
             Keypad(count: draft.playerCount, layout: .grid(columns: 5), spacing: 8) { number in
@@ -140,7 +138,7 @@ struct RolesStep: View {
             Button("Очистить", systemImage: "arrow.counterclockwise") {
                 withAnimation(.snappy) { clearSlots() }
             }
-            .buttonStyle(.glass)
+            .buttonStyle(.solid)
             .disabled(slots.allSatisfy { $0.seat == nil })
         }
         .padding(16)
@@ -299,9 +297,9 @@ private struct RoleChipStyle: ViewModifier {
 
     func body(content: Content) -> some View {
         if isSelected {
-            content.buttonStyle(.glassProminent).tint(tint).buttonBorderShape(.roundedRectangle(radius: 14))
+            content.buttonStyle(.solidProminent).tint(tint)
         } else {
-            content.buttonStyle(.glass).buttonBorderShape(.roundedRectangle(radius: 14))
+            content.buttonStyle(.solid)
         }
     }
 }

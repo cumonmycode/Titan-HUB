@@ -50,7 +50,7 @@ struct PlayersStep: View {
                     .font(.headline)
                     .frame(maxWidth: .infinity)
             }
-            .buttonStyle(.glassProminent)
+            .buttonStyle(.solidProminent)
             .controlSize(.large)
             .padding(.horizontal)
         }
@@ -88,34 +88,31 @@ struct PlayersStep: View {
     }
 
     private var actions: some View {
-        GlassEffectContainer(spacing: 8) {
-            HStack(spacing: 8) {
-                Button {
-                    withAnimation(.snappy) { draft.shuffleSeats() }
-                } label: {
-                    Label("Пересадить", systemImage: "shuffle").font(.subheadline.weight(.semibold))
-                }
-                .buttonStyle(.glassProminent)
-                .disabled(draft.filled < 2)
-                if let last = draft.evening.map(library.lastLineup(of:)), !last.isEmpty {
-                    Button {
-                        withAnimation(.snappy) { draft.seat(last) }
-                    } label: {
-                        Label("Прошлый состав", systemImage: "arrow.uturn.backward").font(.subheadline.weight(.semibold))
-                    }
-                    .buttonStyle(.glass)
-                }
-                Spacer(minLength: 0)
-                Button(role: .destructive) {
-                    withAnimation(.snappy) { draft.seat([]) }
-                } label: {
-                    Image(systemName: "trash").font(.subheadline.weight(.semibold))
-                }
-                .buttonStyle(.glass)
-                .buttonBorderShape(.circle)
-                .disabled(draft.filled == 0)
-                .accessibilityLabel("Очистить рассадку")
+        HStack(spacing: 8) {
+            Button {
+                withAnimation(.snappy) { draft.shuffleSeats() }
+            } label: {
+                Label("Пересадить", systemImage: "shuffle").font(.subheadline.weight(.semibold))
             }
+            .buttonStyle(.solidProminent)
+            .disabled(draft.filled < 2)
+            if let last = draft.evening.map(library.lastLineup(of:)), !last.isEmpty {
+                Button {
+                    withAnimation(.snappy) { draft.seat(last) }
+                } label: {
+                    Label("Прошлый состав", systemImage: "arrow.uturn.backward").font(.subheadline.weight(.semibold))
+                }
+                .buttonStyle(.solid)
+            }
+            Spacer(minLength: 0)
+            Button(role: .destructive) {
+                withAnimation(.snappy) { draft.seat([]) }
+            } label: {
+                Image(systemName: "trash").font(.subheadline.weight(.semibold))
+            }
+            .buttonStyle(.solid(.circle))
+            .disabled(draft.filled == 0)
+            .accessibilityLabel("Очистить рассадку")
         }
     }
 
@@ -201,7 +198,7 @@ private struct SlotRow: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
         .contentShape(.rect)
-        .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 22, style: .continuous))
+        .glassEffect(.regular, in: .rect(cornerRadius: 22, style: .continuous))
     }
 }
 
@@ -293,7 +290,7 @@ private struct SeatPickerSheet: View {
             Button("Убрать", systemImage: "person.badge.minus", role: .destructive) {
                 withAnimation(.snappy) { draft.remove(player.id) }
             }
-            .buttonStyle(.glass)
+            .buttonStyle(.solid)
             .tint(.red)
         }
         .padding(12)
@@ -319,7 +316,7 @@ private struct SeatPickerSheet: View {
         }
         .padding(.horizontal, 16)
         .frame(height: 50)
-        .glassEffect(.regular.interactive(), in: .capsule)
+        .glassEffect(.regular, in: .capsule)
         .onAppear { isFieldFocused = occupant == nil }
     }
 
@@ -422,25 +419,23 @@ private struct SeatStripPicker: View {
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView(.horizontal) {
-                GlassEffectContainer(spacing: 6) {
-                    HStack(spacing: 6) {
-                        ForEach(Array(slots.enumerated()), id: \.element.id) { index, slot in
-                            Button {
-                                withAnimation(.snappy) { selected = index }
-                            } label: {
-                                VStack(spacing: 2) {
-                                    Text("\(index + 1)").font(.headline).monospacedDigit()
-                                    Image(systemName: slot.player == nil ? "circle.dashed" : "person.fill")
-                                        .font(.caption2)
-                                }
-                                .frame(width: 40, height: 44)
+                HStack(spacing: 6) {
+                    ForEach(Array(slots.enumerated()), id: \.element.id) { index, slot in
+                        Button {
+                            withAnimation(.snappy) { selected = index }
+                        } label: {
+                            VStack(spacing: 2) {
+                                Text("\(index + 1)").font(.headline).monospacedDigit()
+                                Image(systemName: slot.player == nil ? "circle.dashed" : "person.fill")
+                                    .font(.caption2)
                             }
-                            .modifier(SeatKeyStyle(isSelected: index == selected))
-                            .id(index)
+                            .frame(width: 40, height: 44)
                         }
+                        .modifier(SeatKeyStyle(isSelected: index == selected))
+                        .id(index)
                     }
-                    .padding(.vertical, 2)
                 }
+                .padding(.vertical, 2)
             }
             .scrollIndicators(.hidden)
             .onChange(of: selected, initial: true) { _, index in
@@ -455,9 +450,9 @@ private struct SeatKeyStyle: ViewModifier {
 
     func body(content: Content) -> some View {
         if isSelected {
-            content.buttonStyle(.glassProminent).buttonBorderShape(.roundedRectangle(radius: 14))
+            content.buttonStyle(.solidProminent)
         } else {
-            content.buttonStyle(.glass).buttonBorderShape(.roundedRectangle(radius: 14))
+            content.buttonStyle(.solid)
         }
     }
 }
@@ -508,6 +503,6 @@ private struct SuggestionRow: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
         .contentShape(.rect)
-        .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 20, style: .continuous))
+        .glassEffect(.regular, in: .rect(cornerRadius: 20, style: .continuous))
     }
 }

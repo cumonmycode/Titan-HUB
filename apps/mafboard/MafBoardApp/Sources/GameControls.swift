@@ -12,6 +12,14 @@ extension View {
 
 // MARK: - Шапка фазы
 
+extension GameState {
+    /// Итог прошедшей ночи — в начале следующего дня.
+    var morningReport: NightReport? {
+        guard case .day = phase, let report = nights.last, report.number == dayNumber - 1 else { return nil }
+        return report
+    }
+}
+
 /// Где мы: день или ночь, текущий шаг, кто говорит, кто выставлен.
 struct PhaseHeader: View {
     let game: GameController
@@ -33,7 +41,7 @@ struct PhaseHeader: View {
 
     /// Итог прошедшей ночи — в начале дня ведущий объявляет его столу.
     private var morning: String? {
-        guard case .day = state.phase, let report = state.nights.last, report.number == state.dayNumber - 1 else { return nil }
+        guard let report = state.morningReport else { return nil }
         if report.victims.isEmpty { return "Ночь прошла без жертв" }
         return "Ночью убит " + report.victims.map { "№\($0.seat) \(game.name(of: $0.seat))" }.joined(separator: ", ")
     }
@@ -87,25 +95,24 @@ struct PhaseHeader: View {
 
 // MARK: - Игрок
 
-/// Карточка игрока. Свёрнута — номер, имя, фолы точками. Раскрыта — таймер (если говорит),
-/// выставление и нарушения (фол, МТФ, БТФ), а на заключительной речи — лучший ход и протокол. Свайпы — быстрые фол и МТФ.
-struct PlayerCard: View {
+/// Игрок на текущем шаге: говорит ли, выставлен ли, что значит нажатие на него ночью.
+/// Общее для карточки (iPhone) и плитки стола (iPad).
+@MainActor
+struct SeatContext {
     let game: GameController
     let seat: SeatState
-    let isExpanded: Bool
-    let onToggle: () -> Void
-    let onBestMove: () -> Void
-    let onProtocol: () -> Void
-    @State private var isConfirmingRemoval = false
 
-    private var state: GameState { game.state }
-    private var isSpeaker: Bool { state.currentSpeaker == seat.seat }
+    var state: GameState { game.state }
+    var name: String { game.name(of: seat.seat) }
+    var isSpeaker: Bool { state.currentSpeaker == seat.seat }
     /// Игрок на заключительной минуте: лучший ход, речь или протокол. Он ещё за столом, пока не оставит протокол.
-    private var isFarewell: Bool { state.currentStep.farewellSeat == seat.seat }
-    private var nomination: Nomination? { state.nominations.first { $0.candidate == seat.seat } }
+    var isFarewell: Bool { state.currentStep.farewellSeat == seat.seat }
+    /// Им можно управлять: живой или на заключительной минуте.
+    var isActive: Bool { seat.isAlive || isFarewell }
+    var nomination: Nomination? { state.nominations.first { $0.candidate == seat.seat } }
 
     /// Ночью нажатие на игрока — ход текущей роли. Проверить можно и выбывшего, выстрелить и лечить — только живого.
-    private var nightAction: GameAction? {
+    var nightAction: GameAction? {
         guard case let .night(step) = state.currentStep else { return nil }
         switch step {
         case .mafiaShot, .maniacShot: return seat.isAlive ? .night(.shot(seat.seat)) : nil
@@ -114,20 +121,25 @@ struct PlayerCard: View {
         }
     }
 
-    private var takesNominations: Bool {
+    var takesNominations: Bool {
         guard isSpeaker, case .speech = state.currentStep else { return false }
         return state.ruleset.day.candidateSource == .nominations
     }
 
     /// Удалён ведущим или за фолы — такого можно вернуть. Убитого и заголосованного — нет (это ход игры).
-    private var isRemoved: Bool {
+    var isRemoved: Bool {
         switch seat.elimination?.cause {
         case .removed, .hostDecision: true
         default: false
         }
     }
 
-    private var status: String? {
+    /// Следующий фол удалит игрока — нужен вопрос перед ним.
+    var nextFoulRemoves: Bool {
+        state.ruleset.discipline.foulsToRemoval.map { seat.fouls + 1 >= $0 } ?? false
+    }
+
+    var status: String? {
         switch state.currentStep {
         case .farewellBestMove where isFarewell: return "Лучший ход"
         case .farewellProtocol where isFarewell: return "Протокол"
@@ -143,45 +155,83 @@ struct PlayerCard: View {
         return nil
     }
 
+    /// Значок с номером: говорящий — акцент, выставленный — оранжевый.
+    var seatTint: Color {
+        if isSpeaker { return .accentColor }
+        if nomination != nil { return .orange }
+        return Color(.systemGray)
+    }
+}
+
+/// Фото и номер одним значком (номер в углу фото), имя, роль (если открыты) и что с игроком сейчас.
+struct PlayerIdentity: View {
+    let context: SeatContext
+    var avatarSize: CGFloat = 44
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            // Касание, а не кнопка: отпускание пальца после свайпа не раскрывает и не сворачивает карточку.
-            header
-                .onTapGesture {
-                    if let nightAction {
-                        game.perform(nightAction)
-                    } else if seat.isAlive || isFarewell {
-                        onToggle()
+        let nomination = context.nomination
+        let status = context.status
+        let showsRoles = context.game.showsRoles
+        HStack(spacing: 12) {
+            PlayerAvatar(
+                name: context.name, url: context.game.profile(at: context.seat.seat)?.avatarURL,
+                seat: context.seat.seat.number, size: avatarSize, seatTint: context.seatTint
+            )
+            .overlay {
+                if nomination != nil, !context.isSpeaker { Circle().stroke(.orange, lineWidth: 2) }
+            }
+            VStack(alignment: .leading, spacing: 1) {
+                Text(context.name).font(.body.weight(.semibold)).lineLimit(1)
+                if showsRoles || status != nil {
+                    HStack(spacing: 6) {
+                        if showsRoles {
+                            Text(context.seat.role.displayName).font(.caption.weight(.medium)).foregroundStyle(context.seat.role.team.tint)
+                        }
+                        if let status {
+                            let isNominated = nomination != nil && context.seat.isAlive
+                            Text(status)
+                                .font(.caption.weight(isNominated ? .semibold : .regular))
+                                .foregroundStyle(isNominated ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary))
+                                .lineLimit(1)
+                        }
                     }
                 }
-                .accessibilityAddTraits(.isButton)
+            }
+        }
+        .opacity(context.isActive ? 1 : 0.5)
+    }
+}
 
-            if isExpanded, seat.isAlive || isFarewell, nightAction == nil {
-                if isSpeaker, game.countdown != nil {
-                    TimerView(game: game)
-                }
-                if isFarewell {
-                    FarewellActions(game: game, seat: seat.seat, onBestMove: onBestMove, onProtocol: onProtocol)
-                }
-                if takesNominations {
-                    NominationPad(game: game, speaker: seat.seat)
-                }
-                if seat.isAlive {
-                    DisciplinePanel(game: game, seat: seat) { isConfirmingRemoval = true }
-                }
+/// Управление игроком: таймер (если говорит), заключительная минута, выставление и нарушения.
+/// На iPhone — в раскрытой карточке, на iPad — в пульте рядом со столом.
+struct PlayerControls: View {
+    let context: SeatContext
+    /// Крупный таймер — на iPad.
+    var isLargeTimer = false
+    let onBestMove: () -> Void
+    let onProtocol: () -> Void
+    @State private var isConfirmingRemoval = false
+
+    var body: some View {
+        let game = context.game
+        let seat = context.seat
+        VStack(alignment: .leading, spacing: 12) {
+            if context.isSpeaker, game.countdown != nil {
+                TimerView(game: game, isLarge: isLargeTimer)
+            }
+            if context.isFarewell {
+                FarewellActions(game: game, seat: seat.seat, onBestMove: onBestMove, onProtocol: onProtocol)
+            }
+            if context.takesNominations {
+                NominationPad(game: game, speaker: seat.seat)
+            }
+            if seat.isAlive {
+                DisciplinePanel(game: game, seat: seat) { isConfirmingRemoval = true }
             }
         }
-        .padding(12)
-        .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 20, style: .continuous))
-        .overlay {
-            if isSpeaker {
-                RoundedRectangle(cornerRadius: 20, style: .continuous).stroke(.tint, lineWidth: 1.5)
-            }
-        }
-        .modifier(PenaltySwipe(game: game, seat: seat, isEnabled: seat.isAlive && !isSpeaker))
         // Штраф не показываем: он зависит от команды игрока, а экран ведущего видят за столом.
         .confirmationDialog(
-            "Удалить №\(seat.seat) \(game.name(of: seat.seat))?",
+            "Удалить №\(seat.seat) \(context.name)?",
             isPresented: $isConfirmingRemoval,
             titleVisibility: .visible
         ) {
@@ -191,21 +241,68 @@ struct PlayerCard: View {
             Button("Выбыл по решению ведущего") { game.perform(.eliminateByHost(seat.seat, note: nil)) }
         }
     }
+}
 
-    private var header: some View {
+/// «Вернуть» удалённого игрока.
+struct ReinstateButton: View {
+    let context: SeatContext
+
+    var body: some View {
+        Button("Вернуть", systemImage: "arrow.uturn.backward") { context.game.reinstate(context.seat.seat) }
+            .font(.subheadline.weight(.semibold))
+            .buttonStyle(.solid(.capsule))
+            .controlSize(.small)
+    }
+}
+
+/// Карточка игрока (iPhone). Свёрнута — номер, имя, фолы точками. Раскрыта — таймер (если говорит),
+/// выставление и нарушения (фол, МТФ, БТФ), а на заключительной речи — лучший ход и протокол. Свайпы — быстрые фол и МТФ.
+struct PlayerCard: View {
+    let game: GameController
+    let seat: SeatState
+    let isExpanded: Bool
+    let onToggle: () -> Void
+    let onBestMove: () -> Void
+    let onProtocol: () -> Void
+
+    var body: some View {
+        let context = SeatContext(game: game, seat: seat)
+        VStack(alignment: .leading, spacing: 12) {
+            // Касание, а не кнопка: отпускание пальца после свайпа не раскрывает и не сворачивает карточку.
+            header(context)
+                .onTapGesture {
+                    if let action = context.nightAction {
+                        game.perform(action)
+                    } else if context.isActive {
+                        onToggle()
+                    }
+                }
+                .accessibilityAddTraits(.isButton)
+
+            if isExpanded, context.isActive, context.nightAction == nil {
+                PlayerControls(context: context, onBestMove: onBestMove, onProtocol: onProtocol)
+            }
+        }
+        .padding(12)
+        .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 20, style: .continuous))
+        .overlay {
+            if context.isSpeaker {
+                RoundedRectangle(cornerRadius: 20, style: .continuous).stroke(.tint, lineWidth: 1.5)
+            }
+        }
+        .modifier(PenaltySwipe(game: game, seat: seat, isEnabled: seat.isAlive && !context.isSpeaker))
+    }
+
+    private func header(_ context: SeatContext) -> some View {
         HStack(spacing: 10) {
-            identity.opacity(seat.isAlive || isFarewell ? 1 : 0.5)
+            PlayerIdentity(context: context)
             Spacer(minLength: 4)
             PenaltyMarks(fouls: seat.fouls, techFouls: seat.techFoulKinds)
-            if nightAction != nil {
+            if context.nightAction != nil {
                 Text("Выбрать").font(.subheadline.weight(.semibold)).foregroundStyle(.tint)
-            } else if isRemoved {
-                Button("Вернуть", systemImage: "arrow.uturn.backward") { game.reinstate(seat.seat) }
-                    .font(.subheadline.weight(.semibold))
-                    .buttonStyle(.bordered)
-                    .buttonBorderShape(.capsule)
-                    .controlSize(.small)
-            } else if seat.isAlive || isFarewell {
+            } else if context.isRemoved {
+                ReinstateButton(context: context)
+            } else if context.isActive {
                 Image(systemName: "chevron.down")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.tertiary)
@@ -214,47 +311,10 @@ struct PlayerCard: View {
         }
         .contentShape(.rect)
     }
-
-    /// Фото и номер — одним значком: номер в углу фото. Говорящий — акцент, выставленный — оранжевый.
-    private var identity: some View {
-        HStack(spacing: 12) {
-            PlayerAvatar(
-                name: game.name(of: seat.seat), url: game.profile(at: seat.seat)?.avatarURL,
-                seat: seat.seat.number, size: 44, seatTint: seatTint
-            )
-            .overlay {
-                if nomination != nil, !isSpeaker { Circle().stroke(.orange, lineWidth: 2) }
-            }
-            VStack(alignment: .leading, spacing: 1) {
-                Text(game.name(of: seat.seat)).font(.body.weight(.semibold)).lineLimit(1)
-                if game.showsRoles || status != nil {
-                    HStack(spacing: 6) {
-                        if game.showsRoles {
-                            Text(seat.role.displayName).font(.caption.weight(.medium)).foregroundStyle(seat.role.team.tint)
-                        }
-                        if let status {
-                            Text(status)
-                                .font(.caption.weight(nomination != nil && seat.isAlive ? .semibold : .regular))
-                                .foregroundStyle(nomination != nil && seat.isAlive ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary))
-                                .lineLimit(1)
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-private extension PlayerCard {
-    var seatTint: Color {
-        if isSpeaker { return .accentColor }
-        if nomination != nil { return .orange }
-        return Color(.systemGray)
-    }
 }
 
 /// Фолы точками и техфолы метками в свёрнутой строке — только если они есть. МТФ — контур, БТФ — заливка.
-private struct PenaltyMarks: View {
+struct PenaltyMarks: View {
     let fouls: Int
     let techFouls: [TechFoulKind]
 
@@ -284,6 +344,9 @@ private struct PenaltySwipe: ViewModifier {
     @State private var offset: CGFloat = 0
     @State private var axis: Axis?
     @State private var tier = 0
+    /// Жест идёт. Сбрасывается сам, даже если жест прервали (прокрутка перехватила палец, свайп выключили) —
+    /// тогда `onEnded` не приходит, и карточку возвращаем на место здесь.
+    @GestureState private var isDragging = false
 
     /// Короткий и длинный свайп.
     private static let thresholds: [CGFloat] = [60, 140]
@@ -301,10 +364,18 @@ private struct PenaltySwipe: ViewModifier {
             .background { backdrop }
             .simultaneousGesture(drag, including: isEnabled ? .all : .subviews)
             .sensoryFeedback(.selection, trigger: tier)
+            .onChange(of: isDragging) { _, dragging in
+                if !dragging { reset() }
+            }
+            .onChange(of: isEnabled) { _, enabled in
+                if !enabled { reset() }
+            }
     }
 
     private var drag: some Gesture {
-        DragGesture(minimumDistance: 16)
+        // В координатах экрана: при прокрутке списка палец уходит по вертикали, и карточка не дёргается вбок.
+        DragGesture(minimumDistance: 16, coordinateSpace: .global)
+            .updating($isDragging) { _, dragging, _ in dragging = true }
             .onChanged { value in
                 if axis == nil {
                     axis = abs(value.translation.width) > abs(value.translation.height) ? .horizontal : .vertical
@@ -317,10 +388,15 @@ private struct PenaltySwipe: ViewModifier {
             }
             .onEnded { _ in
                 if axis == .horizontal { perform(direction, tier: Self.tier(for: offset)) }
-                axis = nil
-                tier = 0
-                withAnimation(.snappy) { offset = 0 }
+                reset()
             }
+    }
+
+    private func reset() {
+        axis = nil
+        tier = 0
+        guard offset != 0 else { return }
+        withAnimation(.snappy(duration: 0.25)) { offset = 0 }
     }
 
     private static func tier(for offset: CGFloat) -> Int {
@@ -434,7 +510,7 @@ private struct DisciplinePanel: View {
     private var rules: DisciplinePolicy { game.state.ruleset.discipline }
     private var scoring: ScoringPolicy { game.state.setup.scoring }
     private var foulLimit: Int { rules.foulsToRemoval ?? 4 }
-    private var nextFoulRemoves: Bool { rules.foulsToRemoval.map { seat.fouls + 1 >= $0 } ?? false }
+    private var nextFoulRemoves: Bool { SeatContext(game: game, seat: seat).nextFoulRemoves }
     private var nextTechFoulRemoves: Bool { rules.techFoulsToRemoval.map { seat.techFouls + 1 >= $0 } ?? false }
 
     /// Штраф за все техфолы игрока вместе с этим удаляющим: он вдвое (МТФ + БТФ = −1.5).
@@ -494,18 +570,16 @@ private struct DisciplinePanel: View {
                 }
             }
             Spacer(minLength: 4)
-            GlassEffectContainer(spacing: 6) {
-                HStack(spacing: 8) {
-                    StepButton(icon: "minus", label: "Снять фол") { game.perform(.cancelFoul(seat.seat)) }
-                        .disabled(seat.fouls == 0)
-                    Text("\(seat.fouls)")
-                        .font(.title3.weight(.bold))
-                        .monospacedDigit()
-                        .foregroundStyle(seat.fouls == 0 ? AnyShapeStyle(.secondary) : AnyShapeStyle(Color.orange))
-                        .contentTransition(.numericText(value: Double(seat.fouls)))
-                        .frame(minWidth: 22)
-                    StepButton(icon: "plus", label: "Фол", tint: nextFoulRemoves ? .red : nil) { add(.foul) }
-                }
+            HStack(spacing: 8) {
+                StepButton(icon: "minus", label: "Снять фол") { game.perform(.cancelFoul(seat.seat)) }
+                    .disabled(seat.fouls == 0)
+                Text("\(seat.fouls)")
+                    .font(.title3.weight(.bold))
+                    .monospacedDigit()
+                    .foregroundStyle(seat.fouls == 0 ? AnyShapeStyle(.secondary) : AnyShapeStyle(Color.orange))
+                    .contentTransition(.numericText(value: Double(seat.fouls)))
+                    .frame(minWidth: 22)
+                StepButton(icon: "plus", label: "Фол", tint: nextFoulRemoves ? .red : nil) { add(.foul) }
             }
         }
     }
@@ -536,21 +610,18 @@ private struct DisciplinePanel: View {
                 }
             }
             Spacer(minLength: 4)
-            GlassEffectContainer(spacing: 6) {
-                HStack(spacing: 6) {
-                    StepButton(icon: "minus", label: "Снять последний техфол") { game.perform(.cancelTechFoul(seat.seat)) }
-                        .disabled(seat.techFouls == 0)
-                    ForEach([TechFoulKind.ordinary, .big], id: \.self) { kind in
-                        Button { add(.techFoul(kind)) } label: {
-                            Text("+" + kind.shortName)
-                                .font(.subheadline.weight(.bold))
-                                .foregroundStyle(nextTechFoulRemoves ? Color.red : Color.primary)
-                                .frame(minHeight: 30)
-                        }
-                        .buttonStyle(.glass)
-                        .buttonBorderShape(.capsule)
-                        .accessibilityLabel("\(kind.fullName) \((-scoring.techFoulPenalty(kind, removes: false)).signed)")
+            HStack(spacing: 6) {
+                StepButton(icon: "minus", label: "Снять последний техфол") { game.perform(.cancelTechFoul(seat.seat)) }
+                    .disabled(seat.techFouls == 0)
+                ForEach([TechFoulKind.ordinary, .big], id: \.self) { kind in
+                    Button { add(.techFoul(kind)) } label: {
+                        Text("+" + kind.shortName)
+                            .font(.subheadline.weight(.bold))
+                            .foregroundStyle(nextTechFoulRemoves ? Color.red : Color.primary)
+                            .frame(minHeight: 30)
                     }
+                    .buttonStyle(.solid(.capsule))
+                    .accessibilityLabel("\(kind.fullName) \((-scoring.techFoulPenalty(kind, removes: false)).signed)")
                 }
             }
         }
@@ -605,8 +676,7 @@ private struct StepButton: View {
                 .foregroundStyle(tint.map(AnyShapeStyle.init) ?? AnyShapeStyle(.primary))
                 .frame(width: 30, height: 30)
         }
-        .buttonStyle(.glass)
-        .buttonBorderShape(.circle)
+        .buttonStyle(.solid(.circle))
         .accessibilityLabel(label)
     }
 }

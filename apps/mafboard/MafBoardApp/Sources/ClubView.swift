@@ -65,7 +65,7 @@ struct ClubView: View {
             } actions: {
                 if model.account?.goMafia == nil {
                     NavigationLink("Подключить GoMafia") { GoMafiaConnectionView() }
-                        .buttonStyle(.glassProminent)
+                        .buttonStyle(.solidProminent)
                 }
             }
         }

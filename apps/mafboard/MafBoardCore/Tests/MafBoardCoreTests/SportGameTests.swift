@@ -119,17 +119,16 @@ struct SportGameTests {
         #expect(session.step == .farewell(7))
     }
 
-    @Test("Лучший ход проверяется: не себя и не больше трёх номеров")
+    @Test("Лучший ход проверяется: не больше трёх номеров, свой номер назвать можно")
     func bestMoveValidation() throws {
         var session = try Fixture.session()
         try session.advance(until: \.isNight)
         try session.run(.night(.shot(1)), .night(.skip), .night(.skip))
-        #expect(throws: GameError.invalidBestMove(.includesAuthor)) {
-            try session.perform(.recordBestMove([1, 2]))
-        }
         #expect(throws: GameError.invalidBestMove(.seatCount(max: 3))) {
             try session.perform(.recordBestMove([2, 3, 5, 6]))
         }
+        try session.perform(.recordBestMove([1, 2]))
+        #expect(session.state.bestMove(by: 1)?.seats == [1, 2])
     }
 
     @Test("Ночной ввод должен соответствовать текущему шагу")

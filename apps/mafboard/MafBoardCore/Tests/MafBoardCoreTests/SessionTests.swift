@@ -97,7 +97,7 @@ struct ErrorMessageTests {
         .invalidBallot(.liftBallotExpected), .invalidBallot(.regularBallotExpected),
         .unexpectedNightInput(.donCheck), .cannotTargetSelf(1), .doctorCannotRepeatTarget(1),
         .bestMoveNotAvailable, .invalidBestMove(.seatCount(max: 3)), .invalidBestMove(.duplicateSeats),
-        .invalidBestMove(.includesAuthor), .nothingToCancel(1), .nothingToUndo,
+        .nothingToCancel(1), .nothingToUndo,
         .extraTimeFoulsLocked(1), .notAllowedNow(.extraTimeOnlyForSpeaker(current: 1)),
         .notAllowedNow(.extraTimeOnlyForSpeaker(current: nil)), .tooManyFoulsForExtraTime(1, max: 3),
         .invalidMiss(.notShooter(1)), .invalidMiss(.duplicateShooter(3)), .invalidMiss(.sameTarget(5)),

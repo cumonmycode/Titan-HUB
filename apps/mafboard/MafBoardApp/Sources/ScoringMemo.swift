@@ -81,6 +81,6 @@ struct ScoringMemoSheet: View {
                 }
             }
         }
-        .presentationDetents([.medium, .large])
+        .phoneDetents([.medium, .large])
     }
 }

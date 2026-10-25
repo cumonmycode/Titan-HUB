@@ -23,6 +23,9 @@ final class GameController: Identifiable {
     var checkResult: NightCheck?
     var errorMessage: String?
     var showsRoles = false
+    /// Что отменит «Назад» и куда ведёт «Далее» — подписи под кнопками шагов.
+    private(set) var backHint = ""
+    private(set) var nextHint = ""
     /// Сохранить идущую игру (на телефоне и затем на сервере).
     @ObservationIgnored var onSave: ((GameSession, [PlayerProfile]) -> Void)?
     @ObservationIgnored var onFinish: ((GameRecord, [PlayerProfile]) -> Void)?
@@ -33,6 +36,7 @@ final class GameController: Identifiable {
         self.session = session
         self.players = players
         restoreTimer()
+        refreshHints()
     }
 
     var state: GameState { session.state }
@@ -50,12 +54,14 @@ final class GameController: Identifiable {
     @discardableResult
     func perform(_ action: GameAction) -> Bool {
         let step = state.currentStep
+        let stepTitle = step.title(in: state)
         do throws(GameError) {
             try session.perform(action)
         } catch {
             errorMessage = error.message
             return false
         }
+        refreshHints(stepBefore: stepTitle)
         if case .night(.check) = action, case let .check(check)? = state.events.last(where: \.isCheck)?.kind {
             checkResult = check
         }
@@ -81,6 +87,7 @@ final class GameController: Identifiable {
             errorMessage = error.message
             return
         }
+        refreshHints()
         if state.currentStep != step {
             resetTimer()
         } else if case .extraTime = undone {
@@ -103,6 +110,7 @@ final class GameController: Identifiable {
             errorMessage = error.message
             return
         }
+        refreshHints()
         if state.currentStep != step { resetTimer() }
         if wasFinished, !state.isFinished { onReopen?(id) }
         save()
@@ -110,22 +118,30 @@ final class GameController: Identifiable {
 
     // MARK: Подсказки для «Назад» и «Далее»
 
+    /// Подсказки считаются один раз после хода, а не при каждой перерисовке: для «Назад» после «Далее»
+    /// раньше заново проигрывалась вся партия — на каждой перерисовке панели.
+    private func refreshHints(stepBefore: String? = nil) {
+        let next = Self.nextHint(for: state)
+        let back = Self.backHint(for: session, stepBefore: stepBefore)
+        if next != nextHint { nextHint = next }
+        if back != backHint { backHint = back }
+    }
+
     /// Куда ведёт «Далее»: заголовок следующего шага.
-    var nextHint: String {
+    private static func nextHint(for state: GameState) -> String {
         if state.isFinished { return "К списку игр" }
         guard state.canAdvance else { return "Сначала подсчитайте голоса" }
         guard let next = try? GameEngine.apply(.advance, to: state, at: .now) else { return "" }
         return next.currentStep.title(in: next)
     }
 
-    /// Что отменит «Назад».
-    var backHint: String {
+    /// Что отменит «Назад». `stepBefore` — заголовок шага до только что сделанного «Далее»: тогда партию не переигрываем.
+    private static func backHint(for session: GameSession, stepBefore: String?) -> String {
         guard let last = session.log.last?.action else { return "Нечего отменять" }
-        if case .advance = last,
-           let previous = try? GameSession.replay(setup: session.setup, log: Array(session.log.dropLast())) {
-            return "к «\(previous.currentStep.title(in: previous))»"
-        }
-        return "отменить \(last.undoLabel)"
+        guard case .advance = last else { return "отменить \(last.undoLabel)" }
+        if let stepBefore { return "к «\(stepBefore)»" }
+        guard let previous = try? GameSession.replay(setup: session.setup, log: Array(session.log.dropLast())) else { return "" }
+        return "к «\(previous.currentStep.title(in: previous))»"
     }
 
     // MARK: Таймер
@@ -341,12 +357,17 @@ struct GameScreen: View {
     /// «Ещё одна игра» серии с экрана итогов. `nil` — серия уже закрыта.
     var onNextGame: (() -> Void)?
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var isShowingLog = false
-    /// Раскрытые карточки: говорящий раскрыт всегда, остальные — по касанию, независимо друг от друга.
+    /// iPhone: раскрытые карточки. Говорящий раскрыт всегда, остальные — по касанию, независимо друг от друга.
     @State private var expanded: Set<Seat> = []
+    /// iPad: игрок в пульте, выбранный касанием на столе. `nil` — пульт следит за говорящим.
+    @State private var focusedSeat: Seat?
     @State private var bestMovePick: SeatPick?
     @State private var protocolPick: SeatPick?
     @State private var forfeitPick: SeatPick?
+    /// Утро после ночи с убийством: сначала объявление «Ночью убит», лист лучшего хода — по «Далее» в нём.
+    @State private var nightVictims: [AnnouncedVictim]?
     @State private var scrollTask: Task<Void, Never>?
 
     private var state: GameState { game.state }
@@ -358,62 +379,34 @@ struct GameScreen: View {
         }
     }
 
+    /// Широкое окно (iPad): стол и пульт рядом. Узкое (iPhone, iPad в узком Split View) — один список.
+    private var usesTable: Bool { sizeClass == .regular }
+
     var body: some View {
         NavigationStack {
-            ScrollViewReader { proxy in
-                ScrollView {
-                    VStack(spacing: 12) {
-                        PhaseHeader(game: game) { bestMovePick = SeatPick(seat: $0) }
-                            .id(ScrollTarget.top)
-                        stepContent
-                        if !state.isFinished {
-                            VStack(spacing: 8) {
-                                ForEach(state.seats) { seat in
-                                    PlayerCard(
-                                        game: game, seat: seat, isExpanded: expanded.contains(seat.seat),
-                                        onToggle: {
-                                            withAnimation(.snappy) {
-                                                if expanded.contains(seat.seat) { expanded.remove(seat.seat) } else { expanded.insert(seat.seat) }
-                                            }
-                                        },
-                                        onBestMove: { bestMovePick = SeatPick(seat: seat.seat) },
-                                        onProtocol: { protocolPick = SeatPick(seat: seat.seat) }
-                                    )
-                                    .id(ScrollTarget.seat(seat.seat))
-                                }
-                            }
-                        }
-                    }
-                    .padding(.horizontal)
-                    .padding(.bottom, 16)
-                }
-                // Новый шаг — экран сам едет к нему: к карточке говорящего или наверх (ночь, голосование, итоги).
-                .onChange(of: state.currentStep, initial: true) { _, _ in
-                    scrollToActiveStep(proxy)
-                }
+            Group {
+                if usesTable { tableLayout } else { listLayout }
             }
             .ambientBackground(mood: isNight ? .night : .accent)
             .navigationTitle(state.moment.displayName)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { toolbar }
-            .safeAreaInset(edge: .bottom) { StepBar(game: game) { dismiss() } }
             .onChange(of: state.currentSpeaker, initial: true) { previous, speaker in
-                withAnimation(.snappy) {
+                focusedSeat = nil
+                withAnimation(.snappy(duration: 0.2)) {
                     if let previous, previous != speaker { expanded.remove(previous) }
                     if let speaker { expanded.insert(speaker) }
                 }
             }
-            // Лучший ход — до заключительной речи, протокол — после: листы открываются сами.
-            .onChange(of: state.currentStep, initial: true) { _, step in
-                switch step {
-                case let .farewellBestMove(seat):
-                    bestMovePick = SeatPick(seat: seat)
-                case let .farewellProtocol(seat):
-                    protocolPick = SeatPick(seat: seat)
-                case let .farewell(seat) where state.ruleset.farewell == nil && state.awaitsBestMove(from: seat):
-                    bestMovePick = SeatPick(seat: seat)
-                default:
-                    break
+            .onChange(of: state.currentStep, initial: true) { previous, step in
+                // Новый шаг — пульт iPad снова у того, кто сейчас на шаге (говорящий, выбывший на заключительной минуте).
+                focusedSeat = nil
+                // Ночь кончилась убийством — сначала объявляем, кого убили; лучший ход — потом, по «Далее».
+                if previous.isNight, !step.isNight, let report = state.morningReport, !report.victims.isEmpty {
+                    nightVictims = report.victims.map { AnnouncedVictim(seat: $0.seat, name: game.name(of: $0.seat)) }
+                } else if nightVictims == nil {
+                    // Пока висит объявление ночи, листы не открываем: нужный откроет «Далее» в объявлении.
+                    presentFarewellSheet(for: step)
                 }
             }
             .sheet(item: $bestMovePick) { BestMoveSheet(game: game, author: $0.seat) }
@@ -440,7 +433,7 @@ struct GameScreen: View {
                             }
                         }
                 }
-                .presentationDetents([.medium, .large])
+                .phoneDetents([.medium, .large])
             }
             .alert("Ошибка", isPresented: Binding(get: { game.errorMessage != nil }, set: { if !$0 { game.errorMessage = nil } })) {
                 Button("OK", role: .cancel) {}
@@ -448,34 +441,223 @@ struct GameScreen: View {
                 Text(game.errorMessage ?? "")
             }
         }
-        // Результат проверки — крупной карточкой поверх экрана, а не системным окном.
+        // Результат проверки и итог ночи — крупной карточкой поверх экрана, а не системным окном.
+        // Анимация — только у карточки: раньше она висела на всём экране, и ход после проверки пружинил целиком.
         .overlay {
-            if let check = game.checkResult {
-                CheckResultOverlay(check: check, name: game.name(of: check.target)) {
-                    withAnimation(.smooth(duration: 0.25)) { game.checkResult = nil }
-                }
-                .transition(.opacity.combined(with: .scale(scale: 0.94)))
-            }
+            ZStack { announcements }
+                .animation(.snappy(duration: 0.25), value: game.checkResult)
+                .animation(.snappy(duration: 0.25), value: nightVictims)
         }
-        .animation(.spring(duration: 0.35, bounce: 0.25), value: game.checkResult)
         .connectionIndicator()
         .onAppear { UIApplication.shared.isIdleTimerDisabled = true }
         .onDisappear { UIApplication.shared.isIdleTimerDisabled = false }
     }
 
-    /// Ждём, пока раскроется карточка говорящего, и докручиваем к ней.
+    // MARK: iPhone: один список
+
+    private var listLayout: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(spacing: 12) {
+                    PhaseHeader(game: game) { bestMovePick = SeatPick(seat: $0) }
+                        .id(ScrollTarget.top)
+                    stepContent(isLarge: false)
+                    if !state.isFinished {
+                        VStack(spacing: 8) {
+                            ForEach(state.seats) { seat in
+                                PlayerCard(
+                                    game: game, seat: seat, isExpanded: expanded.contains(seat.seat),
+                                    onToggle: {
+                                        withAnimation(.snappy(duration: 0.25)) {
+                                            if expanded.contains(seat.seat) { expanded.remove(seat.seat) } else { expanded.insert(seat.seat) }
+                                        }
+                                    },
+                                    onBestMove: { bestMovePick = SeatPick(seat: seat.seat) },
+                                    onProtocol: { protocolPick = SeatPick(seat: seat.seat) }
+                                )
+                                .id(ScrollTarget.seat(seat.seat))
+                            }
+                        }
+                    }
+                }
+                .padding(.horizontal)
+                .padding(.bottom, 16)
+            }
+            // Новый шаг — экран сам едет к нему: к карточке говорящего или наверх (ночь, голосование, итоги).
+            .onChange(of: state.currentStep, initial: true) { _, _ in
+                scrollToActiveStep(proxy)
+            }
+        }
+        .safeAreaInset(edge: .bottom) { StepBar(game: game) { dismiss() } }
+    }
+
+    /// Докручиваем к говорящему, когда карточка прошлого говорящего уже свернулась (0.2 с): иначе цель
+    /// считается по старым размерам и новая карточка уезжает выше края экрана.
     private func scrollToActiveStep(_ proxy: ScrollViewProxy) {
         let target = state.currentSpeaker.map(ScrollTarget.seat) ?? .top
         scrollTask?.cancel()
         scrollTask = Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(180))
+            try? await Task.sleep(for: .milliseconds(200))
             guard !Task.isCancelled else { return }
-            withAnimation(.smooth(duration: 0.4)) { proxy.scrollTo(target, anchor: .top) }
+            withAnimation(.snappy(duration: 0.3)) { proxy.scrollTo(target, anchor: .top) }
+        }
+    }
+
+    // MARK: iPad: стол и пульт
+
+    /// Слева стол — все игроки сразу, справа пульт: шаг, таймер, выставление и нарушения игрока, «Назад» и «Далее»
+    /// под правой рукой. Ландшафт — стол в две колонки, портрет — в одну.
+    private var tableLayout: some View {
+        GeometryReader { proxy in
+            let isLandscape = proxy.size.width >= 1100
+            HStack(spacing: 0) {
+                if !state.isFinished {
+                    SeatTable(game: game, focused: focusTarget, columns: isLandscape ? 2 : 1) { seat in
+                        // Касание говорящего или повторное касание выбранного — пульт снова у говорящего.
+                        let current = state.currentSpeaker ?? state.currentStep.farewellSeat
+                        focusedSeat = seat == current || focusTarget == seat ? nil : seat
+                    }
+                    .frame(width: isLandscape ? proxy.size.width * 0.52 : max(340, proxy.size.width * 0.42))
+                }
+                controlPane
+            }
+        }
+    }
+
+    private var controlPane: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(spacing: 12) {
+                    PhaseHeader(game: game) { bestMovePick = SeatPick(seat: $0) }
+                        .id(ScrollTarget.top)
+                    stepContent(isLarge: true)
+                    if !state.isFinished {
+                        speakerTimer
+                        focusPanel
+                    }
+                }
+                .frame(maxWidth: 760)
+                .frame(maxWidth: .infinity)
+                .padding(.horizontal)
+                .padding(.bottom, 16)
+            }
+            .onChange(of: state.currentStep) { _, _ in
+                withAnimation(.snappy(duration: 0.3)) { proxy.scrollTo(ScrollTarget.top, anchor: .top) }
+            }
+        }
+        .safeAreaInset(edge: .bottom) { StepBar(game: game) { dismiss() }.frame(maxWidth: 760) }
+    }
+
+    /// Игрок в пульте: выбранный на столе, иначе говорящий или выбывший на заключительной минуте. Ночью — никто.
+    private var focusTarget: Seat? {
+        guard !isNight else { return nil }
+        return focusedSeat ?? state.currentSpeaker ?? state.currentStep.farewellSeat
+    }
+
+    /// Выбран не говорящий — таймер речи остаётся на виду над карточкой выбранного. Касание имени — пульт снова у говорящего.
+    @ViewBuilder
+    private var speakerTimer: some View {
+        if let speaker = state.currentSpeaker, let target = focusTarget, target != speaker, game.countdown != nil {
+            VStack(alignment: .leading, spacing: 10) {
+                Button { focusedSeat = nil } label: {
+                    Label("Говорит №\(speaker) \(game.name(of: speaker))", systemImage: "waveform")
+                        .font(.subheadline.weight(.semibold))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.tint)
+                TimerView(game: game)
+            }
+            .gameCard()
         }
     }
 
     @ViewBuilder
-    private var stepContent: some View {
+    private var focusPanel: some View {
+        if let target = focusTarget, let seat = state.seat(target) {
+            let context = SeatContext(game: game, seat: seat)
+            VStack(alignment: .leading, spacing: 14) {
+                HStack(spacing: 10) {
+                    PlayerIdentity(context: context, avatarSize: 52)
+                    Spacer(minLength: 4)
+                    PenaltyMarks(fouls: seat.fouls, techFouls: seat.techFoulKinds)
+                    if context.isRemoved { ReinstateButton(context: context) }
+                    if focusedSeat != nil {
+                        Button("К говорящему", systemImage: "xmark") { focusedSeat = nil }
+                            .labelStyle(.iconOnly)
+                            .font(.subheadline.weight(.bold))
+                            .buttonStyle(.solid(.circle))
+                    }
+                }
+                if context.isActive {
+                    PlayerControls(
+                        context: context, isLargeTimer: true,
+                        onBestMove: { bestMovePick = SeatPick(seat: target) },
+                        onProtocol: { protocolPick = SeatPick(seat: target) }
+                    )
+                }
+            }
+            .gameCard()
+            .overlay {
+                if context.isSpeaker {
+                    RoundedRectangle(cornerRadius: 22, style: .continuous).stroke(.tint, lineWidth: 1.5)
+                }
+            }
+            // Свой набор состояний у каждого игрока: вопросы об удалении не переезжают к другому.
+            .id(target)
+        } else if !isNight {
+            Label("Нажмите на игрока на столе — фолы, техфолы и удаление.", systemImage: "hand.tap")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 4)
+        }
+    }
+
+    // MARK: Объявления и листы
+
+    @ViewBuilder
+    private var announcements: some View {
+        if let check = game.checkResult {
+            CheckResultOverlay(check: check, name: game.name(of: check.target)) { game.checkResult = nil }
+                .transition(.opacity.combined(with: .scale(scale: 0.96)))
+        } else if let victims = nightVictims {
+            NightVictimsOverlay(victims: victims, nextStep: farewellTitle) { continueAfterNight() }
+                .transition(.opacity.combined(with: .scale(scale: 0.96)))
+        }
+    }
+
+    /// Подпись под «Далее» в объявлении ночи: что сейчас начнётся.
+    private var farewellTitle: String {
+        switch state.currentStep {
+        case let .farewellBestMove(seat): "Лучший ход №\(seat)"
+        case let .farewell(seat): "Заключительная речь №\(seat)"
+        default: state.currentStep.title(in: state)
+        }
+    }
+
+    /// Объявили, кого убили, — дальше лучший ход. Если заключительная речь уже пошла сама — время с начала.
+    private func continueAfterNight() {
+        nightVictims = nil
+        presentFarewellSheet(for: state.currentStep)
+        if case .farewell = state.currentStep, game.countdown?.isRunning == true { game.restartTimer() }
+    }
+
+    /// Лучший ход — до заключительной речи, протокол — после: листы открываются сами.
+    private func presentFarewellSheet(for step: CurrentStep) {
+        switch step {
+        case let .farewellBestMove(seat):
+            bestMovePick = SeatPick(seat: seat)
+        case let .farewellProtocol(seat):
+            protocolPick = SeatPick(seat: seat)
+        case let .farewell(seat) where state.ruleset.farewell == nil && state.awaitsBestMove(from: seat):
+            bestMovePick = SeatPick(seat: seat)
+        default:
+            break
+        }
+    }
+
+    @ViewBuilder
+    private func stepContent(isLarge: Bool) -> some View {
         switch state.currentStep {
         case let .ballot(candidates, kind):
             Group {
@@ -489,7 +671,7 @@ struct GameScreen: View {
         case let .liftBallot(candidates):
             LiftPanel(game: game, candidates: candidates)
         case let .timed(_, speaker) where speaker == nil:
-            TimerView(game: game).gameCard()
+            TimerView(game: game, isLarge: isLarge).gameCard()
         case let .night(step):
             NightPanel(game: game, step: step)
         case .finished:
@@ -553,40 +735,38 @@ private struct StepBar: View {
     let onFinish: () -> Void
 
     var body: some View {
-        GlassEffectContainer(spacing: 10) {
-            HStack(spacing: 10) {
-                Button {
-                    game.undo()
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "chevron.backward").font(.subheadline.weight(.bold))
-                        VStack(alignment: .leading, spacing: 0) {
-                            Text("Назад").font(.subheadline.weight(.semibold))
-                            Text(game.backHint).font(.caption2).lineLimit(1).opacity(0.75)
-                        }
+        HStack(spacing: 10) {
+            Button {
+                game.undo()
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "chevron.backward").font(.subheadline.weight(.bold))
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text("Назад").font(.subheadline.weight(.semibold))
+                        Text(game.backHint).font(.caption2).lineLimit(1).opacity(0.75)
                     }
-                    .frame(maxWidth: 130, alignment: .leading)
                 }
-                .buttonStyle(.glass)
-                .disabled(!game.session.canUndo)
-
-                Button {
-                    if game.state.isFinished { onFinish() } else { game.perform(.advance) }
-                } label: {
-                    HStack(spacing: 8) {
-                        VStack(alignment: .leading, spacing: 0) {
-                            Text(game.state.isFinished ? "Готово" : "Далее").font(.subheadline.weight(.semibold))
-                            Text(game.nextHint).font(.caption2).lineLimit(1).opacity(0.85)
-                        }
-                        Spacer(minLength: 0)
-                        Image(systemName: game.state.isFinished ? "checkmark" : "chevron.forward")
-                            .font(.subheadline.weight(.bold))
-                    }
-                    .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.glassProminent)
-                .disabled(!game.state.canAdvance && !game.state.isFinished)
+                .frame(maxWidth: 130, alignment: .leading)
             }
+            .buttonStyle(.floating(.capsule))
+            .disabled(!game.session.canUndo)
+
+            Button {
+                if game.state.isFinished { onFinish() } else { game.perform(.advance) }
+            } label: {
+                HStack(spacing: 8) {
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text(game.state.isFinished ? "Готово" : "Далее").font(.subheadline.weight(.semibold))
+                        Text(game.nextHint).font(.caption2).lineLimit(1).opacity(0.85)
+                    }
+                    Spacer(minLength: 0)
+                    Image(systemName: game.state.isFinished ? "checkmark" : "chevron.forward")
+                        .font(.subheadline.weight(.bold))
+                }
+                .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.solidProminent(.capsule))
+            .disabled(!game.state.canAdvance && !game.state.isFinished)
         }
         .padding(.horizontal, 20)
         .padding(.bottom, 6)
@@ -597,4 +777,10 @@ private struct StepBar: View {
 private enum ScrollTarget: Hashable {
     case top
     case seat(Seat)
+}
+
+private extension CurrentStep {
+    var isNight: Bool {
+        if case .night = self { true } else { false }
+    }
 }

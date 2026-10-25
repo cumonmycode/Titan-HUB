@@ -69,7 +69,7 @@ struct FarewellActions: View {
             Button(action: action) {
                 Label(title, systemImage: icon).font(.headline).frame(maxWidth: .infinity)
             }
-            .buttonStyle(.glassProminent)
+            .buttonStyle(.solidProminent)
             .tint(tint)
             .controlSize(.large)
             Text(hint).font(.caption).foregroundStyle(.secondary)
@@ -91,7 +91,7 @@ struct FarewellActions: View {
                     Button(action: onBestMove) {
                         Label("Лучший ход", systemImage: "star.fill").frame(maxWidth: .infinity)
                     }
-                    .buttonStyle(.glassProminent)
+                    .buttonStyle(.solidProminent)
                     .tint(.orange)
                     .controlSize(.large)
                 }
@@ -102,7 +102,7 @@ struct FarewellActions: View {
                     Label(proto == nil ? "Протокол" : "Изменить протокол", systemImage: "list.clipboard")
                         .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.glass)
+                .buttonStyle(.solid)
                 .controlSize(.large)
                 if let proto {
                     Text(proto.summary).font(.caption).foregroundStyle(.secondary)
@@ -129,23 +129,24 @@ struct BestMoveSheet: View {
 
     var body: some View {
         NavigationStack {
-            VStack(alignment: .leading, spacing: 16) {
-                Text("№\(author) \(game.name(of: author)) называет до \(limit) номеров, кого считает чёрными. Названные номера по правилам не меняются — правка здесь только для ошибки ввода.")
-                    .foregroundStyle(.secondary)
-                Keypad(count: game.state.seats.count) { number in
-                    let seat = Seat(number)
-                    let style: KeypadKey.Style = seat == author ? .disabled : (selected.contains(seat) ? .selected : .normal)
-                    KeypadKey(number: number, style: style) {
-                        if selected.contains(seat) {
-                            selected.remove(seat)
-                        } else if selected.count < limit {
-                            selected.insert(seat)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    Text("№\(author) \(game.name(of: author)) называет до \(limit) номеров, кого считает чёрными (можно и себя). Названные номера по правилам не меняются — правка здесь только для ошибки ввода.")
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Keypad(count: game.state.seats.count) { number in
+                        let seat = Seat(number)
+                        KeypadKey(number: number, caption: seat == author ? "себя" : nil, style: selected.contains(seat) ? .selected : .normal) {
+                            if selected.contains(seat) {
+                                selected.remove(seat)
+                            } else if selected.count < limit {
+                                selected.insert(seat)
+                            }
                         }
                     }
                 }
-                Spacer()
+                .padding()
             }
-            .padding()
             .background { AmbientBackground() }
             .navigationTitle("Лучший ход №\(author)")
             .navigationBarTitleDisplayMode(.inline)
@@ -160,7 +161,7 @@ struct BestMoveSheet: View {
             }
             .onAppear { selected = Set(game.state.bestMove(by: author)?.seats ?? []) }
         }
-        .presentationDetents([.medium, .large])
+        .phoneDetents([.medium, .large])
     }
 }
 

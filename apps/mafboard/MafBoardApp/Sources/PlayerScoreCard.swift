@@ -231,39 +231,34 @@ private struct ExtraStepper: View {
             IconBadge(icon: icon, tint: tint)
             Text(title).font(.subheadline.weight(.semibold))
             Spacer(minLength: 4)
-            GlassEffectContainer(spacing: 6) {
-                HStack(spacing: 6) {
-                    Button { step(-1) } label: {
-                        Image(systemName: "minus").font(.body.weight(.bold)).frame(width: 26, height: 26)
-                    }
-                    .buttonStyle(.glass)
-                    .buttonBorderShape(.circle)
-                    .disabled(index == 0)
-                    .accessibilityLabel("Меньше")
-
-                    Menu {
-                        ForEach(scale.reversed(), id: \.self) { option in
-                            Button(Points(hundredths: option).signed) { value = option }
-                        }
-                    } label: {
-                        Text(Points(hundredths: value).signed)
-                            .font(.headline)
-                            .monospacedDigit()
-                            .foregroundStyle(value == 0 ? AnyShapeStyle(.secondary) : AnyShapeStyle(tint))
-                            .contentTransition(.numericText(value: Double(value)))
-                            .frame(minWidth: 54, minHeight: 26)
-                    }
-                    .buttonStyle(.glass)
-                    .buttonBorderShape(.capsule)
-
-                    Button { step(1) } label: {
-                        Image(systemName: "plus").font(.body.weight(.bold)).frame(width: 26, height: 26)
-                    }
-                    .buttonStyle(.glass)
-                    .buttonBorderShape(.circle)
-                    .disabled(index == scale.count - 1)
-                    .accessibilityLabel("Больше")
+            HStack(spacing: 6) {
+                Button { step(-1) } label: {
+                    Image(systemName: "minus").font(.body.weight(.bold)).frame(width: 26, height: 26)
                 }
+                .buttonStyle(.solid(.circle))
+                .disabled(index == 0)
+                .accessibilityLabel("Меньше")
+
+                Menu {
+                    ForEach(scale.reversed(), id: \.self) { option in
+                        Button(Points(hundredths: option).signed) { value = option }
+                    }
+                } label: {
+                    Text(Points(hundredths: value).signed)
+                        .font(.headline)
+                        .monospacedDigit()
+                        .foregroundStyle(value == 0 ? AnyShapeStyle(.secondary) : AnyShapeStyle(tint))
+                        .contentTransition(.numericText(value: Double(value)))
+                        .frame(minWidth: 54, minHeight: 26)
+                }
+                .buttonStyle(.solid(.capsule))
+
+                Button { step(1) } label: {
+                    Image(systemName: "plus").font(.body.weight(.bold)).frame(width: 26, height: 26)
+                }
+                .buttonStyle(.solid(.circle))
+                .disabled(index == scale.count - 1)
+                .accessibilityLabel("Больше")
             }
         }
         .sensoryFeedback(.selection, trigger: value)
@@ -297,24 +292,20 @@ private struct TechFoulStepper: View {
                 Text(detail).font(.caption).foregroundStyle(kinds.isEmpty ? AnyShapeStyle(.secondary) : AnyShapeStyle(Color.red))
             }
             Spacer(minLength: 4)
-            GlassEffectContainer(spacing: 6) {
-                HStack(spacing: 6) {
-                    Button(action: editing.onCancelTechFoul) {
-                        Image(systemName: "minus").font(.body.weight(.bold)).frame(width: 26, height: 26)
-                    }
-                    .buttonStyle(.glass)
-                    .buttonBorderShape(.circle)
-                    .disabled(kinds.isEmpty)
-                    .accessibilityLabel("Снять последний техфол")
+            HStack(spacing: 6) {
+                Button(action: editing.onCancelTechFoul) {
+                    Image(systemName: "minus").font(.body.weight(.bold)).frame(width: 26, height: 26)
+                }
+                .buttonStyle(.solid(.circle))
+                .disabled(kinds.isEmpty)
+                .accessibilityLabel("Снять последний техфол")
 
-                    ForEach([TechFoulKind.ordinary, .big], id: \.self) { kind in
-                        Button { editing.onTechFoul(kind) } label: {
-                            Text("+" + kind.shortName).font(.subheadline.weight(.bold)).frame(minHeight: 26)
-                        }
-                        .buttonStyle(.glass)
-                        .buttonBorderShape(.capsule)
-                        .accessibilityLabel("\(kind.fullName) \((-(kind == .big ? editing.bigTechFoulPenalty : editing.techFoulPenalty)).signed)")
+                ForEach([TechFoulKind.ordinary, .big], id: \.self) { kind in
+                    Button { editing.onTechFoul(kind) } label: {
+                        Text("+" + kind.shortName).font(.subheadline.weight(.bold)).frame(minHeight: 26)
                     }
+                    .buttonStyle(.solid(.capsule))
+                    .accessibilityLabel("\(kind.fullName) \((-(kind == .big ? editing.bigTechFoulPenalty : editing.techFoulPenalty)).signed)")
                 }
             }
         }
@@ -332,23 +323,21 @@ private struct ActionChips: View {
     private var needsProtocol: Bool { editing.onProtocol != nil && score.component(where: \.isProtocol) == nil }
 
     var body: some View {
-        GlassEffectContainer(spacing: 8) {
-            ChipFlow(spacing: 8) {
-                if needsBestMove, let onBestMove = editing.onBestMove {
-                    Button(action: onBestMove) {
-                        Label("Лучший ход", systemImage: "star.fill").font(.subheadline.weight(.semibold))
-                    }
-                    .buttonStyle(.glassProminent)
-                    .tint(.orange)
+        ChipFlow(spacing: 8) {
+            if needsBestMove, let onBestMove = editing.onBestMove {
+                Button(action: onBestMove) {
+                    Label("Лучший ход", systemImage: "star.fill").font(.subheadline.weight(.semibold))
                 }
-                if needsProtocol, let onProtocol = editing.onProtocol {
-                    Button(action: onProtocol) {
-                        Label("Протокол", systemImage: "list.clipboard.fill").font(.subheadline.weight(.semibold))
-                    }
-                    .buttonStyle(.glass)
-                }
-                ToggleChip(title: "Вскрылся шерифом", icon: "checkmark.shield.fill", tint: .orange, isOn: editing.sheriffClaim)
+                .buttonStyle(.solidProminent)
+                .tint(.orange)
             }
+            if needsProtocol, let onProtocol = editing.onProtocol {
+                Button(action: onProtocol) {
+                    Label("Протокол", systemImage: "list.clipboard.fill").font(.subheadline.weight(.semibold))
+                }
+                .buttonStyle(.solid)
+            }
+            ToggleChip(title: "Вскрылся шерифом", icon: "checkmark.shield.fill", tint: .orange, isOn: editing.sheriffClaim)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -366,9 +355,9 @@ private struct ToggleChip: View {
             .font(.subheadline.weight(.semibold))
         Group {
             if isOn {
-                Button { isOn = false } label: { label }.buttonStyle(.glassProminent).tint(tint)
+                Button { isOn = false } label: { label }.buttonStyle(.solidProminent).tint(tint)
             } else {
-                Button { isOn = true } label: { label }.buttonStyle(.glass)
+                Button { isOn = true } label: { label }.buttonStyle(.solid)
             }
         }
         .sensoryFeedback(.impact(weight: .medium), trigger: isOn)

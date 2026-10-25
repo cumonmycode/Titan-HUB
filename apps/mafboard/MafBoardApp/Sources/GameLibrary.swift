@@ -7,7 +7,7 @@ import MafBoardCore
 
 /// Идущая игра: журнал движка + профили игроков (имена, аватары).
 /// `revision` растёт с каждым изменением, `syncedRevision` — что уже на сервере.
-struct SavedGame: Codable {
+struct SavedGame: Codable, Sendable {
     let session: GameSession
     let players: [PlayerProfile]
     var revision: Int
@@ -118,6 +118,11 @@ enum GameFiles {
     }
 
     static func write(_ value: some Encodable, to url: URL) throws {
+        try write(value, to: url, in: directory)
+    }
+
+    /// Запись с любого потока: папку ведущего передают заранее.
+    nonisolated static func write(_ value: some Encodable, to url: URL, in directory: URL) throws {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         // Доступно после первой разблокировки: приложение, запущенное iOS заранее, игру прочитает.
         try JSONEncoder().encode(value).write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
@@ -144,10 +149,28 @@ enum GameFiles {
     }
 }
 
+/// Идущая игра пишется после каждого хода — в фоне и строго по очереди: кодирование и запись на диск
+/// не задерживают экран, а более старый снимок не может лечь поверх нового.
 @MainActor
 enum SavedGameStore {
-    static func save(_ game: SavedGame) throws { try GameFiles.write(game, to: GameFiles.active) }
-    static func clear() { try? FileManager.default.removeItem(at: GameFiles.active) }
+    private static let queue = DispatchQueue(label: "ru.titan.mafboard.active-game", qos: .userInitiated)
+
+    static func save(_ game: SavedGame, onError: @escaping @MainActor @Sendable (any Error) -> Void = { _ in }) {
+        let directory = GameFiles.directory
+        let url = GameFiles.active
+        queue.async {
+            do {
+                try GameFiles.write(game, to: url, in: directory)
+            } catch {
+                Task { @MainActor in onError(error) }
+            }
+        }
+    }
+
+    static func clear() {
+        let url = GameFiles.active
+        queue.async { try? FileManager.default.removeItem(at: url) }
+    }
 }
 
 /// Строка итогов вечера: сумма баллов игрока за все его игры.
@@ -254,10 +277,8 @@ final class GameLibrary {
         let game = SavedGame(session: session, players: players, revision: revision,
                              syncedRevision: previous?.syncedRevision ?? 0, updatedAt: .now)
         active = game
-        do {
-            try SavedGameStore.save(game)
-        } catch {
-            errorMessage = "Игра не сохранилась на телефоне: \(error.localizedDescription)"
+        SavedGameStore.save(game) { [weak self] error in
+            self?.errorMessage = "Игра не сохранилась на телефоне: \(error.localizedDescription)"
         }
         onActiveChanged?()
     }
@@ -267,7 +288,7 @@ final class GameLibrary {
         guard var game = active, game.id == id, revision > game.syncedRevision else { return }
         game.syncedRevision = revision
         active = game
-        try? SavedGameStore.save(game)
+        SavedGameStore.save(game)
     }
 
     func presentPending() {
@@ -408,7 +429,7 @@ final class GameLibrary {
                              revision: newest.revision, syncedRevision: newest.revision, updatedAt: newest.updatedAt)
         active = game
         lastRevision[game.id] = newest.revision
-        try? SavedGameStore.save(game)
+        SavedGameStore.save(game)
         let setup = game.session.setup
         if let id = setup.seriesID, !evenings.contains(where: { $0.id == id }) {
             evenings.append(Evening(id: id, format: setup.format, variant: setup.variant, createdAt: setup.createdAt,

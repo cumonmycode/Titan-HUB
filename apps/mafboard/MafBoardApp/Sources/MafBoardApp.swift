@@ -45,13 +45,21 @@ struct RootView: View {
     @AppStorage(AccentChoice.storageKey) private var accent = AccentChoice.blue
     @AppStorage(AppearanceChoice.storageKey) private var appearance = AppearanceChoice.system
 
+    #if DEBUG
+    @State private var demoGame = DemoGame.isRequested ? DemoGame.make() : nil
+    #endif
+
     var body: some View {
         Group {
-            switch model.phase {
-            case .loading: ProgressView()
-            case .signedOut: LoginView()
-            case .signedIn: MainTabView()
+            #if DEBUG
+            if let demoGame {
+                GameScreen(game: demoGame)
+            } else {
+                phaseView
             }
+            #else
+            phaseView
+            #endif
         }
         .tint(accent.color)
         .preferredColorScheme(appearance.colorScheme)
@@ -68,6 +76,15 @@ struct RootView: View {
             Button("OK", role: .cancel) {}
         } message: {
             Text(model.errorMessage ?? "")
+        }
+    }
+
+    @ViewBuilder
+    private var phaseView: some View {
+        switch model.phase {
+        case .loading: ProgressView()
+        case .signedOut: LoginView()
+        case .signedIn: MainTabView()
         }
     }
 }
@@ -152,6 +169,30 @@ struct MainTabView: View {
     }
 }
 
+/// На широком экране (iPad) содержимое списка — колонкой читаемой ширины по центру, а прокручивается он на всю ширину.
+private struct ReadableColumn: ViewModifier {
+    let maxWidth: CGFloat
+    @State private var width: CGFloat = 0
+
+    func body(content: Content) -> some View {
+        content
+            .contentMargins(.horizontal, max(0, (width - maxWidth) / 2), for: .scrollContent)
+            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
+    }
+}
+
+extension View {
+    /// Лист на пол-экрана — только на телефоне. На iPad лист сразу во всю высоту: клавиатура номеров не обрезана.
+    func phoneDetents(_ detents: Set<PresentationDetent>) -> some View {
+        presentationDetents(UIDevice.current.userInterfaceIdiom == .pad ? [.large] : detents)
+    }
+
+    /// Колонка читаемой ширины для `ScrollView`/`List` на iPad. На телефоне ничего не меняет.
+    func readableColumn(maxWidth: CGFloat = 820) -> some View {
+        modifier(ReadableColumn(maxWidth: maxWidth))
+    }
+}
+
 extension View {
     /// Место под нижней панелью вкладок: конец списка не прячется под ней.
     /// Ставится прямо на `ScrollView`/`List` экрана — отступ снаружи `NavigationStack` до списка не доходит.
@@ -189,6 +230,8 @@ private struct BottomBar: View {
                 .accessibilityLabel("Новая игра")
             }
         }
+        // На iPad панель не растягивается на всю ширину — остаётся под рукой, как на телефоне.
+        .frame(maxWidth: 520)
         .padding(.horizontal, 20)
         .padding(.bottom, 4)
     }

@@ -23,15 +23,18 @@ struct GamesView: View {
                     if !active.isEmpty || orphan != nil {
                         FolderSectionTitle("Активные серии")
                     }
-                    if let orphan {
-                        RunningGameRow(game: orphan).folderCard(padding: 12)
-                    }
-                    ForEach(active) { evening in
-                        FolderCard(
-                            evening: evening,
-                            running: running?.session.setup.seriesID == evening.id ? running : nil,
-                            isGameRunning: running != nil
-                        ) { onNewGame(evening) }
+                    // На iPad активные серии — в две колонки, на телефоне — одна под другой.
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 280), spacing: 12, alignment: .top)], alignment: .leading, spacing: 12) {
+                        if let orphan {
+                            RunningGameRow(game: orphan).folderCard(padding: 12)
+                        }
+                        ForEach(active) { evening in
+                            FolderCard(
+                                evening: evening,
+                                running: running?.session.setup.seriesID == evening.id ? running : nil,
+                                isGameRunning: running != nil
+                            ) { onNewGame(evening) }
+                        }
                     }
                     if active.isEmpty, orphan == nil {
                         StartCard { onNewGame(nil) }
@@ -57,6 +60,7 @@ struct GamesView: View {
                 .padding(.bottom, 24)
             }
             .tabBarClearance()
+            .readableColumn()
             .ambientBackground()
             .navigationTitle("Игры")
             .profileButton()
@@ -212,7 +216,7 @@ private struct RunningGameRow: View {
             } label: {
                 Label("Продолжить", systemImage: "play.fill").font(.subheadline.weight(.semibold))
             }
-            .buttonStyle(.glassProminent)
+            .buttonStyle(.solidProminent)
         }
         .contextMenu {
             Button("Удалить игру", systemImage: "trash", role: .destructive) { isConfirmingDelete = true }
@@ -246,7 +250,7 @@ private struct StartCard: View {
             Button(action: action) {
                 Label("Новая игра", systemImage: "plus").frame(maxWidth: .infinity)
             }
-            .buttonStyle(.glassProminent)
+            .buttonStyle(.solidProminent)
             .controlSize(.large)
         }
         .frame(maxWidth: .infinity)
@@ -302,14 +306,13 @@ private struct FolderCard: View {
                             .font(.subheadline.weight(.semibold))
                             .frame(maxWidth: .infinity)
                     }
-                    .buttonStyle(.glassProminent)
+                    .buttonStyle(.solidProminent)
                     Menu {
                         Button("Завершить серию", systemImage: "checkmark.circle") { isConfirmingClose = true }
                     } label: {
                         Image(systemName: "ellipsis").font(.subheadline.weight(.semibold)).frame(width: 22, height: 22)
                     }
-                    .buttonStyle(.glass)
-                    .buttonBorderShape(.circle)
+                    .buttonStyle(.solid(.circle))
                     .accessibilityLabel("Ещё")
                 }
             }
@@ -467,6 +470,7 @@ struct EveningDetailView: View {
             .padding(.bottom, 24)
         }
         .tabBarClearance()
+        .readableColumn()
         .ambientBackground()
         .navigationTitle(evening.title)
         .navigationBarTitleDisplayMode(.inline)
@@ -542,6 +546,7 @@ struct FinishedGameView: View {
                 NavigationLink {
                     GameLogView(events: record.events) { game.profile(at: $0)?.nickname ?? "Игрок \($0)" }
                         .tabBarClearance()
+                        .readableColumn()
                 } label: {
                     HStack {
                         Label("Ход игры", systemImage: "list.bullet.rectangle.portrait").font(.headline)
@@ -566,6 +571,7 @@ struct FinishedGameView: View {
             .padding(.bottom, 24)
         }
         .tabBarClearance()
+        .readableColumn()
         .ambientBackground()
         .navigationTitle("Игра \(number)")
         .navigationBarTitleDisplayMode(.inline)

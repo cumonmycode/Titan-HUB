@@ -42,7 +42,7 @@ struct ResultsCard: View {
                 Button(action: onNextGame) {
                     Label("Ещё одна игра", systemImage: "plus").font(.headline).frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.glassProminent)
+                .buttonStyle(.solidProminent)
                 .controlSize(.extraLarge)
             }
         }
@@ -67,21 +67,19 @@ struct ResultsCard: View {
                 }
                 Spacer(minLength: 0)
             }
-            GlassEffectContainer(spacing: 8) {
-                HStack(spacing: 8) {
-                    Button { isShowingMemo = true } label: {
-                        Label("Памятка", systemImage: "book.pages.fill").font(.subheadline.weight(.semibold))
-                    }
-                    .buttonStyle(.glass)
-                    ForEach(game.state.pendingBestMoveAuthors, id: \.self) { author in
-                        Button { onBestMove(author) } label: {
-                            Label("ЛХ №\(author)", systemImage: "star.fill").font(.subheadline.weight(.semibold))
-                        }
-                        .buttonStyle(.glassProminent)
-                        .tint(.orange)
-                    }
-                    Spacer(minLength: 0)
+            HStack(spacing: 8) {
+                Button { isShowingMemo = true } label: {
+                    Label("Памятка", systemImage: "book.pages.fill").font(.subheadline.weight(.semibold))
                 }
+                .buttonStyle(.solid)
+                ForEach(game.state.pendingBestMoveAuthors, id: \.self) { author in
+                    Button { onBestMove(author) } label: {
+                        Label("ЛХ №\(author)", systemImage: "star.fill").font(.subheadline.weight(.semibold))
+                    }
+                    .buttonStyle(.solidProminent)
+                    .tint(.orange)
+                }
+                Spacer(minLength: 0)
             }
             HStack(spacing: 10) {
                 LimitGauge(title: "Плюсы за игру", value: bonusTotal.doubleValue, limit: Self.bonusLimit.doubleValue,

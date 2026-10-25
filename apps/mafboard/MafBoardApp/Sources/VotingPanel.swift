@@ -39,16 +39,14 @@ struct Keypad<Key: View>: View {
     @ViewBuilder let key: (Int) -> Key
 
     var body: some View {
-        GlassEffectContainer(spacing: spacing) {
-            Grid(horizontalSpacing: spacing, verticalSpacing: spacing) {
-                ForEach(Array(keypadRows(count: count, layout: layout).enumerated()), id: \.offset) { _, row in
-                    GridRow {
-                        ForEach(0..<layout.columns, id: \.self) { column in
-                            if let number = row[column] {
-                                key(number)
-                            } else {
-                                Color.clear.frame(maxWidth: .infinity, maxHeight: 1)
-                            }
+        Grid(horizontalSpacing: spacing, verticalSpacing: spacing) {
+            ForEach(Array(keypadRows(count: count, layout: layout).enumerated()), id: \.offset) { _, row in
+                GridRow {
+                    ForEach(0..<layout.columns, id: \.self) { column in
+                        if let number = row[column] {
+                            key(number)
+                        } else {
+                            Color.clear.frame(maxWidth: .infinity, maxHeight: 1)
                         }
                     }
                 }
@@ -80,6 +78,8 @@ struct KeypadKey: View {
     var tint: Color?
     let action: () -> Void
 
+    private var shape: SolidButtonShape { .rounded(isCompact ? 12 : 16) }
+
     var body: some View {
         let label = VStack(spacing: 0) {
             Text("\(number)")
@@ -95,20 +95,20 @@ struct KeypadKey: View {
         Group {
             switch style {
             case .selected:
-                Button(action: action) { label }.buttonStyle(.glassProminent).tint(tint)
+                Button(action: action) { label }.buttonStyle(.solidProminent(shape)).tint(tint)
             case .marked:
-                Button(action: action) { label.foregroundStyle(.secondary) }.buttonStyle(.glass)
+                Button(action: action) { label.foregroundStyle(.secondary) }.buttonStyle(.solid(shape))
             case .taken:
-                Button(action: action) { label }.buttonStyle(.glassProminent).tint(.orange).allowsHitTesting(false)
+                Button(action: action) { label }.buttonStyle(.solidProminent(shape)).tint(.orange).allowsHitTesting(false)
             case .normal:
-                Button(action: action) { label }.buttonStyle(.glass)
+                Button(action: action) { label }.buttonStyle(.solid(shape))
             case .dimmed:
-                Button(action: action) { label }.buttonStyle(.glass).disabled(true).opacity(0.45)
+                Button(action: action) { label }.buttonStyle(.solid(shape)).disabled(true)
             case .disabled:
-                Button(action: action) { label }.buttonStyle(.glass).disabled(true).opacity(0.3)
+                // Стиль сам приглушает недоступную кнопку; выбывший — ещё бледнее и зачёркнут.
+                Button(action: action) { label }.buttonStyle(.solid(shape)).disabled(true).opacity(0.65)
             }
         }
-        .buttonBorderShape(.roundedRectangle(radius: isCompact ? 12 : 16))
         .sensoryFeedback(.selection, trigger: style)
         .accessibilityLabel("Игрок \(number)")
     }
@@ -198,7 +198,7 @@ struct VotingPanel: View {
                 } label: {
                     Label("Подсчитать", systemImage: "checkmark").frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.glassProminent)
+                .buttonStyle(.solidProminent)
             }
             .controlSize(.large)
         }
@@ -305,7 +305,7 @@ struct CountVotingPanel: View {
             } label: {
                 Label("Подсчитать", systemImage: "checkmark").frame(maxWidth: .infinity)
             }
-            .buttonStyle(.glassProminent)
+            .buttonStyle(.solidProminent)
             .controlSize(.large)
         }
         .gameCard()
@@ -329,11 +329,9 @@ struct CountPad: View {
 
     var body: some View {
         let numbers = Array(0...max(0, maximum))
-        GlassEffectContainer(spacing: 8) {
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: Self.columns), spacing: 8) {
-                ForEach(numbers, id: \.self) { number in
-                    KeypadKey(number: number, style: number == selected ? .selected : .normal) { onPick(number) }
-                }
+        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: Self.columns), spacing: 8) {
+            ForEach(numbers, id: \.self) { number in
+                KeypadKey(number: number, style: number == selected ? .selected : .normal) { onPick(number) }
             }
         }
     }
@@ -406,7 +404,7 @@ struct LiftPanel: View {
             } label: {
                 Label("Подсчитать", systemImage: "checkmark").frame(maxWidth: .infinity)
             }
-            .buttonStyle(.glassProminent)
+            .buttonStyle(.solidProminent)
             .controlSize(.large)
         }
         .gameCard()

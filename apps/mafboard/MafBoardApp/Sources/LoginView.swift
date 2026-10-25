@@ -46,7 +46,7 @@ struct LoginView: View {
             } label: {
                 Label("Войти через Telegram", systemImage: "paperplane.fill").frame(maxWidth: .infinity)
             }
-            .buttonStyle(.glassProminent)
+            .buttonStyle(.solidProminent)
             .controlSize(.large)
             Text("Нажимая «Войти», вы перейдёте в бота @mafboard_bot.")
                 .font(.footnote)
@@ -61,7 +61,7 @@ struct LoginView: View {
                     .multilineTextAlignment(.center)
                     .foregroundStyle(.secondary)
                 Button("Открыть Telegram") { openURL(ticket.deepLink) }
-                    .buttonStyle(.glass)
+                    .buttonStyle(.solid)
                     .controlSize(.large)
                 Button("Отмена", role: .cancel) { model.cancelLogin() }
             }

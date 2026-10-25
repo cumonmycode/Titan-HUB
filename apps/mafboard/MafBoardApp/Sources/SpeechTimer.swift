@@ -57,53 +57,84 @@ enum TimerStore {
 
 /// Таймер речи: крупные цифры (нажатие — пауза, удержание — заново), шкала и ряд кнопок «Заново», «Старт», «+30 за фолы».
 /// Время вышло — таймер стоит на нуле и мигает красным.
+/// Тикают только цифры, шкала и строка статуса; кнопки перестраиваются, лишь когда таймер запускают или останавливают.
 struct TimerView: View {
     let game: GameController
+    /// Крупные цифры — на широком экране (iPad).
+    var isLarge = false
 
     var body: some View {
         if let timer = game.countdown {
-            TimelineView(.periodic(from: .now, by: 0.2)) { context in
-                TimerFace(game: game, timer: timer, now: context.date)
+            VStack(spacing: 12) {
+                TimelineView(.timerTick(timer)) { context in
+                    TimerDial(game: game, timer: timer, now: context.date, isLarge: isLarge)
+                }
+                TimerControls(game: game, timer: timer)
+                HStack(spacing: 8) {
+                    TimelineView(.timerTick(timer)) { context in
+                        TimerStatus(timer: timer, now: context.date, autoAdvances: game.autoAdvances)
+                    }
+                    Spacer(minLength: 4)
+                    TimerAutoMenu(game: game)
+                }
             }
         }
     }
 }
 
-private struct TimerFace: View {
-    let game: GameController
-    let timer: Countdown
-    let now: Date
-
-    private enum Phase {
-        case paused
-        case running
-        case ending
-        case over
+extension TimelineSchedule where Self == AnimationTimelineSchedule {
+    /// Тик таймера: пока идёт — пять раз в секунду, на паузе и после конца — ни одного.
+    static func timerTick(_ timer: Countdown) -> AnimationTimelineSchedule {
+        .animation(minimumInterval: 0.2, paused: !timer.isRunning)
     }
+}
+
+/// Что сейчас с таймером: на паузе, идёт, последние секунды, время вышло.
+private enum TimerPhase {
+    case paused
+    case running
+    case ending
+    case over
 
     /// Последние секунды — шкала и цифры становятся оранжевыми.
     private static let endingSeconds: TimeInterval = 10
 
-    private var remaining: TimeInterval { timer.remaining(at: now) }
-
-    private var phase: Phase {
-        if timer.isExpired(at: now) { return .over }
-        if !timer.isRunning { return .paused }
-        return remaining <= Self.endingSeconds ? .ending : .running
+    init(_ timer: Countdown, at now: Date) {
+        if timer.isExpired(at: now) {
+            self = .over
+        } else if !timer.isRunning {
+            self = .paused
+        } else {
+            self = timer.remaining(at: now) <= Self.endingSeconds ? .ending : .running
+        }
     }
 
-    private var tint: Color {
-        switch phase {
+    var tint: Color {
+        switch self {
         case .paused: .secondary
         case .running: .accentColor
         case .ending: .orange
         case .over: .red
         }
     }
+}
+
+private func timerText(_ seconds: TimeInterval) -> String {
+    Duration.seconds(seconds).formatted(.time(pattern: .minuteSecond))
+}
+
+/// Цифры и шкала.
+private struct TimerDial: View {
+    let game: GameController
+    let timer: Countdown
+    let now: Date
+    let isLarge: Bool
+
+    private var remaining: TimeInterval { timer.remaining(at: now) }
 
     /// Вибро: 1 — последние секунды, 2 — время вышло.
     private var hapticStage: Int {
-        switch phase {
+        switch TimerPhase(timer, at: now) {
         case .ending where timer.isRunning: 1
         case .over: 2
         default: 0
@@ -111,22 +142,24 @@ private struct TimerFace: View {
     }
 
     var body: some View {
-        VStack(spacing: 12) {
-            VStack(spacing: 8) {
-                time
-                ProgressCapsule(fraction: phase == .over ? 1 : timer.fraction(at: now), tint: tint)
-            }
-            .modifier(Flashing(isActive: phase == .over))
-            controls
-            HStack(spacing: 8) {
-                Label(statusText, systemImage: statusIcon)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(tint)
-                    .contentTransition(.opacity)
-                Spacer(minLength: 4)
-                autoMenu
-            }
+        let phase = TimerPhase(timer, at: now)
+        VStack(spacing: 8) {
+            Text(timerText(remaining.rounded(.up)))
+                .font(.system(size: isLarge ? 96 : 56, weight: .bold, design: .rounded))
+                .monospacedDigit()
+                .foregroundStyle(phase == .running ? AnyShapeStyle(.primary) : AnyShapeStyle(phase.tint))
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+                .frame(maxWidth: .infinity)
+                .contentShape(.rect)
+                .onTapGesture { if phase != .over { game.toggleTimer() } }
+                .onLongPressGesture { game.restartTimer() }
+                .accessibilityAddTraits(.isButton)
+                .accessibilityLabel(phase == .over ? "Время вышло" : "Осталось \(Int(remaining.rounded(.up))) секунд из \(Int(timer.duration))")
+                .accessibilityHint("Нажатие — пауза или старт, удержание — заново")
+            ProgressCapsule(fraction: phase == .over ? 1 : timer.fraction(at: now), tint: phase.tint, isRunning: timer.isRunning)
         }
+        .modifier(Flashing(isActive: phase == .over))
         .sensoryFeedback(trigger: hapticStage) { _, stage in
             switch stage {
             case 1: .warning
@@ -134,60 +167,83 @@ private struct TimerFace: View {
             default: nil
             }
         }
-        .sensoryFeedback(.impact(weight: .medium), trigger: timer.isRunning)
+    }
+}
+
+/// Строка статуса: «Идёт · из 1:00», «Пауза», «Время вышло».
+private struct TimerStatus: View {
+    let timer: Countdown
+    let now: Date
+    let autoAdvances: Bool
+
+    var body: some View {
+        let phase = TimerPhase(timer, at: now)
+        Label(text(phase), systemImage: icon(phase))
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(phase.tint)
     }
 
-    private var time: some View {
-        Text(format(remaining.rounded(.up)))
-            .font(.system(size: 56, weight: .bold, design: .rounded))
-            .monospacedDigit()
-            .foregroundStyle(phase == .running ? AnyShapeStyle(.primary) : AnyShapeStyle(tint))
-            .contentTransition(.numericText(countsDown: true))
-            .lineLimit(1)
-            .minimumScaleFactor(0.7)
-            .frame(maxWidth: .infinity)
-            .contentShape(.rect)
-            .onTapGesture { if phase != .over { game.toggleTimer() } }
-            .onLongPressGesture { game.restartTimer() }
-            .accessibilityAddTraits(.isButton)
-            .accessibilityLabel(phase == .over ? "Время вышло" : "Осталось \(Int(remaining.rounded(.up))) секунд из \(Int(timer.duration))")
-            .accessibilityHint("Нажатие — пауза или старт, удержание — заново")
-    }
-
-    // MARK: Кнопки
-
-    /// Три равные кнопки: заново, старт или пауза, +30 за фолы (только у говорящего).
-    private var controls: some View {
-        GlassEffectContainer(spacing: 8) {
-            HStack(spacing: 8) {
-                Button { game.restartTimer() } label: {
-                    TimerButtonLabel(icon: "arrow.counterclockwise", title: "Заново")
-                }
-                .buttonStyle(.glass)
-
-                Button { game.toggleTimer() } label: {
-                    TimerButtonLabel(icon: timer.isRunning ? "pause.fill" : "play.fill", title: timer.isRunning ? "Пауза" : "Старт")
-                }
-                .buttonStyle(.glassProminent)
-                .tint(timer.isRunning ? .orange : .green)
-                .disabled(phase == .over)
-
-                if let offer = game.extraTimeOffer {
-                    Button { game.takeExtraTime() } label: {
-                        TimerButtonLabel(title: "+\(offer.policy.seconds)", caption: "\(offer.policy.fouls) фола")
-                    }
-                    .buttonStyle(.glass)
-                    .disabled(!offer.isAllowed)
-                    .accessibilityLabel("Плюс \(offer.policy.seconds) секунд за \(offer.policy.fouls) фола")
-                    .accessibilityHint(offer.isAllowed ? "" : "Фолов стало бы больше \(offer.policy.maxFouls)")
-                }
-            }
-            .buttonBorderShape(.roundedRectangle(radius: 14))
-            .controlSize(.large)
+    private func text(_ phase: TimerPhase) -> String {
+        switch phase {
+        case .paused: timer.elapsed(at: now) == 0 ? "Ждёт старта" : "Пауза"
+        case .running: "Идёт · из \(timerText(timer.duration))"
+        case .ending: "Последние секунды"
+        case .over: autoAdvances ? "Время вышло — дальше…" : "Время вышло"
         }
     }
 
-    private var autoMenu: some View {
+    private func icon(_ phase: TimerPhase) -> String {
+        switch phase {
+        case .paused: "pause.circle"
+        case .running: "timer"
+        case .ending: "exclamationmark.circle"
+        case .over: "bell.fill"
+        }
+    }
+}
+
+// MARK: Кнопки
+
+/// Три равные кнопки: заново, старт или пауза, +30 за фолы (только у говорящего).
+private struct TimerControls: View {
+    let game: GameController
+    let timer: Countdown
+
+    var body: some View {
+        let isOver = timer.isExpired(at: .now)
+        HStack(spacing: 8) {
+            Button { game.restartTimer() } label: {
+                TimerButtonLabel(icon: "arrow.counterclockwise", title: "Заново")
+            }
+            .buttonStyle(.solid)
+
+            Button { game.toggleTimer() } label: {
+                TimerButtonLabel(icon: timer.isRunning ? "pause.fill" : "play.fill", title: timer.isRunning ? "Пауза" : "Старт")
+            }
+            .buttonStyle(.solidProminent)
+            .tint(timer.isRunning ? .orange : .green)
+            .disabled(isOver)
+
+            if let offer = game.extraTimeOffer {
+                Button { game.takeExtraTime() } label: {
+                    TimerButtonLabel(title: "+\(offer.policy.seconds)", caption: "\(offer.policy.fouls) фола")
+                }
+                .buttonStyle(.solid)
+                .disabled(!offer.isAllowed)
+                .accessibilityLabel("Плюс \(offer.policy.seconds) секунд за \(offer.policy.fouls) фола")
+                .accessibilityHint(offer.isAllowed ? "" : "Фолов стало бы больше \(offer.policy.maxFouls)")
+            }
+        }
+        .controlSize(.large)
+        .sensoryFeedback(.impact(weight: .medium), trigger: timer.isRunning)
+    }
+}
+
+/// «Авто»: запускать таймер самому и переходить дальше по окончании.
+private struct TimerAutoMenu: View {
+    let game: GameController
+
+    var body: some View {
         Menu {
             Toggle(isOn: Binding(get: { game.autoStartsTimer }, set: { game.setAutoStart($0) })) {
                 Label("Запускать сам", systemImage: "play.circle")
@@ -196,38 +252,16 @@ private struct TimerFace: View {
                 Label("Дальше по окончании", systemImage: "forward.end")
             }
         } label: {
-            Label(autoTitle, systemImage: game.autoStartsTimer || game.autoAdvances ? "bolt.fill" : "bolt.slash")
+            Label(title, systemImage: game.autoStartsTimer || game.autoAdvances ? "bolt.fill" : "bolt.slash")
                 .font(.caption.weight(.semibold))
         }
-        .buttonStyle(.glass)
+        .buttonStyle(.solid(.capsule))
         .controlSize(.small)
     }
 
-    private var autoTitle: String {
+    private var title: String {
         if game.autoAdvances { return "Авто: дальше сам" }
         return game.autoStartsTimer ? "Авто" : "Вручную"
-    }
-
-    private var statusText: String {
-        switch phase {
-        case .paused: timer.elapsed(at: now) == 0 ? "Ждёт старта" : "Пауза"
-        case .running: "Идёт · из \(format(timer.duration))"
-        case .ending: "Последние секунды"
-        case .over: game.autoAdvances ? "Время вышло — дальше…" : "Время вышло"
-        }
-    }
-
-    private var statusIcon: String {
-        switch phase {
-        case .paused: "pause.circle"
-        case .running: "timer"
-        case .ending: "exclamationmark.circle"
-        case .over: "bell.fill"
-        }
-    }
-
-    private func format(_ seconds: TimeInterval) -> String {
-        Duration.seconds(seconds).formatted(.time(pattern: .minuteSecond))
     }
 }
 
@@ -257,6 +291,8 @@ private struct TimerButtonLabel: View {
 private struct ProgressCapsule: View {
     let fraction: Double
     let tint: Color
+    /// Идёт — шкала тает плавно; запуск заново и конец — быстрый переход без тягучести.
+    let isRunning: Bool
 
     var body: some View {
         GeometryReader { proxy in
@@ -268,7 +304,7 @@ private struct ProgressCapsule: View {
             }
         }
         .frame(height: 8)
-        .animation(.linear(duration: 0.2), value: fraction)
+        .animation(isRunning ? .linear(duration: 0.2) : .snappy(duration: 0.2), value: fraction)
         .accessibilityHidden(true)
     }
 }

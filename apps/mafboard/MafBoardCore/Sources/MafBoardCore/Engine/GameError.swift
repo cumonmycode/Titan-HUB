@@ -96,7 +96,6 @@ public enum BallotProblem: Sendable, Equatable {
 public enum BestMoveProblem: Sendable, Equatable {
     case seatCount(max: Int)
     case duplicateSeats
-    case includesAuthor
 }
 
 // MARK: - Тексты для ведущего
@@ -238,7 +237,6 @@ extension BestMoveProblem {
         switch self {
         case let .seatCount(max): "нужно от 1 до \(max) номеров"
         case .duplicateSeats: "номера не должны повторяться"
-        case .includesAuthor: "нельзя указать свой номер"
         }
     }
 }

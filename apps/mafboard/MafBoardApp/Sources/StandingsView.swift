@@ -94,6 +94,7 @@ struct StandingsView: View {
                 }
             }
             .tabBarClearance()
+            .readableColumn()
             .ambientBackground()
             .overlay {
                 if standings.isEmpty {

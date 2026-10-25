@@ -174,7 +174,6 @@ struct Transition {
             throw .invalidBestMove(.seatCount(max: maxSeats))
         }
         guard Set(seats).count == seats.count else { throw .invalidBestMove(.duplicateSeats) }
-        guard !seats.contains(author) else { throw .invalidBestMove(.includesAuthor) }
         for seat in seats {
             _ = try index(of: seat)
         }

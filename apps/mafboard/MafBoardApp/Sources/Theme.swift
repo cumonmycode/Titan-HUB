@@ -79,47 +79,36 @@ enum AppearanceChoice: String, CaseIterable, Identifiable {
 
 // MARK: - Живой фон
 
-/// Фон приложения: mesh-градиент в оттенках акцента, медленно перетекает.
+/// Фон приложения: mesh-градиент в оттенках акцента.
 /// В тёмной теме — глубокий со светящимися пятнами, в светлой — пастельный.
-/// При «Уменьшении движения» стоит на месте.
 /// Настроение фона: акцент приложения или ночь (во время ночных фаз игры).
 enum AmbientMood: Equatable {
     case accent
     case night
 }
 
+/// Узор неподвижен: перетекающий фон перерисовывался каждый кадр и заставлял стекло и карточки поверх него
+/// пересчитываться вместе с ним — экран тормозил и отвечал на касания с задержкой.
+/// Плавно меняются только цвета: акцент и переход день ↔ ночь.
 struct AmbientBackground: View {
     var mood: AmbientMood = .accent
     @AppStorage(AccentChoice.storageKey) private var accent = AccentChoice.blue
     @Environment(\.colorScheme) private var scheme
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 30, paused: reduceMotion)) { context in
-            MeshGradient(
-                width: 3, height: 3,
-                points: Self.points(at: reduceMotion ? 0 : context.date.timeIntervalSinceReferenceDate),
-                colors: palette
-            )
-        }
-        .ignoresSafeArea()
-        .animation(.easeInOut(duration: 0.6), value: accent)
-        .animation(.easeInOut(duration: 1.2), value: mood)
+        MeshGradient(width: 3, height: 3, points: Self.points, colors: palette)
+            .ignoresSafeArea()
+            .animation(.easeInOut(duration: 0.6), value: accent)
+            .animation(.easeInOut(duration: 1.2), value: mood)
+            .accessibilityHidden(true)
     }
 
-    /// Углы на месте, края скользят вдоль себя, центр плавает. Периоды разные — узор не повторяется заметно.
-    private static func points(at time: Double) -> [SIMD2<Float>] {
-        func wave(_ speed: Double, _ phase: Double, _ amplitude: Float) -> Float {
-            Float(sin(time * speed + phase)) * amplitude
-        }
-        return [
-            [0, 0], [0.5 + wave(0.21, 0.0, 0.2), 0], [1, 0],
-            [0, 0.5 + wave(0.17, 1.3, 0.22)],
-            [0.5 + wave(0.13, 2.1, 0.24), 0.5 + wave(0.19, 0.4, 0.24)],
-            [1, 0.5 + wave(0.15, 3.0, 0.22)],
-            [0, 1], [0.5 + wave(0.23, 4.2, 0.2), 1], [1, 1],
-        ]
-    }
+    /// Углы на месте, края и центр сдвинуты — пятна света лежат не по сетке.
+    private static let points: [SIMD2<Float>] = [
+        [0, 0], [0.62, 0], [1, 0],
+        [0, 0.38], [0.42, 0.56], [1, 0.64],
+        [0, 1], [0.55, 1], [1, 1],
+    ]
 
     private var palette: [Color] {
         // Ночью — глубокий индиго независимо от акцента.
@@ -241,11 +230,7 @@ struct PlayerAvatar: View {
                 .font(.system(size: size * 0.4, weight: .semibold, design: .rounded))
                 .foregroundStyle(.white)
             if let url {
-                AsyncImage(url: url) { image in
-                    image.resizable().scaledToFill()
-                } placeholder: {
-                    Color.clear
-                }
+                AvatarImage(url: url)
             }
         }
         .frame(width: size, height: size)

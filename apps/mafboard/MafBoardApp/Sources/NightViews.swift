@@ -85,9 +85,9 @@ extension NightStep {
 
     var hint: String {
         switch self {
-        case .mafiaShot, .maniacShot: "Нажмите на игрока ниже — в него стреляют."
-        case .donCheck, .sheriffCheck: "Нажмите на игрока ниже — его проверяют. Можно проверить и того, кто уже выбыл."
-        case .doctorHeal: "Нажмите на игрока ниже — его лечат."
+        case .mafiaShot, .maniacShot: "Нажмите на игрока — в него стреляют."
+        case .donCheck, .sheriffCheck: "Нажмите на игрока — его проверяют. Можно проверить и того, кто уже выбыл."
+        case .doctorHeal: "Нажмите на игрока — его лечат."
         }
     }
 }
@@ -137,7 +137,7 @@ struct MissSheet: View {
                     } label: {
                         Label("Просто промах", systemImage: "scope").frame(maxWidth: .infinity)
                     }
-                    .buttonStyle(.glass)
+                    .buttonStyle(.solid)
                     .controlSize(.large)
                 }
                 .padding()
@@ -161,27 +161,24 @@ struct MissSheet: View {
 
     /// Стрелявшие: номер, роль и куда выстрелил.
     private var shooterChips: some View {
-        GlassEffectContainer(spacing: 8) {
-            HStack(spacing: 8) {
-                ForEach(shooters, id: \.self) { shooter in
-                    let label = VStack(spacing: 2) {
-                        Text("№\(shooter.number) · \(state.seat(shooter)?.role.displayName.lowercased() ?? "")")
-                            .font(.subheadline.weight(.semibold))
-                        Text(targets[shooter].map { "→ №\($0.number)" } ?? "не стрелял")
-                            .font(.caption.weight(.medium))
-                            .opacity(0.8)
+        HStack(spacing: 8) {
+            ForEach(shooters, id: \.self) { shooter in
+                let label = VStack(spacing: 2) {
+                    Text("№\(shooter.number) · \(state.seat(shooter)?.role.displayName.lowercased() ?? "")")
+                        .font(.subheadline.weight(.semibold))
+                    Text(targets[shooter].map { "→ №\($0.number)" } ?? "не стрелял")
+                        .font(.caption.weight(.medium))
+                        .opacity(0.8)
+                }
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+                .frame(maxWidth: .infinity)
+                Group {
+                    if shooter == selected {
+                        Button { current = shooter } label: { label }.buttonStyle(.solidProminent).tint(.indigo)
+                    } else {
+                        Button { withAnimation(.snappy) { current = shooter } } label: { label }.buttonStyle(.solid)
                     }
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
-                    .frame(maxWidth: .infinity)
-                    Group {
-                        if shooter == selected {
-                            Button { current = shooter } label: { label }.buttonStyle(.glassProminent).tint(.indigo)
-                        } else {
-                            Button { withAnimation(.snappy) { current = shooter } } label: { label }.buttonStyle(.glass)
-                        }
-                    }
-                    .buttonBorderShape(.roundedRectangle(radius: 14))
                 }
             }
         }
@@ -220,42 +217,103 @@ struct CheckResultOverlay: View {
 
     var body: some View {
         let verdict = verdict
+        AnnouncementCard(onBackgroundTap: onDismiss) {
+            Label(check.checker == .don ? "Проверка дона" : "Проверка шерифа", systemImage: "magnifyingglass")
+                .font(.headline)
+                .foregroundStyle(.secondary)
+            SeatNumberTitle(seat: check.target, name: name)
+            Label(verdict.title, systemImage: verdict.icon)
+                .font(.title.weight(.bold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 24)
+                .padding(.vertical, 12)
+                .frame(maxWidth: .infinity)
+                .background(verdict.tint.gradient, in: .capsule)
+            Button(action: onDismiss) {
+                Text("Понятно").font(.headline).frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.solidProminent(.capsule))
+            .controlSize(.large)
+        }
+        .onAppear { isShown = true }
+        .sensoryFeedback(.success, trigger: isShown)
+    }
+}
+
+// MARK: - Итог ночи
+
+/// Убитый ночью игрок: место и имя.
+struct AnnouncedVictim: Identifiable, Equatable {
+    let seat: Seat
+    let name: String
+    var id: Seat { seat }
+}
+
+/// Утро после ночи с убийством: кого убили. Лучший ход и заключительная минута — только по «Далее»,
+/// чтобы ведущий сначала объявил столу, кто убит.
+struct NightVictimsOverlay: View {
+    let victims: [AnnouncedVictim]
+    /// Что будет после «Далее»: «Лучший ход №5», «Заключительная речь №5».
+    let nextStep: String
+    let onContinue: () -> Void
+
+    var body: some View {
+        AnnouncementCard(onBackgroundTap: nil) {
+            Label(victims.count > 1 ? "Ночью убиты" : "Ночью убит", systemImage: "moon.stars.fill")
+                .font(.headline)
+                .foregroundStyle(.secondary)
+            ForEach(victims) { SeatNumberTitle(seat: $0.seat, name: $0.name) }
+            VStack(spacing: 6) {
+                Button(action: onContinue) {
+                    HStack(spacing: 6) {
+                        Text("Далее")
+                        Image(systemName: "chevron.forward")
+                    }
+                    .font(.headline)
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.solidProminent(.capsule))
+                .controlSize(.large)
+                Text(nextStep).font(.subheadline).foregroundStyle(.secondary)
+            }
+        }
+        .sensoryFeedback(.warning, trigger: victims)
+    }
+}
+
+/// Крупный номер и имя под ним — в объявлениях поверх экрана.
+private struct SeatNumberTitle: View {
+    let seat: Seat
+    let name: String
+
+    var body: some View {
+        VStack(spacing: 2) {
+            Text("№\(seat.number)")
+                .font(.system(size: 60, weight: .heavy, design: .rounded))
+                .monospacedDigit()
+            Text(name).font(.title3.weight(.semibold)).lineLimit(1)
+        }
+    }
+}
+
+/// Карточка поверх затемнённого экрана: результат проверки, итог ночи.
+private struct AnnouncementCard<Content: View>: View {
+    /// Касание вокруг карточки. `nil` — закрывается только кнопкой.
+    let onBackgroundTap: (() -> Void)?
+    @ViewBuilder let content: Content
+
+    var body: some View {
         ZStack {
             Rectangle()
                 .fill(.black.opacity(0.4))
                 .ignoresSafeArea()
-                .onTapGesture(perform: onDismiss)
-            VStack(spacing: 16) {
-                Label(check.checker == .don ? "Проверка дона" : "Проверка шерифа", systemImage: "magnifyingglass")
-                    .font(.headline)
-                    .foregroundStyle(.secondary)
-                VStack(spacing: 2) {
-                    Text("№\(check.target.number)")
-                        .font(.system(size: 60, weight: .heavy, design: .rounded))
-                        .monospacedDigit()
-                    Text(name).font(.title3.weight(.semibold)).lineLimit(1)
-                }
-                Label(verdict.title, systemImage: verdict.icon)
-                    .font(.title.weight(.bold))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 24)
-                    .padding(.vertical, 12)
-                    .frame(maxWidth: .infinity)
-                    .background(verdict.tint.gradient, in: .capsule)
-                Button(action: onDismiss) {
-                    Text("Понятно").font(.headline).frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.glassProminent)
-                .controlSize(.large)
-            }
-            .padding(24)
-            .frame(maxWidth: 340)
-            .glassEffect(.regular, in: .rect(cornerRadius: 34, style: .continuous))
-            .padding(.horizontal, 24)
+                .onTapGesture { onBackgroundTap?() }
+            VStack(spacing: 16) { content }
+                .padding(24)
+                .frame(maxWidth: 360)
+                .glassEffect(.regular, in: .rect(cornerRadius: 34, style: .continuous))
+                .padding(.horizontal, 24)
         }
-        .onAppear { isShown = true }
-        .sensoryFeedback(.success, trigger: isShown)
-        .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isModal)
     }
 }
