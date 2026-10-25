@@ -19,7 +19,17 @@ export interface MafboardConfig {
   termsUrl: string
   /** Версия соглашения: при смене бот попросит принять его заново. */
   termsVersion: string
+  /** Пароль входа проверяющего App Store (`POST /v1/auth/review`). null — такой вход выключен. */
+  reviewPassword: string | null
 }
+
+/** Логин проверяющего App Store — пароль к нему только в MAFBOARD_REVIEW_PASSWORD. */
+export const REVIEW_LOGIN = 'appreview'
+/** Telegram-id аккаунта проверяющего: у настоящих пользователей Telegram id положительные. */
+export const REVIEW_TG_ID = -1
+const REVIEW_PASSWORD_MIN_LENGTH = 16
+/** Ведущий удалённого аккаунта в записях игр клуба: приложению нужен userID, но ничей. */
+export const DELETED_HOST_ID = '00000000-0000-0000-0000-000000000000'
 
 export const JWT_ISSUER = 'mafboard'
 export const JWT_AUDIENCE = 'mafboard-app'
@@ -65,6 +75,10 @@ export function readMafboardConfig(env: NodeJS.ProcessEnv = process.env): Config
       appLinkBase,
       termsUrl: env['MAFBOARD_TERMS_URL']?.trim() || `${appLinkBase}/terms`,
       termsVersion: env['MAFBOARD_TERMS_VERSION']?.trim() || '1',
+      // Короткий пароль не включает вход: его можно подобрать.
+      reviewPassword: (env['MAFBOARD_REVIEW_PASSWORD']?.trim().length ?? 0) >= REVIEW_PASSWORD_MIN_LENGTH
+        ? env['MAFBOARD_REVIEW_PASSWORD']!.trim()
+        : null,
     },
   }
 }

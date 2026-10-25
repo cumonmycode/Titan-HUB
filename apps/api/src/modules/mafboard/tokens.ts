@@ -81,6 +81,11 @@ export function webhookSecret(config: Pick<MafboardConfig, 'jwtSecret' | 'botTok
   return createHmac('sha256', Buffer.from(config.jwtSecret)).update(`tgwh:mafboard:${config.botToken ?? ''}`).digest('hex')
 }
 
+/** Сравнение пароля за постоянное время: сравниваются хэши одинаковой длины. */
+export function passwordMatches(provided: string, expected: string): boolean {
+  return timingSafeEqual(createHash('sha256').update(provided).digest(), createHash('sha256').update(expected).digest())
+}
+
 export function webhookSecretValid(provided: string | undefined, config: Pick<MafboardConfig, 'jwtSecret' | 'botToken'>): boolean {
   if (!provided || !config.botToken) return false
   const expected = Buffer.from(webhookSecret(config))

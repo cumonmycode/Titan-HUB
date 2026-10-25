@@ -6,12 +6,42 @@ struct ProfileView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @State private var isConfirmingSignOut = false
+    @State private var isConfirmingDeletion = false
+    @State private var isDeleting = false
 
     private static let termsURL = URL(string: "https://mafboard.titanpos.ru/terms")!
 
     var body: some View {
         NavigationStack {
             List {
+                if model.phase == .demo {
+                    Section {
+                        DemoHeader()
+                    }
+                    .listRowBackground(Color.clear)
+
+                    Section {
+                        Button {
+                            model.leaveDemo()
+                            dismiss()
+                        } label: {
+                            Label("Войти через Telegram", systemImage: "paperplane.fill").frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.solidProminent)
+                        .controlSize(.large)
+                        .listRowBackground(Color.clear)
+                        .listRowInsets(EdgeInsets())
+                    }
+
+                    Section("Ведущий") {
+                        NavigationLink {
+                            AppearanceView()
+                        } label: {
+                            Label("Оформление", systemImage: "paintbrush")
+                        }
+                    }
+                }
+
                 if let account = model.account {
                     Section {
                         ProfileHeader(account: account)
@@ -93,12 +123,31 @@ struct ProfileView: View {
                     }
                 }
 
-                Section {
-                    Button("Выйти", role: .destructive) { isConfirmingSignOut = true }
-                        .frame(maxWidth: .infinity)
-                        .confirmationDialog("Выйти из MafBoard?", isPresented: $isConfirmingSignOut, titleVisibility: .visible) {
-                            Button("Выйти", role: .destructive) { Task { await model.signOut() } }
+                if model.account != nil {
+                    Section {
+                        Button("Выйти", role: .destructive) { isConfirmingSignOut = true }
+                            .frame(maxWidth: .infinity)
+                            .confirmationDialog("Выйти из MafBoard?", isPresented: $isConfirmingSignOut, titleVisibility: .visible) {
+                                Button("Выйти", role: .destructive) { Task { await model.signOut() } }
+                            }
+                    }
+
+                    Section {
+                        Button(role: .destructive) {
+                            isConfirmingDeletion = true
+                        } label: {
+                            if isDeleting { ProgressView() } else { Text("Удалить аккаунт") }
                         }
+                        .frame(maxWidth: .infinity)
+                        .disabled(isDeleting)
+                        .confirmationDialog("Удалить аккаунт?", isPresented: $isConfirmingDeletion, titleVisibility: .visible) {
+                            Button("Удалить аккаунт", role: .destructive) { deleteAccount() }
+                        } message: {
+                            Text("Аккаунт, вход на всех устройствах и привязка GoMafia будут удалены, игры на этом телефоне — тоже. Игры в истории клуба останутся без связи с вами. Отменить удаление нельзя.")
+                        }
+                    } footer: {
+                        Text("Удаление необратимо: войти можно будет снова через Telegram, но уже как новый ведущий.")
+                    }
                 }
             }
             .ambientBackground()
@@ -111,6 +160,15 @@ struct ProfileView: View {
             }
             .refreshable { await model.refreshAccount() }
             .task { await model.refreshSessions() }
+        }
+    }
+
+    private func deleteAccount() {
+        isDeleting = true
+        Task {
+            let deleted = await model.deleteAccount()
+            isDeleting = false
+            if deleted { dismiss() }
         }
     }
 
@@ -138,6 +196,24 @@ private struct ProfileHeader: View {
             Text([account.telegram.username.map { "@\($0)" }, account.goMafia?.club?.title].compactMap { $0 }.joined(separator: " · "))
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+    }
+}
+
+/// Шапка профиля в демо-режиме: что доступно без входа и что даст вход.
+private struct DemoHeader: View {
+    var body: some View {
+        VStack(spacing: 8) {
+            Image(systemName: "theatermasks.fill")
+                .font(.system(size: 48))
+                .foregroundStyle(.tint)
+                .frame(width: 92, height: 92)
+            Text("Демо-режим").font(.title2.weight(.bold))
+            Text("Фанки с гостями, игры хранятся только на этом телефоне. Войдите через Telegram, чтобы сохранять историю и вести рейтинг, миникап и турниры клуба GoMafia.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity)
     }

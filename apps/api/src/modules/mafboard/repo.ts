@@ -27,6 +27,11 @@ export interface MafboardRepo {
     link: { player: GoMafiaPlayerJSON; club: GoMafiaClubJSON | null } | null,
     at: Date,
   ): Promise<MafboardUser | null>
+  /**
+   * Удалить аккаунт: сессии, билеты, идущие и личные игры уходят вместе с ним, игры клуба
+   * остаются в его истории без ведущего. false — такого пользователя уже нет.
+   */
+  deleteUser(userId: string): Promise<boolean>
 
   // ─── Билеты входа ──────────────────────────────────────────────────────────
   createTicket(input: {

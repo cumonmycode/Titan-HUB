@@ -58,6 +58,8 @@ apps/api/test/mafboard/ — тесты (node:test через tsx), хранил�
 | `GET /v1/me` | Bearer | `UserAccount`. Профиль GoMafia старше суток обновляется в фоне |
 | `POST /v1/me/gomafia` `{login, password}` | Bearer | Привязать GoMafia: вход в GoMafia проверяет владение, пароль не хранится. 422 `bad_credentials`, 409 `gomafia_taken` |
 | `DELETE /v1/me/gomafia` | Bearer | Отвязать — останутся только фанки |
+| `POST /v1/auth/review` `{login, password, deviceName, platform}` | — | Вход проверяющего App Store (логин `appreview`, пароль — `MAFBOARD_REVIEW_PASSWORD`, есть в заметках для App Review). Аккаунт без GoMafia, удалённый создаётся заново. Без пароля в .env — 404; лимит 10 попыток/10 мин на IP |
+| `DELETE /v1/me` | Bearer | Удалить аккаунт (Профиль → «Удалить аккаунт», требование App Store): сессии, билеты, идущие и личные игры удаляются, игры клуба остаются в его истории без ведущего (`host_user_id = NULL`, без `setup.host`) |
 | `GET /v1/gomafia/players?q=` | Bearer | Поиск (от 2 символов): сначала свой клуб (`isInHostClub`), затем общий, до 30 |
 | `GET /v1/gomafia/players/:id` | Bearer | Игрок GoMafia |
 | `GET /v1/gomafia/clubs/:id/players?page=` | Bearer | Состав клуба |

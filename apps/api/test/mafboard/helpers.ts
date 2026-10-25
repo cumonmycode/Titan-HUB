@@ -4,6 +4,7 @@ import type { GomafiaLoginResult, GomafiaPlayer } from '../../src/lib/gomafia.js
 import type { BotMessenger } from '../../src/modules/mafboard/bot.js'
 import type { MafboardConfig } from '../../src/modules/mafboard/config.js'
 import { RosterCache, type GoMafiaGateway } from '../../src/modules/mafboard/gomafia.js'
+import { DELETED_HOST_ID } from '../../src/modules/mafboard/config.js'
 import { GomafiaTakenError, type MafboardRepo } from '../../src/modules/mafboard/repo.js'
 import { createMafboardRouter, type MafboardDeps } from '../../src/modules/mafboard/router.js'
 import type { DeviceSession, LoginTicket, MafboardUser, RefreshTokenRow, StoredActiveGame, StoredGame, TicketGuard } from '../../src/modules/mafboard/types.js'
@@ -21,6 +22,7 @@ export const config: MafboardConfig = {
   appLinkBase: 'https://mafboard.test',
   termsUrl: 'https://mafboard.test/terms',
   termsVersion: '1',
+  reviewPassword: 'review-password-0123456789',
 }
 
 /** Хранилище в памяти с той же семантикой, что у Postgres-версии. */
@@ -57,6 +59,26 @@ export class MemoryRepo implements MafboardRepo {
     }
     this.users.set(user.id, user)
     return user
+  }
+
+  async deleteUser(userId: string) {
+    if (!this.users.delete(userId)) return false
+    for (const [id, game] of this.games) {
+      if (game.hostUserId !== userId) continue
+      if (game.clubId == null) {
+        this.games.delete(id)
+      } else {
+        const record = structuredClone(game.record) as { setup: { host: Record<string, unknown> } }
+        delete record.setup.host['goMafiaPlayerID']
+        record.setup.host['userID'] = DELETED_HOST_ID
+        this.games.set(id, { ...game, hostUserId: null, record })
+      }
+    }
+    for (const [id, game] of this.activeGames) if (game.hostUserId === userId) this.activeGames.delete(id)
+    for (const [id, session] of this.sessions) if (session.userId === userId) this.sessions.delete(id)
+    for (const [hash, row] of this.refresh) if (row.userId === userId) this.refresh.delete(hash)
+    for (const [id, ticket] of this.tickets) if (ticket.userId === userId) this.tickets.delete(id)
+    return true
   }
 
   async setGomafiaLink(userId: string, link: Parameters<MafboardRepo['setGomafiaLink']>[1], at: Date) {

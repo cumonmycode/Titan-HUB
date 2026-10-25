@@ -192,6 +192,7 @@ Platega-реквизиты могут быть заданы на уровне п
 | `MAFBOARD_APP_LINK_BASE` | Для модуля | — | `https://`-домен Universal Link приложения; бот возвращает на `<домен>/auth/return?ticket=…`. |
 | `MAFBOARD_BOT_TOKEN` | Для входа | — | Токен бота входа MafBoard. Без него вход через Telegram недоступен. |
 | `MAFBOARD_BOT_USERNAME` | Нет | из `getMe` | Username бота без «@» (для ссылки `t.me/<бот>?start=login_…`). |
+| `MAFBOARD_REVIEW_PASSWORD` | Нет | — | Пароль входа проверяющего App Store (логин `appreview`, `POST /v1/auth/review`), не короче 16 символов. Без него такой вход выключен. |
 | `MAFBOARD_TERMS_URL` | Нет | `<APP_LINK_BASE>/terms` | Пользовательское соглашение, которое бот показывает при входе. |
 | `MAFBOARD_TERMS_VERSION` | Нет | `1` | Версия соглашения: при смене бот попросит принять его заново. |
 

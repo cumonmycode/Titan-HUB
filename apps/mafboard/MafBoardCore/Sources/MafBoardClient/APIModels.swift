@@ -18,6 +18,14 @@ struct RefreshTokensRequest: Encodable {
     let refreshToken: String
 }
 
+/// Вход проверяющего App Store: логин и пароль из заметок для App Review.
+struct ReviewLoginRequest: Encodable {
+    let login: String
+    let password: String
+    let deviceName: String
+    let platform: String
+}
+
 /// Пароль уходит только в теле запроса по TLS. Сервер проверяет его входом в GoMafia и не хранит.
 struct LinkGoMafiaRequest: Encodable {
     let login: String

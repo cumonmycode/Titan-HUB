@@ -131,7 +131,8 @@ export interface StoredActiveGame {
 
 export interface StoredGame {
   id: string
-  hostUserId: string
+  /** null — ведущий удалил аккаунт, игра осталась в истории клуба без него. */
+  hostUserId: string | null
   /** Клуб GoMafia; null — личная история ведущего. */
   clubId: number | null
   format: string

@@ -5,13 +5,15 @@ import { z } from 'zod'
 import { clientIp } from '../../lib/clientIp.js'
 import type { TgUpdate } from '../tg/types.js'
 import { handleBotUpdate, type BotMessenger } from './bot.js'
-import { GOMAFIA_RESYNC_AFTER_MS, LOGIN_TICKET_TTL_MIN, REFRESH_TOKEN_TTL_DAYS, type MafboardConfig } from './config.js'
+import {
+  GOMAFIA_RESYNC_AFTER_MS, LOGIN_TICKET_TTL_MIN, REFRESH_TOKEN_TTL_DAYS, REVIEW_LOGIN, REVIEW_TG_ID, type MafboardConfig,
+} from './config.js'
 import { validateGameUpload } from './games.js'
 import { MIN_QUERY_LENGTH, refreshLink, resolveLink, searchForHost, type GoMafiaGateway, type RosterCache } from './gomafia.js'
 import { GomafiaTakenError, type MafboardRepo } from './repo.js'
 import { errorBody, toAccountJSON, toPlayerJSON, toSessionsJSON, toTicketStatusJSON } from './serialize.js'
 import {
-  issueAccessToken, newConfirmCode, newDeepCode, newRefreshToken, sha256, verifyAccessToken, webhookSecretValid,
+  issueAccessToken, newConfirmCode, newDeepCode, newRefreshToken, passwordMatches, sha256, verifyAccessToken, webhookSecretValid,
 } from './tokens.js'
 import type { MafboardUser } from './types.js'
 
@@ -58,6 +60,7 @@ const ACTIVE_GAMES_LIMIT = 5
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const START_LIMIT = { count: 20, windowSec: 600 }
 const COMPLETE_LIMIT = { count: 30, windowSec: 600 }
+const REVIEW_LIMIT = { count: 10, windowSec: 600 }
 const LINK_LIMIT = { count: 5, windowSec: 600 }
 /** На один логин GoMafia и на один IP — против подбора чужого пароля через наш сервер. */
 const LINK_TARGET_LIMIT = { count: 5, windowSec: 3600 }
@@ -115,6 +118,12 @@ const startSchema = z.object({
 })
 const completeSchema = z.object({ ticket: z.string().uuid(), deviceSecret: z.string().min(32).max(128) })
 const refreshSchema = z.object({ refreshToken: z.string().min(32).max(128) })
+const reviewSchema = z.object({
+  login: z.string().trim().max(100),
+  password: z.string().max(200),
+  deviceName: z.string().max(200).transform(sanitizeDeviceName),
+  platform: z.enum(['ios', 'android']),
+})
 const linkSchema = z.object({ login: z.string().trim().min(1).max(100), password: z.string().min(1).max(200) })
 /** Снимок идущей игры: журнал движка и игроки. Проверяем только то, на что опирается сервер. */
 const activeGameSchema = z.object({
@@ -289,6 +298,28 @@ export function createMafboardRouter(resolveDeps: DepsResolver): Hono<Env> {
   })
 
   /**
+   * Вход проверяющего App Store по логину и паролю из заметок для App Review — у него нет нашего
+   * Telegram-бота. Отдельный аккаунт без GoMafia (только фанки); удалённый создаётся заново при входе.
+   */
+  router.post('/v1/auth/review', body(reviewSchema), async (c) => {
+    const deps = c.get('deps')
+    const password = deps.config.reviewPassword
+    if (!password) return fail(c, 404, 'not_found', 'Не найдено')
+    const allowed = await deps.limiter.hit(`mb:review:${ipKey(clientIp(c))}`, REVIEW_LIMIT.count, REVIEW_LIMIT.windowSec, { failClosed: true })
+    if (!allowed) return fail(c, 429, 'rate_limited', 'Слишком много попыток, подождите немного')
+    const input = c.req.valid('json')
+    if (input.login.toLowerCase() !== REVIEW_LOGIN || !passwordMatches(input.password, password)) {
+      return fail(c, 422, 'bad_credentials', 'Неверный логин или пароль')
+    }
+    const user = await deps.repo.upsertUserFromTelegram({
+      tgId: REVIEW_TG_ID, tgUsername: null, tgFirstName: 'App Review', tgLastName: null,
+      phone: '', termsVersion: deps.config.termsVersion,
+    })
+    const tokens = await issueSession(deps, user, { name: input.deviceName, platform: input.platform })
+    return c.json({ tokens, account: toAccountJSON(user) })
+  })
+
+  /**
    * Обновить токены. Refresh одноразовый: каждый вызов выдаёт новый токен той же сессии.
    * Повторное предъявление уже заменённого токена живой сессии — признак кражи:
    * отзываем все сессии пользователя. Токен завершённой сессии просто не принимается.
@@ -397,6 +428,16 @@ export function createMafboardRouter(resolveDeps: DepsResolver): Hono<Env> {
       if (error instanceof GomafiaTakenError) return taken()
       throw error
     }
+  })
+
+  /**
+   * Удалить аккаунт (Профиль → «Удалить аккаунт»). Все сессии завершаются, токены этого
+   * пользователя перестают действовать: requireUser не найдёт его.
+   */
+  router.delete('/v1/me', requireUser, async (c) => {
+    const deps = c.get('deps')
+    await deps.repo.deleteUser(c.get('user').id)
+    return c.json({ ok: true })
   })
 
   /** Отвязать GoMafia — останутся только фанки. */

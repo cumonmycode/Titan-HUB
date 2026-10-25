@@ -155,6 +155,17 @@ export const MAFBOARD_MIGRATIONS: readonly { id: string; sql: string }[] = [
       CREATE INDEX IF NOT EXISTS mb_active_games_host_idx ON mb_active_games (host_user_id, updated_at DESC);
     `,
   },
+  {
+    // Удаление аккаунта из приложения (требование App Store): игры клуба остаются в его истории
+    // обезличенными — без ведущего (host_user_id = NULL), личные игры удаляются вместе с аккаунтом.
+    id: '004_mafboard_account_deletion',
+    sql: `
+      ALTER TABLE mb_games ALTER COLUMN host_user_id DROP NOT NULL;
+      ALTER TABLE mb_games DROP CONSTRAINT IF EXISTS mb_games_host_user_id_fkey;
+      ALTER TABLE mb_games
+        ADD CONSTRAINT mb_games_host_user_id_fkey FOREIGN KEY (host_user_id) REFERENCES mb_users(id) ON DELETE SET NULL;
+    `,
+  },
 ]
 
 function rows<T = Record<string, unknown>>(res: unknown): T[] {

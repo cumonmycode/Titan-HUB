@@ -26,10 +26,14 @@ public protocol MafBoardAPI: Sendable {
     func startTelegramLogin(deviceName: String, platform: String, secret: DeviceSecret) async throws(APIError) -> LoginTicket
     func telegramLoginStatus(ticketID: String) async throws(APIError) -> LoginTicketStatus
     func completeTelegramLogin(ticketID: String, secret: DeviceSecret) async throws(APIError) -> AuthSession
+    /// Вход проверяющего App Store по логину и паролю — без Telegram-бота.
+    func reviewLogin(login: String, password: String, deviceName: String, platform: String) async throws(APIError) -> AuthSession
     func refreshTokens(_ refreshToken: String) async throws(APIError) -> AuthTokens
     /// Отзывает refresh-токен на сервере (выход с устройства).
     func logout(refreshToken: String) async throws(APIError)
     func currentAccount() async throws(APIError) -> UserAccount
+    /// Удаляет аккаунт: все сессии завершаются, игры клуба остаются в его истории без ведущего.
+    func deleteAccount() async throws(APIError)
 
     // Сессии устройств
     /// Устройства, где выполнен вход: текущее первым (`isCurrent`), остальные по последней активности.
@@ -91,6 +95,11 @@ public struct MafBoardAPIClient: MafBoardAPI {
         return try await send(.post, "v1/auth/telegram/complete", body: body, authorized: false)
     }
 
+    public func reviewLogin(login: String, password: String, deviceName: String, platform: String) async throws(APIError) -> AuthSession {
+        let body = ReviewLoginRequest(login: login, password: password, deviceName: deviceName, platform: platform)
+        return try await send(.post, "v1/auth/review", body: body, authorized: false)
+    }
+
     public func refreshTokens(_ refreshToken: String) async throws(APIError) -> AuthTokens {
         try await send(.post, "v1/auth/refresh", body: RefreshTokensRequest(refreshToken: refreshToken), authorized: false)
     }
@@ -103,6 +112,10 @@ public struct MafBoardAPIClient: MafBoardAPI {
 
     public func currentAccount() async throws(APIError) -> UserAccount {
         try await send(.get, "v1/me")
+    }
+
+    public func deleteAccount() async throws(APIError) {
+        let _: EmptyResponse = try await send(.delete, "v1/me")
     }
 
     // MARK: Сессии устройств

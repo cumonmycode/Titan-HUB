@@ -131,6 +131,34 @@ struct APIClientTests {
         #expect(request?.value(forHTTPHeaderField: "Authorization") == "Bearer access-1")
     }
 
+    @Test("Вход проверяющего App Store: POST без Bearer, логин и пароль только в теле")
+    func reviewLogin() async throws {
+        let transport = StubTransport(json: """
+        {"tokens":{"accessToken":"a","refreshToken":"r","accessExpiresAt":"2026-10-17T12:00:00Z"},
+         "account":{"id":"8F3A1C2E-0000-4000-8000-000000000002",
+                    "telegram":{"id":-1,"firstName":"App Review"}}}
+        """)
+        let session = try await client(transport).reviewLogin(login: "appreview", password: "secret-1", deviceName: "iPad", platform: "ios")
+        let request = await transport.lastRequest
+        #expect(request?.httpMethod == "POST")
+        #expect(request?.url?.path == "/v1/auth/review")
+        #expect(request?.url?.query == nil)
+        #expect(request?.value(forHTTPHeaderField: "Authorization") == nil)
+        let body = try #require(request?.httpBody.flatMap { try JSONSerialization.jsonObject(with: $0) as? [String: String] })
+        #expect(body == ["login": "appreview", "password": "secret-1", "deviceName": "iPad", "platform": "ios"])
+        #expect(session.account.telegram.firstName == "App Review")
+    }
+
+    @Test("Удаление аккаунта: DELETE /v1/me с Bearer")
+    func deleteAccount() async throws {
+        let transport = StubTransport(json: #"{"ok":true}"#)
+        try await client(transport).deleteAccount()
+        let request = await transport.lastRequest
+        #expect(request?.httpMethod == "DELETE")
+        #expect(request?.url?.path == "/v1/me")
+        #expect(request?.value(forHTTPHeaderField: "Authorization") == "Bearer access-1")
+    }
+
     @Test("Своё устройство так не завершить — конфликт с текстом сервера")
     func revokeCurrentSession() async {
         let transport = StubTransport(status: 409, json: #"{"error":{"code":"current_session","message":"Это текущее устройство"}}"#)

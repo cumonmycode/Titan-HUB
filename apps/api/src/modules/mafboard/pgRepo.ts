@@ -1,5 +1,6 @@
 import { sql, type Database } from '@titan/database'
 import type { SQL } from 'drizzle-orm'
+import { DELETED_HOST_ID } from './config.js'
 import { GomafiaTakenError, type MafboardRepo } from './repo.js'
 import type {
   DeviceSession, GoMafiaClubJSON, GoMafiaPlayerJSON, LoginTicket, MafboardUser, RefreshTokenRow, StoredActiveGame, StoredGame, TicketGuard, TicketPatch,
@@ -12,6 +13,7 @@ import type {
 type Row = Record<string, unknown>
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+const DELETED_HOST_JSON = JSON.stringify(DELETED_HOST_ID)
 
 function rows(res: unknown): Row[] {
   return (Array.isArray(res) ? res : ((res as { rows?: Row[] }).rows ?? [])) as Row[]
@@ -96,7 +98,7 @@ function toSession(r: Row): DeviceSession {
 function toGame(r: Row): StoredGame {
   return {
     id: String(r['id']),
-    hostUserId: String(r['host_user_id']),
+    hostUserId: r['host_user_id'] == null ? null : String(r['host_user_id']),
     clubId: num(r['club_id']),
     format: String(r['format']),
     variant: String(r['variant']),
@@ -183,6 +185,23 @@ export class PgMafboardRepo implements MafboardRepo {
     `)
     if (!row) throw new Error('[mafboard] upsert пользователя не вернул строку')
     return toUser(row)
+  }
+
+  async deleteUser(userId: string): Promise<boolean> {
+    if (!UUID.test(userId)) return false
+    // Одним запросом: личные игры удаляются, из игр клуба убирается ведущий (клуб в записи остаётся),
+    // остальное — каскадом от mb_users.
+    const deleted = await this.query(sql`
+      WITH personal AS (
+        DELETE FROM mb_games WHERE host_user_id = ${userId}::uuid AND club_id IS NULL
+      ), club AS (
+        UPDATE mb_games SET host_user_id = NULL,
+          record = jsonb_set(record #- '{setup,host,goMafiaPlayerID}', '{setup,host,userID}', ${DELETED_HOST_JSON}::jsonb)
+        WHERE host_user_id = ${userId}::uuid AND club_id IS NOT NULL
+      )
+      DELETE FROM mb_users WHERE id = ${userId}::uuid RETURNING id
+    `)
+    return deleted.length > 0
   }
 
   async setGomafiaLink(

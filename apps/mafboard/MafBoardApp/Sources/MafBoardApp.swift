@@ -74,9 +74,17 @@ struct RootView: View {
         .tint(accent.color)
         .preferredColorScheme(appearance.colorScheme)
         .connectionIndicator()
-        .task(id: model.account?.id) {
-            // Игры — только вошедшего ведущего; идущая игра подтягивается с сервера.
-            library.switchUser(model.account?.id)
+        .task(id: model.libraryUser) {
+            // Игры — только вошедшего ведущего (или демо-режима); идущая игра подтягивается с сервера.
+            #if DEBUG
+            if model.phase == .demo, let scene = ScreenshotScene.requested, !scene.isGame {
+                GameFiles.removeGames(of: AppModel.demoUserID)
+                library.switchUser(model.libraryUser)
+                scene.seed(library)
+                return
+            }
+            #endif
+            library.switchUser(model.libraryUser)
             await sync.refresh()
         }
         .alert(
@@ -94,7 +102,7 @@ struct RootView: View {
         switch model.phase {
         case .loading: ProgressView()
         case .signedOut: LoginView()
-        case .signedIn: MainTabView()
+        case .signedIn, .demo: MainTabView()
         }
     }
 }
@@ -118,6 +126,15 @@ enum AppTab: Hashable, CaseIterable {
         case .standings: "trophy"
         }
     }
+
+    /// Вкладка при запуске. В отладочной сборке скриншот рейтинга открывает сразу «Рейтинг».
+    @MainActor static var initial: AppTab {
+        #if DEBUG
+        ScreenshotScene.requested == .standings ? .standings : .games
+        #else
+        .games
+        #endif
+    }
 }
 
 /// Запрос на новую игру: с нуля или следующей игрой вечера.
@@ -130,7 +147,7 @@ struct NewGameRequest: Identifiable {
 /// справа — отдельная круглая кнопка «Новая игра». Профиль — аватар в правом верхнем углу.
 struct MainTabView: View {
     @Environment(GameLibrary.self) private var library
-    @State private var tab = AppTab.games
+    @State private var tab = AppTab.initial
     @State private var newGame: NewGameRequest?
     /// «Следующая игра» с экрана итогов: откроется, когда игра закроется.
     @State private var nextEvening: Evening?
@@ -290,7 +307,8 @@ private struct ProfileButton: ViewModifier {
                     Button {
                         isShowingProfile = true
                     } label: {
-                        let name = model.account?.goMafia?.player.nickname ?? model.account?.telegram.displayName ?? "?"
+                        let name = model.account?.goMafia?.player.nickname ?? model.account?.telegram.displayName
+                            ?? (model.phase == .demo ? "Демо" : "?")
                         PlayerAvatar(name: name, url: model.account?.goMafia?.player.avatarURL, size: 34)
                     }
                     .accessibilityLabel("Профиль")

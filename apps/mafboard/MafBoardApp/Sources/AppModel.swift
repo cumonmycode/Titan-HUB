@@ -11,10 +11,20 @@ final class AppModel {
         case loading
         case signedOut
         case signedIn
+        /// «Попробовать без входа»: фанки с гостями, игры только на этом телефоне, сервера нет.
+        case demo
     }
 
     static let apiBase = URL(string: "https://mafboard.titanpos.ru/api/mafboard")!
     static let returnHosts: Set<String> = ["mafboard.titanpos.ru"]
+    /// Папка игр демо-режима — отдельно от игр вошедших ведущих.
+    static let demoUserID = UserID(UUID(uuidString: "00000000-DE30-4000-8000-000000000000")!)
+    private static let demoKey = "demoMode"
+
+    /// Чьи игры показывать: вошедшего ведущего или демо-режима.
+    var libraryUser: UserID? {
+        phase == .demo ? Self.demoUserID : account?.id
+    }
 
     private(set) var phase: Phase = .loading
     private(set) var account: UserAccount?
@@ -37,10 +47,18 @@ final class AppModel {
     func bootstrap() async {
         // Только при запуске: экран под полноэкранной игрой «появляется» заново, но входить второй раз не нужно.
         guard phase == .loading else { return }
+        if Self.isDemoForced {
+            phase = .demo
+            return
+        }
         if let session = await store.load() {
             account = session.account
             phase = .signedIn
             await refreshAccount()
+            return
+        }
+        if UserDefaults.standard.bool(forKey: Self.demoKey) {
+            phase = .demo
             return
         }
         if let pending = await store.loadPendingLogin(), pending.ticket.expiresAt > .now {
@@ -52,6 +70,50 @@ final class AppModel {
             returned(with: ticketID)
         }
         await pollLogin()
+    }
+
+    // MARK: - Демо-режим
+
+    /// Только в отладочной сборке: аргумент запуска `-demoMode` открывает демо-режим, не трогая
+    /// сохранённый вход, — для скриншотов App Store на телефоне, где ведущий уже вошёл.
+    private static var isDemoForced: Bool {
+        #if DEBUG
+        ProcessInfo.processInfo.arguments.contains("-demoMode")
+        #else
+        false
+        #endif
+    }
+
+    func startDemo() {
+        dispatch(.reset)
+        Task { await persistPendingLogin() }
+        UserDefaults.standard.set(true, forKey: Self.demoKey)
+        phase = .demo
+    }
+
+    /// Из демо-режима — на экран входа. Игры демо-режима остаются на телефоне до следующего раза.
+    func leaveDemo() {
+        UserDefaults.standard.removeObject(forKey: Self.demoKey)
+        phase = .signedOut
+    }
+
+    // MARK: - Вход проверяющего App Store
+
+    /// Логин и пароль из заметок для App Review: у проверяющего нет нашего Telegram-бота.
+    /// `nil` — вошли, иначе текст ошибки для формы входа.
+    func reviewLogin(login: String, password: String) async -> String? {
+        do throws(APIError) {
+            let session = try await api.reviewLogin(login: login, password: password, deviceName: UIDevice.current.name, platform: "ios")
+            do { try await store.save(session) } catch { report(error) }
+            UserDefaults.standard.removeObject(forKey: Self.demoKey)
+            dispatch(.reset)
+            await persistPendingLogin()
+            account = session.account
+            phase = .signedIn
+            return nil
+        } catch {
+            return error.message
+        }
     }
 
     // MARK: - Вход через Telegram
@@ -71,7 +133,7 @@ final class AppModel {
         switch phase {
         case .loading: earlyReturnTicketID = ticketID
         case .signedOut: returned(with: ticketID)
-        case .signedIn: break
+        case .signedIn, .demo: break
         }
     }
 
@@ -310,6 +372,20 @@ final class AppModel {
         await endSession()
     }
 
+    /// Удалить аккаунт на сервере, затем забыть вход и игры этого ведущего на телефоне.
+    func deleteAccount() async -> Bool {
+        guard let userID = account?.id else { return false }
+        do throws(APIError) {
+            try await withAuth { () async throws(APIError) in try await api.deleteAccount() }
+        } catch {
+            report(error)
+            return false
+        }
+        await endSession()
+        GameFiles.removeGames(of: userID)
+        return true
+    }
+
     private func endSession() async {
         refreshTask = nil
         await store.clear()
@@ -331,6 +407,8 @@ final class AppModel {
 
     /// Запрос от имени пользователя: при истёкшем access-токене один раз обновляем пару и повторяем.
     private func withAuth<T>(_ call: () async throws(APIError) -> T) async throws(APIError) -> T {
+        // В демо-режиме сервера нет: запрос не уходит, а сессия не «истекает» и не выкидывает на вход.
+        guard phase != .demo else { throw .unauthorized }
         let usedToken = await store.accessToken()
         do {
             return try await call()

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { call, createTestContext, NOW, signIn, TG_USER, type TestContext } from './helpers.js'
+import { call, config, createTestContext, NOW, signIn, TG_USER, type TestContext } from './helpers.js'
 
 async function linkedHost(ctx: TestContext) {
   const session = await signIn(ctx)
@@ -225,6 +225,70 @@ describe('история игр', () => {
     const ctx = createTestContext()
     const res = await call(ctx, 'POST', '/v1/games', { body: {} })
     assert.equal(res.status, 401)
+  })
+})
+
+describe('удаление аккаунта', () => {
+  it('личные игры и сессии удаляются, игры клуба остаются без ведущего', async () => {
+    const ctx = createTestContext()
+    const host = await linkedHost(ctx)
+    const clubGame = gameRecord(host.account.id, 'rating', 77)
+    const personal = gameRecord(host.account.id, 'funky', null, 'A1B2C3D4-0000-4000-8000-000000000456')
+    assert.equal((await call(ctx, 'POST', '/v1/games', { token: host.accessToken, body: clubGame })).status, 201)
+    ctx.repo.users.set(host.account.id, { ...ctx.repo.users.get(host.account.id)!, gomafia: null })
+    assert.equal((await call(ctx, 'POST', '/v1/games', { token: host.accessToken, body: personal })).status, 201)
+
+    const deleted = await call(ctx, 'DELETE', '/v1/me', { token: host.accessToken })
+    assert.equal(deleted.status, 200)
+
+    assert.equal(ctx.repo.users.size, 0)
+    assert.equal(ctx.repo.sessions.size, 0)
+    assert.equal(ctx.repo.refresh.size, 0)
+    const left = [...ctx.repo.games.values()]
+    assert.equal(left.length, 1)
+    assert.equal(left[0]?.clubId, 77)
+    assert.equal(left[0]?.hostUserId, null)
+    const anonymized = (left[0]?.record as { setup: { host: Record<string, unknown> } }).setup.host
+    assert.deepEqual(anonymized, { userID: '00000000-0000-0000-0000-000000000000', clubID: 77 })
+
+    assert.equal((await call(ctx, 'GET', '/v1/me', { token: host.accessToken })).status, 401)
+    const refresh = await call(ctx, 'POST', '/v1/auth/refresh', { body: { refreshToken: host.refreshToken } })
+    assert.equal(refresh.status, 401)
+  })
+
+  it('вход проверяющего App Store: только верный пароль, аккаунт без GoMafia, после удаления создаётся заново', async () => {
+    const ctx = createTestContext()
+    const device = { deviceName: 'iPad', platform: 'ios' }
+    const wrong = await call(ctx, 'POST', '/v1/auth/review', { body: { login: 'appreview', password: 'nope', ...device } })
+    assert.equal(wrong.status, 422)
+    assert.equal(wrong.json.error.code, 'bad_credentials')
+
+    const ok = await call(ctx, 'POST', '/v1/auth/review', { body: { login: 'AppReview', password: config.reviewPassword, ...device } })
+    assert.equal(ok.status, 200)
+    assert.equal(ok.json.account.goMafia ?? null, null)
+    const me = await call(ctx, 'GET', '/v1/me', { token: ok.json.tokens.accessToken })
+    assert.equal(me.status, 200)
+
+    assert.equal((await call(ctx, 'DELETE', '/v1/me', { token: ok.json.tokens.accessToken })).status, 200)
+    const again = await call(ctx, 'POST', '/v1/auth/review', { body: { login: 'appreview', password: config.reviewPassword, ...device } })
+    assert.equal(again.status, 200)
+    assert.notEqual(again.json.account.id, ok.json.account.id)
+  })
+
+  it('без MAFBOARD_REVIEW_PASSWORD вход проверяющего выключен', async () => {
+    const ctx = createTestContext({ config: { ...config, reviewPassword: null } })
+    const res = await call(ctx, 'POST', '/v1/auth/review', { body: { login: 'appreview', password: '', deviceName: 'iPad', platform: 'ios' } })
+    assert.equal(res.status, 404)
+  })
+
+  it('после удаления вход через бота создаёт новый пустой аккаунт', async () => {
+    const ctx = createTestContext()
+    const first = await signIn(ctx)
+    assert.equal((await call(ctx, 'DELETE', '/v1/me', { token: first.accessToken })).status, 200)
+
+    const again = await signIn(ctx)
+    assert.notEqual(again.account.id, first.account.id)
+    assert.equal(again.account.goMafia ?? null, null)
   })
 })
 

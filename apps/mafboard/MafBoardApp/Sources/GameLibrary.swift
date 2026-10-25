@@ -105,6 +105,11 @@ enum GameFiles {
     static var evenings: URL { directory.appending(path: names[2]) }
     static var pendingDeletions: URL { directory.appending(path: "pending-deletions.json") }
 
+    /// Аккаунт удалён — его игры на телефоне тоже.
+    static func removeGames(of userID: UserID) {
+        try? FileManager.default.removeItem(at: URL.applicationSupportDirectory.appending(path: "users/\(userID.description)"))
+    }
+
     /// Игры, сохранённые до разделения по ведущим (в корне), переезжают к первому вошедшему.
     static func adoptLegacyFiles() {
         let base = URL.applicationSupportDirectory
@@ -345,6 +350,14 @@ final class GameLibrary {
 
     /// Игра закончилась: в историю (сразу видна в своём вечере) и на сервер.
     /// Правка уже сохранённой игры оставляет её на прежнем месте и не трогает вечер.
+    #if DEBUG
+    /// Скриншоты App Store: законченная игра сразу в историю, без экрана игры.
+    func seedFinished(_ session: GameSession, players: [PlayerProfile]) {
+        guard session.state.isFinished, let record = GameController(session: session, players: players).record else { return }
+        archive(record, players: players)
+    }
+    #endif
+
     private func archive(_ record: GameRecord, players: [PlayerProfile]) {
         let game = FinishedGame(record: record, players: players, isUploaded: false)
         if let index = history.firstIndex(where: { $0.id == record.id }) {
