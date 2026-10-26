@@ -5,7 +5,8 @@
  *  1) лента в приложении — строка client_notifications (всегда: история не должна
  *     теряться, даже если push выключен или приложение не установлено);
  *  2) push на телефон (если есть устройства и client_push_enabled): iPhone — напрямую
- *     через APNs (apns.ts), Android — через Expo Push;
+ *     через APNs (apns.ts), Android — напрямую через FCM (fcm.ts); старые сборки Android
+ *     с токеном Expo — через Expo Push;
  *  3) личное сообщение от Tai (если привязан Telegram и
  *     wallet_notify_enabled — прежнее поведение).
  *
@@ -17,6 +18,7 @@ import {
   eq, and, inArray, isNotNull, sql, type Database,
 } from '@titan/database'
 import { isApnsToken, sendApns } from './apns.js'
+import { isFcmToken, sendFcm } from './fcm.js'
 import { isBlocked } from '../../lib/tgBot.js'
 import { taiBot } from '../tg/club.js'
 import { appendMessage, markBlocked } from '../tg/dialog/memory.js'
@@ -121,20 +123,24 @@ async function sendExpoPush(messages: PushMessage[]): Promise<{ accepted: number
 
 /**
  * Отправить пачку push: токены Expo — через Expo Push, нативные токены iPhone — прямо
- * в APNs. Возвращает число принятых сообщений. Мёртвые токены удаляет.
+ * в APNs, нативные токены Android — прямо в FCM. Возвращает число принятых сообщений.
+ * Мёртвые токены удаляет.
  */
 export async function sendPush(messages: PushMessage[], database: Database): Promise<number> {
-  const [expo, apns] = await Promise.all([
+  const [expo, apns, fcm] = await Promise.all([
     sendExpoPush(messages.filter((m) => isExpoToken(m.to))),
     sendApns(messages.filter((m) => isApnsToken(m.to)).map((m) => ({
       token: m.to, title: m.title, body: m.body, badge: m.badge, threadId: m.channelId, data: m.data,
     }))),
+    sendFcm(messages.filter((m) => isFcmToken(m.to)).map((m) => ({
+      token: m.to, title: m.title, body: m.body, badge: m.badge, channelId: m.channelId, data: m.data,
+    }))),
   ])
-  const dead = [...expo.dead, ...apns.dead]
+  const dead = [...expo.dead, ...apns.dead, ...fcm.dead]
   if (dead.length) {
     await database.delete(appDevices).where(inArray(appDevices.pushToken, dead)).catch(() => {})
   }
-  return expo.accepted + apns.accepted
+  return expo.accepted + apns.accepted + fcm.accepted
 }
 
 /** Непрочитанные уведомления по списку клиентов (для бейджа на иконке). */

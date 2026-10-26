@@ -39,25 +39,15 @@ export async function ensureAndroidChannels() {
   });
 }
 
-function projectId(): string | undefined {
-  const extra = Constants.expoConfig?.extra as { eas?: { projectId?: string } } | undefined;
-  return extra?.eas?.projectId ?? Constants.easConfig?.projectId;
-}
-
 /**
- * Токен, по которому сервер достанет телефон. iPhone — нативный токен APNs: сервер шлёт
- * в Apple напрямую, без Expo. Android — токен Expo Push: без projectId (не выполнен
- * `eas init`) его не получить, тогда остаются лента в приложении и Telegram-бот.
+ * Токен, по которому сервер достанет телефон, — нативный токен устройства, без Expo:
+ * iPhone — токен APNs (сервер шлёт в Apple, apns.ts), Android — токен FCM (сервер шлёт
+ * в Firebase, fcm.ts; нужен google-services.json в сборке). Не вышло получить — остаются
+ * лента в приложении и Telegram-бот.
  */
 async function devicePushToken(): Promise<string | null> {
-  if (Platform.OS === 'ios') {
-    const { data } = await Notifications.getDevicePushTokenAsync();
-    return typeof data === 'string' ? data : null;
-  }
-  const pid = projectId();
-  if (!pid) return null;
-  const { data } = await Notifications.getExpoPushTokenAsync({ projectId: pid });
-  return data;
+  const { data } = await Notifications.getDevicePushTokenAsync();
+  return typeof data === 'string' && data ? data : null;
 }
 
 export type PushPermission = 'granted' | 'denied' | 'undetermined';
