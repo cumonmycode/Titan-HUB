@@ -72,7 +72,7 @@
 | `GET /api/resident/feed?kind=all\|money\|bonus&cursor=` | Лента операций (transactions + bonus_history), курсор `<ISO>\|<id>` |
 | `GET /api/resident/collections` | Состояние сборов клиента (та же арифметика «пула», что в ростере `/collections/:id`) |
 | `GET /api/resident/notifications`, `POST …/read` | Лента уведомлений, отметка прочитанного |
-| `POST/DELETE /api/resident/devices` | Push-токен устройства: iPhone — нативный токен APNs, Android — токен Expo Push |
+| `POST/DELETE /api/resident/devices` | Push-токен устройства: iPhone — нативный токен APNs, Android — нативный токен FCM (сборки до 1.5.0 — токен Expo Push) |
 | `PATCH /api/resident/prefs` | Push / Telegram / новости клуба |
 | `POST /api/auth/me/payments {purpose, amount, collectionId?}` | Онлайн-платёж; `collectionId` — любой активный сбор, в котором клиент участвует |
 | `POST /api/client-broadcasts`, `…/audience`, `GET` | Рассылки из панели (владелец — всем / по статусу / должникам / с депозитом / по опросу; сотрудник — только выбранным) |
@@ -85,7 +85,7 @@
 
 `notifyClient()` (`modules/notifications/client.ts`) шлёт каждое событие по трём независимым каналам:
 - в ленту приложения (всегда);
-- push, если есть устройство и включён push: iPhone — напрямую в Apple (`modules/notifications/apns.ts`, HTTP/2 + ключ .p8), Android — через Expo Push;
+- push, если есть устройство и включён push: iPhone — напрямую в Apple (`modules/notifications/apns.ts`, HTTP/2 + ключ .p8), Android — напрямую в Firebase Cloud Messaging (`modules/notifications/fcm.ts`, HTTP v1 + ключ сервисного аккаунта); старые сборки с токеном Expo — через Expo Push;
 - сообщением от бота My Titan, если привязан Telegram.
 
 Автоматические события: начисление и списание бонусов, пополнение депозита, погашение и появление долга, зачисление онлайн-оплаты, статус «Резидент». Рассылки идут с `kind='news'`: клиент может их отключить.
@@ -102,7 +102,7 @@
 ## Что нужно сделать владельцу
 
 1. **Push на iPhone:** в `.env` сервера — ключ APNs команды G99YH9UK8C (один на все приложения команды): `APNS_KEY_P8` (base64 от файла `AuthKey_<ID>.p8` или PEM с `\n`), `APNS_KEY_ID`, `APNS_TEAM_ID`; `APNS_TOPIC` по умолчанию `ru.titan.resident`. Без ключа push на iPhone не уходят (в логе API — `[apns] … не заданы`), лента и бот работают. Сервер шлёт в боевой APNs, а токены отладочных сборок сам переадресует в песочницу.
-   **Push на Android (позже):** в `apps/client` выполнить `npx eas-cli login`, `npx eas-cli init` (пропишет `extra.eas.projectId` в `app.json`) и `npx eas-cli credentials` — загрузить ключ FCM V1 из Firebase и положить `google-services.json` рядом с `app.json` (`android.googleServicesFile`). Необязательно: `EXPO_ACCESS_TOKEN` в окружение API — защищённый режим Expo Push.
+   **Push на Android (сделано 2026-10-26):** Firebase-проект `mytitan-d7f3c`, Android-приложение `ru.titan.resident`. `apps/client/google-services.json` (не секрет, в git) подключён в `app.json` (`android.googleServicesFile`); приложение регистрирует нативный FCM-токен. Сервер шлёт напрямую в FCM HTTP v1 от имени сервисного аккаунта: `FCM_SERVICE_ACCOUNT` в `.env` прода (base64 от JSON-ключа «Настройки проекта → Сервисные аккаунты»). Без ключа push на Android не уходят (в логе API — `[fcm] … не задан`). Expo-аккаунт и EAS не нужны. Push приходит только на устройства с сервисами Google (на новых Huawei/Honor без Google Play — нет).
 2. **App Store Connect:** приложение создано и заполнено (тексты, скриншоты, рейтинг 4+, App Privacy, бесплатно во всех странах). Новые сборки — `npm run ios:testflight`; в `app.json` включён плагин `with-scene-lifecycle` (обязателен для iOS 27).
 3. **Переименование в My Titan:** название в App Store Connect (App Information → Name; оно уникально в App Store — если «My Titan» занято, подойдёт, например, «My Titan Club») и имя бота `@titanwalletrobot` в @BotFather (`/setname`) меняются вручную. Подпись под иконкой на телефоне берётся из `app.json` и сменится со следующей сборкой; `upload-testflight.sh` сам пересоздаст Xcode-проект под новое имя (`ios/MyTitan`).
 4. **Проверка App Store:** в заметках для проверяющего указать, что вход — по номеру телефона с подтверждением в Telegram клуба, а полное демо открывается кнопкой «Посмотреть демо».
