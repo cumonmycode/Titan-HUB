@@ -6,12 +6,14 @@ import { api, ApiError } from '@/lib/api'
 import { startRegistration, startAuthentication } from '@simplewebauthn/browser'
 import { Icon } from '@/components/Icon'
 import { TelegramLogin } from './TelegramLogin'
+import { PasswordLogin } from './PasswordLogin'
 
 // ─── Screen types ─────────────────────────────────────────────────────────────
 
 type Screen =
   | 'telegram'      // Первый вход на устройстве — подтверждение у Tai в Telegram
   | 'passkey'       // Повторный вход на устройстве с passkey (Face ID / Touch ID)
+  | 'password'      // Логин и пароль — учётные записи без Telegram (проверяющие)
   | 'pin-setup'     // Set PIN after first login
   | 'passkey-setup' // Offer passkey registration
 
@@ -81,6 +83,13 @@ export default function LoginPage() {
         <TelegramLogin
           onSuccess={(token, user, hasPin) => afterLogin(token, user, { needsPinSetup: !hasPin, hasPasskey: false })}
           onPasskey={webAuthnSupported ? () => setScreen('passkey') : undefined}
+          onPassword={() => setScreen('password')}
+        />
+      )}
+      {screen === 'password' && (
+        <PasswordLogin
+          onSuccess={(token, user, opts) => afterLogin(token, user, opts)}
+          onBack={() => setScreen('telegram')}
         />
       )}
       {screen === 'passkey' && (

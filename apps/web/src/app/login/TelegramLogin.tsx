@@ -25,9 +25,11 @@ function deviceName(): string {
   return `Браузер · ${os}`
 }
 
-export function TelegramLogin({ onSuccess, onPasskey }: {
+export function TelegramLogin({ onSuccess, onPasskey, onPassword }: {
   onSuccess: (token: string, user: any, hasPin: boolean) => void
   onPasskey?: () => void
+  /** Вход по логину и паролю — для учётных записей без Telegram. */
+  onPassword?: () => void
 }) {
   const [phase, setPhase] = useState<Phase>('idle')
   const [start, setStart] = useState<Start | null>(null)
@@ -120,6 +122,13 @@ export function TelegramLogin({ onSuccess, onPasskey }: {
         <button type="button" onClick={onPasskey}
           style={{ marginTop: 18, background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(255,255,255,0.45)', fontSize: 13, padding: 6 }}>
           На этом устройстве уже есть passkey — войти по Face ID / Touch ID
+        </button>
+      )}
+
+      {onPassword && (
+        <button type="button" onClick={onPassword}
+          style={{ marginTop: onPasskey ? 2 : 18, background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(255,255,255,0.45)', fontSize: 13, padding: 6 }}>
+          Войти по логину и паролю
         </button>
       )}
 
