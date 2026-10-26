@@ -10,6 +10,11 @@
  *    при регистрации — сначала создаёт профиль.
  * 4) GET /status?ticket — приложение опрашивает и получает токен.
  *
+ * Номер для проверяющих (APP_REVIEW_PHONE — модерация Platega, App Review): у них нет
+ * Telegram, привязанного к клубу, поэтому вход по этому номеру подтверждается сразу,
+ * без бота (строка создаётся claimed). Только для готового профиля с этим номером и только
+ * пока переменная задана — после проверки её убрать.
+ *
  * Строки живут в wallet_login_codes (общая БД API и бота). Прежний вход по
  * 4-значному коду (/wallet-code/*, mode NULL) остаётся для веб-кошелька и
  * старых сборок приложения.
@@ -23,7 +28,7 @@ import { profiles, walletLoginCodes, eq, and, gt, lt, isNotNull, sql, type AppRe
 import { signToken } from '@titan/auth'
 import { clientIp } from '../../lib/clientIp.js'
 import { getSharedRedis } from '../../lib/redis.js'
-import { findProfilesByPhone, normalizePhone } from '../../lib/phone.js'
+import { findProfilesByPhone, normalizePhone, phoneKey } from '../../lib/phone.js'
 import { appLoginBlockedUntil, reloginBanMessage } from '../../lib/app-account.js'
 import { MAX_UPLOAD_BODY_BYTES, storeImage } from '../../lib/imageStore.js'
 import { notify } from '../notifications/push.js'
@@ -45,6 +50,8 @@ const START_WINDOW_SECONDS = 10 * 60
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const MIN_BIRTH_YEAR = 1920
 const MIN_AGE_YEARS = 3
+/** Номер для проверяющих: вход без подтверждения в Telegram (см. шапку файла). */
+const REVIEW_PHONE = normalizePhone(process.env['APP_REVIEW_PHONE'] ?? '')
 
 /** Ответ 400 с первой понятной ошибкой схемы (приложение показывает её как есть). */
 function invalid(result: { success: boolean; error?: z.ZodError }, c: Context) {
@@ -123,6 +130,12 @@ appLoginRouter.post('/start', zValidator('json', StartSchema, invalid), async (c
   const botUsername = await taiUsername(db)
   if (!botUsername) return c.json({ error: 'Telegram-бот клуба сейчас недоступен. Попробуйте позже.' }, 503)
 
+  // Проверяющий: вход в готовый тестовый профиль подтверждается сразу — приложение
+  // получит токен первым же опросом /status, бот не нужен.
+  const reviewProfile = mode === 'login' && REVIEW_PHONE && existing.length === 1
+    && phoneKey(phone) === phoneKey(REVIEW_PHONE) ? existing[0] : null
+  if (reviewProfile) console.info('[app-login] вход по номеру для проверяющих, профиль', reviewProfile.id)
+
   // Чистим истёкшие строки (оппортунистически, как /wallet-code/start).
   await db.delete(walletLoginCodes).where(lt(walletLoginCodes.expiresAt, new Date())).catch(() => {})
 
@@ -138,6 +151,7 @@ appLoginRouter.post('/start', zValidator('json', StartSchema, invalid), async (c
     phone,
     mode,
     regData,
+    ...(reviewProfile ? { status: 'claimed', profileId: reviewProfile.id } : {}),
   }).returning({ ticket: walletLoginCodes.ticket })
 
   return c.json({
