@@ -56,6 +56,11 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     private val _homePresses = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
     val homePresses: SharedFlow<Unit> = _homePresses.asSharedFlow()
 
+    private val _saverRequests = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+
+    /** Requests to show the screensaver now, sent over adb to check it. */
+    val saverRequests: SharedFlow<Unit> = _saverRequests.asSharedFlow()
+
     private var reloadJob: Job? = null
 
     private val packageChanges = object : BroadcastReceiver() {
@@ -80,6 +85,10 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
     fun onHomePressed() {
         _homePresses.tryEmit(Unit)
+    }
+
+    fun showScreensaver() {
+        _saverRequests.tryEmit(Unit)
     }
 
     fun open(app: LauncherApp) = graph.apps.open(app.packageName)

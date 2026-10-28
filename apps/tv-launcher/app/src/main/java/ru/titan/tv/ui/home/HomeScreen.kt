@@ -254,6 +254,13 @@ fun HomeScreen(viewModel: HomeViewModel) {
             keyPresses.tryEmit(Unit)
         }
     }
+    LaunchedEffect(viewModel) {
+        viewModel.saverRequests.collect {
+            cinemaOpen = false
+            sheet = Sheet.NONE
+            saver = true
+        }
+    }
     BackHandler(enabled = sheet != Sheet.NONE) { sheet = Sheet.NONE }
 
     Box(
