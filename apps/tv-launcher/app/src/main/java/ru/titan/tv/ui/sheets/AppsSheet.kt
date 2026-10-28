@@ -20,6 +20,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import ru.titan.tv.apps.LauncherApp
+import ru.titan.tv.hub.HubStatus
 import ru.titan.tv.ui.LocalStage
 import ru.titan.tv.ui.glass.Backdrop
 import ru.titan.tv.ui.glass.Glass
@@ -27,10 +28,11 @@ import ru.titan.tv.ui.glass.Lens
 import ru.titan.tv.ui.home.AppTile
 import ru.titan.tv.ui.theme.Type
 
-/** Every installed app; OK opens one. */
+/** Every installed app; OK opens one. In the corner, whether Titan HUB can reach this TV. */
 @Composable
 fun AppsSheet(
     apps: List<LauncherApp>,
+    hub: HubStatus,
     backdrop: Backdrop,
     onOpen: (LauncherApp) -> Unit,
     modifier: Modifier = Modifier,
@@ -50,7 +52,14 @@ fun AppsSheet(
                 verticalAlignment = Alignment.Bottom,
             ) {
                 BasicText("Все приложения", style = Type.title(s))
-                BasicText("OK — открыть · «Назад» — на главный экран", style = Type.caption(s).copy(fontSize = s.sp(20)))
+                Column(horizontalAlignment = Alignment.End) {
+                    BasicText(hubLine(hub), style = Type.caption(s).copy(fontSize = s.sp(20)))
+                    BasicText(
+                        "OK — открыть · «Назад» — на главный экран",
+                        style = Type.caption(s).copy(fontSize = s.sp(20)),
+                        modifier = Modifier.padding(top = s.dp(4)),
+                    )
+                }
             }
             LazyVerticalGrid(
                 columns = GridCells.FixedSize(s.dp(248)),
@@ -70,4 +79,10 @@ fun AppsSheet(
             }
         }
     }
+}
+
+/** The code is what the phone shows next to this TV in Titan HUB → Экраны → «Подключить ТВ». */
+private fun hubLine(hub: HubStatus): String = when (hub) {
+    is HubStatus.Waiting -> "Titan HUB: подключите с телефона · код ${hub.code}"
+    is HubStatus.Paired -> "Titan HUB · экран «${hub.screenName}»" + if (hub.online) "" else " · нет связи"
 }

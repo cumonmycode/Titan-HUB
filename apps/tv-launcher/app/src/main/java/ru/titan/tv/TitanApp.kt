@@ -10,15 +10,23 @@ import ru.titan.tv.config.EMPTY_CONFIG
 import ru.titan.tv.home.SmartHome
 import ru.titan.tv.home.TvControls
 import ru.titan.tv.home.WifiWatch
+import ru.titan.tv.hub.AdImages
+import ru.titan.tv.hub.DeviceStateReader
+import ru.titan.tv.hub.HubLink
+import ru.titan.tv.hub.MessageOverlay
+import ru.titan.tv.hub.Presence
+import ru.titan.tv.hub.RemoteControl
 import ru.titan.tv.inputs.TvInputs
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import okhttp3.OkHttpClient
 
 private const val DEFAULT_AIRPLAY_NAME = "TITAN"
 
@@ -53,6 +61,17 @@ class AppGraph(app: Application) {
     val wifi = WifiWatch(app, scope).also { watch ->
         // A Wi-Fi watchdog that cannot register must not take the launcher down with it
         runCatching { watch.start() }.onFailure { Log.e("Titan", "Wi-Fi watch did not start", it) }
+    }
+
+    /** What the launcher has on screen, set by the home screen; Titan HUB shows it in «Экраны». */
+    val presence = MutableStateFlow(Presence.AWAY)
+    private val http = OkHttpClient()
+    val adImages = AdImages(http, app.cacheDir)
+    private val deviceState = DeviceStateReader(app, presence, airplay.state, smartHome.room, inputs)
+    val hub = HubLink(app, scope, http, deviceState::read).also { link ->
+        runCatching { link.start() }.onFailure { Log.e("Titan", "Titan HUB link did not start", it) }
+        val remote = RemoteControl(app, scope, MessageOverlay(app))
+        scope.launch { link.commands.collect(remote::run) }
     }
 }
 

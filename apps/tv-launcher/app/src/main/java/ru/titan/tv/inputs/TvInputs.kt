@@ -30,6 +30,11 @@ class TvInputs(private val context: Context) {
     private val _sources = MutableStateFlow<List<TvSource>>(emptyList())
     val sources: StateFlow<List<TvSource>> = _sources.asStateFlow()
 
+    /** The input opened last, so Titan HUB can say «HDMI 1» rather than just «the TV player». */
+    @Volatile
+    var lastOpened: TvSource? = null
+        private set
+
     fun start() {
         val tv = manager ?: return
         tv.registerCallback(
@@ -65,6 +70,7 @@ class TvInputs(private val context: Context) {
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         try {
             context.startActivity(intent)
+            lastOpened = source
         } catch (e: ActivityNotFoundException) {
             Log.w(TAG, "No player for ${source.id}", e)
         }

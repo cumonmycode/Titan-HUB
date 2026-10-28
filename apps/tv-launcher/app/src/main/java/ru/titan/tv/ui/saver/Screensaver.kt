@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
@@ -28,10 +29,14 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.toSize
 import ru.titan.tv.airplay.AirPlayState
 import ru.titan.tv.apps.DEFAULT_ART_COLORS
+import ru.titan.tv.hub.Ad
+import ru.titan.tv.ui.ads.AdImageLoader
+import ru.titan.tv.ui.ads.AdPanel
 import ru.titan.tv.ui.LocalStage
 import ru.titan.tv.ui.brand.TitanLogo
 import ru.titan.tv.ui.glass.Backdrop
@@ -48,7 +53,9 @@ import java.time.format.DateTimeFormatter
 data class SaverHint(val icon: String, val title: String, val detail: String)
 
 private const val HINT_MS = 8_000L
-// Still: on this TV every full-screen frame is expensive, so only the hint and the player's progress change
+// 1920 less the margins, the ad panel, the hint's icon and the gaps between them
+private const val HINT_TEXT_WIDTH = 860
+// Still: on this TV every full-screen frame is expensive, so only the hint, the ad and the player's progress change
 private const val LOGO_GLOW = 0.8f
 private const val LOGO = 230
 private val TIME_FORMAT = DateTimeFormatter.ofPattern("HH:mm")
@@ -56,11 +63,11 @@ private val HINT_FILL = Color.White.copy(alpha = 0.08f)
 
 /**
  * After two idle minutes on the home screen: the club's logo glowing on its own colours, the time in a
- * corner, what plays over AirPlay in the other top corner and, below it, one hint at a time about the
- * booth. Any key brings the home screen back.
+ * corner, what plays over AirPlay in the other top corner, one hint at a time about the booth below it
+ * and the club's ads in the last corner. Any key brings the home screen back.
  */
 @Composable
-fun Screensaver(roomName: String?, hints: List<SaverHint>, airplay: AirPlayState) {
+fun Screensaver(hints: List<SaverHint>, airplay: AirPlayState, ads: List<Ad>, adImage: AdImageLoader) {
     val s = LocalStage.current
     val backdrop = remember { Backdrop(DEFAULT_ART_COLORS) }
     Box(
@@ -81,7 +88,6 @@ fun Screensaver(roomName: String?, hints: List<SaverHint>, airplay: AirPlayState
                 style = Type.title(s).copy(fontSize = s.sp(64), fontWeight = FontWeight.Bold, letterSpacing = 0.5.em),
                 modifier = Modifier.padding(top = s.dp(40)),
             )
-            if (roomName != null) BasicText(roomName, style = Type.meta(s).copy(fontSize = s.sp(30)), modifier = Modifier.padding(top = s.dp(10)))
         }
         val now = rememberMinuteClock()
         BasicText(
@@ -90,6 +96,7 @@ fun Screensaver(roomName: String?, hints: List<SaverHint>, airplay: AirPlayState
             modifier = Modifier.align(Alignment.TopEnd).padding(top = s.dp(56), end = s.dp(96)),
         )
         SaverPlayer(airplay, Modifier.align(Alignment.TopStart).padding(start = s.dp(96), top = s.dp(64)))
+        AdPanel(ads, backdrop, adImage, Modifier.align(Alignment.BottomEnd).padding(end = s.dp(96), bottom = s.dp(80)))
         if (hints.isNotEmpty()) {
             HintCorner(hints, Modifier.align(Alignment.BottomStart).padding(start = s.dp(96), bottom = s.dp(80)))
         }
@@ -119,9 +126,16 @@ private fun HintCorner(hints: List<SaverHint>, modifier: Modifier) {
             Box(Modifier.size(s.dp(72)).clip(CircleShape).background(HINT_FILL), contentAlignment = Alignment.Center) {
                 TitanIcon(hint.icon, s.dp(36), Ink.AccentSoft)
             }
-            Column {
-                BasicText(hint.title, style = Type.pill(s).copy(fontSize = s.sp(30)))
-                BasicText(hint.detail, style = Type.caption(s).copy(fontSize = s.sp(23)), modifier = Modifier.padding(top = s.dp(6)))
+            // Narrower than the gap to the ad in the other corner
+            Column(Modifier.widthIn(max = s.dp(HINT_TEXT_WIDTH))) {
+                BasicText(hint.title, style = Type.pill(s).copy(fontSize = s.sp(30)), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                BasicText(
+                    hint.detail,
+                    style = Type.caption(s).copy(fontSize = s.sp(23)),
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = s.dp(6)),
+                )
             }
         }
     }

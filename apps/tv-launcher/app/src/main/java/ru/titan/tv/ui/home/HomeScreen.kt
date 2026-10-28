@@ -53,6 +53,8 @@ import androidx.lifecycle.compose.currentStateAsState
 import ru.titan.tv.HomeViewModel
 import ru.titan.tv.apps.DEFAULT_ART_COLORS
 import ru.titan.tv.home.StaffCall
+import ru.titan.tv.hub.Presence
+import ru.titan.tv.ui.ads.AdPanel
 import ru.titan.tv.ui.LocalStage
 import ru.titan.tv.ui.airplay.NowPlayingPanel
 import ru.titan.tv.ui.cinema.CinemaScreen
@@ -140,6 +142,8 @@ fun HomeScreen(viewModel: HomeViewModel) {
     val config by viewModel.smartHome.config.collectAsStateWithLifecycle()
     val airplay by viewModel.airplay.collectAsStateWithLifecycle()
     val sources by viewModel.sources.collectAsStateWithLifecycle()
+    val ads by viewModel.ads.collectAsStateWithLifecycle()
+    val hubStatus by viewModel.hubStatus.collectAsStateWithLifecycle()
     val lifecycle by LocalLifecycleOwner.current.lifecycle.currentStateAsState()
     val resumed = lifecycle.isAtLeast(Lifecycle.State.RESUMED)
 
@@ -207,6 +211,17 @@ fun HomeScreen(viewModel: HomeViewModel) {
             saver = true
         }
     }
+    // Titan HUB shows staff what the TV has on screen
+    LaunchedEffect(resumed, saver, cinemaOpen) {
+        viewModel.reportPresence(
+            when {
+                !resumed -> Presence.AWAY
+                saver -> Presence.SAVER
+                cinemaOpen -> Presence.CINEMA
+                else -> Presence.HOME
+            },
+        )
+    }
     LaunchedEffect(staffCalledAt) {
         if (staffCalledAt == 0L) return@LaunchedEffect
         staffCalled = true
@@ -251,6 +266,8 @@ fun HomeScreen(viewModel: HomeViewModel) {
             cinemaOpen = false
             sheet = Sheet.NONE
             returnFocus = dockFocus
+            // Home from Titan HUB lands with nothing focused; the guest's first key must land on a tile
+            dockRefocus++
             keyPresses.tryEmit(Unit)
         }
     }
@@ -292,7 +309,7 @@ fun HomeScreen(viewModel: HomeViewModel) {
         Box(Modifier.fillMaxSize()) {
             Box(Modifier.fillMaxSize()) {
                 Scenery(backdrop)
-                HeroInfo(room.name.takeIf { hasRoom }, weather, Modifier.align(Alignment.TopStart).padding(start = s.dp(96), top = s.dp(52)))
+                HeroInfo(weather, Modifier.align(Alignment.TopStart).padding(start = s.dp(96), top = s.dp(52)))
                 Shelf(focusedApp, Modifier.align(Alignment.BottomStart).padding(start = s.dp(96), bottom = s.dp(340)))
                 Dock(
                     apps = homeApps,
@@ -308,6 +325,13 @@ fun HomeScreen(viewModel: HomeViewModel) {
                     },
                     onOpenAll = { open(Sheet.APPS, dockFocus) },
                     modifier = Modifier.align(Alignment.TopStart).offset(y = s.dp(772)),
+                )
+                // The club's ads to the right of the app tiles, level with them (the dock's 772 plus its 40 padding)
+                AdPanel(
+                    ads = ads,
+                    backdrop = backdrop,
+                    image = viewModel::adImage,
+                    modifier = Modifier.align(Alignment.TopEnd).padding(top = s.dp(812), end = s.dp(96)),
                 )
                 TopBar(
                     backdrop = backdrop,
@@ -355,6 +379,7 @@ fun HomeScreen(viewModel: HomeViewModel) {
             ) {
                 AppsSheet(
                     apps = allApps,
+                    hub = hubStatus,
                     backdrop = backdrop,
                     onOpen = { app ->
                         sheet = Sheet.NONE
@@ -391,9 +416,10 @@ fun HomeScreen(viewModel: HomeViewModel) {
                 // While music plays the player says it all; the AirPlay invitation would repeat it
                 val airplayName = airplay.receiverName.takeIf { airplay.nowPlaying == null }
                 Screensaver(
-                    roomName = room.name.takeIf { hasRoom },
                     hints = saverHints(room.canCallStaff, room.climate != null, airplayName, cinemaApps.map { it.label }, sources.isNotEmpty()),
                     airplay = airplay,
+                    ads = ads,
+                    adImage = viewModel::adImage,
                 )
             }
         }

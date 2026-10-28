@@ -70,7 +70,7 @@ class ConfigRepository(context: Context) {
 }
 
 /** A file encrypted with an AES-GCM key that never leaves the Android Keystore. */
-private class SecureFile(private val file: File) {
+internal class SecureFile(private val file: File) {
 
     fun write(text: String) {
         val cipher = Cipher.getInstance(TRANSFORMATION).apply { init(Cipher.ENCRYPT_MODE, key()) }
@@ -90,6 +90,10 @@ private class SecureFile(private val file: File) {
             }
             String(cipher.doFinal(bytes.copyOfRange(1 + ivLength, bytes.size)), Charsets.UTF_8)
         }.onFailure { Log.e(TAG, "Stored config could not be decrypted", it) }
+    }
+
+    fun delete() {
+        file.delete()
     }
 
     private fun key(): SecretKey {

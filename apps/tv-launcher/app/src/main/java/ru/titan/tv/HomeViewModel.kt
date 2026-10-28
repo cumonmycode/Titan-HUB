@@ -14,6 +14,9 @@ import ru.titan.tv.apps.AppEntry
 import ru.titan.tv.apps.LauncherApp
 import ru.titan.tv.apps.homeTiles
 import ru.titan.tv.home.StaffCall
+import ru.titan.tv.hub.Ad
+import ru.titan.tv.hub.HubStatus
+import ru.titan.tv.hub.Presence
 import ru.titan.tv.inputs.TvSource
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -35,6 +38,10 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     val wifiNotices = graph.wifi.notices
     val airplay = graph.airplay.state
     val sources: StateFlow<List<TvSource>> = graph.inputs.sources
+
+    /** The club's ads from «Экраны» in Titan HUB, for the home screen and the screensaver. */
+    val ads: StateFlow<List<Ad>> = graph.hub.ads
+    val hubStatus: StateFlow<HubStatus> = graph.hub.status
 
     fun sendAirPlay(command: AirPlayCommand) = graph.airplay.send(command)
 
@@ -90,6 +97,12 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     fun showScreensaver() {
         _saverRequests.tryEmit(Unit)
     }
+
+    fun reportPresence(presence: Presence) {
+        graph.presence.value = presence
+    }
+
+    suspend fun adImage(url: String, width: Int, height: Int): ImageBitmap? = graph.adImages.load(url, width, height)
 
     fun open(app: LauncherApp) = graph.apps.open(app.packageName)
 

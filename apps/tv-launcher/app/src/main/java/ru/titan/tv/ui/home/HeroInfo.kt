@@ -44,16 +44,15 @@ fun clockStyle(s: Stage, size: Int = CLOCK_SIZE) = Type.number(s, size).copy(
     lineHeight = s.sp(size),
 )
 
-/** The club's mark and the booth, then the time, the date and the weather, readable from the sofa. */
+/** The club's mark, then the time, the date and the weather, readable from the sofa. */
 @Composable
-fun HeroInfo(roomName: String?, weather: WeatherNow?, modifier: Modifier = Modifier) {
+fun HeroInfo(weather: WeatherNow?, modifier: Modifier = Modifier) {
     val s = LocalStage.current
     val now = rememberMinuteClock()
     Column(modifier) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(s.dp(20))) {
             TitanLogo(s.dp(LOGO))
             BasicText("TITAN", style = Type.eyebrow(s).copy(color = Ink.Primary, fontSize = s.sp(28), fontWeight = FontWeight.Bold, letterSpacing = 0.32.em))
-            if (roomName != null) BasicText("·  $roomName", style = Type.meta(s).copy(fontSize = s.sp(28)))
         }
         BasicText(now.format(TIME_FORMAT), style = clockStyle(s), modifier = Modifier.padding(top = s.dp(18)))
         val line = Type.meta(s).copy(fontSize = s.sp(DATE_SIZE), color = Ink.Primary)
