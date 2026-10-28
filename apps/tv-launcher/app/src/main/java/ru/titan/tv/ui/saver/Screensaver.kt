@@ -30,6 +30,7 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.toSize
+import ru.titan.tv.airplay.AirPlayState
 import ru.titan.tv.apps.DEFAULT_ART_COLORS
 import ru.titan.tv.ui.LocalStage
 import ru.titan.tv.ui.brand.TitanLogo
@@ -47,7 +48,7 @@ import java.time.format.DateTimeFormatter
 data class SaverHint(val icon: String, val title: String, val detail: String)
 
 private const val HINT_MS = 8_000L
-// Still: on this TV every full-screen frame is expensive, so only the hint in the corner changes
+// Still: on this TV every full-screen frame is expensive, so only the hint and the player's progress change
 private const val LOGO_GLOW = 0.8f
 private const val LOGO = 230
 private val TIME_FORMAT = DateTimeFormatter.ofPattern("HH:mm")
@@ -55,10 +56,11 @@ private val HINT_FILL = Color.White.copy(alpha = 0.08f)
 
 /**
  * After two idle minutes on the home screen: the club's logo glowing on its own colours, the time in a
- * corner and, in the other, one hint at a time about the booth. Any key brings the home screen back.
+ * corner, what plays over AirPlay in the other top corner and, below it, one hint at a time about the
+ * booth. Any key brings the home screen back.
  */
 @Composable
-fun Screensaver(roomName: String?, hints: List<SaverHint>) {
+fun Screensaver(roomName: String?, hints: List<SaverHint>, airplay: AirPlayState) {
     val s = LocalStage.current
     val backdrop = remember { Backdrop(DEFAULT_ART_COLORS) }
     Box(
@@ -87,6 +89,7 @@ fun Screensaver(roomName: String?, hints: List<SaverHint>) {
             style = clockStyle(s, 96),
             modifier = Modifier.align(Alignment.TopEnd).padding(top = s.dp(56), end = s.dp(96)),
         )
+        SaverPlayer(airplay, Modifier.align(Alignment.TopStart).padding(start = s.dp(96), top = s.dp(64)))
         if (hints.isNotEmpty()) {
             HintCorner(hints, Modifier.align(Alignment.BottomStart).padding(start = s.dp(96), bottom = s.dp(80)))
         }

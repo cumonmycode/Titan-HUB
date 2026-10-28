@@ -199,9 +199,9 @@ fun HomeScreen(viewModel: HomeViewModel) {
         delay(CROSSFADE_SETTLE_MS)
         focusedApp?.let { backdrop.showColors(it.colors) }
     }
-    // Every key restarts the countdown; music over AirPlay or an open panel holds it off
-    LaunchedEffect(resumed, idle, airplayPlaying) {
-        if (!resumed || !idle || airplayPlaying) return@LaunchedEffect
+    // Every key restarts the countdown; an open panel holds it off. Music does not: the screensaver shows the player
+    LaunchedEffect(resumed, idle) {
+        if (!resumed || !idle) return@LaunchedEffect
         keyPresses.onStart { emit(Unit) }.collectLatest {
             delay(IDLE_MS)
             saver = true
@@ -388,7 +388,13 @@ fun HomeScreen(viewModel: HomeViewModel) {
                 }
             }
             AnimatedVisibility(visible = saver, enter = fadeIn(tween(700)), exit = fadeOut(tween(250))) {
-                Screensaver(room.name.takeIf { hasRoom }, saverHints(room.canCallStaff, room.climate != null, airplay.receiverName, cinemaApps.map { it.label }, sources.isNotEmpty()))
+                // While music plays the player says it all; the AirPlay invitation would repeat it
+                val airplayName = airplay.receiverName.takeIf { airplay.nowPlaying == null }
+                Screensaver(
+                    roomName = room.name.takeIf { hasRoom },
+                    hints = saverHints(room.canCallStaff, room.climate != null, airplayName, cinemaApps.map { it.label }, sources.isNotEmpty()),
+                    airplay = airplay,
+                )
             }
         }
     }
