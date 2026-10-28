@@ -7,7 +7,7 @@
  * алфавиту. Только включённые и отмеченные «на экране ТВ» позиции/зоны с ценой > 0;
  * без себестоимости и остатков.
  */
-import type { Database, Screen } from '@titan/database'
+import type { Database, Screen, ScreenSlide } from '@titan/database'
 import { menuCategories, inventory, spaces, appSettings, screens, screenSlides, eq, and, asc, isNull } from '@titan/database'
 
 export const SCREEN_THEMES = ['night', 'neon', 'deco', 'synth', 'avant', 'dossier', 'halloween'] as const
@@ -95,6 +95,13 @@ export type ShowItem = {
   fit: string
 }
 
+/** Реклама ленты, которую есть что показать: картинка со ссылкой или карточка не пустая. */
+export function bandReady(sl: Pick<ScreenSlide, 'kind' | 'imageUrl' | 'title' | 'body' | 'linkUrl'>): boolean {
+  if (sl.kind === 'image') return !!sl.imageUrl
+  if (sl.kind === 'card') return !!(sl.title || sl.body || sl.linkUrl)
+  return false
+}
+
 /** Показ, когда в нём ничего не включено: просто меню. */
 const MENU_ONLY: ShowItem[] = [{ kind: 'menu', imageUrl: null, durationSec: 60, transition: 'fade', transitionMs: 900, fit: 'contain' }]
 
@@ -121,9 +128,7 @@ async function screenContent(db: Database, screen: Screen) {
       })
       continue
     }
-    if (sl.kind === 'image' && !sl.imageUrl) continue
-    if (sl.kind === 'card' && !sl.title && !sl.body && !sl.linkUrl) continue
-    if (sl.kind === 'menu') continue
+    if (!bandReady(sl)) continue
     band.push({
       kind: sl.kind,
       imageUrl: sl.kind === 'image' ? sl.imageUrl : null,
