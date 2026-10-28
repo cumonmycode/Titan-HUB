@@ -7,6 +7,7 @@ import * as WebBrowser from 'expo-web-browser';
 import { useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
 
+import { BoothTvSections } from '@/components/booth-tv-sections';
 import { ActionRow, LinkRow, TextRow } from '@/components/native-form';
 import { ScreenPreview, swatchOf } from '@/components/screen-preview';
 import { Text as RNText } from '@/components/text';
@@ -38,6 +39,8 @@ const PREVIEW_MAX = 360;
  * Один экран: превью телевизора, «Что показывать» — один плейлист по кругу (меню и
  * картинки, порядок меняется), оформление меню (тема и реклама внизу — отдельным экраном)
  * и сам телевизор (название, поворот, подключение). Правит владелец.
+ * К экрану привязан ТВ в кабинке (Titan TV) — вместо показа и оформления его пульт,
+ * что на нём сейчас, сообщение гостям и реклама (BoothTvSections).
  */
 export default function ScreenEditorScreen() {
   const { screenId } = useLocalSearchParams<{ screenId: string }>();
@@ -71,7 +74,8 @@ export default function ScreenEditorScreen() {
   // Пустой показ — тоже меню.
   const hasMenu = active.length === 0 || active.some((s) => s.kind === 'menu');
   const status = deviceStatus(screen);
-  const device = [screen.deviceModel, screen.appVersion && `Titan Menu ${screen.appVersion}`].filter(Boolean).join(' · ');
+  const isBooth = screen.deviceApp === 'launcher';
+  const device = [screen.deviceModel, screen.appVersion && `${isBooth ? 'Titan TV' : 'Titan Menu'} ${screen.appVersion}`].filter(Boolean).join(' · ');
 
   const run = async (action: () => Promise<void>, failure: string) => {
     try {
@@ -141,14 +145,20 @@ export default function ScreenEditorScreen() {
       <Host style={{ flex: 1 }} useViewportSizeMeasurement>
         <Form modifiers={[refreshable(async () => void (await query.refetch()))]}>
           <Section footer={<Text>{screen.paired ? (device ? `${device}. Приставка отмечается раз в 20 секунд.` : 'Приставка отмечается раз в 20 секунд.') : 'Телевизор не подключён — ниже «Подключить телевизор».'}</Text>}>
-            <RNHostView matchContents>
-              <View style={styles.preview}>
-                <ScreenPreview rotation={screen.rotation} theme={screen.theme} first={active[0]} width={Math.min(width - 64, PREVIEW_MAX)} status={status} />
-              </View>
-            </RNHostView>
+            {isBooth ? (
+              <LinkRow icon="tv" color={status.color} title={status.label} valueColor={status.color} chevron={false} />
+            ) : (
+              <RNHostView matchContents>
+                <View style={styles.preview}>
+                  <ScreenPreview rotation={screen.rotation} theme={screen.theme} first={active[0]} width={Math.min(width - 64, PREVIEW_MAX)} status={status} />
+                </View>
+              </RNHostView>
+            )}
           </Section>
 
-          <Section
+          {isBooth ? <BoothTvSections screen={screen} band={band} isOwner={isOwner} /> : null}
+
+          {!isBooth ? <Section
             title="Что показывать"
             footer={
               <Text>
@@ -179,9 +189,9 @@ export default function ScreenEditorScreen() {
             {isOwner && show.length > 1 ? (
               <ActionRow title={ordering ? 'Готово' : 'Изменить порядок'} icon={ordering ? 'checkmark.circle' : 'arrow.up.arrow.down'} onPress={() => setOrdering((v) => !v)} />
             ) : null}
-          </Section>
+          </Section> : null}
 
-          {hasMenu ? (
+          {!isBooth && hasMenu ? (
             <Section title="Оформление меню" footer={<Text>Что попадает в меню — кнопкой «На экране ТВ» у позиций в «Товарах» и «Тарифах».</Text>}>
               <RNHostView matchContents>
                 <ThemeChips value={screen.theme} disabled={!isOwner} onChange={(theme) => save({ theme })} />
@@ -199,13 +209,15 @@ export default function ScreenEditorScreen() {
 
           <Section title="Телевизор">
             {isOwner ? <TextRow key={screen.name} label="Название" value={screen.name} maxLength={60} onCommit={(name) => name && save({ name })} /> : <LinkRow title="Название" value={screen.name} chevron={false} />}
-            <Picker label="Как висит" selection={screen.rotation} onSelectionChange={(next) => save({ rotation: Number(next) as ScreenPatch['rotation'] })} modifiers={[pickerStyle('menu')]}>
-              {ROTATIONS.map((r) => (
-                <Text key={r.key} modifiers={[tag(r.key)]}>
-                  {r.label}
-                </Text>
-              ))}
-            </Picker>
+            {!isBooth ? (
+              <Picker label="Как висит" selection={screen.rotation} onSelectionChange={(next) => save({ rotation: Number(next) as ScreenPatch['rotation'] })} modifiers={[pickerStyle('menu')]}>
+                {ROTATIONS.map((r) => (
+                  <Text key={r.key} modifiers={[tag(r.key)]}>
+                    {r.label}
+                  </Text>
+                ))}
+              </Picker>
+            ) : null}
             {isOwner && !screen.paired ? (
               <ActionRow title="Подключить телевизор" icon="antenna.radiowaves.left.and.right" onPress={() => router.push({ pathname: '/manage/screens/connect', params: { screenId: screen.id } })} />
             ) : null}

@@ -47,7 +47,33 @@ export type Screen = {
   deviceIp: string | null;
   pairedAt: string | null;
   lastSeenAt: string | null;
+  /** Что привязано: приставка Titan Menu или ТВ в кабинке с главным экраном Titan TV. */
+  deviceApp: DeviceApp | null;
+  /** Что сейчас на ТВ в кабинке (пока он на связи). */
+  deviceState: DeviceState | null;
+  /** ТВ в кабинке: реклама на главном экране и заставке и чья лента (null — как на экране с меню). */
+  adsEnabled: boolean;
+  adsScreenId: string | null;
 };
+
+export type DeviceApp = 'menu' | 'launcher';
+
+export type DeviceState = {
+  screen: 'home' | 'saver' | 'cinema' | 'app' | 'input';
+  app?: string | null;
+  airplay?: { title: string; artist: string; client: string; playing: boolean } | null;
+  volume?: { level: number; max: number; muted: boolean } | null;
+  ha?: 'connected' | 'connecting' | 'offline' | 'auth_failed' | 'idle' | null;
+};
+
+/** Пульт ТВ в кабинке (POST /screens/:id/command). */
+export type ScreenCommand =
+  | { action: 'home' }
+  | { action: 'screensaver' }
+  | { action: 'reset' }
+  | { action: 'message'; text: string; seconds: number }
+  | { action: 'volume'; percent: number }
+  | { action: 'mute'; muted: boolean };
 
 /** Элемент экрана: в показе — меню или картинка, в ленте — картинка или карточка. */
 export type ScreenSlide = {
@@ -81,7 +107,7 @@ export type SlideInput = {
   isActive?: boolean;
 };
 
-export type ScreenPatch = Partial<Pick<Screen, 'name' | 'rotation' | 'theme' | 'bandSec'>>;
+export type ScreenPatch = Partial<Pick<Screen, 'name' | 'rotation' | 'theme' | 'bandSec' | 'adsEnabled' | 'adsScreenId'>>;
 
 /** GET /screens/:id — экран, его показ и реклама ленты. */
 export type ScreenDetail = { screen: Screen; show: ScreenSlide[]; slides: ScreenSlide[] };
@@ -184,6 +210,8 @@ export function screenPageUrl(id: string, theme?: string): string {
 // ── Данные ────────────────────────────────────────────────────────────────
 
 const screensKey = (club: string) => [club, 'screens'];
+/** ТВ присылает новое состояние вскоре после команды. */
+const STATE_AFTER_COMMAND_MS = 3000;
 const screenKey = (club: string, id: string) => [club, 'screens', id];
 const clubNow = () => useSession.getState().club?.host ?? 'none';
 
@@ -198,10 +226,19 @@ export function refreshScreens(): void {
  * применяется и к сохранённому кэшу: достраиваем старый формат, а не падаем на нём,
  * пока не пришёл свежий ответ.
  */
-type StoredScreen = Omit<Screen, 'show'> & { show?: ShowSummary; kind?: string };
+type StoredScreen = Omit<Screen, 'show' | 'deviceApp' | 'deviceState' | 'adsEnabled' | 'adsScreenId'> &
+  Partial<Pick<Screen, 'deviceApp' | 'deviceState' | 'adsEnabled' | 'adsScreenId'>> & { show?: ShowSummary; kind?: string };
 
+// ТВ в кабинке (миграция 091) — в старом кэше этих полей ещё нет.
 function normalizeScreen(s: StoredScreen): Screen {
-  return { ...s, show: s.show ?? { menu: s.kind !== 'slideshow', images: 0 } };
+  return {
+    ...s,
+    show: s.show ?? { menu: s.kind !== 'slideshow', images: 0 },
+    deviceApp: s.deviceApp ?? null,
+    deviceState: s.deviceState ?? null,
+    adsEnabled: s.adsEnabled ?? true,
+    adsScreenId: s.adsScreenId ?? null,
+  };
 }
 
 const selectScreens = (list: StoredScreen[]): Screen[] => list.map(normalizeScreen);
@@ -250,6 +287,12 @@ export async function updateScreen(id: string, patch: ScreenPatch): Promise<void
 export async function deleteScreen(id: string): Promise<void> {
   await api.delete(`/screens/${id}`);
   refreshScreens();
+}
+
+/** Команда пульта ТВ в кабинке: уходит сразу; состояние ТВ обновится через пару секунд. */
+export async function sendScreenCommand(id: string, command: ScreenCommand): Promise<void> {
+  await api.post(`/screens/${id}/command`, command);
+  setTimeout(refreshScreens, STATE_AFTER_COMMAND_MS);
 }
 
 export async function unpairScreen(id: string): Promise<void> {
@@ -429,3 +472,39 @@ export async function pairTv(tv: FoundTv, screenId: string): Promise<{ name: str
   refreshScreens();
   return { name: body.name ?? '' };
 }
+
+/** «Главный экран», «Заставка», «YouTube», «HDMI 1». */
+export function nowOnScreen(state: DeviceState): string {
+  switch (state.screen) {
+    case 'home':
+      return 'Главный экран';
+    case 'saver':
+      return 'Заставка';
+    case 'cinema':
+      return 'Кинозал';
+    case 'input':
+      return state.app || 'Вход HDMI';
+    case 'app':
+      return state.app || 'Другое приложение';
+  }
+}
+
+/** Громкость в процентах, как её двигает пульт HUB. */
+export const volumePercent = (v: NonNullable<DeviceState['volume']>) => Math.round((v.level / Math.max(1, v.max)) * 100);
+
+export const HA_STATE: Record<NonNullable<DeviceState['ha']>, { label: string; color: string }> = {
+  connected: { label: 'Свет и климат на связи', color: '#34C759' },
+  connecting: { label: 'Свет и климат подключается', color: '#FF9500' },
+  offline: { label: 'Нет связи с Home Assistant', color: '#FF3B30' },
+  auth_failed: { label: 'Home Assistant не принял токен', color: '#FF3B30' },
+  idle: { label: 'Свет и климат не настроены', color: '#8E8E93' },
+};
+
+/** Частые сообщения гостям: одно нажатие вместо набора; label — подпись кнопки. */
+export const MESSAGE_PRESETS: { label: string; text: string }[] = [
+  { label: '10 минут до конца', text: 'Через 10 минут время кабинки закончится. Продлить — у администратора' },
+  { label: 'Заказ готов', text: 'Ваш заказ готов' },
+  { label: 'Администратор идёт', text: 'Администратор скоро подойдёт' },
+];
+
+export const MESSAGE_SECONDS = 20;

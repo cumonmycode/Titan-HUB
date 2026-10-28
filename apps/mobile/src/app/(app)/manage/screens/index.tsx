@@ -9,7 +9,7 @@ import { Text } from '@/components/text';
 import { ToolbarButton } from '@/components/toolbar';
 import { haptic } from '@/lib/haptics';
 import { usePageGutter } from '@/lib/layout';
-import { deviceStatus, showLabel, THEMES, useScreens, type Screen } from '@/lib/screens-api';
+import { deviceStatus, nowOnScreen, showLabel, THEMES, useScreens, type Screen } from '@/lib/screens-api';
 import { useSession } from '@/lib/session';
 import { colors, space, type, useAccentHex } from '@/lib/theme';
 
@@ -94,6 +94,10 @@ export default function ScreensScreen() {
 function ScreenTile({ screen, width, onPress }: { screen: Screen; width: number; onPress: () => void }) {
   const status = deviceStatus(screen);
   const theme = THEMES.find((t) => t.key === screen.theme)?.name;
+  const isBooth = screen.deviceApp === 'launcher';
+  const subtitle = isBooth
+    ? ['ТВ в кабинке', screen.deviceState && nowOnScreen(screen.deviceState)].filter(Boolean).join(' · ')
+    : [showLabel(screen.show), screen.show.menu ? theme : null].filter(Boolean).join(' · ');
   return (
     <Pressable
       onPress={() => {
@@ -105,13 +109,19 @@ function ScreenTile({ screen, width, onPress }: { screen: Screen; width: number;
       accessibilityLabel={`${screen.name}, ${status.label}`}
     >
       <View style={styles.previewBox}>
-        <ScreenPreview rotation={screen.rotation} theme={screen.theme} width={width - TILE_PAD * 2} />
+        {isBooth ? (
+          <View style={[styles.booth, { width: width - TILE_PAD * 2, height: ((width - TILE_PAD * 2) * 9) / 16 }]}>
+            <SymbolView name="tv.inset.filled" size={34} tintColor="white" />
+          </View>
+        ) : (
+          <ScreenPreview rotation={screen.rotation} theme={screen.theme} width={width - TILE_PAD * 2} />
+        )}
       </View>
       <Text style={[type.headline, styles.label]} numberOfLines={1}>
         {screen.name}
       </Text>
       <Text style={[type.footnote, styles.secondary]} numberOfLines={1}>
-        {[showLabel(screen.show), screen.show.menu ? theme : null].filter(Boolean).join(' · ')}
+        {subtitle}
       </Text>
       <View style={styles.statusRow}>
         <View style={[styles.dot, { backgroundColor: status.color }]} />
@@ -124,6 +134,7 @@ function ScreenTile({ screen, width, onPress }: { screen: Screen; width: number;
 }
 
 const styles = StyleSheet.create({
+  booth: { borderRadius: 10, borderCurve: 'continuous', backgroundColor: '#2A1B5C', alignItems: 'center', justifyContent: 'center' },
   screen: { flex: 1, backgroundColor: colors.groupedBackground },
   content: { gap: space.lg, paddingTop: space.md, paddingBottom: space.xxxl },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: space.md },
