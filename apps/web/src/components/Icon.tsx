@@ -1297,6 +1297,74 @@ const ICONS: Record<string, React.ReactNode> = {
       <path d="M18.5 5.5c0 2-1.6 2-1.6 3.8M21.5 7.5c0 1.6-1.4 1.6-1.4 3" />
     </>
   ),
+
+  /* ── ТВ в кабинке ───────────────────────────────────────── */
+  live_tv: (
+    <>
+      <rect x="2" y="6" width="20" height="14" rx="2" />
+      <path d="M8 2l4 4 4-4" />
+      <path d="M10 10.5l4.5 2.5-4.5 2.5z" />
+    </>
+  ),
+  volume_up: (
+    <>
+      <path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z" />
+      <path d="M15.5 9a4 4 0 010 6M18 6.5a7.5 7.5 0 010 11" />
+    </>
+  ),
+  volume_off: (
+    <>
+      <path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z" />
+      <path d="M16 9.5l5 5M21 9.5l-5 5" />
+    </>
+  ),
+  music_note: (
+    <>
+      <path d="M9 18V6l10-2v12" />
+      <circle cx="6.5" cy="18" r="2.5" />
+      <circle cx="16.5" cy="16" r="2.5" />
+    </>
+  ),
+  pause: (
+    <>
+      <rect x="6.5" y="5" width="3.5" height="14" rx="1" />
+      <rect x="14" y="5" width="3.5" height="14" rx="1" />
+    </>
+  ),
+  lightbulb: (
+    <>
+      <path d="M9 18h6M10 21h4" />
+      <path d="M12 3a6 6 0 00-3.5 10.9c.6.5 1 1.2 1 2V16h5v-.1c0-.8.4-1.5 1-2A6 6 0 0012 3z" />
+    </>
+  ),
+  settings_remote: (
+    <>
+      <rect x="8" y="2.5" width="8" height="19" rx="2.5" />
+      <circle cx="12" cy="8" r="1.8" />
+      <path d="M10.5 13h3M10.5 16h3" />
+    </>
+  ),
+  wallpaper: (
+    <>
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <path d="M3 16l5-5 4 4 3-3 6 6" />
+      <circle cx="15.5" cy="8.5" r="1.5" />
+    </>
+  ),
+  input: (
+    <>
+      <path d="M14 4h5a2 2 0 012 2v12a2 2 0 01-2 2h-5" />
+      <path d="M3 12h11M10 8l4 4-4 4" />
+    </>
+  ),
+  apps: (
+    <>
+      <rect x="4" y="4" width="6" height="6" rx="1.5" />
+      <rect x="14" y="4" width="6" height="6" rx="1.5" />
+      <rect x="4" y="14" width="6" height="6" rx="1.5" />
+      <rect x="14" y="14" width="6" height="6" rx="1.5" />
+    </>
+  ),
 }
 
 export function Icon({ name, size = 24, color, style, className }: IconProps) {

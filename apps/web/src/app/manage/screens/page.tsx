@@ -15,21 +15,25 @@ import { StateView } from '@/components/StateView'
 import { useToast } from '@/components/Toast'
 import { useAuthStore } from '@/store/auth.store'
 import { PageHeader, Sheet, Button, INP, LBL } from '@/components/manage/DesignSystem'
-import { ROTATIONS, SCREENS_KEY, deviceStatus, showLabel, type Screen } from '@/lib/screens'
+import { ROTATIONS, SCREENS_KEY, deviceStatus, nowOnScreen, showLabel, type Screen } from '@/lib/screens'
 import { TabletsSection } from '@/components/manage/screens/TabletsSection'
 
 function ScreenCard({ s }: { s: Screen }) {
   const status = deviceStatus(s)
   const rotation = ROTATIONS.find((r) => r.key === s.rotation)
+  const isBooth = s.deviceApp === 'launcher'
+  const subtitle = isBooth
+    ? ['ТВ в кабинке', s.deviceState && nowOnScreen(s.deviceState)].filter(Boolean).join(' · ')
+    : `${showLabel(s.show)} · ${rotation?.short}`
   return (
     <Link href={`/manage/screens/${s.id}`} style={{ textDecoration: 'none', color: 'inherit' }}>
       <div className="glass-l2" style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 16px', borderRadius: 18, border: '1px solid rgba(255,255,255,0.08)' }}>
         <div style={{ width: 44, height: 44, borderRadius: 13, flexShrink: 0, background: 'rgba(139,92,246,0.14)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <Icon name={s.show.menu ? 'tv' : 'slideshow'} size={21} color="#a78bfa" />
+          <Icon name={isBooth ? 'live_tv' : s.show.menu ? 'tv' : 'slideshow'} size={21} color="#a78bfa" />
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
           <p style={{ fontSize: 15, fontWeight: 700, margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.name}</p>
-          <p style={{ fontSize: 12, color: 'var(--on-surface-variant)', margin: '2px 0 0' }}>{showLabel(s.show)} · {rotation?.short}</p>
+          <p style={{ fontSize: 12, color: 'var(--on-surface-variant)', margin: '2px 0 0' }}>{subtitle}</p>
           <p style={{ fontSize: 12, margin: '4px 0 0', display: 'flex', alignItems: 'center', gap: 6, color: status.color }}>
             <span style={{ width: 7, height: 7, borderRadius: 4, background: status.color, flexShrink: 0 }} />
             {status.label}
@@ -71,7 +75,7 @@ export default function ScreensPage() {
     <div style={{ minHeight: '100dvh', display: 'flex', flexDirection: 'column' }}>
       <PageHeader
         title="Экраны"
-        subtitle="Телевизоры с приложением Titan Menu"
+        subtitle="ТВ с меню и ТВ в кабинках"
         onBack={() => router.push('/manage')}
         action={isOwner ? { label: 'Добавить', icon: 'add', onClick: () => setAdding(true) } : undefined}
       />
@@ -94,7 +98,7 @@ export default function ScreensPage() {
             <span style={{ ...LBL, marginBottom: 0, color: '#a78bfa' }}>Как подключить телевизор</span>
           </div>
           <ol style={{ margin: 0, paddingLeft: 18, fontSize: 13, lineHeight: 1.55, color: 'var(--on-surface-variant)' }}>
-            <li>Установите на ТВ-приставку приложение Titan Menu и откройте его — на экране появится код.</li>
+            <li>Установите на ТВ-приставку приложение Titan Menu и откройте его — на экране появится код. ТВ в кабинке с Titan TV показывает код в «Все приложения».</li>
             <li>На телефоне в той же Wi-Fi сети откройте Titan HUB → Управление → Экраны → «Подключить ТВ».</li>
             <li>Выберите приставку с тем же кодом и экран, который она будет показывать.</li>
           </ol>

@@ -33,7 +33,33 @@ export interface Screen {
   deviceIp: string | null
   pairedAt: string | null
   lastSeenAt: string | null
+  /** Что привязано: приставка Titan Menu или ТВ в кабинке с главным экраном Titan TV. */
+  deviceApp: DeviceApp | null
+  /** Что сейчас на ТВ в кабинке (пока он на связи). */
+  deviceState: DeviceState | null
+  /** ТВ в кабинке: реклама на главном экране и заставке, и чья лента (null — как на экране с меню). */
+  adsEnabled: boolean
+  adsScreenId: string | null
 }
+
+export type DeviceApp = 'menu' | 'launcher'
+
+export interface DeviceState {
+  screen: 'home' | 'saver' | 'cinema' | 'app' | 'input'
+  app?: string | null
+  airplay?: { title: string; artist: string; client: string; playing: boolean } | null
+  volume?: { level: number; max: number; muted: boolean } | null
+  ha?: 'connected' | 'connecting' | 'offline' | 'auth_failed' | 'idle' | null
+}
+
+/** Пульт ТВ в кабинке (POST /screens/:id/command). */
+export type ScreenCommand =
+  | { action: 'home' }
+  | { action: 'screensaver' }
+  | { action: 'reset' }
+  | { action: 'message'; text: string; seconds: number }
+  | { action: 'volume'; percent: number }
+  | { action: 'mute'; muted: boolean }
 
 /** Элемент экрана: в показе — меню или картинка, в ленте — картинка или карточка. */
 export interface ScreenSlide {
@@ -141,3 +167,34 @@ export function deviceStatus(s: Pick<Screen, 'paired' | 'online' | 'lastSeenAt'>
 
 /** Загрузка картинки показа — общий загрузчик (сжатие до 1920/1080 px, JPEG < 900 КБ). */
 export const uploadScreenImage = uploadImage
+
+/** «Главный экран», «Заставка», «YouTube», «HDMI 1». */
+export function nowOnScreen(state: DeviceState): string {
+  switch (state.screen) {
+    case 'home': return 'Главный экран'
+    case 'saver': return 'Заставка'
+    case 'cinema': return 'Кинозал'
+    case 'input': return state.app || 'Вход HDMI'
+    case 'app': return state.app || 'Другое приложение'
+  }
+}
+
+/** Громкость в процентах, как её двигает пульт HUB. */
+export const volumePercent = (v: NonNullable<DeviceState['volume']>) => Math.round((v.level / Math.max(1, v.max)) * 100)
+
+export const HA_STATE: Record<NonNullable<DeviceState['ha']>, { label: string; color: string }> = {
+  connected: { label: 'Свет и климат на связи', color: '#22C55E' },
+  connecting: { label: 'Свет и климат подключается', color: '#F59E0B' },
+  offline: { label: 'Нет связи с Home Assistant', color: '#F87171' },
+  auth_failed: { label: 'Home Assistant не принял токен', color: '#F87171' },
+  idle: { label: 'Свет и климат не настроены', color: 'var(--on-surface-variant)' },
+}
+
+/** Частые сообщения гостям: одно нажатие вместо набора на телефоне; label — подпись кнопки. */
+export const MESSAGE_PRESETS: { label: string; text: string }[] = [
+  { label: '10 минут до конца', text: 'Через 10 минут время кабинки закончится. Продлить — у администратора' },
+  { label: 'Заказ готов', text: 'Ваш заказ готов' },
+  { label: 'Администратор идёт', text: 'Администратор скоро подойдёт' },
+]
+
+export const MESSAGE_SECONDS = [10, 20, 30, 60]

@@ -4,6 +4,8 @@
  * кругу меню и картинки со своими временем, анимацией и скоростью), а если в показе
  * есть меню — его тема, лента и реклама в ней; привязанная приставка. Всё сохраняется
  * сразу — приставка подхватывает изменения в течение 20 секунд.
+ * К экрану привязан ТВ в кабинке (Titan TV) — вместо показа и темы его пульт,
+ * что на нём сейчас и реклама на главном экране и заставке (BoothTv).
  */
 import React, { use, useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
@@ -17,6 +19,7 @@ import { PageHeader, Button, ConfirmDialog, Chip, INP, LBL } from '@/components/
 import { ScreenThemePicker } from '@/components/manage/screens/ScreenThemePicker'
 import { ScreenSlides } from '@/components/manage/screens/ScreenSlides'
 import { ScreenShow } from '@/components/manage/screens/ScreenShow'
+import { BoothTvSections } from '@/components/manage/screens/BoothTv'
 import {
   BAND_DURATIONS, ROTATIONS, SCREENS_KEY, deviceStatus, screenKey, showLabel, withCurrent,
   type Screen, type ScreenDetail,
@@ -102,10 +105,12 @@ export default function ScreenEditorPage({ params }: { params: Promise<{ id: str
   // Оформление и лента нужны, только если меню есть в показе (пустой показ — тоже меню).
   const active = data.show.filter((x) => x.isActive)
   const hasMenu = active.length === 0 || active.some((x) => x.kind === 'menu')
+  const isBooth = screen.deviceApp === 'launcher'
+  const appName = isBooth ? 'Titan TV' : 'Titan Menu'
 
   return (
     <div style={{ minHeight: '100dvh', display: 'flex', flexDirection: 'column' }}>
-      <PageHeader title={screen.name} subtitle={showLabel(screen.show)} onBack={back} />
+      <PageHeader title={screen.name} subtitle={isBooth ? 'ТВ в кабинке' : showLabel(screen.show)} onBack={back} />
       <div style={{ padding: '16px 16px var(--bottom-nav-clear, 24px)', maxWidth: 'var(--content-narrow)', margin: '0 auto', width: '100%', boxSizing: 'border-box', display: 'flex', flexDirection: 'column', gap: 16 }}>
 
         {/* Приставка */}
@@ -117,7 +122,7 @@ export default function ScreenEditorPage({ params }: { params: Promise<{ id: str
           </div>
           {screen.paired ? (
             <p style={{ fontSize: 12.5, color: 'var(--on-surface-variant)', margin: 0, lineHeight: 1.5 }}>
-              {[screen.deviceModel, screen.appVersion && `Titan Menu ${screen.appVersion}`, screen.deviceIp].filter(Boolean).join(' · ') || 'Приставка подключена'}
+              {[screen.deviceModel, screen.appVersion && `${appName} ${screen.appVersion}`, screen.deviceIp].filter(Boolean).join(' · ') || 'Приставка подключена'}
             </p>
           ) : (
             <p style={{ fontSize: 12.5, color: 'var(--on-surface-variant)', margin: 0, lineHeight: 1.5 }}>
@@ -125,9 +130,11 @@ export default function ScreenEditorPage({ params }: { params: Promise<{ id: str
             </p>
           )}
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-            <a href={`/screen/${screen.id}`} target="_blank" rel="noopener noreferrer" style={{ textDecoration: 'none' }}>
-              <Button size="sm" variant="secondary" icon="open_in_new">Открыть экран</Button>
-            </a>
+            {!isBooth && (
+              <a href={`/screen/${screen.id}`} target="_blank" rel="noopener noreferrer" style={{ textDecoration: 'none' }}>
+                <Button size="sm" variant="secondary" icon="open_in_new">Открыть экран</Button>
+              </a>
+            )}
             {isOwner && screen.paired && (
               <Button size="sm" variant="secondary" icon="link_off" onClick={() => setConfirm('unpair')}>Отвязать ТВ</Button>
             )}
@@ -146,7 +153,7 @@ export default function ScreenEditorPage({ params }: { params: Promise<{ id: str
               onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
             />
           </div>
-          <div>
+          {!isBooth && <div>
             <label style={LBL}>Как висит телевизор</label>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
               {ROTATIONS.map((r) => (
@@ -156,18 +163,20 @@ export default function ScreenEditorPage({ params }: { params: Promise<{ id: str
             <p style={{ fontSize: 12, color: 'var(--on-surface-variant)', margin: '8px 2px 0' }}>
               Поворачивает картинку на приставке. Меню на боку или вверх ногами — выберите другой вариант.
             </p>
-          </div>
+          </div>}
         </section>
 
-        <section className="glass-l2" style={CARD}>
+        {isBooth && <BoothTvSections screen={screen} slides={data.slides} isOwner={isOwner} />}
+
+        {!isBooth && <section className="glass-l2" style={CARD}>
           <Title icon="slideshow">Показ</Title>
           <p style={{ fontSize: 12.5, color: 'var(--on-surface-variant)', margin: 0, lineHeight: 1.5 }}>
             Экран показывает элементы по кругу, сверху вниз. Картинка появляется поверх меню на весь экран, меню — из-под уходящей картинки. Нажмите на элемент, чтобы задать время, анимацию и её скорость.
           </p>
           <ScreenShow screen={screen} items={data.show} isOwner={isOwner} />
-        </section>
+        </section>}
 
-        {hasMenu && (
+        {!isBooth && hasMenu && (
           <>
             <section className="glass-l2" style={CARD}>
               <Title icon="restaurant_menu">Оформление</Title>
