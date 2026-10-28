@@ -1,0 +1,27 @@
+{
+  "homeAssistant": {
+    "url": "http://192.168.1.2:8123",
+    "token": "долгосрочный токен из профиля Home Assistant"
+  },
+  "room": {
+    "name": "Маленькая кабинка",
+    "lights": [
+      { "entity": "switch.prosmotrovaia_l2", "name": "Консоль", "icon": "strip" },
+      { "entity": "switch.prosmotrovaia_l1", "name": "Чилл", "icon": "sconce" }
+    ],
+    "climate": { "entity": "climate.konditsioner", "name": "Кондиционер" },
+    "callStaff": { "service": "script.turn_on", "entity": "script.skript_v_malenkuiu_kabinku_poprosili_podojti" }
+  },
+  "weather": { "entity": "weather.forecast_home_assistant" },
+  "pinnedApps": ["com.spotify.tv.android"],
+  "cinemaApps": [
+    "com.google.android.youtube.tv",
+    "ru.kinopoisk.tv",
+    "ru.rt.video.app.tv",
+    "com.vk.tv",
+    "rtb.mobile.android",
+    "tv.twitch.android.app",
+    "ar.tvplayer.tv",
+    "top.rootu.lampa"
+  ]
+}

@@ -1,0 +1,65 @@
+# Changhong (CHiQ) AI PONT (alimos, MediaTek MT9676), Google TV на Android 14, этап 1.
+# Одна строка = один пакет. Текст после # игнорируется.
+# Нужны: Wink, YouTube (с голосовым поиском), Spotify (пока не установлен), Lampa, Chromecast, Happ (VPN),
+# файловый менеджер. Эфирный тюнер, руководство, демонстрация экрана и плеер флешек не нужны (решение владельца).
+# Wi-Fi: текущая сеть «Keen» создана системой (android.uid.system), сеть «iKai» создана
+# com.google.android.tungsten.setupwraith, поэтому setupwraith не удаляем ни на каком этапе.
+# Не трогаем: HDMI и входы (com.mediatek.tis — HDMI 1–3, AV и аналог; oneworld.tvcenter — плеер входов;
+# tv.agent — кнопки TV/Input/Settings; com.android.providers.tv, google tv.inputplayer, com.cltv.* — отключены
+# производителем, но связаны с плеером входов; статические оверлеи тюнера), картинку и звук (dynamicbacklight,
+# gdch.gameoptimiser — ALLM для приставок, dolby), пульт (autopair, googletvremotepairer, tv.remote.service,
+# bluetooth, oneworld.wizardkt — экран сопряжения пульта, homwee.factory — кнопки HDMI), обновления
+# (tv.systemupdater, homwee.dmt.upgrade, homwee.upgrade), mediashell и dialservice (трансляция), tts
+# (распознавание речи), Gboard, webview (оба), gms, gsf, vending, packageinstaller, permissioncontroller, systemui.
+# Остаются на этап 2: launcherx, mediatek.tv.launcher.partner, settings.intelligence (держит роль).
+
+# Стриминги, которые не нужны
+com.netflix.ninja                                 # Netflix
+com.netflix.tokenmanager                          # служебный пакет Netflix
+com.amazon.amazonvideo.livingroom                 # Prime Video
+com.apple.atve.androidtv.appletv                  # Apple TV
+ru.ivi.client                                     # Иви
+ru.kinopoisk.tv                                   # Кинопоиск
+gpm.tnt_premier                                   # Premier
+com.vk.tv                                         # VK Видео (висит в фоне, 75 МБ)
+com.google.android.youtube.tvmusic                # YouTube Music
+com.google.android.play.games                     # Play Игры
+android.autoinstalls.config.google.gtvpai         # автоустановка партнёрских приложений
+
+# Эфирное ТВ и тюнер (HDMI работает через com.mediatek.tis, он остаётся)
+com.mediatek.dtv.tvinput.dvbtuner                 # тюнер DVB-T/C/S и HbbTV-посредник (к нему привязан только system_server)
+com.mediatek.dtv.tvinput.atsctuner                # тюнер ATSC (США), уже отключён
+com.mediatek.dtv.tvinput.isdbtuner                # тюнер ISDB (Бразилия, Япония), уже отключён
+com.mediatek.browservice                          # браузер HbbTV, работает только для dvbtuner
+com.mediatek.opapp                                # HbbTV-приложения спутниковых операторов, уже отключён
+tv.mopa.ginga                                     # Ginga — интерактив эфирного ТВ ISDB
+
+# Changhong и MediaTek: реклама, телеметрия, демо, ненужные функции
+tv.anoki.acr.controller                           # Anoki ACR: распознаёт, что на экране, для рекламы (постоянный процесс)
+ru.swlinks.gdch.rulaunch                          # заводской установщик «российских приложений» (рекламный ID, Firebase)
+com.homwee.store                                  # демо-режим для витрины магазина
+com.homwee.help                                   # встроенное руководство (его кнопки на пульте перестанут что-либо делать)
+com.homwee.mmp.screenshare                        # AirPlay-приёмник Changhong
+com.homwee.multiscreenshare                       # «Демонстрация экрана» Changhong
+com.mediatek.miracast                             # Miracast с Android-телефонов (Chromecast остаётся)
+com.gdch.wwtv.mediaplayer                         # плеер для флешек
+com.audiocn.karaoke.global.micmanager             # менеджер USB-караоке-микрофонов (к микрофону пульта отношения не имеет)
+
+# Google: Ассистент, заставка, отчёты, реклама
+com.google.android.katniss                        # Google Ассистент (голосовой поиск YouTube работает без него)
+com.google.android.apps.tv.dreamx                 # Ambient mode и панель Google Home (два процесса)
+com.google.android.feedback                       # отправка отчётов в Google
+com.android.tv.feedbackconsent                    # согласие на отправку отчётов
+com.google.android.partnersetup                   # партнёрская настройка поиска
+com.google.android.syncadapters.calendar          # синхронизация календаря (работает в фоне)
+com.google.android.onetimeinitializer             # разовая инициализация после настройки
+com.google.android.marvin.talkback                # экранный диктор
+com.android.adservices.api                        # рекламные сервисы Privacy Sandbox
+com.android.ondevicepersonalization.services      # персонализация рекламы на устройстве
+com.android.federatedcompute.services             # обучение моделей на данных устройства
+
+# Не нужно на ТВ
+com.android.printspooler                          # печать
+com.android.cameraextensions                      # расширения камеры
+com.android.dynsystem                             # установка тестовых образов системы
+com.android.wallpaperbackup                       # резервная копия обоев

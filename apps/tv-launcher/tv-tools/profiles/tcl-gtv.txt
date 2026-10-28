@@ -1,0 +1,61 @@
+# TCL Smart TV Pro (BeyondTV4, Realtek RTD2885), Google TV на Android 11, спальня Юлии.
+# Нужны: Wink, YouTube (с голосовым поиском), Spotify, Lampa, Chromecast.
+# Не трогаем: com.tcl.tv, tvinput, system.server, settings, dashboard, suspension (входы HDMI),
+# keyhelp, providers.config, tcl_bt_rcu_service, autopair, micmanager (пульт), initsetup,
+# factory.view, useragreement, versionUpdateApp (обновления прошивки), ttvs, android.webview, com.tvos.
+
+# Предустановленные стриминги
+com.netflix.ninja                                 # Netflix
+com.amazon.amazonvideo.livingroom                 # Prime Video
+com.disney.disneyplus                             # Disney+
+com.iqiyi.i18n.tv                                 # iQIYI
+au.com.stan.and                                   # Stan (уже отключён)
+tv.wuaki.apptv                                    # Rakuten TV (уже отключён)
+android.autoinstalls.config.google.gtvpai         # автоустановка партнёрских приложений
+com.google.android.videos                         # «Фильмы» Google TV
+com.google.android.youtube.tvmusic                # YouTube Music
+com.google.android.play.games                     # Play Игры
+
+# TCL: реклама, витрины и телеметрия
+com.tcl.bi                                        # сбор аналитики TCL
+com.tcl.logkit                                    # сбор логов TCL
+com.tcl.overseasappshow                           # витрина рекомендованных приложений
+com.tcl.waterfall.overseas                        # витрина фильмов TCL
+com.tcl.channelplus                               # TCL Channel — бесплатные каналы с рекламой
+com.tcl.tclchannel.overlay                        # оформление TCL Channel
+com.tcl.tv.tclhome_passive                        # рекламные ряды для главного экрана
+com.tcl.messagebox                                # рекламные сообщения
+com.tcl.esticker                                  # наклейки демо-режима магазина
+com.tcl.usercenter                                # аккаунт TCL
+com.tcl.guard                                     # «защитник» и менеджер приложений TCL
+com.tcl.partnercustomizer                         # партнёрская настройка
+com.tcl.ocean.instructions                        # встроенная инструкция
+
+# TCL: функции, которые не нужны
+com.tcl.assistant                                 # голосовой помощник TCL
+com.tcl.smartalexa                                # Alexa
+com.tcl.magiconnectfree                           # T-Cast/Magiconnect — пульт в телефоне TCL
+com.tcl.MultiScreenInteraction_TV                 # мультиэкран TCL
+com.tcl.browser                                   # браузер TCL
+com.tcl.gallery                                   # галерея
+com.tcl.ui_mediaCenter                            # медиаплеер для флешек
+com.tcl.gamebar                                   # игровая панель
+com.tcl.hearaid                                   # слуховой режим
+com.tcl.miracast                                  # Miracast (Chromecast остаётся)
+org.chromium.webview_shell                        # тестовая оболочка WebView
+
+# Google: Ассистент, заставка, отчёты
+com.google.android.katniss                        # Google Ассистент
+com.google.android.tv.assistant                   # Ассистент для ТВ
+com.google.android.apps.tv.dreamx                 # Ambient mode и панель Google Home
+com.google.android.feedback                       # отправка отчётов в Google
+com.google.android.syncadapters.calendar          # синхронизация календаря
+com.google.android.marvin.talkback                # экранный диктор
+com.google.android.onetimeinitializer             # разовая инициализация
+com.google.android.partnersetup                   # партнёрская настройка поиска
+
+# Остатки TCL (второй проход)
+com.tcl.t_solo                                    # «Слушать в наушниках» по Bluetooth
+com.tcl.dashboard                                 # панель TCL с рекламным «подарочным» разделом
+com.tcl.useragreement                             # экраны соглашений и канал отчётов TCL
+com.tcl.initsetup                                 # мастер первичной настройки TCL

@@ -1,0 +1,44 @@
+# Chromecast with Google TV 4K (sabrina), Android 14, этап 1.
+# Одна строка = один пакет. Текст после # игнорируется.
+# Нужны владельцу: Wink, YouTube (с голосовым поиском), Spotify, Lampa, Chromecast, Incy (VPN).
+# Главный экран Google TV (launcherx) и мастер настройки (setupwraith) удаляются на этапе 2,
+# когда будет установлен замещающий лаунчер.
+
+# Предустановленные приложения
+com.netflix.ninja                                    # Netflix
+com.netflix.tokenmanager                             # служебный пакет Netflix
+com.wbd.hbomax                                       # HBO Max (Play Store доустанавливает после настройки)
+com.disney.disneyplus                                # Disney+ (то же)
+com.amazon.amazonvideo.livingroom                    # Prime Video (то же)
+nl.uitzendinggemist                                  # NPO Start (то же)
+com.google.android.videos                            # «Фильмы» Google TV
+com.google.android.play.games                        # Play Игры
+android.autoinstalls.config.google.sabrina           # автоустановка партнёрских приложений (поставила Netflix)
+com.google.android.partnersetup                      # партнёрская настройка поиска
+
+# Ассистент, рекомендации, заставка
+com.google.android.katniss                           # Google Ассистент и кнопка Ассистента на пульте
+com.google.android.tvrecommendations                 # рекомендации (система уже отключила)
+com.google.android.apps.tv.dreamx                    # Ambient mode и панель Google Home
+com.google.android.backdrop                          # старая версия Ambient mode
+
+# Телеметрия и реклама
+com.google.android.feedback                          # отправка отчётов и отзывов в Google
+com.android.tv.feedbackconsent                       # согласие на отправку отчётов
+com.google.android.tv.remotecontrol.logging          # логирование нажатий пульта
+com.google.android.adservices.api                    # рекламные сервисы Privacy Sandbox
+com.google.android.ext.adservices.api                # рекламные сервисы, второй модуль
+com.google.android.ondevicepersonalization.services  # персонализация рекламы на устройстве
+com.google.android.federatedcompute                  # обучение моделей Google на данных устройства
+
+# Не нужно на ТВ
+com.google.android.syncadapters.calendar             # синхронизация календаря
+com.android.settings.intelligence                    # подсказки поиска в настройках
+com.google.android.marvin.talkback                   # экранный диктор
+com.android.printspooler                             # печать
+com.android.bluetoothmidiservice                     # MIDI по Bluetooth
+com.android.cameraextensions                         # расширения камеры
+com.android.dynsystem                                # установка тестовых образов системы
+com.android.wallpaperbackup                          # резервная копия обоев
+com.google.android.devicelockcontroller              # блокировка устройств, купленных в кредит
+com.google.android.onetimeinitializer                # разовая инициализация после настройки

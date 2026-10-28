@@ -1,0 +1,74 @@
+# Xiaomi Mi TV P1 (MiTV-MSSP1, nino, MediaTek), Android TV 9, кабинка «Смотровая» (Маленькая кабинка) клуба TITAN.
+# Одна строка = один пакет. Текст после # игнорируется. Этап 1 (до установки Titan TV).
+# Остаются по решению владельца 2026-10-28: Google Play, YouTube, Spotify, Lampa, TiviMate (ar.tvplayer.tv), Happ,
+# Twitch, VK Видео, Wink, Кинопоиск, Rutube (rtb.mobile.android), Vimu (net.gtvbox.videoplayer).
+# Не трогаем: setupwraith — создатель сети «Titan» (Android удалит сеть вместе с ним); mitv.service,
+# xiaomi.mitv.res, tvsetup.partnercustomizer (постоянные системные процессы: картинка, звук, пульт);
+# com.mediatek.* кроме заводского меню (HDMI-входы, кнопки пульта, сеть); gms, gsf, vending, webview, Gboard,
+# bluetooth (пульт), vpndialogs (Happ), providers.*, tv.settings, systemui.
+# Этап 2 (после set-home-activity на ru.titan.tv): com.google.android.tvlauncher.
+
+# Приложения не из списка
+com.netflix.ninja                                 # Netflix (поставлен через Uptodown)
+ru.more.play                                      # more.tv
+com.v2raytun.android                              # v2RayTun — второй VPN, остаётся Happ
+tv.ablesign.app                                   # AbleSign — больше не нужен
+com.apkcombo.app                                  # APKCombo — магазин APK
+com.uptodown                                      # Uptodown — магазин APK
+com.wuliang.xapkinstaller                         # XAPK Installer
+com.cxinventor.file.explorer                      # CX File Explorer
+
+# Xiaomi: телеметрия, обновления прошивки, реклама
+com.miui.tv.analytics                             # сбор аналитики Xiaomi (DataCollectorService, постоянный процесс)
+com.xiaomi.statistic                              # статистика Xiaomi
+com.xiaomi.mitv.updateservice                     # обновления прошивки (Firebase, держит процесс на переднем плане)
+com.xiaomo.tv.milegal                             # экраны соглашений и согласия на сбор данных
+com.xm.webcontent                                 # рекламные веб-страницы Xiaomi
+com.xiaomi.mitv.tvmanager                         # «Менеджер ТВ»: очистка, ускоритель, трафик (постоянный процесс)
+com.xiaomi.floatingframe                          # плавающие окна Xiaomi
+android.autoinstalls.config.xiaomi.amelie         # автоустановка партнёрских приложений
+
+# Xiaomi: PatchWall и медиаприложения
+com.mitv.tvhome.atv                               # PatchWall — главный экран Xiaomi (был отключён)
+com.mitv.tvhome.michannel                         # каналы PatchWall (Firebase, AppMeasurement)
+com.mitv.dream                                    # заставка Xiaomi
+com.mitv.gallery                                  # галерея
+com.mitv.videoplayer                              # видеоплеер для флешек (остаётся Vimu)
+com.xiaomi.mitv.mediaexplorer                     # проводник медиафайлов
+com.xiaomi.mimusic2                               # музыка Xiaomi
+mediatek.factorymenu.ui                           # заводское меню
+
+# Google: Ассистент, рекомендации, заставка, отчёты
+com.google.android.katniss                        # Google Ассистент; кнопка Ассистента откроет «Свет и климат» Titan TV
+com.google.android.speech.pumpkin                 # распознавание «Окей, Google»
+com.google.android.tts                            # синтез и распознавание речи Google
+com.google.android.backdrop                       # заставка Ambient
+com.google.android.tvrecommendations              # рекомендации (постоянный процесс)
+com.google.android.leanbacklauncher               # старый главный экран Android TV
+com.google.android.leanbacklauncher.recommendations # его рекомендации
+com.google.android.videos                         # «Фильмы» Google Play
+com.google.android.youtube.tvmusic                # YouTube Music
+com.google.android.play.games                     # Play Игры
+com.google.android.feedback                       # отправка отчётов в Google
+com.google.android.tv.bugreportsender             # отправка отчётов об ошибках
+com.google.android.partnersetup                   # партнёрская настройка поиска
+com.google.android.onetimeinitializer             # разовая инициализация
+com.google.android.syncadapters.calendar          # синхронизация календаря
+com.google.android.syncadapters.contacts          # синхронизация контактов
+com.google.android.marvin.talkback                # экранный диктор
+com.google.android.backuptransport                # резервное копирование в Google
+com.google.android.sss.authbridge                 # настройка с телефона (доступ к SMS и звонкам)
+com.google.android.boot.appsplashscreen           # заставка приложений при загрузке
+com.google.android.apps.mediashell                # Chromecast — не в списке владельца; в HA на него ничего не завязано
+com.google.android.tv.remote.service              # пульт в телефоне Google TV
+
+# AOSP: не нужно на ТВ
+org.chromium.webview_shell                        # тестовая оболочка WebView
+com.android.printspooler                          # печать
+com.android.dreams.basic                          # простая заставка
+com.android.wallpaperbackup                       # резервная копия обоев
+com.android.sharedstoragebackup                   # резервная копия общего хранилища
+com.android.backupconfirm                         # подтверждение резервного копирования
+com.android.htmlviewer                            # просмотр HTML
+com.android.settings.intelligence                 # подсказки поиска в настройках
+com.android.companiondevicemanager                # сопряжение с часами и браслетами

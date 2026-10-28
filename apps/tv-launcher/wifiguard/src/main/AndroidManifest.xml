@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
+
+    <!-- Only apps signed with the launcher's key may ask for a reconnect -->
+    <permission
+        android:name="ru.titan.permission.WIFI_GUARD"
+        android:protectionLevel="signature" />
+
+    <application
+        android:allowBackup="false"
+        android:label="Titan Wi-Fi">
+
+        <receiver
+            android:name=".ReconnectReceiver"
+            android:exported="true"
+            android:permission="ru.titan.permission.WIFI_GUARD">
+            <intent-filter>
+                <action android:name="ru.titan.wifi.RECONNECT" />
+            </intent-filter>
+        </receiver>
+
+        <!-- NETWORK_SETTINGS is held by adb and the system but cannot be granted to an app, unlike
+             WRITE_SECURE_SETTINGS; Android 14 also forbids adb from toggling the receiver instead -->
+        <receiver
+            android:name=".SetupReceiver"
+            android:exported="true"
+            android:permission="android.permission.NETWORK_SETTINGS">
+            <intent-filter>
+                <action android:name="ru.titan.wifi.SETUP" />
+            </intent-filter>
+        </receiver>
+    </application>
+</manifest>

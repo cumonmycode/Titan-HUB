@@ -1,0 +1,31 @@
+# Chromecast with Google TV 4K (кухня), этап 3, 2026-10-24: после обновления до Android 14 часть
+# удалённого вернулась, плюс рекламные и служебные пакеты, которых нет на других ТВ.
+# Главный экран — «Стекло» (app.steklo.tv). Все сохранённые сети Wi-Fi принадлежат системе (uid 1000).
+# Не трогаем: YouTube (голосовой поиск остаётся), mediashell (Chromecast), пульт, GMS, Play Store.
+
+# Вернулось после обновления
+com.google.android.apps.tv.launcherx              # главный экран Google TV (ловит кнопку «Домой»)
+com.google.android.katniss                        # Google Ассистент
+com.google.android.apps.tv.dreamx                 # Ambient mode и панель Google Home
+com.google.android.backdrop                       # заставка-фон Google TV
+com.google.android.videos                         # «Фильмы» Google TV
+com.google.android.play.games                     # Play Игры
+com.netflix.tokenmanager                          # токены Netflix
+com.android.settings.intelligence                 # подсказки поиска в настройках
+
+# Реклама, телеметрия и отчёты
+com.google.android.adservices.api                 # рекламные сервисы Android
+com.google.android.ext.adservices.api             # рекламные сервисы Android (расширение)
+com.google.android.ondevicepersonalization.services # персонализация рекламы
+com.google.android.federatedcompute               # обучение моделей на устройстве
+com.google.android.feedback                       # отправка отчётов в Google
+com.android.tv.feedbackconsent                    # согласие на отчёты
+
+# Не нужны на ТВ
+com.google.android.partnersetup                   # партнёрская настройка поиска
+com.google.android.onetimeinitializer             # разовая инициализация
+com.google.android.syncadapters.calendar          # синхронизация календаря
+com.google.android.marvin.talkback                # экранный диктор
+com.android.printspooler                          # печать
+com.android.dynsystem                             # установка образов системы
+com.android.cameraextensions                      # расширения камеры

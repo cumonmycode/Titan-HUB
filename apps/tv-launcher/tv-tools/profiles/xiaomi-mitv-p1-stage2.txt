@@ -1,0 +1,7 @@
+# Xiaomi Mi TV P1 (MiTV-MSSP1), этап 2: главный экран — Titan TV (ru.titan.tv).
+# Запускать только после: adb shell cmd package set-home-activity ru.titan.tv/.MainActivity
+# Кандидаты на HOME после этапа: Titan TV и FallbackHome из com.android.tv.settings (нужен на время загрузки).
+# Мастер настройки Google (setupwraith) не удаляется, а замораживается (pm disable-user): он создатель сети
+# «Titan», и Android удалит сеть вместе с ним.
+
+com.google.android.tvlauncher                     # главный экран Android TV

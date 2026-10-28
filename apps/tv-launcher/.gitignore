@@ -1,0 +1,12 @@
+.gradle/
+.kotlin/
+build/
+local.properties
+.idea/
+*.iml
+.DS_Store
+captures/
+config.json
+# Local logs of TV cleanups and audits
+tv-tools/runs/
+tv-tools/audits/

@@ -1,0 +1,8 @@
+# Chromecast with Google TV 4K (sabrina), этап 2: главный экран — «Стекло» (app.steklo.tv).
+# Запускать только после: adb shell cmd package set-home-activity app.steklo.tv/.MainActivity
+# Системный FallbackHome из com.android.tv.settings остаётся: он нужен на время загрузки.
+
+com.google.android.apps.tv.launcherx                 # главный экран Google TV
+com.google.android.tungsten.setupwraith              # мастер настройки и его «аварийный» главный экран
+com.google.android.chromecast.setupcustomization     # оформление мастера настройки
+com.google.android.tvlauncher                        # заглушка старого лаунчера Android TV

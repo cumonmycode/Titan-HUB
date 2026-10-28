@@ -1,0 +1,42 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="320dp"
+    android:height="180dp"
+    android:viewportWidth="320"
+    android:viewportHeight="180">
+    <path android:pathData="M0,0h320v180h-320z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:endX="320"
+                android:endY="180"
+                android:startX="0"
+                android:startY="0"
+                android:type="linear">
+                <item android:color="#FF1C1726" android:offset="0" />
+                <item android:color="#FF120F18" android:offset="1" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <path android:pathData="M0,0h320v180h-320z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:centerX="160"
+                android:centerY="90"
+                android:gradientRadius="120"
+                android:type="radial">
+                <item android:color="#598B5CF6" android:offset="0" />
+                <item android:color="#008B5CF6" android:offset="1" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <!-- The club's winged T, 368×339 units, scaled to 96 dp high and centred -->
+    <group
+        android:scaleX="0.2832"
+        android:scaleY="0.2832"
+        android:translateX="107.9"
+        android:translateY="42">
+        <path
+            android:fillColor="#FF7C5AF0"
+            android:pathData="M0,0L186,0L163,37L24,37Z M36,58L150,58L126,95L60,95Z M210,0L368,0L305,95L230,95L230,339L136,275L136,114Z" />
+    </group>
+</vector>
