@@ -15,6 +15,7 @@
     <string name="status_not_found">Экран не найден в Titan HUB. Его могли удалить — подключите ТВ заново.</string>
     <string name="status_slow">Экран загружается слишком долго.</string>
     <string name="hint_settings">Настройки — удерживайте OK на пульте</string>
+    <string name="clock_wrong">На приставке неверная дата — %1$s, поэтому нет связи с Titan HUB.\nУдерживайте OK → «Дата и время» → включите «Использовать время сети».</string>
     <string name="hint_legacy">Код для Titan HUB: %1$s · настройки — удерживайте OK</string>
 
     <!-- Привязка -->
@@ -52,6 +53,11 @@
     <string name="setup_autostart_button">Разрешить автозапуск</string>
     <string name="setup_home_button">Сделать главным экраном</string>
     <string name="setup_home_note">Главный экран: приставка сразу открывает Titan Menu, и кнопка «Домой» тоже ведёт сюда.</string>
+    <string name="setup_clock">Дата и время</string>
+    <string name="setup_clock_ok">%1$s · время берётся из сети.</string>
+    <string name="setup_clock_manual">%1$s. «Использовать время сети» выключено — после отключения питания дата собьётся и экран потеряет связь с Titan HUB. Включите его.</string>
+    <string name="setup_clock_wrong">Неверная дата: %1$s. С ней нет связи с Titan HUB — включите «Использовать время сети».</string>
+    <string name="setup_clock_button">Дата и время</string>
     <string name="setup_remote">Пульт</string>
     <string name="setup_remote_note">Настройки — удерживайте OK. Кнопка «Назад» экран не закрывает.</string>
     <string name="setup_no_screen">На этой приставке нет такого экрана настроек</string>

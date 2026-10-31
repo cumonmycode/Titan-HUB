@@ -34,6 +34,8 @@ import android.widget.TextView
 import org.json.JSONObject
 import java.io.IOException
 import java.net.Inet4Address
+import java.text.DateFormat
+import java.util.Date
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
@@ -43,6 +45,8 @@ import java.util.concurrent.TimeUnit
  *  • привязан — открываем /screen/<id> клуба, раз в 20 с отмечаемся (в сети, поворот);
  *  • не привязан — показываем код, объявляемся в локальной сети и ждём телефон;
  *  • старый режим Titan Menu 1.0 — показываем /menu, но телефон уже может нас найти.
+ * В любом режиме держим Wi‑Fi включённым (NetworkKeeper) и предупреждаем на экране, если
+ * сбилась дата приставки — с ней нет связи с сервером (DeviceClock).
  * «Назад» экран не закрывает; пропала связь — показываем, что происходит, и повторяем
  * сами. Настройки приставки — удержать OK на пульте.
  */
@@ -59,7 +63,9 @@ class MenuActivity : Activity(), LocalServer.Listener {
     private lateinit var statusHost: TextView
     private lateinit var pairing: View
     private lateinit var hint: TextView
+    private lateinit var clockWarning: TextView
     private lateinit var advertiser: Advertiser
+    private lateinit var keeper: NetworkKeeper
     private val server = LocalServer(this)
     private var web: WebView? = null
     @Volatile private var cache: OfflineCache? = null
@@ -75,17 +81,26 @@ class MenuActivity : Activity(), LocalServer.Listener {
     private val retry = Runnable { load() }
     private val stuck = Runnable { fail(getString(R.string.status_slow)) }
     private val hideHint = Runnable { hint.animate().alpha(0f).setDuration(HINT_FADE_MS).start() }
+    private val clockWatch = object : Runnable {
+        override fun run() {
+            showClockWarning()
+            handler.postDelayed(this, CLOCK_CHECK_MS)
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         prefs = Prefs(this)
         advertiser = Advertiser(this)
+        keeper = NetworkKeeper(this)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         // Страницу можно отладить через chrome://inspect, подключив приставку по adb.
         WebView.setWebContentsDebuggingEnabled(true)
         setContentView(buildScreen())
         hideSystemBars()
         watchNetwork()
+        worker.scheduleWithFixedDelay(guarded("Wi‑Fi") { keeper.check() }, 0, KEEPER_SEC, TimeUnit.SECONDS)
+        handler.post(clockWatch)
         applyMode()
     }
 
@@ -96,9 +111,11 @@ class MenuActivity : Activity(), LocalServer.Listener {
         statusHost = status.findViewById(R.id.status_host)
         pairing = layoutInflater.inflate(R.layout.view_pairing, stage, false)
         hint = layoutInflater.inflate(R.layout.view_hint, stage, false) as TextView
+        clockWarning = layoutInflater.inflate(R.layout.view_clock, stage, false) as TextView
         stage.addView(status)
         stage.addView(pairing)
         stage.addView(hint)
+        stage.addView(clockWarning)
         rotated = RotatedLayout(this).apply {
             setBackgroundColor(getColor(R.color.bg))
             addView(stage)
@@ -194,7 +211,16 @@ class MenuActivity : Activity(), LocalServer.Listener {
 
     private fun startHeartbeat() {
         stopHeartbeat()
-        heartbeat = worker.scheduleWithFixedDelay({ beat() }, 0, HEARTBEAT_SEC, TimeUnit.SECONDS)
+        heartbeat = worker.scheduleWithFixedDelay(guarded("пульс") { beat() }, 0, HEARTBEAT_SEC, TimeUnit.SECONDS)
+    }
+
+    /** Упавшая задача у ScheduledExecutor больше не повторяется — без этого пульс замолчал бы до перезапуска. */
+    private fun guarded(name: String, task: () -> Unit) = Runnable {
+        try {
+            task()
+        } catch (e: Exception) {
+            Log.w(TAG, "Сбой задачи «$name»", e)
+        }
     }
 
     private fun stopHeartbeat() {
@@ -225,6 +251,14 @@ class MenuActivity : Activity(), LocalServer.Listener {
         Log.i(TAG, "Экран отвязан в Titan HUB — показываем код")
         prefs.clearPairing()
         applyMode()
+    }
+
+    // ── Дата приставки ─────────────────────────────────────────────────────
+
+    private fun showClockWarning() {
+        val wrong = DeviceClock.isWrong()
+        if (wrong) clockWarning.text = getString(R.string.clock_wrong, DateFormat.getDateInstance(DateFormat.LONG).format(Date()))
+        clockWarning.visibility = if (wrong) View.VISIBLE else View.GONE
     }
 
     // ── Страница ───────────────────────────────────────────────────────────
@@ -492,6 +526,8 @@ class MenuActivity : Activity(), LocalServer.Listener {
         const val RETRY_MAX_MS = 60_000L
         const val LOAD_TIMEOUT_MS = 45_000L
         const val HEARTBEAT_SEC = 20L
+        const val KEEPER_SEC = 20L
+        const val CLOCK_CHECK_MS = 15_000L
         const val HOLD_MS = 1_200L
         const val HINT_MS = 6_000L
         const val HINT_FADE_MS = 400L

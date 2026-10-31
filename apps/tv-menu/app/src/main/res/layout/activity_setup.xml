@@ -205,6 +205,21 @@
                 <TextView
                     style="@style/Setup.Label"
                     android:layout_marginTop="26dp"
+                    android:text="@string/setup_clock" />
+
+                <TextView
+                    android:id="@+id/clock_status"
+                    style="@style/Setup.Body" />
+
+                <Button
+                    android:id="@+id/clock_button"
+                    style="@style/Setup.Button"
+                    android:layout_marginTop="12dp"
+                    android:text="@string/setup_clock_button" />
+
+                <TextView
+                    style="@style/Setup.Label"
+                    android:layout_marginTop="26dp"
                     android:text="@string/setup_remote" />
 
                 <TextView

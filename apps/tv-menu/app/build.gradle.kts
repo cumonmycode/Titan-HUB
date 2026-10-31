@@ -21,9 +21,11 @@ android {
         applicationId = "ru.titan.menu"
         // Android 7.1+: раньше система не доверяет сертификату Let's Encrypt (ISRG Root X1).
         minSdk = 25
-        targetSdk = 36
-        versionCode = 5
-        versionName = "2.1.0"
+        // 28 нарочно: с targetSdk 29+ Android не даёт приложению включить Wi‑Fi, а приставка
+        // должна возвращаться в сеть сама (NetworkKeeper). APK ставится мимо Google Play.
+        targetSdk = 28
+        versionCode = 6
+        versionName = "2.2.0"
     }
 
     signingConfigs {
@@ -47,6 +49,11 @@ android {
 
     buildFeatures {
         buildConfig = true
+    }
+
+    lint {
+        // Требование Google Play к targetSdk; приложение туда не публикуется (см. targetSdk выше).
+        disable += "ExpiredTargetSdkVersion"
     }
 
     compileOptions {

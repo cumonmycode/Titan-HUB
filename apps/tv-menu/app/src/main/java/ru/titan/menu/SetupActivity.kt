@@ -15,10 +15,12 @@ import android.widget.EditText
 import android.widget.RadioGroup
 import android.widget.TextView
 import android.widget.Toast
+import java.text.DateFormat
+import java.util.Date
 
 /**
  * Настройки приставки с пульта. Содержимое экрана (что показывать, поворот, тема,
- * слайды) задаётся в Titan HUB — здесь только подключение, автозапуск и выход.
+ * слайды) задаётся в Titan HUB — здесь только подключение, автозапуск, дата и выход.
  */
 class SetupActivity : Activity() {
     private lateinit var prefs: Prefs
@@ -27,6 +29,7 @@ class SetupActivity : Activity() {
     private lateinit var legacyOff: Button
     private lateinit var autostart: TextView
     private lateinit var autostartButton: Button
+    private lateinit var clock: TextView
     private lateinit var manual: View
     private lateinit var address: EditText
     private lateinit var rotations: RadioGroup
@@ -40,6 +43,7 @@ class SetupActivity : Activity() {
         legacyOff = findViewById(R.id.legacy_off)
         autostart = findViewById(R.id.autostart_status)
         autostartButton = findViewById(R.id.autostart_button)
+        clock = findViewById(R.id.clock_status)
         findViewById<TextView>(R.id.version).text = getString(R.string.setup_version, BuildConfig.VERSION_NAME)
         manual = findViewById(R.id.manual)
         address = findViewById(R.id.address)
@@ -62,6 +66,7 @@ class SetupActivity : Activity() {
         autostartButton.setOnClickListener { requestAutostart() }
         findViewById<Button>(R.id.home_button).setOnClickListener { openSettings(Settings.ACTION_HOME_SETTINGS) }
         findViewById<Button>(R.id.system_settings).setOnClickListener { openSettings(Settings.ACTION_SETTINGS) }
+        findViewById<Button>(R.id.clock_button).setOnClickListener { openSettings(Settings.ACTION_DATE_SETTINGS) }
         findViewById<Button>(R.id.exit).setOnClickListener { finishAffinity() }
         // Фокус пульта — на «Вернуться», когда экран уже собран (иначе приставка ставит его куда придётся).
         back.post { back.requestFocus() }
@@ -71,6 +76,7 @@ class SetupActivity : Activity() {
         super.onResume()
         showConnection()
         showAutostart()
+        showClock()
     }
 
     private fun showConnection() {
@@ -128,6 +134,15 @@ class SetupActivity : Activity() {
         val allowed = autostartAllowed()
         autostart.setText(if (allowed) R.string.setup_autostart_on else R.string.setup_autostart_off)
         autostartButton.visibility = if (allowed) View.GONE else View.VISIBLE
+    }
+
+    private fun showClock() {
+        val now = DateFormat.getDateTimeInstance(DateFormat.LONG, DateFormat.SHORT).format(Date())
+        clock.text = when {
+            DeviceClock.isWrong() -> getString(R.string.setup_clock_wrong, now)
+            !DeviceClock.isNetworkTime(this) -> getString(R.string.setup_clock_manual, now)
+            else -> getString(R.string.setup_clock_ok, now)
+        }
     }
 
     private fun requestAutostart() {
