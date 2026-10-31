@@ -1,3 +1,5 @@
+// Первым: кривые TLS до любых исходящих соединений (Cloudflare из РФ, см. модуль).
+import './lib/tlsCurves.js'
 import { serve } from '@hono/node-server'
 import { closeDb, closeClubDbs, getClubDb, type Database } from '@titan/database'
 import { app } from './app.js'
