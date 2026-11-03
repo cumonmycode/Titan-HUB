@@ -12,6 +12,7 @@ import { api, ApiError } from '@/lib/api';
 import { useBanner } from '@/lib/banner';
 import { useDialogStore } from '@/lib/dialog';
 import { haptic } from '@/lib/haptics';
+import { isScreenCaptured, subscribeScreenCapture } from '@/lib/screen-capture';
 import { useSession } from '@/lib/session';
 import { unregisterStaffDevice } from '@/lib/staff-push';
 import { colors, space, type } from '@/lib/theme';
@@ -68,7 +69,8 @@ function useDismissPresentedWhenLocked(locked: boolean) {
 
 /**
  * Защита сессии:
- * - в переключателе приложений содержимое скрыто размытием;
+ * - в переключателе приложений содержимое скрыто размытием (кроме показа экрана: сотрудник
+ *   сам показывает кассу, а панель FaceTime поверх приложения иначе закрывала бы её);
  * - при холодном старте и после долгого фона — Face ID, запасной путь — вход по PIN.
  */
 export function SessionLock() {
@@ -91,12 +93,26 @@ export function SessionLock() {
         backgroundAt.current = null;
       } else {
         // Системный запрос Face ID тоже делает приложение неактивным — его не прячем.
-        if (!prompting.current) setObscured(true);
+        // Панель FaceTime при показе экрана — тоже: заслонка закрыла бы весь интерфейс.
+        const showing = state === 'inactive' && isScreenCaptured();
+        if (!prompting.current && !showing) setObscured(true);
         if (state === 'background' && backgroundAt.current === null) backgroundAt.current = Date.now();
       }
     });
     return () => sub.remove();
   }, []);
+
+  // Показ начался, когда приложение уже было неактивно: снимаем заслонку, не дожидаясь касания.
+  // Заблокированной кассе она не мешает — Face ID запросим, когда приложение станет активным.
+  // Конец показа заслонку не возвращает: системная панель поверх приложения может сбросить
+  // этот признак и посреди показа. Заслонка вернётся при уходе в фон.
+  useEffect(
+    () =>
+      subscribeScreenCapture((captured) => {
+        if (captured && AppState.currentState === 'inactive' && !useSession.getState().locked) setObscured(false);
+      }),
+    [],
+  );
 
   // Есть ли вообще Face ID / отпечаток. Без них кнопка «Разблокировать» молча ничего
   // не делала — на Android без настроенного отпечатка касса открывалась только выходом.

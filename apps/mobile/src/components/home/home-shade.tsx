@@ -8,6 +8,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useBanner } from '@/lib/banner';
 import { connectHa, disconnectHa } from '@/lib/home-assistant';
 import { haptic } from '@/lib/haptics';
+import { isScreenCaptured, subscribeScreenCapture } from '@/lib/screen-capture';
 import { useSession } from '@/lib/session';
 import { useSmartHome, useSmartHomeToken, zoneDevices, zoneEntityIds, type Zone } from '@/lib/smart-home-api';
 
@@ -148,8 +149,15 @@ export function HomeShadeHost() {
 function useAppActive(): boolean {
   const [active, setActive] = useState(AppState.currentState === 'active');
   useEffect(() => {
-    const sub = AppState.addEventListener('change', (state) => setActive(state === 'active'));
-    return () => sub.remove();
+    // Панель FaceTime при показе экрана — не переключатель приложений: шторка остаётся.
+    const sub = AppState.addEventListener('change', (state) => setActive(state === 'active' || (state === 'inactive' && isScreenCaptured())));
+    const unsubscribe = subscribeScreenCapture((captured) => {
+      if (captured && AppState.currentState === 'inactive') setActive(true);
+    });
+    return () => {
+      sub.remove();
+      unsubscribe();
+    };
   }, []);
   return active;
 }
