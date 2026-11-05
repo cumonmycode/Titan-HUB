@@ -360,7 +360,9 @@ struct GameScreen: View {
     var onNextGame: (() -> Void)?
     @Environment(\.dismiss) private var dismiss
     @Environment(\.horizontalSizeClass) private var sizeClass
+    @Environment(AppModel.self) private var model
     @State private var isShowingLog = false
+    @State private var isShowingStudio = false
     /// iPhone: раскрытые карточки. Говорящий раскрыт всегда, остальные — по касанию, независимо друг от друга.
     @State private var expanded: Set<Seat> = []
     /// iPad: игрок в панели нарушений, выбранный касанием на столе. `nil` — панель следит за говорящим.
@@ -436,6 +438,7 @@ struct GameScreen: View {
                 // Команду не называем: экран ведущего видят за столом.
                 Text("Клятва, пари, шантаж, подсказки из зала — команда нарушителя проигрывает (ФСМ 6.9).")
             }
+            .sheet(isPresented: $isShowingStudio) { StudioRemoteView() }
             .sheet(isPresented: $isShowingLog) {
                 // Во время игры экран видят за столом: цвета команд и «кто куда стрелял» — только при открытых ролях.
                 GameTimelineSheet(events: game.state.events, seats: state.seats, revealsRoles: game.showsRoles || state.isFinished) {
@@ -603,6 +606,9 @@ struct GameScreen: View {
                 game.showsRoles.toggle()
             }
             Menu("Ещё", systemImage: "ellipsis") {
+                if model.studioPairing != nil {
+                    Button("Эфир", systemImage: "dot.radiowaves.left.and.right") { isShowingStudio = true }
+                }
                 ForEach(state.pendingBestMoveAuthors, id: \.self) { author in
                     Button("Лучший ход №\(author)", systemImage: "star") { bestMovePick = SeatPick(seat: author) }
                 }

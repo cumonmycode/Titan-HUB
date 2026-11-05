@@ -29,6 +29,8 @@ targets:
         product: MafBoardCore
       - package: MafBoardCore
         product: MafBoardClient
+      - package: MafBoardCore
+        product: MafBoardRemote
       - target: MafBoardWidgets
     info:
       path: Generated/Info.plist
@@ -50,6 +52,9 @@ targets:
         ITSAppUsesNonExemptEncryption: false
         # Live Activity идущей игры: таймер и говорящий на экране блокировки и в Dynamic Island.
         NSSupportsLiveActivities: true
+        # Пульт MafBoard Studio: телефон ищет ноутбук в локальной сети.
+        NSBonjourServices: [_mbs-remote._tcp]
+        NSLocalNetworkUsageDescription: "MafBoard находит ноутбук с MafBoard Studio в этой сети и управляет эфиром: сценами, микрофоном и записью."
     entitlements:
       path: Generated/MafBoard.entitlements
       properties:

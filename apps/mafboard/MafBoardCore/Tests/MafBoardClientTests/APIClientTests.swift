@@ -73,6 +73,53 @@ struct APIClientTests {
         #expect(await transport.lastRequest?.url?.query == "ticket=t-1")
     }
 
+    @Test("Вход в Studio: что показать на телефоне, запрос с токеном")
+    func studioTicket() async throws {
+        let transport = StubTransport(json: """
+        {"deviceName":"MacBook Кая","platform":"macos","codes":[17,42,88],"expiresAt":"2026-11-05T12:03:00.000Z"}
+        """)
+        let ticket = try await client(transport).studioLoginTicket(scan: "scan-code")
+        #expect(ticket.deviceName == "MacBook Кая")
+        #expect(ticket.platform == "macos")
+        #expect(ticket.codes == [17, 42, 88])
+
+        let request = await transport.lastRequest
+        #expect(request?.httpMethod == "GET")
+        #expect(request?.url?.path == "/v1/auth/qr/ticket")
+        #expect(request?.url?.query == "scan=scan-code")
+        #expect(request?.value(forHTTPHeaderField: "Authorization") == "Bearer access-1")
+    }
+
+    @Test("Подтверждение входа в Studio: код числом, ответ ok", arguments: [
+        (#"{"ok":true}"#, true),
+        (#"{"ok":false}"#, false),
+    ])
+    func studioApprove(json: String, expected: Bool) async throws {
+        let transport = StubTransport(json: json)
+        let approved = try await client(transport).approveStudioLogin(scan: "scan-code", code: 42)
+        #expect(approved == expected)
+
+        let request = await transport.lastRequest
+        #expect(request?.httpMethod == "POST")
+        #expect(request?.url?.path == "/v1/auth/qr/approve")
+        #expect(request?.value(forHTTPHeaderField: "Authorization") == "Bearer access-1")
+        let body = try jsonBody(request)
+        #expect(body["scan"] as? String == "scan-code")
+        #expect(body["code"] as? Int == 42)
+    }
+
+    @Test("Устаревший QR-код: сервер отвечает 404 и 422")
+    func studioExpired() async {
+        let missing = StubTransport(status: 404, json: #"{"error":{"code":"not_found","message":"Этот QR-код уже недействителен"}}"#)
+        await #expect(throws: APIError.notFound) {
+            _ = try await client(missing).studioLoginTicket(scan: "old")
+        }
+        let invalid = StubTransport(status: 422, json: #"{"error":{"code":"invalid_ticket","message":"Этот QR-код уже недействителен"}}"#)
+        await #expect(throws: APIError.validation("Этот QR-код уже недействителен")) {
+            _ = try await client(invalid).approveStudioLogin(scan: "old", code: 42)
+        }
+    }
+
     @Test("Завершение входа возвращает токены и аккаунт")
     func completeLogin() async throws {
         let transport = StubTransport(json: """

@@ -6,7 +6,7 @@ public struct DeviceSession: Codable, Sendable, Equatable, Identifiable {
     public let id: String
     /// Имя устройства при входе («iPhone»). У сессий, открытых до появления списка, может не быть.
     public var deviceName: String?
-    /// `ios` или `android`.
+    /// `ios`, `android` или, для MafBoard Studio, `macos` и `windows`.
     public var platform: String?
     public let createdAt: Date
     public var lastUsedAt: Date
@@ -29,12 +29,19 @@ public struct DeviceSession: Codable, Sendable, Equatable, Identifiable {
         self.isCurrent = isCurrent
     }
 
+    /// Сессия настольного приложения MafBoard Studio: туда входят только по QR-коду.
+    public var isStudio: Bool {
+        platform == "macos" || platform == "windows"
+    }
+
     /// Название в списке: имя устройства, а без него — платформа.
     public var displayName: String {
         if let deviceName, !deviceName.isEmpty { return deviceName }
         return switch platform {
         case "ios": "iPhone"
         case "android": "Android"
+        case "macos": "Mac"
+        case "windows": "Компьютер с Windows"
         default: "Устройство"
         }
     }

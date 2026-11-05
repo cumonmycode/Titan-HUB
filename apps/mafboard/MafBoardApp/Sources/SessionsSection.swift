@@ -51,7 +51,7 @@ struct SessionsSection: View {
                     ) {
                         Button("Выйти", role: .destructive) { Task { await model.revokeSession(session) } }
                     } message: {
-                        Text("На нём придётся заново войти через Telegram.")
+                        Text(session.isStudio ? "В MafBoard Studio придётся заново войти по QR-коду. Идущий эфир не прервётся." : "На нём придётся заново войти через Telegram.")
                     }
             }
         }
@@ -71,6 +71,8 @@ private extension DeviceSession {
         switch platform {
         case "ios": displayName.localizedCaseInsensitiveContains("ipad") ? "ipad" : "iphone"
         case "android": "smartphone"
+        case "macos": "laptopcomputer"
+        case "windows": "pc"
         default: "desktopcomputer"
         }
     }

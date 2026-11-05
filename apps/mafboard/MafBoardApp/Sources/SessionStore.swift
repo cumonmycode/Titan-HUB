@@ -25,6 +25,7 @@ actor SessionStore: AccessTokenProvider {
     private let service = "ru.titan.mafboard.session"
     private let sessionKey = "default"
     private let pendingLoginKey = "pending-login"
+    private let studioPairingKey = "studio-pairing"
     private var cached: AuthSession?
     private var isLoaded = false
 
@@ -81,6 +82,22 @@ actor SessionStore: AccessTokenProvider {
             return
         }
         try? write(data, for: pendingLoginKey)
+    }
+
+    // MARK: Сопряжение с MafBoard Studio
+
+    /// Ключ шифрования пульта. Как и токены, только в Keychain этого устройства.
+    func loadStudioPairing() -> StudioPairing? {
+        guard case let .success(data?) = read(studioPairingKey) else { return nil }
+        return try? JSONDecoder().decode(StudioPairing.self, from: data)
+    }
+
+    func saveStudioPairing(_ pairing: StudioPairing?) {
+        guard let pairing, let data = try? JSONEncoder().encode(pairing) else {
+            delete(studioPairingKey)
+            return
+        }
+        try? write(data, for: studioPairingKey)
     }
 
     // MARK: Keychain

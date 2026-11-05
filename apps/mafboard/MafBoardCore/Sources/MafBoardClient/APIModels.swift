@@ -18,6 +18,16 @@ struct RefreshTokensRequest: Encodable {
     let refreshToken: String
 }
 
+/// Подтверждение входа в MafBoard Studio: код, который ведущий выбрал на телефоне.
+struct ApproveStudioLoginRequest: Encodable {
+    let scan: String
+    let code: Int
+}
+
+struct ApproveStudioLoginResponse: Decodable {
+    let ok: Bool
+}
+
 /// Вход проверяющего App Store: логин и пароль из заметок для App Review.
 struct ReviewLoginRequest: Encodable {
     let login: String

@@ -89,8 +89,22 @@
 | `DELETE /v1/me/sessions/:id` | Bearer | `{ok: true}`. 409 `current_session` — это текущее устройство (выход — через `logout`), 404 — сессии нет или она уже завершена |
 
 `DeviceSession`: `{id, deviceName, platform, createdAt, lastUsedAt, isCurrent}`. `deviceName` — имя из `start`
-(«iPhone»), `platform` — `ios` / `android`; у сессий, открытых до появления этого списка, они могут быть `null`.
+(«iPhone»), `platform` — `ios` / `android` / `macos` / `windows` (две последние — MafBoard Studio, вход только по QR);
+у сессий, открытых до появления этого списка, они могут быть `null`.
 `lastUsedAt` обновляется при обновлении токенов и не чаще раза в 5 минут при запросах.
+
+## Вход в MafBoard Studio по QR
+
+QR-код на экране ноутбука: `https://mafboard.titanpos.ru/studio/login?scan=<scanCode>#k=<ключ сопряжения>&s=<studioId>`.
+Часть после `#` на сервер не попадает. Камера iPhone открывает приложение, приложение показывает имя устройства и три кода.
+Ведущий выбирает код с экрана ноутбука, ноутбук получает свою сессию. Новый пользователь при этом не создаётся.
+
+| Метод и путь | Авторизация | Ответ |
+|---|---|---|
+| `GET /v1/auth/qr/ticket?scan=` | Bearer | `{deviceName, platform, codes: [3 числа], expiresAt}`. 404 — QR-код истёк или уже использован |
+| `POST /v1/auth/qr/approve` `{scan, code}` | Bearer, 30 за 10 мин | `{ok: true}`. `{ok: false}` — код неверный, вход отклонён, нужен новый QR-код. 422 `invalid_ticket` — решать уже нечего |
+
+Ручки ноутбука (`POST /v1/auth/qr/start`, `GET /v1/auth/qr/status`, `POST /v1/auth/qr/complete`) описаны в `docs/MAFBOARD.md`.
 
 ## GoMafia
 

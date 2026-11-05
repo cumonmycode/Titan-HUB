@@ -35,6 +35,12 @@ public protocol MafBoardAPI: Sendable {
     /// Удаляет аккаунт: все сессии завершаются, игры клуба остаются в его истории без ведущего.
     func deleteAccount() async throws(APIError)
 
+    // Вход в MafBoard Studio по QR
+    /// Что просит вход. `.notFound` — QR-код истёк или уже использован.
+    func studioLoginTicket(scan: String) async throws(APIError) -> StudioLoginTicket
+    /// `false` — код не совпал, вход отклонён. `.validation` — QR-код уже недействителен.
+    func approveStudioLogin(scan: String, code: Int) async throws(APIError) -> Bool
+
     // Сессии устройств
     /// Устройства, где выполнен вход: текущее первым (`isCurrent`), остальные по последней активности.
     func sessions() async throws(APIError) -> [DeviceSession]
@@ -116,6 +122,19 @@ public struct MafBoardAPIClient: MafBoardAPI {
 
     public func deleteAccount() async throws(APIError) {
         let _: EmptyResponse = try await send(.delete, "v1/me")
+    }
+
+    // MARK: Вход в MafBoard Studio
+
+    public func studioLoginTicket(scan: String) async throws(APIError) -> StudioLoginTicket {
+        try await send(.get, "v1/auth/qr/ticket", query: [URLQueryItem(name: "scan", value: scan)])
+    }
+
+    public func approveStudioLogin(scan: String, code: Int) async throws(APIError) -> Bool {
+        let response: ApproveStudioLoginResponse = try await send(
+            .post, "v1/auth/qr/approve", body: ApproveStudioLoginRequest(scan: scan, code: code)
+        )
+        return response.ok
     }
 
     // MARK: Сессии устройств

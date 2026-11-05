@@ -1,0 +1,301 @@
+{
+  "comment": "Сгенерировано scripts/make-remote-vectors.py. Rust и Swift обязаны получить те же байты.",
+  "version": 1,
+  "keyDerivation": [
+    {
+      "pairingKey": "11181f262d343b424950575e656c737a81888f969da4abb2b9c0c7ced5dce3ea",
+      "saltC": "51585f666d747b828990979ea5acb3ba",
+      "saltS": "a1a8afb6bdc4cbd2d9e0e7eef5fc030a",
+      "c2sKey": "ba8e11aae5736fff0e0b6b2de9cb2bd5f9b1830a91a1df277b889d3195a8f5bc",
+      "s2cKey": "684f9b456c1fdbe58bb0362453eb64f85738e6791cd6c813a546724077471595"
+    },
+    {
+      "pairingKey": "777e858c939aa1a8afb6bdc4cbd2d9e0e7eef5fc030a11181f262d343b424950",
+      "saltC": "a1a8afb6bdc4cbd2d9e0e7eef5fc030a",
+      "saltS": "51585f666d747b828990979ea5acb3ba",
+      "c2sKey": "126cb64dde6dde166bd4260fc154467190d310fd7c3832324b2392827c59edb7",
+      "s2cKey": "df81feefd205e13b32a0dd464b708866d63da31c2eaabd37ac06eca6e5f833c3"
+    },
+    {
+      "pairingKey": "0000000000000000000000000000000000000000000000000000000000000000",
+      "saltC": "00000000000000000000000000000000",
+      "saltS": "00000000000000000000000000000000",
+      "c2sKey": "b03fe326aaca058351669556349706ed628fbf82fe097cd95b0ae13c6e66563d",
+      "s2cKey": "74bb15ee36f034dce4be1ab2ef0ca16194e7f1035f80d85ee7dcc29aac545051"
+    }
+  ],
+  "transcript": [
+    {
+      "studioId": "W5TGTnS5V-BDElf6dh-hSw",
+      "saltC": "51585f666d747b828990979ea5acb3ba",
+      "saltS": "a1a8afb6bdc4cbd2d9e0e7eef5fc030a",
+      "clockMs": "1793883600123",
+      "hash": "a482860d9422b4694bdd854283931faec2233007ed5da6cc248e75e7b28691d5"
+    },
+    {
+      "studioId": "studio-2",
+      "saltC": "a1a8afb6bdc4cbd2d9e0e7eef5fc030a",
+      "saltS": "51585f666d747b828990979ea5acb3ba",
+      "clockMs": "0",
+      "hash": "f0893ff7930193d9204d5ffefad9fcd2a3b6551e3727930260e64ba61b108c2b"
+    },
+    {
+      "studioId": "ssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssss",
+      "saltC": "51585f666d747b828990979ea5acb3ba",
+      "saltS": "a1a8afb6bdc4cbd2d9e0e7eef5fc030a",
+      "clockMs": "18446744073709551615",
+      "hash": "8e820ab13282d601f5d8f4f24c3fc458348fbac75148809fae853b236894078e"
+    }
+  ],
+  "frames": [
+    {
+      "name": "команда телефона",
+      "key": "ba8e11aae5736fff0e0b6b2de9cb2bd5f9b1830a91a1df277b889d3195a8f5bc",
+      "aad": "a482860d9422b4694bdd854283931faec2233007ed5da6cc248e75e7b28691d5",
+      "counter": "0",
+      "plaintext": "7b226964223a2237663063222c2273656e7441744d73223a313739333838333630303132332c22636f6d6d616e64223a7b226b696e64223a227377697463685363656e65222c227363656e65223a22627265616b227d7d",
+      "frame": "0300000000000000000e59a40e4f5d1a1910375d76874efd8f68e80902053ecde19da3bbdc03ec8d4ad32f77500a9e81b11a6869e54addb41b497023f99cee23d4da5d7f418bbdb414c6d326b19fcb4db6c7271a64ba8a58bc8a60c379ad6d93884bb43edd7cb6f3a160285b8cf69768"
+    },
+    {
+      "name": "следующий кадр",
+      "key": "ba8e11aae5736fff0e0b6b2de9cb2bd5f9b1830a91a1df277b889d3195a8f5bc",
+      "aad": "a482860d9422b4694bdd854283931faec2233007ed5da6cc248e75e7b28691d5",
+      "counter": "1",
+      "plaintext": "7b226964223a2237663063222c2273656e7441744d73223a313739333838333630303132332c22636f6d6d616e64223a7b226b696e64223a227377697463685363656e65222c227363656e65223a22627265616b227d7d",
+      "frame": "030000000000000001089a64ead7e34ad3499da24270b300266f837031c9586c74ad3d2f13d764ee6419ae62c936e1c2bb3e6e123195d84f08a9922546fa1a2ce1d75ec84ea86c7380fe3aff7e7d8ac2d037830a12ba94f9c9e31f32fce8279f8dd1f6e849ec1284628c1e09338c2641"
+    },
+    {
+      "name": "состояние с кириллицей",
+      "key": "684f9b456c1fdbe58bb0362453eb64f85738e6791cd6c813a546724077471595",
+      "aad": "a482860d9422b4694bdd854283931faec2233007ed5da6cc248e75e7b28691d5",
+      "counter": "0",
+      "plaintext": "7b2274797065223a227374617465222c227374617465223a7b226163746976655363656e65223a22d09fd0b5d180d0b5d180d18bd0b2227d7d",
+      "frame": "0300000000000000000ef8da2c00320859e758f02887373dfcfdd1a92dfe37c29bb8a9e544018782a096ca661dc8cd24b452384e12c1702c2043ce61274f75ab8b07a1144d7addd81149ce901780bc7d4106"
+    },
+    {
+      "name": "пустое сообщение",
+      "key": "684f9b456c1fdbe58bb0362453eb64f85738e6791cd6c813a546724077471595",
+      "aad": "a482860d9422b4694bdd854283931faec2233007ed5da6cc248e75e7b28691d5",
+      "counter": "7",
+      "plaintext": "",
+      "frame": "030000000000000007d7b2d0f7011a202a046bee0bf2e02671"
+    },
+    {
+      "name": "длиннее блока",
+      "key": "684f9b456c1fdbe58bb0362453eb64f85738e6791cd6c813a546724077471595",
+      "aad": "a482860d9422b4694bdd854283931faec2233007ed5da6cc248e75e7b28691d5",
+      "counter": "8",
+      "plaintext": "333a41484f565d646b727980878e959ca3aab1b8bfc6cdd4dbe2e9f0f7fe050c131a21282f363d444b525960676e757c838a91989fa6adb4bbc2c9d0d7dee5ecf3fa01080f161d242b323940474e555c636a71787f868d949ba2a9b0b7bec5ccd3dae1e8eff6fd040b121920272e353c434a51585f666d747b828990979ea5acb3bac1c8cfd6dde4ebf2f900070e151c232a31383f464d545b626970777e858c939aa1a8afb6bdc4cbd2d9e0e7eef5fc030a11181f262d343b424950575e656c737a81888f969da4abb2b9c0c7ced5dce3eaf1f8ff060d141b222930373e454c535a61686f767d848b9299a0a7aeb5bcc3cad1d8dfe6edf4fb020910171e252c333a41484f565d646b727980878e959ca3aab1b8bfc6cdd4dbe2e9f0f7fe050c131a21282f363d444b525960676e757c838a91989fa6adb4bbc2c9d0d7dee5ecf3fa01080f161d242b323940474e555c636a71787f868d949ba2a9b0b7bec5ccd3dae1e8eff6fd040b121920272e353c434a51585f666d747b828990979ea5acb3bac1c8cfd6dde4ebf2f900070e151c232a31383f464d545b626970777e858c939aa1a8afb6bdc4cbd2d9e0e7eef5fc030a11181f262d343b424950575e656c737a81888f969da4abb2b9c0c7ced5dce3eaf1f8ff060d141b222930373e454c535a61686f767d848b9299a0a7aeb5bcc3cad1d8dfe6edf4fb020910171e252c333a41484f565d646b727980878e959ca3aab1b8bfc6cdd4dbe2e9f0f7fe050c131a21282f363d444b525960676e757c838a91989fa6adb4bbc2c9d0d7dee5ecf3fa01080f161d242b323940474e555c636a71787f868d949ba2a9b0b7bec5ccd3dae1e8eff6fd040b121920272e353c434a51585f666d747b828990979ea5acb3bac1c8cfd6dde4ebf2f900070e151c232a31383f464d545b626970777e858c939aa1a8afb6bdc4cbd2d9e0e7eef5fc030a11181f262d343b424950575e656c737a81888f969da4abb2b9c0c7ced5dce3eaf1f8ff060d141b222930373e454c535a61686f767d848b9299a0a7aeb5bcc3cad1d8dfe6edf4fb020910171e252c333a41484f565d646b727980878e959ca3aab1b8bfc6cdd4dbe2e9f0f7fe050c131a21282f363d444b525960676e757c838a91989fa6adb4bbc2c9d0d7dee5ecf3fa01080f161d242b323940474e555c636a71787f868d949ba2a9b0b7bec5ccd3dae1e8eff6fd040b121920272e353c434a51585f666d747b828990979ea5acb3bac1c8cfd6dde4ebf2f900070e151c232a31383f464d545b626970777e858c939aa1a8afb6bdc4cbd2d9e0e7eef5fc030a11181f262d343b424950575e656c737a81888f969da4abb2b9c0c7ced5dce3eaf1f8ff060d141b222930373e454c535a61686f767d84",
+      "frame": "0300000000000000084f1032523d81f6b9d75c463edd0c17ffec9b35441f8a5939acd99a4e7c94ee4c288789f5781bec2385bc740b33666d2fde484af3486af91cba8e9e81181c85f4da252fa282257ea8024219c2ce31ba25bfac771e8b566b24635601e12a52d5de4d2ab6f2fe09775b3ac1a22ea57bd1d8b77c5822a11dc0ded02bf07456816edf6aea6ac325f2c1d680066b8fe5a1f13d3027237d5140c6ba984ae7b0c21d9e85863f767e157c7cfa9c532088dbd265fce0964b766960d5d29fddf6176f53780fab9576f2bf270eadb3ff760743b94f2c729894fd82d0651913b68fa13949c214bd32ccd888f41f082ac28dacfa59daa4c0493f43631ed6e66fa513ba2671ec5a79cfc32b3babfd46d151565fe1661b72cf1930ad0ff324358de49237c5ec120e9593cd450888935469cdfbe160d90c329b9db1875774e00912a955a7912380f4e0f09dae33d4548cbcfe887460dd748e61ea36ff9beb9e901f52d0eb5a4a90eb2e90a398a4ed9dc2883c9a6398dedc39fe49167393a77ed5461c18d35ca4692145b10c5df12f5101119a2f3e632056dd4ae0b0bf22fcd68b00f4f6f665442711c5e0f0ca2be3c73fe6f90dbe5a2fdfaa095372e422e36ac180c593f2965d39c752b80bde8d4f808d48ef5aa81dfdee0b0fd8746a8051f7738e744126eeedab0d39c2ee794735ec40c09b7c7fc0fba08fc3aabe89ed46cb4a9fef0f0337c7216070798e2188456a1edf39c6792d4373c21366a076d4dbd601ab22d496afc221bc8959a66e1ed0d1b26f91ecb70e43072d8f43735f4dcead96a377fa405a5d89e09d4b6b9360d52b4547cf54d81a32aed5e48404147319edf09b607765f78c4fca8b7e69f253d63da740ee4fd7b5f9febfdc77c9a4fc7cd887c5fc264321dbead89bc1b3755dfec4b33fec4df067d3efe3a031d634f1b8b5fcba4163c8de4f1fb3d6a05372e427ad142686ff10d51545636f6d73914279f7c7700dbf74006cda99e2c446e215b3aa1f0aefef726e143cdfb9e8b8ef170ba6cb0f5e7bf0d9d95f7fa683964925fbca7697a1f3fbb45b6d07848eb3851f4285895bebe83b379c24916779bd9f4d1a1326d9350fafb5a410b373dff46cf83c24e9054cfcb31f1c8b44bd7727710539542eaa8a844d86cd63eff59b3f6d8fa36f9cfcd1fcd5791ae74c445b6013f8c2290f5f58b69011eb5976c5ea796762e0c877d8c2ebb9273ae4c972b4760e0590f69f5e7653ffe6ae46e55de7d2373100db6329a4a40724e0d45c0c0a6b16c05e7beed1e16ddb0789e95de338e9e2f81b14e17725ee9c4fd3d9dbb5334ef26a0b9010b3ea906a05a965dd669cc01b29c7783e85c8c5d656c4da0f475faa2ad2b4330d9be2170c490d6de1f328c4b8a60cceb4be98cf8e10032315f4dd02d94f2ae86d346f8887120d71305acc61405051a81f"
+    },
+    {
+      "name": "счётчик больше 32 бит",
+      "key": "ba8e11aae5736fff0e0b6b2de9cb2bd5f9b1830a91a1df277b889d3195a8f5bc",
+      "aad": "a482860d9422b4694bdd854283931faec2233007ed5da6cc248e75e7b28691d5",
+      "counter": "4294967301",
+      "plaintext": "7b226964223a2237663063222c2273656e7441744d73223a313739333838333630303132332c22636f6d6d616e64223a7b226b696e64223a227377697463685363656e65222c227363656e65223a22627265616b227d7d",
+      "frame": "030000000100000005dabaf20798d585983f1ce0eb14e613d0492f820f4ba1ac016f779e90c410699e81abb984a4d0bffa488b831ac54051e70757d99671003cd0c000cb288818f8cfeb529e9d38306726bb763f8698c5e0e58e03c22d8483416bc202cd7c05c0fb6a001bb4474f2b36"
+    },
+    {
+      "name": "последний счётчик",
+      "key": "ba8e11aae5736fff0e0b6b2de9cb2bd5f9b1830a91a1df277b889d3195a8f5bc",
+      "aad": "a482860d9422b4694bdd854283931faec2233007ed5da6cc248e75e7b28691d5",
+      "counter": "18446744073709551615",
+      "plaintext": "7b226964223a2237663063222c2273656e7441744d73223a313739333838333630303132332c22636f6d6d616e64223a7b226b696e64223a227377697463685363656e65222c227363656e65223a22627265616b227d7d",
+      "frame": "03ffffffffffffffffd547a42771cc7d12e2f25fc3af88e8f7d7c0467febcd6b46c0025cfa5b73790084a18dca0601c926529b4783ea2a9aa48445f851571edcfdbb0d04fa2da3bd13e4ded479fc88fd32f9d93e9ab3e250b681d93c86256a3d9c6e2e5423460b81913de042fc2d96d5"
+    }
+  ],
+  "rejects": [
+    {
+      "name": "подмена шифротекста",
+      "key": "ba8e11aae5736fff0e0b6b2de9cb2bd5f9b1830a91a1df277b889d3195a8f5bc",
+      "aad": "a482860d9422b4694bdd854283931faec2233007ed5da6cc248e75e7b28691d5",
+      "frame": "0300000000000000037eddf25274a2f1d6c25dffbe706f49cbcb8448d774727fca90ec0a18f67b56143f3bc5e1cb1befa68467227812b563d154b574769544ff00421ebccd09facd936bee5434261013a73cb9ee29a05c2a556eae7886b0728dbd51f71e6d0e088517108b3a092e0195"
+    },
+    {
+      "name": "подмена метки",
+      "key": "ba8e11aae5736fff0e0b6b2de9cb2bd5f9b1830a91a1df277b889d3195a8f5bc",
+      "aad": "a482860d9422b4694bdd854283931faec2233007ed5da6cc248e75e7b28691d5",
+      "frame": "0300000000000000037eddf25374a2f1d6c25dffbe706f49cbcb8448d774727fca90ec0a18f67b56143f3bc5e1cb1befa68467227812b563d154b574769544ff00421ebccd09facd936bee5434261013a73cb9ee29a05c2a556eae7886b0728dbd51f71e6d0e088517108b3a092e0115"
+    },
+    {
+      "name": "подмена счётчика",
+      "key": "ba8e11aae5736fff0e0b6b2de9cb2bd5f9b1830a91a1df277b889d3195a8f5bc",
+      "aad": "a482860d9422b4694bdd854283931faec2233007ed5da6cc248e75e7b28691d5",
+      "frame": "0300000000000000027eddf25374a2f1d6c25dffbe706f49cbcb8448d774727fca90ec0a18f67b56143f3bc5e1cb1befa68467227812b563d154b574769544ff00421ebccd09facd936bee5434261013a73cb9ee29a05c2a556eae7886b0728dbd51f71e6d0e088517108b3a092e0195"
+    },
+    {
+      "name": "подмена часов в приветствии",
+      "key": "ba8e11aae5736fff0e0b6b2de9cb2bd5f9b1830a91a1df277b889d3195a8f5bc",
+      "aad": "7da44c391b90492744fb04a20b5387c2fe32428028ad28804fe86fd069baf1e6",
+      "frame": "0300000000000000037eddf25374a2f1d6c25dffbe706f49cbcb8448d774727fca90ec0a18f67b56143f3bc5e1cb1befa68467227812b563d154b574769544ff00421ebccd09facd936bee5434261013a73cb9ee29a05c2a556eae7886b0728dbd51f71e6d0e088517108b3a092e0195"
+    },
+    {
+      "name": "ключ другого направления",
+      "key": "684f9b456c1fdbe58bb0362453eb64f85738e6791cd6c813a546724077471595",
+      "aad": "a482860d9422b4694bdd854283931faec2233007ed5da6cc248e75e7b28691d5",
+      "frame": "0300000000000000037eddf25374a2f1d6c25dffbe706f49cbcb8448d774727fca90ec0a18f67b56143f3bc5e1cb1befa68467227812b563d154b574769544ff00421ebccd09facd936bee5434261013a73cb9ee29a05c2a556eae7886b0728dbd51f71e6d0e088517108b3a092e0195"
+    },
+    {
+      "name": "короче заголовка и метки",
+      "key": "ba8e11aae5736fff0e0b6b2de9cb2bd5f9b1830a91a1df277b889d3195a8f5bc",
+      "aad": "a482860d9422b4694bdd854283931faec2233007ed5da6cc248e75e7b28691d5",
+      "frame": "0300000000000000037eddf25374a2f1d6c25dff"
+    },
+    {
+      "name": "не тот вид кадра",
+      "key": "ba8e11aae5736fff0e0b6b2de9cb2bd5f9b1830a91a1df277b889d3195a8f5bc",
+      "aad": "a482860d9422b4694bdd854283931faec2233007ed5da6cc248e75e7b28691d5",
+      "frame": "0100000000000000037eddf25374a2f1d6c25dffbe706f49cbcb8448d774727fca90ec0a18f67b56143f3bc5e1cb1befa68467227812b563d154b574769544ff00421ebccd09facd936bee5434261013a73cb9ee29a05c2a556eae7886b0728dbd51f71e6d0e088517108b3a092e0195"
+    }
+  ],
+  "phoneFrames": [
+    {
+      "type": "ready"
+    },
+    {
+      "type": "alive"
+    },
+    {
+      "id": "c-1",
+      "sentAtMs": 1793883600123,
+      "command": {
+        "kind": "switchScene",
+        "scene": "break"
+      }
+    },
+    {
+      "id": "c-2",
+      "sentAtMs": 1793883600123,
+      "command": {
+        "kind": "setMicMuted",
+        "muted": true
+      }
+    },
+    {
+      "id": "c-3",
+      "sentAtMs": 1793883600123,
+      "command": {
+        "kind": "setLanEnabled",
+        "enabled": false
+      }
+    },
+    {
+      "id": "c-4",
+      "sentAtMs": 1793883600123,
+      "command": {
+        "kind": "selectCamera",
+        "uid": "6C707041-05AC-0011"
+      }
+    },
+    {
+      "id": "c-5",
+      "sentAtMs": 1793883600123,
+      "command": {
+        "kind": "startRecording"
+      }
+    },
+    {
+      "id": "c-6",
+      "sentAtMs": 1793883600123,
+      "command": {
+        "kind": "stopRecording"
+      }
+    }
+  ],
+  "desktopMessages": [
+    {
+      "type": "state",
+      "state": {
+        "scenes": [
+          {
+            "id": "game",
+            "name": "Игра"
+          },
+          {
+            "id": "break",
+            "name": "Перерыв"
+          }
+        ],
+        "activeScene": "break",
+        "cameras": [
+          {
+            "id": "cam-1",
+            "name": "Камера (MacBook Pro)"
+          }
+        ],
+        "cameraUid": "cam-1",
+        "micMuted": true,
+        "recording": true,
+        "lanEnabled": false,
+        "lanUrls": [],
+        "video": {
+          "width": 1920,
+          "height": 1080,
+          "fps": 30
+        }
+      }
+    },
+    {
+      "type": "state",
+      "state": {
+        "scenes": [],
+        "activeScene": "",
+        "cameras": [],
+        "cameraUid": null,
+        "micMuted": false,
+        "recording": false,
+        "lanEnabled": true,
+        "lanUrls": [
+          "http://192.168.1.41:8889/lan"
+        ],
+        "video": {
+          "width": 2560,
+          "height": 1440,
+          "fps": 60
+        }
+      }
+    },
+    {
+      "type": "stats",
+      "stats": {
+        "uptimeSeconds": 42,
+        "recordingSeconds": 13,
+        "recordingBytes": 7000000,
+        "framesSkipped": 2,
+        "lanActive": true
+      }
+    },
+    {
+      "type": "stats",
+      "stats": {
+        "uptimeSeconds": 1,
+        "recordingSeconds": null,
+        "recordingBytes": 0,
+        "framesSkipped": 0,
+        "lanActive": false
+      }
+    },
+    {
+      "type": "level",
+      "peakDb": -12.5
+    },
+    {
+      "type": "reply",
+      "id": "c-1",
+      "error": null
+    },
+    {
+      "type": "reply",
+      "id": "c-2",
+      "error": "Команда устарела"
+    },
+    {
+      "type": "engine",
+      "online": false
+    },
+    {
+      "type": "alive"
+    }
+  ]
+}

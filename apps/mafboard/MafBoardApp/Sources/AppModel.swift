@@ -3,6 +3,7 @@ import Observation
 import UIKit
 import MafBoardClient
 import MafBoardCore
+import MafBoardRemote
 
 /// Состояние приложения: сессия, вход через Telegram-бота, аккаунт и GoMafia.
 @Observable @MainActor
@@ -26,7 +27,15 @@ final class AppModel {
         phase == .demo ? Self.demoUserID : account?.id
     }
 
-    private(set) var phase: Phase = .loading
+    private(set) var phase: Phase = .loading {
+        didSet {
+            // QR-код могли отсканировать раньше, чем стало известно, что ведущий вошёл.
+            if phase == .signedIn, let link = waitingStudioLink {
+                waitingStudioLink = nil
+                beginStudioLogin(link)
+            }
+        }
+    }
     private(set) var account: UserAccount?
     private(set) var login = TelegramLoginFlow()
     /// Ссылку на бота открывает экран (у модели нет доступа к openURL).
@@ -54,6 +63,7 @@ final class AppModel {
         if let session = await store.load() {
             account = session.account
             phase = .signedIn
+            if let pairing = await store.loadStudioPairing() { adoptStudio(pairing) }
             await refreshAccount()
             return
         }
@@ -127,8 +137,12 @@ final class AppModel {
         Task { await persistPendingLogin() }
     }
 
-    /// Ссылка возврата из бота (Universal Link или mafboard://).
+    /// Ссылка возврата из бота или QR-код MafBoard Studio (Universal Link или mafboard://).
     func handle(url: URL) {
+        if let link = StudioLoginLink(url: url, allowedHosts: Self.returnHosts) {
+            handleStudio(link)
+            return
+        }
         guard let ticketID = LoginReturnLink.ticketID(from: url, allowedHosts: Self.returnHosts) else { return }
         switch phase {
         case .loading: earlyReturnTicketID = ticketID
@@ -194,6 +208,122 @@ final class AppModel {
 
     private func persistPendingLogin() async {
         await store.savePendingLogin(login.pendingTicket.map { PendingLogin(ticket: $0.0, secret: $0.1) })
+    }
+
+    // MARK: - MafBoard Studio
+
+    static let studioRelayURL = URL(string: "wss://mafboard.titanpos.ru/api/mafboard/v1/studio/relay")!
+
+    /// Идущее подтверждение входа: экран показывается поверх всего, в том числе поверх партии.
+    private(set) var studioLogin: StudioLoginFlow?
+    private(set) var studioPairing: StudioPairing?
+    /// Связь с ноутбуком. Есть, если телефон сопряжён с MafBoard Studio.
+    private(set) var studioLink: StudioLink?
+    private var waitingStudioLink: StudioLoginLink?
+
+    private func handleStudio(_ link: StudioLoginLink) {
+        switch phase {
+        case .signedIn:
+            beginStudioLogin(link)
+        case .loading:
+            waitingStudioLink = link
+        case .signedOut:
+            waitingStudioLink = link
+            errorMessage = "Войдите в MafBoard, и вход в MafBoard Studio продолжится."
+        case .demo:
+            errorMessage = "Чтобы войти в MafBoard Studio, сначала войдите в аккаунт."
+        }
+    }
+
+    private func beginStudioLogin(_ link: StudioLoginLink) {
+        studioLogin = StudioLoginFlow(link: link)
+        Task {
+            do throws(APIError) {
+                let ticket = try await withAuth { () async throws(APIError) in try await api.studioLoginTicket(scan: link.scanCode) }
+                updateStudioLogin(of: link) { $0.ticketLoaded(ticket) }
+            } catch {
+                updateStudioLogin(of: link) { $0.failed(Self.studioFailure(error)) }
+            }
+        }
+    }
+
+    /// Другой QR-код мог заменить этот, пока шёл запрос: его ответ уже ни на что не влияет.
+    private func updateStudioLogin(of link: StudioLoginLink, _ change: (inout StudioLoginFlow) -> Void) {
+        guard var flow = studioLogin, flow.link == link else { return }
+        change(&flow)
+        studioLogin = flow
+    }
+
+    private static func studioFailure(_ error: APIError) -> StudioLoginFailure {
+        switch error {
+        case .notFound, .validation: .expired
+        default: .network(error.message)
+        }
+    }
+
+    /// Ведущий выбрал код с экрана ноутбука. Первая ошибка закрывает вход на сервере.
+    func chooseStudioCode(_ code: Int) {
+        guard var flow = studioLogin, flow.choose(code: code) else { return }
+        studioLogin = flow
+        let link = flow.link
+        Task {
+            do throws(APIError) {
+                let approved = try await withAuth { () async throws(APIError) in
+                    try await api.approveStudioLogin(scan: link.scanCode, code: code)
+                }
+                guard let current = studioLogin, current.link == link else { return }
+                guard approved, case let .approving(ticket, _) = current.state else {
+                    updateStudioLogin(of: link) { $0.failed(.wrongCode) }
+                    return
+                }
+                let pairing = StudioPairing(studioID: link.studioID, pairingKey: link.pairingKey, deviceName: ticket.deviceName, pairedAt: .now)
+                await store.saveStudioPairing(pairing)
+                adoptStudio(pairing)
+                updateStudioLogin(of: link) { $0.approved(deviceName: ticket.deviceName) }
+            } catch {
+                updateStudioLogin(of: link) { $0.failed(Self.studioFailure(error)) }
+            }
+        }
+    }
+
+    func studioLoginClockTick() {
+        guard var flow = studioLogin else { return }
+        flow.clockTick(.now)
+        if flow != studioLogin { studioLogin = flow }
+    }
+
+    func closeStudioLogin() {
+        studioLogin = nil
+    }
+
+    /// Телефон перестаёт управлять этим ноутбуком. На сам эфир это не влияет.
+    func forgetStudio() async {
+        studioLink?.stop()
+        studioLink = nil
+        studioPairing = nil
+        await store.saveStudioPairing(nil)
+    }
+
+    private func adoptStudio(_ pairing: StudioPairing) {
+        studioLink?.stop()
+        studioPairing = pairing
+        let link = StudioLink(
+            pairingKey: pairing.pairingKey,
+            studioID: pairing.studioID,
+            relayURL: Self.studioRelayURL,
+            relayToken: { [weak self] rejected in await self?.studioRelayToken(rejected: rejected) }
+        )
+        studioLink = link
+        link.start()
+    }
+
+    /// Токен для облачного канала. Релей отверг прошлый — значит, он истёк: обновляем общим обменом.
+    private func studioRelayToken(rejected: String?) async -> String? {
+        if let rejected, case .rejected = await refreshTokens(after: rejected) {
+            await endSession()
+            return nil
+        }
+        return await store.accessToken()
     }
 
     // MARK: - Аккаунт и GoMafia
@@ -388,6 +518,8 @@ final class AppModel {
 
     private func endSession() async {
         refreshTask = nil
+        await forgetStudio()
+        studioLogin = nil
         await store.clear()
         account = nil
         sessionList = .loading

@@ -39,7 +39,10 @@ struct MafBoardApp: App {
                 }
         }
         .onChange(of: scenePhase) { _, phase in
+            // В фоне пульт не работает: система всё равно усыпит соединение. Вернёмся — подключимся заново.
+            if phase == .background { model.studioLink?.stop() }
             guard phase == .active else { return }
+            model.studioLink?.start()
             Task {
                 await model.pollLogin()
                 await sync.refresh()
@@ -74,6 +77,7 @@ struct RootView: View {
         .tint(accent.color)
         .preferredColorScheme(appearance.colorScheme)
         .connectionIndicator()
+        .studioLoginPresenter()
         .task(id: model.libraryUser) {
             // Игры — только вошедшего ведущего (или демо-режима); идущая игра подтягивается с сервера.
             #if DEBUG
@@ -112,11 +116,14 @@ struct RootView: View {
 enum AppTab: Hashable, CaseIterable {
     case games
     case standings
+    /// Пульт MafBoard Studio. Вкладка появляется, когда телефон сопряжён с ноутбуком.
+    case studio
 
     var title: String {
         switch self {
         case .games: "Игры"
         case .standings: "Рейтинг"
+        case .studio: "Эфир"
         }
     }
 
@@ -124,6 +131,7 @@ enum AppTab: Hashable, CaseIterable {
         switch self {
         case .games: "theatermasks"
         case .standings: "trophy"
+        case .studio: "dot.radiowaves.left.and.right"
         }
     }
 
@@ -146,6 +154,7 @@ struct NewGameRequest: Identifiable {
 /// Экраны «Игры» и «Рейтинг» и стеклянная панель снизу: слева переключатель экранов,
 /// справа — отдельная круглая кнопка «Новая игра». Профиль — аватар в правом верхнем углу.
 struct MainTabView: View {
+    @Environment(AppModel.self) private var model
     @Environment(GameLibrary.self) private var library
     @State private var tab = AppTab.initial
     @State private var newGame: NewGameRequest?
@@ -158,10 +167,16 @@ struct MainTabView: View {
         ZStack {
             screen(.games) { GamesView(onNewGame: { newGame = NewGameRequest(evening: $0) }) }
             screen(.standings) { StandingsView() }
+            if model.studioPairing != nil {
+                screen(.studio) { StudioRemoteView() }
+            }
         }
         // Панель поверх экранов; место под неё каждый список оставляет сам (`tabBarClearance`).
         .overlay(alignment: .bottom) {
-            BottomBar(selection: $tab) { newGame = NewGameRequest() }
+            BottomBar(selection: $tab, tabs: model.studioPairing == nil ? [.games, .standings] : AppTab.allCases) { newGame = NewGameRequest() }
+        }
+        .onChange(of: model.studioPairing == nil) { _, isGone in
+            if isGone, tab == .studio { tab = .games }
         }
         .sheet(item: $newGame, onDismiss: library.presentPending) { NewGameFlow(evening: $0.evening) }
         .fullScreenCover(item: $library.presented, onDismiss: {
@@ -233,6 +248,7 @@ extension View {
 /// Стеклянная панель: капсула с экранами слева и круглая «Новая игра» справа — отдельно друг от друга.
 private struct BottomBar: View {
     @Binding var selection: AppTab
+    let tabs: [AppTab]
     let onNewGame: () -> Void
     @Namespace private var highlight
 
@@ -240,7 +256,7 @@ private struct BottomBar: View {
         GlassEffectContainer(spacing: 14) {
             HStack(spacing: 14) {
                 HStack(spacing: 2) {
-                    ForEach(AppTab.allCases, id: \.self) { item($0) }
+                    ForEach(tabs, id: \.self) { item($0) }
                 }
                 .padding(4)
                 .glassEffect(.regular.interactive(), in: .capsule)
@@ -272,7 +288,8 @@ private struct BottomBar: View {
                 Text(tab.title).font(.caption2.weight(.semibold))
             }
             .foregroundStyle(selection == tab ? AnyShapeStyle(.tint) : AnyShapeStyle(.primary))
-            .frame(width: 88, height: 48)
+            // Три вкладки и кнопка новой игры должны поместиться на узком iPhone.
+            .frame(width: tabs.count > 2 ? 72 : 88, height: 48)
             .background {
                 if selection == tab {
                     Capsule()
