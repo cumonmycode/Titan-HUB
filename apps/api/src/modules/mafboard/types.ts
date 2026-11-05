@@ -100,6 +100,29 @@ export interface RefreshTokenRow {
   revokedAt: Date | null
   /** Сессия завершена (выход, отзыв с другого устройства) — токен больше не годится, но это не кража. */
   sessionRevokedAt: Date | null
+  /** Платформа сессии: от неё зависит, что отзывать при позднем повторе токена. */
+  sessionPlatform: string | null
+}
+
+export type QrTicketStatus = 'pending' | 'confirmed' | 'rejected' | 'claimed'
+
+/**
+ * Билет входа в MBS по QR-коду. Настоящий код виден только на экране ноутбука, на телефоне —
+ * он же среди ложных. Варианты хранятся в билете: выданные заново, они выдали бы настоящий код.
+ */
+export interface QrTicket {
+  id: string
+  /** Часть QR-кода. По нему телефон находит билет, без входа в аккаунт он бесполезен. */
+  scanCode: string
+  confirmCode: string
+  choiceCodes: number[]
+  deviceSecretHash: string
+  deviceName: string
+  platform: string
+  status: QrTicketStatus
+  /** Кто подтвердил вход. Задан только у подтверждённого билета. */
+  userId: string | null
+  expiresAt: Date
 }
 
 /**

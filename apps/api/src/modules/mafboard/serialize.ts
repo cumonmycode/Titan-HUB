@@ -1,5 +1,5 @@
 import type { GomafiaPlayer } from '../../lib/gomafia.js'
-import type { DeviceSession, ErrorBody, GoMafiaClubJSON, GoMafiaPlayerJSON, LoginTicket, MafboardUser } from './types.js'
+import type { DeviceSession, ErrorBody, GoMafiaClubJSON, GoMafiaPlayerJSON, LoginTicket, MafboardUser, QrTicket } from './types.js'
 
 // Перевод внутренних данных в JSON-контракт приложения (docs/MAFBOARD.md).
 
@@ -117,6 +117,23 @@ export function toTicketStatusJSON(ticket: LoginTicket, now: Date) {
   if (ticket.status === 'claimed' || ticket.expiresAt <= now) return { status: 'expired' }
   if (ticket.status === 'confirmed') return { status: 'confirmed' }
   return { status: 'pending', opened: ticket.openedAt != null }
+}
+
+/** Статус билета QR для опроса ноутбуком. */
+export function toQrStatusJSON(ticket: QrTicket, now: Date) {
+  if (ticket.status === 'rejected') return { status: 'rejected' }
+  if (ticket.status === 'claimed' || ticket.expiresAt <= now) return { status: 'expired' }
+  return { status: ticket.status }
+}
+
+/** Что показать на телефоне перед подтверждением. Настоящий код неотличим от ложных. */
+export function toQrTicketJSON(ticket: QrTicket) {
+  return {
+    deviceName: ticket.deviceName,
+    platform: ticket.platform,
+    codes: ticket.choiceCodes,
+    expiresAt: ticket.expiresAt.toISOString(),
+  }
 }
 
 /** Universal Link, по которому бот возвращает пользователя в приложение. */

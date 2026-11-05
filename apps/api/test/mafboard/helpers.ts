@@ -7,7 +7,7 @@ import { RosterCache, type GoMafiaGateway } from '../../src/modules/mafboard/gom
 import { DELETED_HOST_ID } from '../../src/modules/mafboard/config.js'
 import { GomafiaTakenError, type MafboardRepo } from '../../src/modules/mafboard/repo.js'
 import { createMafboardRouter, type MafboardDeps } from '../../src/modules/mafboard/router.js'
-import type { DeviceSession, LoginTicket, MafboardUser, RefreshTokenRow, StoredActiveGame, StoredGame, TicketGuard } from '../../src/modules/mafboard/types.js'
+import type { DeviceSession, LoginTicket, MafboardUser, QrTicket, RefreshTokenRow, StoredActiveGame, StoredGame, TicketGuard } from '../../src/modules/mafboard/types.js'
 
 // Вебхук бота подписывается от JWT_SECRET Titan HUB (lib/tgWebhook.ts).
 process.env['JWT_SECRET'] ??= 'test-titan-jwt-secret-0123456789abcdef'
@@ -29,9 +29,10 @@ export const config: MafboardConfig = {
 export class MemoryRepo implements MafboardRepo {
   users = new Map<string, MafboardUser>()
   tickets = new Map<string, LoginTicket>()
+  qrTickets = new Map<string, QrTicket>()
   sessions = new Map<string, DeviceSession>()
-  /** Отзыв сессии хранится в самой сессии — `refreshToken()` подставляет его, как JOIN в Postgres. */
-  refresh = new Map<string, Omit<RefreshTokenRow, 'sessionRevokedAt'>>()
+  /** Отзыв и платформа хранятся в самой сессии — `refreshToken()` подставляет их, как JOIN в Postgres. */
+  refresh = new Map<string, Omit<RefreshTokenRow, 'sessionRevokedAt' | 'sessionPlatform'>>()
   games = new Map<string, StoredGame>()
   activeGames = new Map<string, StoredActiveGame>()
   private seq = 0
@@ -78,6 +79,7 @@ export class MemoryRepo implements MafboardRepo {
     for (const [id, session] of this.sessions) if (session.userId === userId) this.sessions.delete(id)
     for (const [hash, row] of this.refresh) if (row.userId === userId) this.refresh.delete(hash)
     for (const [id, ticket] of this.tickets) if (ticket.userId === userId) this.tickets.delete(id)
+    for (const [id, ticket] of this.qrTickets) if (ticket.userId === userId) this.qrTickets.delete(id)
     return true
   }
 
@@ -139,11 +141,40 @@ export class MemoryRepo implements MafboardRepo {
   async purgeExpired(before: Date) {
     const expired = [...this.tickets.values()].filter((t) => t.expiresAt < before)
     expired.forEach((t) => this.tickets.delete(t.id))
+    const expiredQr = [...this.qrTickets.values()].filter((t) => t.expiresAt < before)
+    expiredQr.forEach((t) => this.qrTickets.delete(t.id))
     const sessions = [...this.sessions.values()].filter((s) => s.expiresAt < before)
     sessions.forEach((s) => this.sessions.delete(s.id))
     const tokens = [...this.refresh.values()].filter((r) => r.expiresAt < before || !this.sessions.has(r.sessionId))
     tokens.forEach((r) => this.refresh.delete(r.tokenHash))
-    return { tickets: expired.length, sessions: sessions.length, refreshTokens: tokens.length }
+    return { tickets: expired.length + expiredQr.length, sessions: sessions.length, refreshTokens: tokens.length }
+  }
+
+  async createQrTicket(input: Parameters<MafboardRepo['createQrTicket']>[0]) {
+    const ticket: QrTicket = { id: this.uuid(), ...input, status: 'pending', userId: null }
+    this.qrTickets.set(ticket.id, ticket)
+    return ticket
+  }
+
+  async qrTicketById(id: string) { return this.qrTickets.get(id) ?? null }
+  async qrTicketByScan(scanCode: string) { return [...this.qrTickets.values()].find((t) => t.scanCode === scanCode) ?? null }
+
+  async decideQrTicket(scanCode: string, code: string, userId: string, now: Date) {
+    const ticket = await this.qrTicketByScan(scanCode)
+    if (!ticket || ticket.status !== 'pending' || ticket.expiresAt <= now) return null
+    const decided: QrTicket = ticket.confirmCode === code
+      ? { ...ticket, status: 'confirmed', userId }
+      : { ...ticket, status: 'rejected' }
+    this.qrTickets.set(ticket.id, decided)
+    return decided
+  }
+
+  async claimQrTicket(id: string, hash: string, now: Date) {
+    const ticket = this.qrTickets.get(id)
+    if (!ticket || ticket.status !== 'confirmed' || ticket.expiresAt <= now || ticket.deviceSecretHash !== hash) return null
+    const claimed: QrTicket = { ...ticket, status: 'claimed' }
+    this.qrTickets.set(id, claimed)
+    return claimed
   }
 
   async createSession(input: Parameters<MafboardRepo['createSession']>[0]) {
@@ -202,7 +233,8 @@ export class MemoryRepo implements MafboardRepo {
   async refreshToken(hash: string): Promise<RefreshTokenRow | null> {
     const row = this.refresh.get(hash)
     if (!row) return null
-    return { ...row, sessionRevokedAt: this.sessions.get(row.sessionId)?.revokedAt ?? null }
+    const session = this.sessions.get(row.sessionId)
+    return { ...row, sessionRevokedAt: session?.revokedAt ?? null, sessionPlatform: session?.platform ?? null }
   }
 
   async revokeRefreshToken(hash: string, at: Date) {

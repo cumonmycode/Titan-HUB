@@ -1,6 +1,6 @@
 import type {
-  DeviceSession, GoMafiaClubJSON, GoMafiaPlayerJSON, LoginTicket, MafboardUser, RefreshTokenRow, StoredActiveGame, StoredGame, TelegramProfile, TicketGuard,
-  TicketPatch, TicketStep,
+  DeviceSession, GoMafiaClubJSON, GoMafiaPlayerJSON, LoginTicket, MafboardUser, QrTicket, RefreshTokenRow, StoredActiveGame, StoredGame, TelegramProfile,
+  TicketGuard, TicketPatch, TicketStep,
 } from './types.js'
 
 /** Аккаунт GoMafia уже привязан к другому пользователю (уникальность gomafia_id). */
@@ -50,8 +50,28 @@ export interface MafboardRepo {
   updateTicket(id: string, patch: TicketPatch, guard?: TicketGuard): Promise<LoginTicket | null>
   /** Атомарно: подтверждённый, не истёкший билет с этим секретом → claimed. Иначе null. */
   claimTicket(id: string, deviceSecretHash: string, now: Date): Promise<LoginTicket | null>
-  /** Удалить билеты, сессии и refresh-токены, истёкшие раньше `before`. */
+  /** Удалить билеты (обоих видов), сессии и refresh-токены, истёкшие раньше `before`. */
   purgeExpired(before: Date): Promise<{ tickets: number; sessions: number; refreshTokens: number }>
+
+  // ─── Билеты входа в MBS по QR ──────────────────────────────────────────────
+  createQrTicket(input: {
+    scanCode: string
+    confirmCode: string
+    choiceCodes: number[]
+    deviceSecretHash: string
+    deviceName: string
+    platform: string
+    expiresAt: Date
+  }): Promise<QrTicket>
+  qrTicketById(id: string): Promise<QrTicket | null>
+  qrTicketByScan(scanCode: string): Promise<QrTicket | null>
+  /**
+   * Атомарно: не истёкший билет в ожидании становится подтверждённым этим пользователем,
+   * если код верный, и отклонённым, если нет. null — решать уже нечего.
+   */
+  decideQrTicket(scanCode: string, code: string, userId: string, now: Date): Promise<QrTicket | null>
+  /** Атомарно: подтверждённый, не истёкший билет с этим секретом → claimed. Иначе null. */
+  claimQrTicket(id: string, deviceSecretHash: string, now: Date): Promise<QrTicket | null>
 
   // ─── Сессии устройств ──────────────────────────────────────────────────────
   /** Атомарно: новая сессия (вход на устройстве) вместе с её первым refresh-токеном. */

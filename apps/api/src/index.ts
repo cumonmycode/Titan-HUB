@@ -1,5 +1,6 @@
 // Первым: кривые TLS до любых исходящих соединений (Cloudflare из РФ, см. модуль).
 import './lib/tlsCurves.js'
+import type { Server as HttpServer } from 'node:http'
 import { serve } from '@hono/node-server'
 import { closeDb, closeClubDbs, getClubDb, type Database } from '@titan/database'
 import { app } from './app.js'
@@ -18,7 +19,7 @@ import { smmTick } from './modules/smm/workflow.js'
 import { runMigrations, runMigrationsOn } from './migrations/runner.js'
 import { listActiveClubDbNames, buildClubConnString } from './lib/clubResolver.js'
 import { getSharedRedis } from './lib/redis.js'
-import { scheduleMafboardCron, startMafboard } from './modules/mafboard/index.js'
+import { attachMafboardRelay, scheduleMafboardCron, startMafboard } from './modules/mafboard/index.js'
 
 const port = Number(process.env['API_PORT'] ?? 3001)
 // CRON_DISABLED=1 — инстанс без фоновых задач: пробный запуск на копии БД при
@@ -104,7 +105,9 @@ runMigrations()
     const server = serve({ fetch: app.fetch, port }, (info) => {
       console.log(`🚀 Titan HUB API running on http://localhost:${info.port}`)
     })
-    setupGracefulShutdown(server)
+    // WebSocket пульта MafBoard Studio: мимо Hono и глобального cors.
+    const relay = attachMafboardRelay(server as unknown as HttpServer)
+    setupGracefulShutdown(server, () => relay.close())
     // MafBoard — своя БД и свой бот; стартует ПОСЛЕ serve и в фоне: ни медленный шлюз
     // Telegram, ни недоступная БД MafBoard не задерживают Titan HUB (startMafboard не бросает).
     void startMafboard()
@@ -117,7 +120,7 @@ runMigrations()
 // Graceful shutdown: при деплое Docker шлёт SIGTERM. Перестаём принимать новые
 // соединения, даём активным запросам/транзакциям завершиться, закрываем пул БД и
 // Redis. Это и закрывает «деплой рвёт in-flight транзакции/SSE» из аудита.
-function setupGracefulShutdown(server: { close: (cb?: () => void) => void }) {
+function setupGracefulShutdown(server: { close: (cb?: () => void) => void }, closeUpgraded: () => void) {
   let shuttingDown = false
   const shutdown = (signal: string) => {
     if (shuttingDown) return
@@ -130,6 +133,12 @@ function setupGracefulShutdown(server: { close: (cb?: () => void) => void }) {
       closeDb().finally(() => process.exit(1))
     }, 8000)
     force.unref()
+    // Соединения WebSocket сервер сам не закрывает: они держали бы его до принудительного выхода.
+    try {
+      closeUpgraded()
+    } catch (error) {
+      console.error('[shutdown] соединения WebSocket не закрыты', error)
+    }
     server.close(() => {
       Promise.all([closeDb(), closeClubDbs()])
         .finally(() => {

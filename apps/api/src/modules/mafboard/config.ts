@@ -36,6 +36,10 @@ export const JWT_AUDIENCE = 'mafboard-app'
 export const ACCESS_TOKEN_TTL_SEC = 60 * 60
 export const REFRESH_TOKEN_TTL_DAYS = 90
 export const LOGIN_TICKET_TTL_MIN = 10
+/** MafBoard Studio. Такие сессии появляются только через вход по QR. */
+export const DESKTOP_PLATFORMS: ReadonlySet<string> = new Set(['macos', 'windows'])
+/** QR на экране ноутбука: короткий срок, MBS обновляет его сам. */
+export const QR_TICKET_TTL_MIN = 3
 /** Профиль GoMafia обновляется при входе, если с прошлой синхронизации прошло больше суток. */
 export const GOMAFIA_RESYNC_AFTER_MS = 24 * 60 * 60_000
 export const SUPPORTED_GAME_SCHEMA_VERSION = 1

@@ -3,8 +3,8 @@ import type { SQL } from 'drizzle-orm'
 import { DELETED_HOST_ID } from './config.js'
 import { GomafiaTakenError, type MafboardRepo } from './repo.js'
 import type {
-  DeviceSession, GoMafiaClubJSON, GoMafiaPlayerJSON, LoginTicket, MafboardUser, RefreshTokenRow, StoredActiveGame, StoredGame, TicketGuard, TicketPatch,
-  TicketStatus, TicketStep,
+  DeviceSession, GoMafiaClubJSON, GoMafiaPlayerJSON, LoginTicket, MafboardUser, QrTicket, QrTicketStatus, RefreshTokenRow, StoredActiveGame, StoredGame,
+  TicketGuard, TicketPatch, TicketStatus, TicketStep,
 } from './types.js'
 
 // Хранилище MafBoard в Postgres (raw SQL, как modules/smm/db.ts). Даты передаём
@@ -78,6 +78,21 @@ function toTicket(r: Row): LoginTicket {
     openedAt: dateOrNull(r['opened_at']),
     note: str(r['note']),
     createdAt: date(r['created_at']),
+    expiresAt: date(r['expires_at']),
+  }
+}
+
+function toQrTicket(r: Row): QrTicket {
+  return {
+    id: String(r['id']),
+    scanCode: String(r['scan_code']),
+    confirmCode: String(r['confirm_code']),
+    choiceCodes: json<number[]>(r['choice_codes']) ?? [],
+    deviceSecretHash: String(r['device_secret_hash']),
+    deviceName: String(r['device_name']),
+    platform: String(r['platform']),
+    status: String(r['status']) as QrTicketStatus,
+    userId: str(r['user_id']),
     expiresAt: date(r['expires_at']),
   }
 }
@@ -297,10 +312,58 @@ export class PgMafboardRepo implements MafboardRepo {
 
   async purgeExpired(before: Date): Promise<{ tickets: number; sessions: number; refreshTokens: number }> {
     const tickets = await this.query(sql`DELETE FROM mb_login_tickets WHERE expires_at < ${iso(before)}::timestamptz RETURNING id`)
+    const qrTickets = await this.query(sql`DELETE FROM mb_qr_tickets WHERE expires_at < ${iso(before)}::timestamptz RETURNING id`)
     // Токены истёкшей сессии удаляются каскадом; отдельно — старые токены живых сессий.
     const sessions = await this.query(sql`DELETE FROM mb_sessions WHERE expires_at < ${iso(before)}::timestamptz RETURNING id`)
     const tokens = await this.query(sql`DELETE FROM mb_refresh_tokens WHERE expires_at < ${iso(before)}::timestamptz RETURNING token_hash`)
-    return { tickets: tickets.length, sessions: sessions.length, refreshTokens: tokens.length }
+    return { tickets: tickets.length + qrTickets.length, sessions: sessions.length, refreshTokens: tokens.length }
+  }
+
+  // ─── Билеты входа в MBS по QR ──────────────────────────────────────────────
+
+  async createQrTicket(input: Parameters<MafboardRepo['createQrTicket']>[0]): Promise<QrTicket> {
+    const row = await this.one(sql`
+      INSERT INTO mb_qr_tickets (scan_code, confirm_code, choice_codes, device_secret_hash, device_name, platform, expires_at)
+      VALUES (${input.scanCode}, ${input.confirmCode}, ${JSON.stringify(input.choiceCodes)}::jsonb, ${input.deviceSecretHash},
+              ${input.deviceName}, ${input.platform}, ${iso(input.expiresAt)}::timestamptz)
+      RETURNING *
+    `)
+    if (!row) throw new Error('[mafboard] билет QR не создан')
+    return toQrTicket(row)
+  }
+
+  async qrTicketById(id: string): Promise<QrTicket | null> {
+    if (!UUID.test(id)) return null
+    const row = await this.one(sql`SELECT * FROM mb_qr_tickets WHERE id = ${id}::uuid`)
+    return row ? toQrTicket(row) : null
+  }
+
+  async qrTicketByScan(scanCode: string): Promise<QrTicket | null> {
+    const row = await this.one(sql`SELECT * FROM mb_qr_tickets WHERE scan_code = ${scanCode}`)
+    return row ? toQrTicket(row) : null
+  }
+
+  async decideQrTicket(scanCode: string, code: string, userId: string, now: Date): Promise<QrTicket | null> {
+    if (!UUID.test(userId)) return null
+    const row = await this.one(sql`
+      UPDATE mb_qr_tickets SET
+        status = CASE WHEN confirm_code = ${code} THEN 'confirmed' ELSE 'rejected' END,
+        user_id = CASE WHEN confirm_code = ${code} THEN ${userId}::uuid ELSE NULL END
+      WHERE scan_code = ${scanCode} AND status = 'pending' AND expires_at > ${iso(now)}::timestamptz
+      RETURNING *
+    `)
+    return row ? toQrTicket(row) : null
+  }
+
+  async claimQrTicket(id: string, deviceSecretHash: string, now: Date): Promise<QrTicket | null> {
+    if (!UUID.test(id)) return null
+    const row = await this.one(sql`
+      UPDATE mb_qr_tickets SET status = 'claimed', claimed_at = ${iso(now)}::timestamptz
+      WHERE id = ${id}::uuid AND status = 'confirmed'
+        AND expires_at > ${iso(now)}::timestamptz AND device_secret_hash = ${deviceSecretHash}
+      RETURNING *
+    `)
+    return row ? toQrTicket(row) : null
   }
 
   // ─── Сессии устройств ──────────────────────────────────────────────────────
@@ -391,7 +454,8 @@ export class PgMafboardRepo implements MafboardRepo {
 
   async refreshToken(tokenHash: string): Promise<RefreshTokenRow | null> {
     const row = await this.one(sql`
-      SELECT t.token_hash, t.user_id, t.session_id, t.expires_at, t.revoked_at, s.revoked_at AS session_revoked_at
+      SELECT t.token_hash, t.user_id, t.session_id, t.expires_at, t.revoked_at,
+             s.revoked_at AS session_revoked_at, s.platform AS session_platform
       FROM mb_refresh_tokens t JOIN mb_sessions s ON s.id = t.session_id
       WHERE t.token_hash = ${tokenHash}
     `)
@@ -403,6 +467,7 @@ export class PgMafboardRepo implements MafboardRepo {
           expiresAt: date(row['expires_at']),
           revokedAt: dateOrNull(row['revoked_at']),
           sessionRevokedAt: dateOrNull(row['session_revoked_at']),
+          sessionPlatform: str(row['session_platform']),
         }
       : null
   }

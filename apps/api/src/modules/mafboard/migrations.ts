@@ -166,6 +166,29 @@ export const MAFBOARD_MIGRATIONS: readonly { id: string; sql: string }[] = [
         ADD CONSTRAINT mb_games_host_user_id_fkey FOREIGN KEY (host_user_id) REFERENCES mb_users(id) ON DELETE SET NULL;
     `,
   },
+  {
+    // Вход в MBS по QR-коду: билет с экрана ноутбука подтверждает телефон, где ведущий уже вошёл.
+    // В отличие от входа через бота, нового пользователя здесь не создаётся.
+    id: '005_mafboard_qr_tickets',
+    sql: `
+      CREATE TABLE IF NOT EXISTS mb_qr_tickets (
+        id                 uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        scan_code          text NOT NULL UNIQUE,
+        confirm_code       text NOT NULL,
+        choice_codes       jsonb NOT NULL,
+        device_secret_hash text NOT NULL,
+        device_name        text NOT NULL,
+        platform           text NOT NULL CHECK (platform IN ('macos', 'windows')),
+        status             text NOT NULL DEFAULT 'pending'
+                           CHECK (status IN ('pending', 'confirmed', 'rejected', 'claimed')),
+        user_id            uuid REFERENCES mb_users(id) ON DELETE CASCADE,
+        created_at         timestamptz NOT NULL DEFAULT now(),
+        expires_at         timestamptz NOT NULL,
+        claimed_at         timestamptz
+      );
+      CREATE INDEX IF NOT EXISTS mb_qr_tickets_expires_idx ON mb_qr_tickets (expires_at);
+    `,
+  },
 ]
 
 function rows<T = Record<string, unknown>>(res: unknown): T[] {

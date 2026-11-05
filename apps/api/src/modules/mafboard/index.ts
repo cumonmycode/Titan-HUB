@@ -1,3 +1,4 @@
+import type { Server } from 'node:http'
 import { getClubDb } from '@titan/database'
 import { getSharedRedis } from '../../lib/redis.js'
 import { setTelegramWebhook } from '../../lib/telegram.js'
@@ -7,6 +8,7 @@ import { readMafboardConfig, type MafboardConfig } from './config.js'
 import { liveGoMafia, RosterCache } from './gomafia.js'
 import { ensureMafboardDatabase, runMafboardMigrations } from './migrations.js'
 import { PgMafboardRepo } from './pgRepo.js'
+import { attachStudioRelay, type StudioRelay } from './relay.js'
 import { createMafboardRouter, type MafboardDeps, type RateLimiter } from './router.js'
 import { webhookSecret } from './tokens.js'
 
@@ -96,6 +98,11 @@ function resolveDeps(): MafboardDeps | { error: string } {
 }
 
 export const mafboardRouter = createMafboardRouter(resolveDeps)
+
+/** Облачный канал пульта MafBoard Studio: WebSocket идёт мимо Hono, прямо на сервер. */
+export function attachMafboardRelay(server: Server): StudioRelay {
+  return attachStudioRelay(server, resolveDeps)
+}
 
 function webhookUrl(): string {
   const root = (process.env['TELEGRAM_WEBHOOK_HOST'] || process.env['ROOT_DOMAIN'] || 'titanpos.ru').toLowerCase()

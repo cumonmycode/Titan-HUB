@@ -6,14 +6,14 @@ import { clientIp } from '../../lib/clientIp.js'
 import type { TgUpdate } from '../tg/types.js'
 import { handleBotUpdate, type BotMessenger } from './bot.js'
 import {
-  GOMAFIA_RESYNC_AFTER_MS, LOGIN_TICKET_TTL_MIN, REFRESH_TOKEN_TTL_DAYS, REVIEW_LOGIN, REVIEW_TG_ID, type MafboardConfig,
+  DESKTOP_PLATFORMS, GOMAFIA_RESYNC_AFTER_MS, LOGIN_TICKET_TTL_MIN, QR_TICKET_TTL_MIN, REFRESH_TOKEN_TTL_DAYS, REVIEW_LOGIN, REVIEW_TG_ID, type MafboardConfig,
 } from './config.js'
 import { validateGameUpload } from './games.js'
 import { MIN_QUERY_LENGTH, refreshLink, resolveLink, searchForHost, type GoMafiaGateway, type RosterCache } from './gomafia.js'
 import { GomafiaTakenError, type MafboardRepo } from './repo.js'
-import { errorBody, toAccountJSON, toPlayerJSON, toSessionsJSON, toTicketStatusJSON } from './serialize.js'
+import { errorBody, toAccountJSON, toPlayerJSON, toQrStatusJSON, toQrTicketJSON, toSessionsJSON, toTicketStatusJSON } from './serialize.js'
 import {
-  issueAccessToken, newConfirmCode, newDeepCode, newRefreshToken, passwordMatches, sha256, verifyAccessToken, webhookSecretValid,
+  issueAccessToken, newConfirmCode, newDeepCode, newRefreshToken, passwordMatches, qrChoiceCodes, sha256, verifyAccessToken, webhookSecretValid,
 } from './tokens.js'
 import type { MafboardUser } from './types.js'
 
@@ -60,6 +60,9 @@ const ACTIVE_GAMES_LIMIT = 5
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const START_LIMIT = { count: 20, windowSec: 600 }
 const COMPLETE_LIMIT = { count: 30, windowSec: 600 }
+const QR_APPROVE_LIMIT = { count: 30, windowSec: 600 }
+/** MBS спрашивает раз в 2 секунды, это 300 запросов за 10 минут. С запасом на два окна за одним адресом. */
+const QR_STATUS_LIMIT = { count: 600, windowSec: 600 }
 const REVIEW_LIMIT = { count: 10, windowSec: 600 }
 const LINK_LIMIT = { count: 5, windowSec: 600 }
 /** На один логин GoMafia и на один IP — против подбора чужого пароля через наш сервер. */
@@ -111,12 +114,20 @@ function body<T extends z.ZodTypeAny>(schema: T) {
   })
 }
 
+const deviceSecretSchema = z.string().regex(/^[A-Za-z0-9_-]{32,128}$/)
 const startSchema = z.object({
   deviceName: z.string().max(200).transform(sanitizeDeviceName),
   platform: z.enum(['ios', 'android']),
-  deviceSecret: z.string().regex(/^[A-Za-z0-9_-]{32,128}$/),
+  deviceSecret: deviceSecretSchema,
 })
 const completeSchema = z.object({ ticket: z.string().uuid(), deviceSecret: z.string().min(32).max(128) })
+const qrStartSchema = z.object({
+  deviceName: z.string().max(200).transform(sanitizeDeviceName),
+  platform: z.enum(['macos', 'windows']),
+  deviceSecret: deviceSecretSchema,
+})
+const scanCodeSchema = z.string().regex(/^[A-Za-z0-9_-]{16,64}$/)
+const qrApproveSchema = z.object({ scan: scanCodeSchema, code: z.number().int().min(10).max(99) })
 const refreshSchema = z.object({ refreshToken: z.string().min(32).max(128) })
 const reviewSchema = z.object({
   login: z.string().trim().max(100),
@@ -212,6 +223,12 @@ export function createMafboardRouter(resolveDeps: DepsResolver): Hono<Env> {
     const live = session && !session.revokedAt && session.userId === claims?.userId
     const user = live ? await deps.repo.userById(session.userId) : null
     if (!session || !user) return fail(c, 401, 'unauthorized', 'Сессия истекла — войдите снова')
+    // Ноутбук в клубе защищён слабее телефона, а MafBoard Studio нужно только имя ведущего.
+    // Запрет по умолчанию: новая ручка тоже недоступна с ноутбука, пока её не разрешат здесь.
+    const isDesktop = session.platform != null && DESKTOP_PLATFORMS.has(session.platform)
+    if (isDesktop && !(c.req.method === 'GET' && c.req.path.endsWith('/v1/me'))) {
+      return fail(c, 403, 'desktop_session', 'Это действие доступно только с телефона')
+    }
 
     const now = deps.now()
     if (now.getTime() - session.lastUsedAt.getTime() > SESSION_TOUCH_EVERY_MS) await deps.repo.touchSession(session.id, now)
@@ -297,6 +314,89 @@ export function createMafboardRouter(resolveDeps: DepsResolver): Hono<Env> {
     return c.json({ tokens, account: toAccountJSON(user) })
   })
 
+  // ─── Вход в MBS по QR ───────────────────────────────────────────────────────
+
+  /**
+   * MBS показывает QR-код и двузначный код. Секрет ноутбука хранится только хэшем: без него
+   * подтверждённый билет не обменять на сессию, даже зная всё, что есть в QR-коде.
+   */
+  router.post('/v1/auth/qr/start', body(qrStartSchema), async (c) => {
+    const deps = c.get('deps')
+    if (!(await deps.limiter.hit(`mb:qr:start:${ipKey(clientIp(c))}`, START_LIMIT.count, START_LIMIT.windowSec))) {
+      return fail(c, 429, 'rate_limited', 'Слишком много попыток входа, подождите немного')
+    }
+    const input = c.req.valid('json')
+    const confirmCode = newConfirmCode()
+    const ticket = await deps.repo.createQrTicket({
+      scanCode: newDeepCode(),
+      confirmCode,
+      choiceCodes: qrChoiceCodes(confirmCode),
+      deviceSecretHash: sha256(input.deviceSecret),
+      deviceName: input.deviceName,
+      platform: input.platform,
+      expiresAt: new Date(deps.now().getTime() + QR_TICKET_TTL_MIN * 60_000),
+    })
+    return c.json({
+      id: ticket.id,
+      scanCode: ticket.scanCode,
+      confirmationCode: ticket.confirmCode,
+      expiresAt: ticket.expiresAt.toISOString(),
+    })
+  })
+
+  /** Опрос с ноутбука: pending / confirmed / rejected / expired. */
+  router.get('/v1/auth/qr/status', async (c) => {
+    const deps = c.get('deps')
+    if (!(await deps.limiter.hit(`mb:qr:status:${ipKey(clientIp(c))}`, QR_STATUS_LIMIT.count, QR_STATUS_LIMIT.windowSec))) {
+      return fail(c, 429, 'rate_limited', 'Слишком много запросов, подождите немного')
+    }
+    const id = c.req.query('ticket') ?? ''
+    if (!z.string().uuid().safeParse(id).success) return fail(c, 422, 'validation', 'Некорректный билет')
+    const ticket = await deps.repo.qrTicketById(id)
+    if (!ticket) return fail(c, 404, 'not_found', 'Билет не найден')
+    return c.json(toQrStatusJSON(ticket, deps.now()))
+  })
+
+  /** Телефон показывает, какое устройство просит вход, и три кода на выбор. */
+  router.get('/v1/auth/qr/ticket', requireUser, async (c) => {
+    const deps = c.get('deps')
+    const scan = scanCodeSchema.safeParse(c.req.query('scan') ?? '')
+    if (!scan.success) return fail(c, 422, 'validation', 'Некорректный код')
+    const ticket = await deps.repo.qrTicketByScan(scan.data)
+    if (!ticket || ticket.status !== 'pending' || ticket.expiresAt <= deps.now()) {
+      return fail(c, 404, 'not_found', 'Этот QR-код уже недействителен, отсканируйте новый')
+    }
+    return c.json(toQrTicketJSON(ticket))
+  })
+
+  /** Ведущий выбрал код с экрана ноутбука. Первая же ошибка закрывает билет: код не подобрать. */
+  router.post('/v1/auth/qr/approve', requireUser, body(qrApproveSchema), async (c) => {
+    const deps = c.get('deps')
+    const user = c.get('user')
+    if (!(await deps.limiter.hit(`mb:qr:approve:${user.id}`, QR_APPROVE_LIMIT.count, QR_APPROVE_LIMIT.windowSec))) {
+      return fail(c, 429, 'rate_limited', 'Слишком много попыток, подождите немного')
+    }
+    const input = c.req.valid('json')
+    const ticket = await deps.repo.decideQrTicket(input.scan, String(input.code), user.id, deps.now())
+    if (!ticket) return fail(c, 422, 'invalid_ticket', 'Этот QR-код уже недействителен, отсканируйте новый')
+    return c.json({ ok: ticket.status === 'confirmed' })
+  })
+
+  /** Ноутбук обменивает подтверждённый билет и свой секрет на сессию. Билет одноразовый. */
+  router.post('/v1/auth/qr/complete', body(completeSchema), async (c) => {
+    const deps = c.get('deps')
+    if (!(await deps.limiter.hit(`mb:qr:complete:${ipKey(clientIp(c))}`, COMPLETE_LIMIT.count, COMPLETE_LIMIT.windowSec))) {
+      return fail(c, 429, 'rate_limited', 'Слишком много попыток, подождите немного')
+    }
+    const input = c.req.valid('json')
+    const ticket = await deps.repo.claimQrTicket(input.ticket, sha256(input.deviceSecret), deps.now())
+    const user = ticket?.userId ? await deps.repo.userById(ticket.userId) : null
+    if (!ticket || !user) return fail(c, 422, 'invalid_ticket', 'Вход не подтверждён или устарел, начните заново')
+
+    const tokens = await issueSession(deps, user, { name: ticket.deviceName, platform: ticket.platform })
+    return c.json({ tokens, account: toAccountJSON(user) })
+  })
+
   /**
    * Вход проверяющего App Store по логину и паролю из заметок для App Review — у него нет нашего
    * Telegram-бота. Отдельный аккаунт без GoMafia (только фанки); удалённый создаётся заново при входе.
@@ -322,7 +422,8 @@ export function createMafboardRouter(resolveDeps: DepsResolver): Hono<Env> {
   /**
    * Обновить токены. Refresh одноразовый: каждый вызов выдаёт новый токен той же сессии.
    * Повторное предъявление уже заменённого токена живой сессии — признак кражи:
-   * отзываем все сессии пользователя. Токен завершённой сессии просто не принимается.
+   * отзываем все сессии пользователя, а для настольного приложения только его сессию.
+   * Токен завершённой сессии просто не принимается.
    */
   router.post('/v1/auth/refresh', body(refreshSchema), async (c) => {
     const deps = c.get('deps')
@@ -334,7 +435,12 @@ export function createMafboardRouter(resolveDeps: DepsResolver): Hono<Env> {
     if (row.revokedAt) {
       // Свежий повтор (потерянный ответ, параллельный запрос) — не кража: сессии не трогаем.
       if (now.getTime() - row.revokedAt.getTime() > REFRESH_REUSE_GRACE_MS) {
-        await deps.repo.revokeAllSessions(row.userId, now)
+        // Ноутбук мог уснуть посреди обновления, и телефон ведущего посреди партии из-за этого не страдает.
+        if (row.sessionPlatform && DESKTOP_PLATFORMS.has(row.sessionPlatform)) {
+          await deps.repo.revokeSession(row.userId, row.sessionId, now)
+        } else {
+          await deps.repo.revokeAllSessions(row.userId, now)
+        }
       }
       return fail(c, 401, 'unauthorized', 'Сессия уже обновлена — войдите снова')
     }

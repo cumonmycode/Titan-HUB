@@ -43,7 +43,7 @@ apps/api/test/mafboard/ — тесты (node:test через tsx), хранил�
 
 ## API
 
-Базовый адрес для приложения: `https://mafboard.titanpos.ru/api/mafboard` (поддомен отдаёт только API MafBoard, страницу возврата `/auth/return`, `/terms` и `apple-app-site-association`; см. блок в `nginx/nginx.conf`). Все запросы и ответы — JSON,
+Базовый адрес для приложения: `https://mafboard.titanpos.ru/api/mafboard` (поддомен отдаёт только API MafBoard, страницы `/auth/return` и `/studio/login`, `/terms` и `apple-app-site-association`; см. блок в `nginx/nginx.conf`). Все запросы и ответы — JSON,
 даты — ISO 8601. Ошибки приходят в формате `{"error": {"code": "…", "message": "…"}}`.
 
 | Метод и путь | Авторизация | Что делает |
@@ -51,7 +51,12 @@ apps/api/test/mafboard/ — тесты (node:test через tsx), хранил�
 | `POST /v1/auth/telegram/start` `{deviceName, platform: ios\|android, deviceSecret}` | — | Билет входа на 10 минут: `{id, deepLink: https://t.me/<бот>?start=login_<код>, expiresAt, confirmationCode}` |
 | `GET /v1/auth/telegram/status?ticket=` | — | `{status: pending, opened}` / `confirmed` / `rejected, note` / `expired` |
 | `POST /v1/auth/telegram/complete` `{ticket, deviceSecret}` | — | `{tokens: {accessToken, refreshToken, accessExpiresAt}, account}`. Билет одноразовый |
-| `POST /v1/auth/refresh` `{refreshToken}` | — | Новая пара токенов той же сессии. Повторное предъявление уже заменённого refresh отзывает все сессии |
+| `POST /v1/auth/qr/start` `{deviceName, platform: macos\|windows, deviceSecret}` | — (20 за 10 мин с IP) | Вход в MafBoard Studio: билет на 3 минуты `{id, scanCode, confirmationCode, expiresAt}`. Настольные платформы входят только так |
+| `GET /v1/auth/qr/status?ticket=` | — | `{status: pending\|confirmed\|rejected\|expired}` |
+| `GET /v1/auth/qr/ticket?scan=` | Bearer | Что показать на телефоне: `{deviceName, platform, codes: [3 числа], expiresAt}`. Варианты кода хранятся в билете и не меняются между запросами. 404 — билет истёк или уже решён |
+| `POST /v1/auth/qr/approve` `{scan, code}` | Bearer (30 за 10 мин) | `{ok: true}` или `{ok: false}`, если код неверный: билет сразу становится `rejected`. 422 `invalid_ticket` — решать уже нечего. Новый пользователь здесь не создаётся |
+| `POST /v1/auth/qr/complete` `{ticket, deviceSecret}` | — (30 за 10 мин с IP) | `{tokens, account}`. Билет одноразовый, 422 `invalid_ticket` — не подтверждён, истёк или секрет не тот |
+| `POST /v1/auth/refresh` `{refreshToken}` | — | Новая пара токенов той же сессии. Повторное предъявление уже заменённого refresh через 30 с и позже отзывает все сессии, а для `macos` и `windows` только свою: уснувший ноутбук не должен выкидывать телефон ведущего |
 | `POST /v1/auth/logout` `{refreshToken}` | — | Завершает сессию устройства: её refresh и access перестают действовать |
 | `GET /v1/me/sessions` | Bearer | `{sessions: [{id, deviceName, platform, createdAt, lastUsedAt, isCurrent}]}` — устройства, где выполнен вход; текущее (по сессии access-токена) первым, остальные по `lastUsedAt` |
 | `DELETE /v1/me/sessions/:id` | Bearer | Завершить сессию другого устройства → `{ok: true}`. 409 `current_session` — это текущее устройство (для него `logout`), 404 — нет такой активной сессии у пользователя |
@@ -67,6 +72,15 @@ apps/api/test/mafboard/ — тесты (node:test через tsx), хранил�
 | `GET /v1/me/games?since=` | Bearer | Все игры ведущего, включая фанки |
 | `GET /v1/clubs/:id/games?since=` | Bearer, участник клуба | История клуба |
 | `POST /tg-webhook` | secret_token | Вебхук бота |
+| `WS /v1/studio/relay` | Токен первым сообщением | Облачный канал пульта MafBoard Studio, см. ниже |
+
+Сессии `macos` и `windows` (MafBoard Studio) могут только читать `GET /v1/me`, всё остальное отвечает 403 `desktop_session`. Это запрет по умолчанию в `requireUser`.
+
+### Облачный канал пульта
+
+WebSocket идёт мимо Hono: обработчик `upgrade` на HTTP-сервере в `relay.ts`, подключается из `apps/api/src/index.ts`. Сервер пересылает двоичные кадры между телефоном и ноутбуком одного ведущего и содержимое не читает: кадры зашифрованы сквозным ключом, который есть только у них. Адрес токена не содержит: первое сообщение `{"type":"auth","token","studioId","role"}`. Ответ `{"type":"ready","peerOnline"}`, затем `{"type":"peer","online"}` при появлении и пропаже второй стороны.
+
+Комната — `userId:studioId`, по одному соединению на роль, роль следует из платформы сессии. Лимиты: кадр 64 КБ, 60 кадров в секунду на соединение, 60 подключений за 10 минут с адреса. Коды закрытия: 4400, 4401, 4403, 4409, 4429. Комнаты живут в памяти, поэтому при нескольких экземплярах API понадобится Redis. Сейчас контейнер `titan-api` один. Протокол и шифрование описаны в `docs/login-and-remote.md` репозитория MafBoard Studio.
 
 ### Права ведущего (проверяет `POST /v1/games`)
 

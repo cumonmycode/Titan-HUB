@@ -72,6 +72,18 @@ export function decoyCodes(real: string): string[] {
   return [...decoys]
 }
 
+/** Три варианта для экрана телефона: настоящий код среди двух ложных, в случайном порядке. */
+export function qrChoiceCodes(real: string): number[] {
+  const codes = [real, ...decoyCodes(real)].map(Number)
+  for (let i = codes.length - 1; i > 0; i -= 1) {
+    const j = randomInt(i + 1)
+    const swapped = codes[i] as number
+    codes[i] = codes[j] as number
+    codes[j] = swapped
+  }
+  return codes
+}
+
 /**
  * secret_token вебхука бота MafBoard: HMAC от СВОЕГО ключа модуля и токена бота
  * (не от JWT_SECRET Titan HUB). Смена токена бота или ключа меняет секрет — вебхук
