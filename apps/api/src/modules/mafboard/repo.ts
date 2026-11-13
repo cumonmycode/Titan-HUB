@@ -1,5 +1,5 @@
 import type {
-  DeviceSession, GoMafiaClubJSON, GoMafiaPlayerJSON, LoginTicket, MafboardUser, QrTicket, RefreshTokenRow, StoredActiveGame, StoredGame, TelegramProfile,
+  DeviceSession, GoMafiaClubJSON, GoMafiaPlayerJSON, LoginTicket, MafboardUser, QrTicket, RefreshTokenRow, StoredActiveGame, StoredGame, StoredStudioSettings, TelegramProfile,
   TicketGuard, TicketPatch, TicketStep,
 } from './types.js'
 
@@ -117,4 +117,18 @@ export interface MafboardRepo {
   saveActiveGame(game: StoredActiveGame): Promise<'saved' | 'stale' | 'conflict'>
   activeGamesByHost(userId: string, limit: number): Promise<StoredActiveGame[]>
   deleteActiveGame(userId: string, id: string): Promise<void>
+
+  // ─── Настройки MafBoard Studio ─────────────────────────────────────────────
+  studioSettings(userId: string): Promise<StoredStudioSettings | null>
+  /**
+   * Атомарно: запись, если сохранённая ревизия равна `baseRevision` (или записи нет и он 0).
+   * Иначе — текущая версия, чтобы MBS слил свои изменения с ней.
+   */
+  saveStudioSettings(input: {
+    userId: string
+    baseRevision: number
+    document: Record<string, unknown>
+    secrets: string | null
+    updatedAt: Date
+  }): Promise<{ saved: true; revision: number } | { saved: false; current: StoredStudioSettings | null }>
 }

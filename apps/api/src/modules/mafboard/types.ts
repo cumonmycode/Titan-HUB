@@ -143,6 +143,17 @@ export interface DeviceSession {
 
 /** Завершённая игра в истории. `record` — GameRecord приложения как есть. */
 /** Идущая игра ведущего: снимок журнала, чтобы продолжить после переустановки или на другом устройстве. */
+/** Настройки MafBoard Studio ведущего: документ профилей и зашифрованные секреты. */
+export interface StoredStudioSettings {
+  userId: string
+  /** Растёт с каждой записью: запись от устаревшей ревизии отклоняется. */
+  revision: number
+  updatedAt: Date
+  document: Record<string, unknown>
+  /** `sealSecrets` из studio.ts. null — секретов нет. */
+  secrets: string | null
+}
+
 export interface StoredActiveGame {
   id: string
   hostUserId: string

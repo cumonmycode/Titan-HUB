@@ -15,7 +15,8 @@ import { errorBody, toAccountJSON, toPlayerJSON, toQrStatusJSON, toQrTicketJSON,
 import {
   issueAccessToken, newConfirmCode, newDeepCode, newRefreshToken, passwordMatches, qrChoiceCodes, sha256, verifyAccessToken, webhookSecretValid,
 } from './tokens.js'
-import type { MafboardUser } from './types.js'
+import { openSecrets, sealSecrets, STUDIO_BODY_LIMIT_BYTES, STUDIO_SAVES_PER_HOUR, STUDIO_SECRETS_LIMIT_BYTES, studioPutSchema } from './studio.js'
+import type { MafboardUser, StoredStudioSettings } from './types.js'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // API приложения MafBoard (/api/mafboard). Контракт — docs/MAFBOARD.md; клиент —
@@ -80,6 +81,16 @@ const SESSIONS_LIMIT = 50
 const SESSION_TOUCH_EVERY_MS = 5 * 60_000
 
 /** Ключ лимита по IP: для IPv6 — подсеть /64 (адресов в ней у одного клиента сколько угодно). */
+/**
+ * Что можно ноутбуку (MafBoard Studio): своё имя и свои настройки студии. Остальное — только с
+ * телефона: ноутбук в клубе защищён слабее, и украденным токеном не должно быть видно ни игр,
+ * ни сессий, ни GoMafia.
+ */
+function desktopAllowed(method: string, path: string): boolean {
+  if (method === 'GET' && path.endsWith('/v1/me')) return true
+  return (method === 'GET' || method === 'PUT') && path.endsWith('/v1/studio/settings')
+}
+
 export function ipKey(ip: string): string {
   if (!ip.includes(':')) return ip
   const value = (ip.replace(/^\[|\]$/g, '').split('%')[0] ?? '').toLowerCase()
@@ -226,7 +237,7 @@ export function createMafboardRouter(resolveDeps: DepsResolver): Hono<Env> {
     // Ноутбук в клубе защищён слабее телефона, а MafBoard Studio нужно только имя ведущего.
     // Запрет по умолчанию: новая ручка тоже недоступна с ноутбука, пока её не разрешат здесь.
     const isDesktop = session.platform != null && DESKTOP_PLATFORMS.has(session.platform)
-    if (isDesktop && !(c.req.method === 'GET' && c.req.path.endsWith('/v1/me'))) {
+    if (isDesktop && !desktopAllowed(c.req.method, c.req.path)) {
       return fail(c, 403, 'desktop_session', 'Это действие доступно только с телефона')
     }
 
@@ -637,6 +648,53 @@ export function createMafboardRouter(resolveDeps: DepsResolver): Hono<Env> {
     if (since === 'invalid') return fail(c, 422, 'validation', 'Некорректная дата since')
     const games = await deps.repo.gamesByClub(clubId, since, GAMES_PAGE_LIMIT)
     return c.json({ games: games.map((g) => g.record) })
+  })
+
+  // ─── Настройки MafBoard Studio ──────────────────────────────────────────────
+
+  const studioBodyLimit = bodyLimit({
+    maxSize: STUDIO_BODY_LIMIT_BYTES,
+    onError: (c) => c.json(errorBody('too_large', 'Настройки студии слишком большие'), 413),
+  })
+
+  const studioJSON = (deps: MafboardDeps, settings: StoredStudioSettings | null) => ({
+    revision: settings?.revision ?? 0,
+    updatedAt: settings?.updatedAt.toISOString() ?? null,
+    document: settings?.document ?? null,
+    // Не расшифровался — значит, сменился ключ сервера: MBS попросит ввести ключи заново.
+    secrets: settings?.secrets ? openSecrets(deps.config.studioSecretsKey, settings.secrets) : null,
+  })
+
+  /** Профили и секреты ведущего: MBS берёт их при входе и при смене ведущего. */
+  router.get('/v1/studio/settings', requireUser, async (c) => {
+    const deps = c.get('deps')
+    return c.json(studioJSON(deps, await deps.repo.studioSettings(c.get('user').id)))
+  })
+
+  /** Запись от ревизии `baseRevision`. Новее уже сохранили на другом Mac — 409 с текущей версией. */
+  router.put('/v1/studio/settings', studioBodyLimit, requireUser, async (c) => {
+    const deps = c.get('deps')
+    const user = c.get('user')
+    if (!(await deps.limiter.hit(`mb:studio:${user.id}`, STUDIO_SAVES_PER_HOUR, 60 * 60))) {
+      return fail(c, 429, 'rate_limited', 'Слишком частые сохранения настроек')
+    }
+    const parsed = studioPutSchema.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return fail(c, 422, 'validation', 'Настройки студии повреждены')
+    const { baseRevision, document, secrets } = parsed.data
+    if (secrets && Buffer.byteLength(JSON.stringify(secrets)) > STUDIO_SECRETS_LIMIT_BYTES) {
+      return fail(c, 422, 'validation', 'Слишком много секретов')
+    }
+    const result = await deps.repo.saveStudioSettings({
+      userId: user.id,
+      baseRevision,
+      document,
+      secrets: secrets ? sealSecrets(deps.config.studioSecretsKey, secrets) : null,
+      updatedAt: deps.now(),
+    })
+    if (!result.saved) {
+      return c.json({ error: { code: 'revision_conflict', message: 'Настройки изменили на другом устройстве' }, current: studioJSON(deps, result.current) }, 409)
+    }
+    return c.json({ revision: result.revision })
   })
 
   // ─── Идущие игры ────────────────────────────────────────────────────────────

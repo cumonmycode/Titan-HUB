@@ -3,7 +3,7 @@ import type { SQL } from 'drizzle-orm'
 import { DELETED_HOST_ID } from './config.js'
 import { GomafiaTakenError, type MafboardRepo } from './repo.js'
 import type {
-  DeviceSession, GoMafiaClubJSON, GoMafiaPlayerJSON, LoginTicket, MafboardUser, QrTicket, QrTicketStatus, RefreshTokenRow, StoredActiveGame, StoredGame,
+  DeviceSession, GoMafiaClubJSON, GoMafiaPlayerJSON, LoginTicket, MafboardUser, QrTicket, QrTicketStatus, RefreshTokenRow, StoredActiveGame, StoredGame, StoredStudioSettings,
   TicketGuard, TicketPatch, TicketStatus, TicketStep,
 } from './types.js'
 
@@ -131,6 +131,16 @@ function toActiveGame(r: Row): StoredActiveGame {
     revision: Number(r['revision']),
     updatedAt: date(r['updated_at']),
     snapshot: json<unknown>(r['snapshot']),
+  }
+}
+
+function toStudioSettings(r: Row): StoredStudioSettings {
+  return {
+    userId: String(r['user_id']),
+    revision: Number(r['revision']),
+    updatedAt: date(r['updated_at']),
+    document: json<Record<string, unknown>>(r['document']) ?? {},
+    secrets: r['secrets'] == null ? null : String(r['secrets']),
   }
 }
 
@@ -544,6 +554,28 @@ export class PgMafboardRepo implements MafboardRepo {
 
   async deleteActiveGame(userId: string, id: string): Promise<void> {
     await this.query(sql`DELETE FROM mb_active_games WHERE id = ${id}::uuid AND host_user_id = ${userId}::uuid`)
+  }
+
+
+  async studioSettings(userId: string): Promise<StoredStudioSettings | null> {
+    if (!UUID.test(userId)) return null
+    const row = await this.one(sql`SELECT * FROM mb_studio_settings WHERE user_id = ${userId}::uuid`)
+    return row ? toStudioSettings(row) : null
+  }
+
+  async saveStudioSettings(input: Parameters<MafboardRepo['saveStudioSettings']>[0]) {
+    const saved = await this.query(sql`
+      INSERT INTO mb_studio_settings (user_id, revision, updated_at, document, secrets)
+      VALUES (${input.userId}::uuid, ${input.baseRevision + 1}, ${iso(input.updatedAt)}::timestamptz,
+              ${JSON.stringify(input.document)}::jsonb, ${input.secrets})
+      ON CONFLICT (user_id) DO UPDATE
+        SET revision = mb_studio_settings.revision + 1, updated_at = EXCLUDED.updated_at,
+            document = EXCLUDED.document, secrets = EXCLUDED.secrets
+        WHERE mb_studio_settings.revision = ${input.baseRevision}
+      RETURNING revision
+    `)
+    if (saved.length > 0) return { saved: true as const, revision: Number(saved[0]!['revision']) }
+    return { saved: false as const, current: await this.studioSettings(input.userId) }
   }
 
 }

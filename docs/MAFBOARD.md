@@ -73,8 +73,14 @@ apps/api/test/mafboard/ — тесты (node:test через tsx), хранил�
 | `GET /v1/clubs/:id/games?since=` | Bearer, участник клуба | История клуба |
 | `POST /tg-webhook` | secret_token | Вебхук бота |
 | `WS /v1/studio/relay` | Токен первым сообщением | Облачный канал пульта MafBoard Studio, см. ниже |
+| `GET /v1/studio/settings` | Bearer | Настройки MafBoard Studio ведущего: `{revision, updatedAt, document, secrets}`. Ничего не сохранено — `revision: 0` и `null` |
+| `PUT /v1/studio/settings` `{baseRevision, document, secrets}` | Bearer (600 записей в час) | `{revision}`. Сохранённая ревизия не равна `baseRevision` — 409 `revision_conflict` с `current` для слияния. До 512 КБ, секреты до 64 КБ |
 
-Сессии `macos` и `windows` (MafBoard Studio) могут только читать `GET /v1/me`, всё остальное отвечает 403 `desktop_session`. Это запрет по умолчанию в `requireUser`.
+Сессии `macos` и `windows` (MafBoard Studio) могут только читать `GET /v1/me` и читать и писать `/v1/studio/settings`, всё остальное отвечает 403 `desktop_session`. Это запрет по умолчанию в `requireUser` (`desktopAllowed`).
+
+### Настройки MafBoard Studio (`studio.ts`)
+
+`document` — коллекция профилей ведущего, как её видит MBS (качество, сцены, площадки, темы, каналы чатов, устройства); сервер хранит его как есть. `secrets` — ключи потоков площадок и ключ YouTube Data API: сервер шифрует их AES-256-GCM (`v1.<iv>.<tag>.<шифротекст>`) и отдаёт только самому ведущему. Ключ — `MAFBOARD_STUDIO_SECRETS_KEY` (32 байта в base64) или, если его нет, выведенный HKDF из `MAFBOARD_JWT_SECRET`. При смене JWT-секрета без своего ключа сохранённые секреты перестанут читаться (`secrets: null`), и MBS попросит ввести ключи заново. Это защита от утечки базы, но не от доступа к серверу: сквозное шифрование потребует хранить ключ в приложении на телефоне.
 
 ### Облачный канал пульта
 
@@ -111,6 +117,7 @@ WebSocket идёт мимо Hono: обработчик `upgrade` на HTTP-се�
 | `mb_login_tickets` | Билеты входа: хэш секрета устройства, шаг в боте, статус, срок |
 | `mb_sessions` | Сессии устройств: имя и платформа из `start`, время входа, последней активности (не чаще раза в 5 минут и при каждом refresh), срок, отзыв |
 | `mb_refresh_tokens` | SHA-256 refresh-токенов, отзыв и ротация; `session_id` — сессия, к которой выдан токен |
+| `mb_studio_settings` | Настройки MafBoard Studio: ревизия, `document jsonb`, `secrets` — шифротекст (миграция `006`) |
 | `mb_games` | Игры: ведущий, клуб (`NULL` — личная), формат, даты, `record jsonb` — GameRecord приложения целиком |
 
 Истёкшие билеты, сессии и токены удаляются раз в сутки, через 30 дней после истечения.

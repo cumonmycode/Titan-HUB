@@ -189,6 +189,20 @@ export const MAFBOARD_MIGRATIONS: readonly { id: string; sql: string }[] = [
       CREATE INDEX IF NOT EXISTS mb_qr_tickets_expires_idx ON mb_qr_tickets (expires_at);
     `,
   },
+  {
+    // Настройки MafBoard Studio: профили ведущего в облаке, чтобы на любом Mac после входа они
+    // подтягивались сами. Секреты (ключи потоков) — шифротекстом ключа сервера, см. studio.ts.
+    id: '006_mafboard_studio_settings',
+    sql: `
+      CREATE TABLE IF NOT EXISTS mb_studio_settings (
+        user_id    uuid PRIMARY KEY REFERENCES mb_users(id) ON DELETE CASCADE,
+        revision   integer NOT NULL,
+        updated_at timestamptz NOT NULL,
+        document   jsonb NOT NULL,
+        secrets    text
+      );
+    `,
+  },
 ]
 
 function rows<T = Record<string, unknown>>(res: unknown): T[] {

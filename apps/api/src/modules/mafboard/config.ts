@@ -7,6 +7,8 @@
 // из любых клубов GoMafia, а не арендаторы Titan HUB.
 // ─────────────────────────────────────────────────────────────────────────────
 
+import { studioSecretsKey } from './studio.js'
+
 export interface MafboardConfig {
   databaseUrl: string
   /** Ключ токенов приложения. Свой, не JWT_SECRET: токен MafBoard не пройдёт requireAuth Titan HUB. */
@@ -21,6 +23,8 @@ export interface MafboardConfig {
   termsVersion: string
   /** Пароль входа проверяющего App Store (`POST /v1/auth/review`). null — такой вход выключен. */
   reviewPassword: string | null
+  /** Ключ AES-256-GCM для секретов MafBoard Studio (studio.ts). */
+  studioSecretsKey: Uint8Array
 }
 
 /** Логин проверяющего App Store — пароль к нему только в MAFBOARD_REVIEW_PASSWORD. */
@@ -69,11 +73,16 @@ export function readMafboardConfig(env: NodeJS.ProcessEnv = process.env): Config
     return { ok: false, error: 'MAFBOARD_APP_LINK_BASE должен начинаться с https:// (домен Universal Link)' }
   }
 
+  const jwtSecret = new TextEncoder().encode(secret)
+  const studioKey = studioSecretsKey(env, jwtSecret)
+  if (typeof studioKey === 'string') return { ok: false, error: studioKey }
+
   return {
     ok: true,
     config: {
       databaseUrl,
-      jwtSecret: new TextEncoder().encode(secret),
+      jwtSecret,
+      studioSecretsKey: studioKey,
       botToken: env['MAFBOARD_BOT_TOKEN']?.trim() || null,
       botUsername: env['MAFBOARD_BOT_USERNAME']?.trim().replace(/^@/, '') || null,
       appLinkBase,

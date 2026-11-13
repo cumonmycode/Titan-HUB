@@ -7,7 +7,7 @@ import { RosterCache, type GoMafiaGateway } from '../../src/modules/mafboard/gom
 import { DELETED_HOST_ID } from '../../src/modules/mafboard/config.js'
 import { GomafiaTakenError, type MafboardRepo } from '../../src/modules/mafboard/repo.js'
 import { createMafboardRouter, type MafboardDeps } from '../../src/modules/mafboard/router.js'
-import type { DeviceSession, LoginTicket, MafboardUser, QrTicket, RefreshTokenRow, StoredActiveGame, StoredGame, TicketGuard } from '../../src/modules/mafboard/types.js'
+import type { DeviceSession, LoginTicket, MafboardUser, QrTicket, RefreshTokenRow, StoredActiveGame, StoredGame, StoredStudioSettings, TicketGuard } from '../../src/modules/mafboard/types.js'
 
 // Вебхук бота подписывается от JWT_SECRET Titan HUB (lib/tgWebhook.ts).
 process.env['JWT_SECRET'] ??= 'test-titan-jwt-secret-0123456789abcdef'
@@ -17,6 +17,7 @@ export const NOW = new Date('2026-10-16T18:00:00.000Z')
 export const config: MafboardConfig = {
   databaseUrl: 'postgres://test/mafboard',
   jwtSecret: new TextEncoder().encode('test-mafboard-secret-0123456789abcdef'),
+  studioSecretsKey: new Uint8Array(32).fill(7),
   botToken: 'test-bot-token',
   botUsername: 'mafboard_test_bot',
   appLinkBase: 'https://mafboard.test',
@@ -35,6 +36,7 @@ export class MemoryRepo implements MafboardRepo {
   refresh = new Map<string, Omit<RefreshTokenRow, 'sessionRevokedAt' | 'sessionPlatform'>>()
   games = new Map<string, StoredGame>()
   activeGames = new Map<string, StoredActiveGame>()
+  studio = new Map<string, StoredStudioSettings>()
   private seq = 0
 
   private uuid(): string {
@@ -76,6 +78,7 @@ export class MemoryRepo implements MafboardRepo {
       }
     }
     for (const [id, game] of this.activeGames) if (game.hostUserId === userId) this.activeGames.delete(id)
+    this.studio.delete(userId)
     for (const [id, session] of this.sessions) if (session.userId === userId) this.sessions.delete(id)
     for (const [hash, row] of this.refresh) if (row.userId === userId) this.refresh.delete(hash)
     for (const [id, ticket] of this.tickets) if (ticket.userId === userId) this.tickets.delete(id)
@@ -278,6 +281,19 @@ export class MemoryRepo implements MafboardRepo {
 
   async deleteActiveGame(userId: string, id: string) {
     if (this.activeGames.get(id)?.hostUserId === userId) this.activeGames.delete(id)
+  }
+
+  async studioSettings(userId: string) {
+    return this.studio.get(userId) ?? null
+  }
+
+  async saveStudioSettings(input: Parameters<MafboardRepo['saveStudioSettings']>[0]) {
+    const current = this.studio.get(input.userId) ?? null
+    // Как в Postgres: записи нет — пишется; есть — только от той же ревизии.
+    if (current && current.revision !== input.baseRevision) return { saved: false as const, current }
+    const revision = input.baseRevision + 1
+    this.studio.set(input.userId, { userId: input.userId, revision, updatedAt: input.updatedAt, document: input.document, secrets: input.secrets })
+    return { saved: true as const, revision }
   }
 }
 
