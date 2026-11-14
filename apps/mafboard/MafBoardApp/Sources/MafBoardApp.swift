@@ -5,6 +5,7 @@ struct MafBoardApp: App {
     @State private var model: AppModel
     @State private var library: GameLibrary
     @State private var sync: GameSync
+    @State private var broadcaster: StudioBroadcaster
     @Environment(\.scenePhase) private var scenePhase
 
     init() {
@@ -13,6 +14,7 @@ struct MafBoardApp: App {
         _model = State(initialValue: model)
         _library = State(initialValue: library)
         _sync = State(initialValue: GameSync(library: library, model: model))
+        _broadcaster = State(initialValue: StudioBroadcaster(library: library, model: model))
         LiveGameActivity.shared.installActions()
     }
 
@@ -25,6 +27,8 @@ struct MafBoardApp: App {
                 .task {
                     library.uploader = { [model] record in await model.uploadGame(record) }
                     library.onActiveChanged = { [sync] in sync.activeChanged() }
+                    library.onBroadcast = { [broadcaster] in broadcaster.gameChanged($0) }
+                    library.onActiveDiscarded = { [broadcaster] in broadcaster.gameDiscarded() }
                     await model.bootstrap()
                     // Активности прошлого запуска без открытой игры — закрыть, чтобы не висел застывший таймер.
                     LiveGameActivity.shared.endOrphans()

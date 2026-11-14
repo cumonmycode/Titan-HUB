@@ -1,4 +1,5 @@
 import Foundation
+import MafBoardCore
 
 // Что передаётся внутри зашифрованных кадров. Имена полей те же, что на ноутбуке:
 // образцы лежат в общих векторах и проверяются с обеих сторон.
@@ -11,11 +12,15 @@ public enum RemoteCommand: Sendable, Equatable {
     case selectCamera(String)
     case startRecording
     case stopRecording
+    /// Снимок идущей игры для инфографики эфира.
+    case setGame(GameBroadcast)
+    /// Игра удалена: инфографика уходит с экрана.
+    case clearGame
 }
 
 extension RemoteCommand: Encodable {
     private enum CodingKeys: String, CodingKey {
-        case kind, scene, muted, enabled, uid
+        case kind, scene, muted, enabled, uid, game
     }
 
     public func encode(to encoder: any Encoder) throws {
@@ -37,6 +42,11 @@ extension RemoteCommand: Encodable {
             try container.encode("startRecording", forKey: .kind)
         case .stopRecording:
             try container.encode("stopRecording", forKey: .kind)
+        case let .setGame(game):
+            try container.encode("setGame", forKey: .kind)
+            try container.encode(game, forKey: .game)
+        case .clearGame:
+            try container.encode("clearGame", forKey: .kind)
         }
     }
 }

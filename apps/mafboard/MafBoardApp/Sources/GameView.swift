@@ -30,6 +30,8 @@ final class GameController: Identifiable {
     @ObservationIgnored var onSave: ((GameSession, [PlayerProfile]) -> Void)?
     @ObservationIgnored var onFinish: ((GameRecord, [PlayerProfile]) -> Void)?
     @ObservationIgnored var onReopen: ((GameID) -> Void)?
+    /// Игра или таймер изменились — показать это в инфографике MafBoard Studio.
+    @ObservationIgnored var onBroadcast: ((GameController) -> Void)?
 
     init(session: GameSession, players: [PlayerProfile]) {
         id = session.setup.gameID
@@ -74,6 +76,7 @@ final class GameController: Identifiable {
         save()
         // Законченная игра (и любые правки после конца — доп. баллы, лучший ход) — в историю и на сервер.
         if state.isFinished, let record { onFinish?(record, players) }
+        onBroadcast?(self)
         return true
     }
 
@@ -98,6 +101,7 @@ final class GameController: Identifiable {
         if wasFinished, !state.isFinished { onReopen?(id) }
         if state.isFinished, let record { onFinish?(record, players) }
         save()
+        onBroadcast?(self)
     }
 
     /// Вернуть удалённого игрока: удаление уходит из журнала вместе с последствиями.
@@ -114,6 +118,7 @@ final class GameController: Identifiable {
         if state.currentStep != step { resetTimer() }
         if wasFinished, !state.isFinished { onReopen?(id) }
         save()
+        onBroadcast?(self)
     }
 
     // MARK: Подсказки для «Назад» и «Далее»
@@ -223,9 +228,11 @@ final class GameController: Identifiable {
     /// Шаг, к которому относится сохранённое время: «День 2|speech(5)».
     private var timerStepKey: String { "\(state.moment.displayName)|\(state.currentStep)" }
 
+    /// Старт, пауза, сброс, «+30»: ноутбук ведёт таймер сам, ему нужен только новый отсчёт.
     private func timerChanged() {
         storeTimer()
         scheduleExpiry()
+        onBroadcast?(self)
     }
 
     private func storeTimer() {

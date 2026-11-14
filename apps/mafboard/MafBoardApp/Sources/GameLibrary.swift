@@ -208,6 +208,10 @@ final class GameLibrary {
     var uploader: (@MainActor (HostedGame) async -> SyncResult)?
     /// Идущая игра изменилась — пора отправить её на сервер.
     var onActiveChanged: (@MainActor () -> Void)?
+    /// Ход или таймер идущей игры — для инфографики MafBoard Studio.
+    var onBroadcast: (@MainActor (GameController) -> Void)?
+    /// Идущую игру удалили — инфографику убрать.
+    var onActiveDiscarded: (@MainActor () -> Void)?
 
     private var user: UserID?
     /// Последняя ревизия каждой игры — чтобы после отмены конца игры ревизия не пошла заново.
@@ -322,6 +326,7 @@ final class GameLibrary {
         SavedGameStore.clear()
         active = nil
         onActiveChanged?()
+        onActiveDiscarded?()
     }
 
     private func makeController(_ session: GameSession, players: [PlayerProfile]) -> GameController {
@@ -329,7 +334,17 @@ final class GameLibrary {
         controller.onSave = { [weak self] session, players in self?.saveActive(session, players: players) }
         controller.onFinish = { [weak self] record, players in self?.archive(record, players: players) }
         controller.onReopen = { [weak self] id in self?.unarchive(id) }
+        controller.onBroadcast = { [weak self] controller in self?.onBroadcast?(controller) }
+        // Открыли игру — инфографика сразу показывает её, не дожидаясь хода.
+        onBroadcast?(controller)
         return controller
+    }
+
+    /// Какая по счёту игра вечера: законченные игры вечера, начатые раньше, плюс один. Без вечера — `nil`.
+    func gameNumber(of setup: GameSetup) -> Int? {
+        guard let series = setup.seriesID else { return nil }
+        let earlier = history.filter { $0.eveningID == series && $0.id != setup.gameID && $0.record.startedAt < setup.createdAt }
+        return earlier.count + 1
     }
 
     // MARK: Законченные игры
