@@ -17,6 +17,7 @@ import {
 } from './tokens.js'
 import { openSecrets, sealSecrets, STUDIO_BODY_LIMIT_BYTES, STUDIO_SAVES_PER_HOUR, STUDIO_SECRETS_LIMIT_BYTES, studioPutSchema } from './studio.js'
 import type { MafboardUser, StoredStudioSettings } from './types.js'
+import { authorizeUrl, callbackPage, VkError, VkLogins, type VkGateway, type VkTokens } from './vk.js'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // API приложения MafBoard (/api/mafboard). Контракт — docs/MAFBOARD.md; клиент —
@@ -40,6 +41,8 @@ export interface MafboardDeps {
   /** null — бот не настроен (нет MAFBOARD_BOT_TOKEN). */
   messenger: BotMessenger | null
   limiter: RateLimiter
+  /** Обмен кода и токенов VK Видео Live с секретом приложения (vk.ts). */
+  vk: VkGateway
   /** Telegram повторяет доставку — true только при первой встрече ключа. */
   firstDelivery(key: string, ttlSec: number): Promise<boolean>
   now(): Date
@@ -88,6 +91,8 @@ const SESSION_TOUCH_EVERY_MS = 5 * 60_000
  */
 function desktopAllowed(method: string, path: string): boolean {
   if (method === 'GET' && path.endsWith('/v1/me')) return true
+  // Вход MBS в VK Видео Live: секрет приложения есть только у сервера.
+  if (path.includes('/v1/studio/vk/')) return true
   return (method === 'GET' || method === 'PUT') && path.endsWith('/v1/studio/settings')
 }
 
@@ -126,6 +131,9 @@ function body<T extends z.ZodTypeAny>(schema: T) {
 }
 
 const deviceSecretSchema = z.string().regex(/^[A-Za-z0-9_-]{32,128}$/)
+const vkTokenSchema = z.object({ token: z.string().min(8).max(4096) })
+/** Входов в VK в час на ведущего: каждая попытка держит место в памяти сервера 10 минут. */
+const VK_BEGINS_PER_HOUR = 20
 const startSchema = z.object({
   deviceName: z.string().max(200).transform(sanitizeDeviceName),
   platform: z.enum(['ios', 'android']),
@@ -212,6 +220,7 @@ async function issueSession(deps: MafboardDeps, user: MafboardUser, device: { na
 
 export function createMafboardRouter(resolveDeps: DepsResolver): Hono<Env> {
   const router = new Hono<Env>()
+  const vkLogins = new VkLogins()
 
   // Модуль выключен (нет БД/секрета) — 503, остальной API работает.
   router.use('*', async (c, next) => {
@@ -695,6 +704,83 @@ export function createMafboardRouter(resolveDeps: DepsResolver): Hono<Env> {
       return c.json({ error: { code: 'revision_conflict', message: 'Настройки изменили на другом устройстве' }, current: studioJSON(deps, result.current) }, 409)
     }
     return c.json({ revision: result.revision })
+  })
+
+  // ─── Вход MafBoard Studio в VK Видео Live (vk.ts) ──────────────────────────
+
+  const vkTokensJSON = (tokens: VkTokens) => ({ accessToken: tokens.accessToken, refreshToken: tokens.refreshToken, expiresIn: tokens.expiresIn })
+  const vkFail = (c: Context, error: unknown) => {
+    if (error instanceof VkError && error.kind === 'revoked') return fail(c, 401, 'vk_revoked', 'Вход в VK Видео Live не действует, войдите снова')
+    if (error instanceof VkError) return fail(c, 502, 'vk_failed', error.message)
+    throw error
+  }
+
+  /** Ссылка на вход VK для MBS. Итог MBS забирает через claim по тому же state. */
+  router.post('/v1/studio/vk/begin', requireUser, async (c) => {
+    const deps = c.get('deps')
+    const app = deps.config.vk
+    if (!app) return fail(c, 503, 'vk_disabled', 'Вход в VK Видео Live на сервере не настроен')
+    if (!(await deps.limiter.hit(`mb:vk:${c.get('user').id}`, VK_BEGINS_PER_HOUR, 60 * 60))) {
+      return fail(c, 429, 'rate_limited', 'Слишком много попыток входа, подождите немного')
+    }
+    const state = vkLogins.begin(c.get('user').id, deps.now().getTime())
+    if (!state) return fail(c, 429, 'rate_limited', 'Сервер занят, попробуйте войти чуть позже')
+    return c.json({ state, url: authorizeUrl(app, state) })
+  })
+
+  /** Сюда VK возвращает браузер ведущего. Ведущий видит простую страницу, токены ждут MBS. */
+  router.get('/v1/vk/callback', async (c) => {
+    const deps = c.get('deps')
+    const state = c.req.query('state') ?? ''
+    const code = c.req.query('code') ?? ''
+    const app = deps.config.vk
+    if (!app || !state || !vkLogins.waiting(state, deps.now().getTime())) return c.html(callbackPage(false), 400)
+    if (!code) {
+      vkLogins.finish(state, { message: 'Доступ не разрешён. Чтобы войти, разрешите его на странице VK' })
+      return c.html(callbackPage(false))
+    }
+    try {
+      vkLogins.finish(state, { tokens: await deps.vk.exchange(app, code) })
+      return c.html(callbackPage(true))
+    } catch (error) {
+      vkLogins.finish(state, { message: error instanceof VkError ? error.message : 'VK не ответил' })
+      return c.html(callbackPage(false))
+    }
+  })
+
+  /** Итог входа: 202, пока ведущий в браузере. Готовые токены отдаются один раз. */
+  router.get('/v1/studio/vk/claim', requireUser, async (c) => {
+    const deps = c.get('deps')
+    const result = vkLogins.claim(c.req.query('state') ?? '', c.get('user').id, deps.now().getTime())
+    if (!result) return fail(c, 404, 'not_found', 'Вход не найден или устарел, войдите снова')
+    if (result.status === 'waiting') return c.json({ pending: true }, 202)
+    if (result.status === 'failed') return fail(c, 400, 'vk_failed', result.message)
+    return c.json(vkTokensJSON(result.tokens))
+  })
+
+  /** Новый токен доступа по токену обновления MBS: сервер подставляет секрет приложения. */
+  router.post('/v1/studio/vk/refresh', requireUser, body(vkTokenSchema), async (c) => {
+    const deps = c.get('deps')
+    const app = deps.config.vk
+    if (!app) return fail(c, 503, 'vk_disabled', 'Вход в VK Видео Live на сервере не настроен')
+    try {
+      return c.json(vkTokensJSON(await deps.vk.refresh(app, c.req.valid('json').token)))
+    } catch (error) {
+      return vkFail(c, error)
+    }
+  })
+
+  /** Выход ведущего: отзыв токена обновления у VK. */
+  router.post('/v1/studio/vk/revoke', requireUser, body(vkTokenSchema), async (c) => {
+    const deps = c.get('deps')
+    const app = deps.config.vk
+    if (!app) return fail(c, 503, 'vk_disabled', 'Вход в VK Видео Live на сервере не настроен')
+    try {
+      await deps.vk.revoke(app, c.req.valid('json').token, 'refresh_token')
+      return c.json({ ok: true })
+    } catch (error) {
+      return vkFail(c, error)
+    }
   })
 
   // ─── Идущие игры ────────────────────────────────────────────────────────────

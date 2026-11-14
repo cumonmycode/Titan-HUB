@@ -10,6 +10,7 @@ import { ensureMafboardDatabase, runMafboardMigrations } from './migrations.js'
 import { PgMafboardRepo } from './pgRepo.js'
 import { attachStudioRelay, type StudioRelay } from './relay.js'
 import { createMafboardRouter, type MafboardDeps, type RateLimiter } from './router.js'
+import { liveVkGateway } from './vk.js'
 import { webhookSecret } from './tokens.js'
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -86,6 +87,7 @@ function resolveDeps(): MafboardDeps | { error: string } {
       roster: new RosterCache(liveGoMafia),
       messenger: messengerFor(config.botToken),
       limiter: redisLimiter,
+      vk: liveVkGateway,
       firstDelivery,
       now: () => new Date(),
       background,

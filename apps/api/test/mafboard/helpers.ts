@@ -8,6 +8,7 @@ import { DELETED_HOST_ID } from '../../src/modules/mafboard/config.js'
 import { GomafiaTakenError, type MafboardRepo } from '../../src/modules/mafboard/repo.js'
 import { createMafboardRouter, type MafboardDeps } from '../../src/modules/mafboard/router.js'
 import type { DeviceSession, LoginTicket, MafboardUser, QrTicket, RefreshTokenRow, StoredActiveGame, StoredGame, StoredStudioSettings, TicketGuard } from '../../src/modules/mafboard/types.js'
+import { VkError, type VkAppConfig, type VkGateway, type VkTokens } from '../../src/modules/mafboard/vk.js'
 
 // Вебхук бота подписывается от JWT_SECRET Titan HUB (lib/tgWebhook.ts).
 process.env['JWT_SECRET'] ??= 'test-titan-jwt-secret-0123456789abcdef'
@@ -24,6 +25,25 @@ export const config: MafboardConfig = {
   termsUrl: 'https://mafboard.test/terms',
   termsVersion: '1',
   reviewPassword: 'review-password-0123456789',
+  vk: { clientId: 'vk-client', clientSecret: 'vk-secret', redirectUri: 'https://mafboard.test/api/mafboard/v1/vk/callback' },
+}
+
+/** VK без сети: код `good` меняется на токены, токен обновления `dead-token` отозван. */
+export class FakeVk implements VkGateway {
+  calls: string[] = []
+  async exchange(_app: VkAppConfig, code: string): Promise<VkTokens> {
+    this.calls.push(`exchange:${code}`)
+    if (code !== 'good') throw new VkError('rejected', 'VK отказал (400, invalid_request)')
+    return { accessToken: 'vk-access', refreshToken: 'vk-refresh', expiresIn: 3600 }
+  }
+  async refresh(_app: VkAppConfig, token: string): Promise<VkTokens> {
+    this.calls.push(`refresh:${token}`)
+    if (token === 'dead-token') throw new VkError('revoked', 'Вход в VK не действует')
+    return { accessToken: 'vk-access-2', refreshToken: 'vk-refresh-2', expiresIn: 3600 }
+  }
+  async revoke(_app: VkAppConfig, token: string): Promise<void> {
+    this.calls.push(`revoke:${token}`)
+  }
 }
 
 /** Хранилище в памяти с той же семантикой, что у Postgres-версии. */
@@ -411,6 +431,7 @@ export function createTestContext(overrides: Partial<MafboardDeps> = {}): TestCo
     gomafia,
     roster: new RosterCache(gomafia, () => clock.now.getTime()),
     messenger,
+    vk: new FakeVk(),
     limiter: {
       async hit(key, limit, windowSec) {
         const now = clock.now.getTime()

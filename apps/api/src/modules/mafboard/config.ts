@@ -8,6 +8,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { studioSecretsKey } from './studio.js'
+import type { VkAppConfig } from './vk.js'
 
 export interface MafboardConfig {
   databaseUrl: string
@@ -25,6 +26,8 @@ export interface MafboardConfig {
   reviewPassword: string | null
   /** Ключ AES-256-GCM для секретов MafBoard Studio (studio.ts). */
   studioSecretsKey: Uint8Array
+  /** Приложение VK Видео Live для входа MBS (vk.ts). null — вход VK выключен. */
+  vk: VkAppConfig | null
 }
 
 /** Логин проверяющего App Store — пароль к нему только в MAFBOARD_REVIEW_PASSWORD. */
@@ -92,6 +95,16 @@ export function readMafboardConfig(env: NodeJS.ProcessEnv = process.env): Config
       reviewPassword: (env['MAFBOARD_REVIEW_PASSWORD']?.trim().length ?? 0) >= REVIEW_PASSWORD_MIN_LENGTH
         ? env['MAFBOARD_REVIEW_PASSWORD']!.trim()
         : null,
+      vk: readVk(env, appLinkBase),
     },
   }
+}
+
+/** Приложение VK Видео Live. Адрес возврата — тот, что указан в кабинете VK, до символа. */
+function readVk(env: NodeJS.ProcessEnv, appLinkBase: string): VkAppConfig | null {
+  const clientId = env['MAFBOARD_VK_CLIENT_ID']?.trim()
+  const clientSecret = env['MAFBOARD_VK_CLIENT_SECRET']?.trim()
+  if (!clientId || !clientSecret) return null
+  const redirectUri = env['MAFBOARD_VK_REDIRECT_URI']?.trim() || `${appLinkBase}/api/mafboard/v1/vk/callback`
+  return { clientId, clientSecret, redirectUri }
 }
