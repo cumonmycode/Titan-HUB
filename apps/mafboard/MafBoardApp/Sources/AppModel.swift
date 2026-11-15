@@ -220,6 +220,18 @@ final class AppModel {
     /// Связь с ноутбуком. Есть, если телефон сопряжён с MafBoard Studio.
     private(set) var studioLink: StudioLink?
     private var waitingStudioLink: StudioLoginLink?
+    /// Последний снимок игры для инфографики: новый ноутбук получит его сразу после сопряжения.
+    private var studioGame: (snapshot: GameBroadcast, madeAt: Date)?
+
+    func publishStudioGame(_ snapshot: GameBroadcast, madeAt: Date) {
+        studioGame = (snapshot, madeAt)
+        studioLink?.publishGame(snapshot, madeAt: madeAt)
+    }
+
+    func clearStudioGame() {
+        studioGame = nil
+        studioLink?.clearGame()
+    }
 
     private func handleStudio(_ link: StudioLoginLink) {
         switch phase {
@@ -314,6 +326,7 @@ final class AppModel {
             relayToken: { [weak self] rejected in await self?.studioRelayToken(rejected: rejected) }
         )
         studioLink = link
+        if let studioGame { link.publishGame(studioGame.snapshot, madeAt: studioGame.madeAt) }
         link.start()
     }
 

@@ -1,4 +1,5 @@
 import Foundation
+import MafBoardCore
 import Network
 import Observation
 
@@ -57,6 +58,9 @@ public final class StudioLink {
 
     private var policy = RemoteChannelPolicy(now: .now)
     private var pending = RemotePendingCommands()
+    private var game = GameOnScreen.none
+    /// Последняя команда инфографики: ответ с ошибкой на неё показываем ведущему.
+    private var gameCommandID: String?
     private var browser: RemoteBrowser?
     private var lanEndpoint: NWEndpoint?
     private var socket: RemoteSocket?
@@ -143,6 +147,19 @@ public final class StudioLink {
         let fresh = incoming.filter { known.insert($0.id).inserted }
         guard !fresh.isEmpty else { return }
         chat = Array((chat + fresh).sorted { $0.seq < $1.seq }.suffix(Self.chatLimit))
+    }
+
+    /// Снимок игры для инфографики. Без связи не копится: ноутбуку нужен только последний,
+    /// и он уйдёт сам, как только канал оживёт. `madeAt` — когда снят таймер в снимке.
+    public func publishGame(_ snapshot: GameBroadcast, madeAt: Date = .now) {
+        game = .shown(snapshot, madeAt: madeAt)
+        sendGame()
+    }
+
+    /// Игра удалена — убрать инфографику. Без связи уйдёт при подключении.
+    public func clearGame() {
+        game = .cleared
+        sendGame()
     }
 
     public func dismissNotice() {
@@ -308,6 +325,7 @@ public final class StudioLink {
                 socket?.send(ready)
                 lastAlive = .now
                 resendPending()
+                sendGame()
             } catch {
                 dropConnection()
             }
@@ -338,9 +356,15 @@ public final class StudioLink {
         case let .level(value):
             peakDb = value
         case let .reply(id, error):
-            if pending.acknowledge(id: id), let error, waiters[id] == nil { notice = error }
-            // Запрос к студии, отклонённый пультом (устарел или не поддерживается), тоже получает ответ.
-            if waiters[id] != nil { resolve(id: id, with: error.map { .failure(StudioError(message: $0)) } ?? .success(nil)) }
+            let acknowledged = pending.acknowledge(id: id)
+            if waiters[id] != nil {
+                // Запрос к студии, отклонённый пультом (устарел или не поддерживается), тоже получает ответ.
+                resolve(id: id, with: error.map { .failure(StudioError(message: $0)) } ?? .success(nil))
+            } else if acknowledged, let error {
+                notice = error
+            } else if id == gameCommandID, let error {
+                notice = "Инфографика: \(error)"
+            }
         case let .answer(id, error, data):
             _ = pending.acknowledge(id: id)
             resolve(id: id, with: error.map { .failure(StudioError(message: $0)) } ?? .success(data))
@@ -359,6 +383,26 @@ public final class StudioLink {
         for envelope in pending.resendable(at: .now) {
             transmit(envelope)
         }
+    }
+
+    /// Мимо очереди команд: снимок не повторяется по таймауту, а после переподключения шлётся заново,
+    /// с таймером, отсчитанным на время в пути.
+    private func sendGame() {
+        guard case .live = phase else { return }
+        let now = Date.now
+        let command: RemoteCommand
+        switch game {
+        case .none:
+            return
+        case let .shown(snapshot, madeAt):
+            command = .setGame(snapshot.aged(by: now.timeIntervalSince(madeAt)))
+        case .cleared:
+            command = .clearGame
+            game = .none
+        }
+        let envelope = RemoteEnvelope(id: UUID().uuidString, sentAtMs: Self.milliseconds(now), command: command)
+        gameCommandID = envelope.id
+        transmit(envelope)
     }
 
     private func transmit(_ envelope: RemoteEnvelope) {
@@ -386,4 +430,12 @@ public final class StudioLink {
     private static func milliseconds(_ date: Date) -> UInt64 {
         UInt64(max(0, date.timeIntervalSince1970 * 1000))
     }
+}
+
+/// Что должна показывать инфографика ноутбука.
+private enum GameOnScreen {
+    case none
+    case shown(GameBroadcast, madeAt: Date)
+    /// Игру удалили, а ноутбук об этом ещё не знает.
+    case cleared
 }
