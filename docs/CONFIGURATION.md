@@ -198,7 +198,7 @@ Platega-реквизиты могут быть заданы на уровне п
 | `MAFBOARD_VK_REDIRECT_URI` | Нет | `<APP_LINK_BASE>/api/mafboard/v1/vk/callback` | Адрес возврата VK ID. Должен совпадать с адресом в кабинете VK ID. |
 | `MAFBOARD_WEBHOOK_HOST` | Нет | `TELEGRAM_WEBHOOK_HOST` | Свой хост вебхука бота MafBoard (шлюз, доступный Telegram). |
 
-Вебхук бота: `https://<MAFBOARD_WEBHOOK_HOST|TELEGRAM_WEBHOOK_HOST|ROOT_DOMAIN>/api/mafboard/tg-webhook`. `MAFBOARD_WEBHOOK_HOST` — только хост, до которого достаёт Telegram: сервер в РФ, поэтому вебхук идёт через шлюз (сейчас `tg.titanpos.ru`) (ставится при старте и раз в час). Шлюз `infra/telegram-relay` должен быть передеплоен с путём `/api/mafboard/tg-webhook` в `WEBHOOK_PATH`.
+Вебхук бота: `https://<MAFBOARD_WEBHOOK_HOST|TELEGRAM_WEBHOOK_HOST|ROOT_DOMAIN>/api/mafboard/tg-webhook`. `MAFBOARD_WEBHOOK_HOST` — только хост, до которого достаёт Telegram: сервер в РФ, поэтому вебхук идёт через шлюз `infra/telegram-relay`. В проде `MAFBOARD_WEBHOOK_HOST=tg.mafboard.com`: шлюз пересылает вебхук MafBoard на `api.mafboard.com` (`MAFBOARD_ORIGIN_HOST`), вебхуки ботов клубов — на `titanpos.ru` (ставится при старте и раз в час). Шлюз `infra/telegram-relay` должен быть передеплоен с путём `/api/mafboard/tg-webhook` в `WEBHOOK_PATH`.
 
 #### Rate Limiting (Hono-middleware)
 
