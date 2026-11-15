@@ -4,7 +4,12 @@ name = "titan-telegram-relay"
 main = "worker.js"
 compatibility_date = "2026-09-01"
 workers_dev = false
-routes = [{ pattern = "tg.titanpos.ru", custom_domain = true }]
+routes = [
+  { pattern = "tg.titanpos.ru", custom_domain = true },
+  # Вебхук бота MafBoard (MAFBOARD_WEBHOOK_HOST на сервере). Зона mafboard.com — в этом же аккаунте Cloudflare.
+  { pattern = "tg.mafboard.com", custom_domain = true },
+]
 
 [vars]
 ORIGIN_HOST = "titanpos.ru"
+MAFBOARD_ORIGIN_HOST = "api.mafboard.com"

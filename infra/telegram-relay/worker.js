@@ -1,5 +1,5 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// Шлюз Telegram для сервера в РФ (Cloudflare Worker на tg.titanpos.ru).
+// Шлюз Telegram для сервера в РФ (Cloudflare Worker на tg.titanpos.ru и tg.mafboard.com).
 //
 // Сервер в РФ не достаёт api.telegram.org, а Telegram может не достучаться до
 // сервера в РФ. Cloudflare доступен обоим, поэтому Worker работает посредником:
@@ -11,7 +11,8 @@
 //
 //  2) Входящий вебхук бота опросов (Telegram → нам):
 //       POST /api/tg/poll-webhook/<clubId>     → https://<ORIGIN_HOST>/api/tg/poll-webhook/<clubId>
-//       POST /api/mafboard/tg-webhook          → https://<ORIGIN_HOST>/api/mafboard/tg-webhook (бот MafBoard)
+//       POST /api/mafboard/tg-webhook          → https://<MAFBOARD_ORIGIN_HOST|ORIGIN_HOST>/api/mafboard/tg-webhook
+//                                                (бот MafBoard, вебхук на tg.mafboard.com)
 //     Подлинность проверяет API по заголовку X-Telegram-Bot-Api-Secret-Token.
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -28,6 +29,13 @@ const WEB_HEADERS = ['user-agent', 'accept', 'accept-language', 'x-ig-app-id', '
 //      GET /media/smm-<файл> → https://<ORIGIN_HOST>/media/smm-<файл>. Только наши файлы СММ.
 const MEDIA_PATH = /^\/media\/smm-[\w.-]+$/
 const WEBHOOK_PATH = /^\/api\/(tg\/poll-webhook\/[A-Za-z0-9-]+|mafboard\/tg-webhook)$/
+const MAFBOARD_WEBHOOK = '/api/mafboard/tg-webhook'
+
+/** Сервер для входящего вебхука: у MafBoard свой домен, у ботов клубов — titanpos.ru. */
+function webhookOrigin(pathname, env) {
+  if (pathname === MAFBOARD_WEBHOOK && env.MAFBOARD_ORIGIN_HOST) return env.MAFBOARD_ORIGIN_HOST
+  return env.ORIGIN_HOST
+}
 const FORWARD_HEADERS = ['content-type', 'accept', 'x-telegram-bot-api-secret-token']
 
 function pickHeaders(src) {
@@ -89,8 +97,9 @@ export default {
       return forward(request, `${TELEGRAM}${rest}${url.search}`)
     }
 
-    if (request.method === 'POST' && WEBHOOK_PATH.test(url.pathname) && env.ORIGIN_HOST) {
-      return forward(request, `https://${env.ORIGIN_HOST}${url.pathname}`)
+    const origin = webhookOrigin(url.pathname, env)
+    if (request.method === 'POST' && WEBHOOK_PATH.test(url.pathname) && origin) {
+      return forward(request, `https://${origin}${url.pathname}`)
     }
 
     if (

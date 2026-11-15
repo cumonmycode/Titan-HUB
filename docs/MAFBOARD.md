@@ -44,7 +44,7 @@ apps/api/test/mafboard/ — тесты (node:test через tsx), хранил�
 
 ## API
 
-Базовый адрес для приложения: `https://mafboard.titanpos.ru/api/mafboard` (поддомен отдаёт только API MafBoard, страницы `/auth/return` и `/studio/login`, `/terms` и `apple-app-site-association`; см. блок в `nginx/nginx.conf`). Все запросы и ответы — JSON,
+Базовый адрес для приложения: `https://api.mafboard.com` (пути `/v1/...`; nginx передаёт их серверу как `/api/mafboard/v1/...`). Домены (блоки в `nginx/nginx.conf`, маршруты в `nginx/mafboard/*.conf`): `mafboard.com` — лендинг и страницы `/terms`, `/privacy`, `/support`; `api.mafboard.com` — API, релей пульта, страницы `/auth/return` и `/studio/login`, `apple-app-site-association`, а также прежние пути `/api/mafboard/...`; `mafboard.titanpos.ru` — старый адрес, отвечает как раньше, пока им пользуются приложения прошлых версий. Все запросы и ответы — JSON,
 даты — ISO 8601. Ошибки приходят в формате `{"error": {"code": "…", "message": "…"}}`.
 
 | Метод и путь | Авторизация | Что делает |

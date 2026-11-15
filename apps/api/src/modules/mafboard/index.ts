@@ -4,7 +4,7 @@ import { getSharedRedis } from '../../lib/redis.js'
 import { setTelegramWebhook } from '../../lib/telegram.js'
 import { TgBot } from '../../lib/tgBot.js'
 import type { BotMessenger } from './bot.js'
-import { readMafboardConfig, type MafboardConfig } from './config.js'
+import { mafboardWebhookUrl, readMafboardConfig, type MafboardConfig } from './config.js'
 import { liveGoMafia, RosterCache } from './gomafia.js'
 import { ensureMafboardDatabase, runMafboardMigrations } from './migrations.js'
 import { PgMafboardRepo } from './pgRepo.js'
@@ -106,16 +106,12 @@ export function attachMafboardRelay(server: Server): StudioRelay {
   return attachStudioRelay(server, resolveDeps)
 }
 
-function webhookUrl(): string {
-  const root = (process.env['TELEGRAM_WEBHOOK_HOST'] || process.env['ROOT_DOMAIN'] || 'titanpos.ru').toLowerCase()
-  return `https://${root}/api/mafboard/tg-webhook`
-}
 
 async function ensureWebhook(config: MafboardConfig): Promise<void> {
   if (!config.botToken) return
   // Шлюз Telegram может зависнуть — не ждём дольше 15 с.
   const result = await Promise.race([
-    setTelegramWebhook(config.botToken, webhookUrl(), webhookSecret(config), ALLOWED_UPDATES),
+    setTelegramWebhook(config.botToken, mafboardWebhookUrl(), webhookSecret(config), ALLOWED_UPDATES),
     new Promise<{ ok: false; error: string }>((resolve) =>
       setTimeout(() => resolve({ ok: false, error: `нет ответа за ${WEBHOOK_TIMEOUT_MS / 1000} с` }), WEBHOOK_TIMEOUT_MS),
     ),

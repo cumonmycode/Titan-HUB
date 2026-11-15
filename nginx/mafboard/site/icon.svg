@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+<defs>
+  <linearGradient id="bg" x1="0" y1="0" x2="0.7" y2="1"><stop offset="0" stop-color="#b199fc"/><stop offset="0.45" stop-color="#8b5cf6"/><stop offset="1" stop-color="#4c1d95"/></linearGradient>
+  <radialGradient id="halo" cx="0.5" cy="0.5" r="0.5">
+    <stop offset="0" stop-color="#e9e1ff" stop-opacity=".28"/>
+    <stop offset="1" stop-color="#e9e1ff" stop-opacity="0"/>
+  </radialGradient>
+  <filter id="moonGlow" x="-50%" y="-50%" width="200%" height="200%">
+    <feGaussianBlur stdDeviation="22" result="b"/>
+    <feComponentTransfer in="b" result="soft"><feFuncA type="linear" slope=".7"/></feComponentTransfer>
+    <feMerge><feMergeNode in="soft"/><feMergeNode in="SourceGraphic"/></feMerge>
+  </filter>
+  <linearGradient id="mask" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2d2639"/><stop offset="0.5" stop-color="#1c1726"/><stop offset="1" stop-color="#110e17"/></linearGradient>
+  <linearGradient id="strap" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1c1726"/><stop offset="1" stop-color="#0d0b12"/></linearGradient>
+  <linearGradient id="sheen" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0" stop-color="#fff" stop-opacity=".16"/>
+    <stop offset="0.35" stop-color="#fff" stop-opacity="0"/>
+  </linearGradient>
+  <filter id="shadow" x="-20%" y="-30%" width="140%" height="170%">
+    <feDropShadow dx="0" dy="26" stdDeviation="28" flood-color="#1e0b47" flood-opacity=".55"/>
+  </filter>
+  <filter id="glow" x="-30%" y="-60%" width="160%" height="220%">
+    <feGaussianBlur stdDeviation="6" result="b"/>
+    <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+  </filter>
+</defs>
+<rect width="1024" height="1024" fill="url(#bg)"/>
+<ellipse cx="512" cy="560" rx="470" ry="360" fill="url(#halo)"/>
+<circle cx="196" cy="196" r="8" fill="#ffffff" opacity="0.95"/><circle cx="300" cy="126" r="4.5" fill="#ffffff" opacity="0.75"/><circle cx="146" cy="330" r="4.5" fill="#ffffff" opacity="0.6"/><circle cx="600" cy="150" r="3.5" fill="#ffffff" opacity="0.5"/><circle cx="884" cy="420" r="4" fill="#ffffff" opacity="0.55"/>
+<path d="M 806 168 A 116 116 0 1 0 896 340 A 96 96 0 1 1 806 168 Z" fill="#f6f2ff" filter="url(#moonGlow)"/>
+<path d="M -10 492 C 200 476 330 486 512 486 C 694 486 824 476 1034 492 L 1034 540 C 824 524 694 534 512 534 C 330 534 200 524 -10 540 Z" fill="url(#strap)"/>
+<g transform="translate(512 540) scale(1.08) translate(-512 -540)">
+  <path d="M 212 520 C 212 432 292 394 382 398 C 446 401 482 422 512 422 C 542 422 578 401 642 398 C 732 394 812 432 812 520 C 812 622 744 680 654 680 C 590 680 560 636 512 636 C 464 636 434 680 370 680 C 280 680 212 622 212 520 Z" fill="url(#mask)" filter="url(#shadow)"/>
+  <path d="M 212 520 C 212 432 292 394 382 398 C 446 401 482 422 512 422 C 542 422 578 401 642 398 C 732 394 812 432 812 520 C 812 622 744 680 654 680 C 590 680 560 636 512 636 C 464 636 434 680 370 680 C 280 680 212 622 212 520 Z" fill="url(#sheen)"/>
+  <path d="M 212 520 C 212 432 292 394 382 398 C 446 401 482 422 512 422 C 542 422 578 401 642 398 C 732 394 812 432 812 520 C 812 622 744 680 654 680 C 590 680 560 636 512 636 C 464 636 434 680 370 680 C 280 680 212 622 212 520 Z" fill="none" stroke="#8b7bb0" stroke-width="5" stroke-dasharray="14 12"
+        stroke-linecap="round" opacity=".5" transform="translate(512 532) scale(0.9 0.86) translate(-512 -532)"/>
+  <g fill="none" stroke="#d4c6ff" stroke-width="21" stroke-linecap="round" filter="url(#glow)"><path d="M 296 522 Q 372 588 448 522"/><path d="M 576 522 Q 652 588 728 522"/><path d="M 322 558 L 304 590 M 372 574 L 372 610 M 422 558 L 440 590"/><path d="M 602 558 L 584 590 M 652 574 L 652 610 M 702 558 L 720 590"/></g>
+</g>
+</svg>
