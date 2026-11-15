@@ -62,6 +62,17 @@ export function databaseName(url: string): string {
   return name
 }
 
+/**
+ * Адрес вебхука бота MafBoard. Свой хост — MAFBOARD_WEBHOOK_HOST (api.mafboard.com): бот MafBoard не зависит
+ * от домена клубов. Без него — общий TELEGRAM_WEBHOOK_HOST или ROOT_DOMAIN, как у ботов клубов.
+ */
+export function mafboardWebhookUrl(env: NodeJS.ProcessEnv = process.env): string {
+  const host = (env['MAFBOARD_WEBHOOK_HOST'] || env['TELEGRAM_WEBHOOK_HOST'] || env['ROOT_DOMAIN'] || 'titanpos.ru')
+    .trim()
+    .toLowerCase()
+  return `https://${host}/api/mafboard/tg-webhook`
+}
+
 export function readMafboardConfig(env: NodeJS.ProcessEnv = process.env): ConfigResult {
   const databaseUrl = env['MAFBOARD_DATABASE_URL']?.trim()
   if (!databaseUrl) return { ok: false, error: 'MAFBOARD_DATABASE_URL не задан' }

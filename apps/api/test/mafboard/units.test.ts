@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { signScopedJwt, verifyToken } from '@titan/auth'
-import { databaseName, JWT_AUDIENCE, JWT_ISSUER, readMafboardConfig } from '../../src/modules/mafboard/config.js'
+import { databaseName, JWT_AUDIENCE, JWT_ISSUER, mafboardWebhookUrl, readMafboardConfig } from '../../src/modules/mafboard/config.js'
 import { validateGameUpload } from '../../src/modules/mafboard/games.js'
 import { RosterCache, searchForHost } from '../../src/modules/mafboard/gomafia.js'
 import { maskPhone, normalizePhone, toPlayerJSON, toSessionsJSON, toTicketStatusJSON } from '../../src/modules/mafboard/serialize.js'
@@ -213,5 +213,20 @@ describe('приём игры', () => {
       validateGameUpload({ nonsense: true }, host, NOW),
     ].map((r) => (r.ok ? 'ok' : r.code))
     assert.deepEqual(codes, ['host_mismatch', 'club_required', 'club_mismatch', 'guest_players', 'unsupported_schema', 'invalid_record'])
+  })
+})
+
+describe('вебхук бота', () => {
+  it('свой хост MafBoard важнее общего хоста ботов клубов', () => {
+    assert.equal(
+      mafboardWebhookUrl({ MAFBOARD_WEBHOOK_HOST: 'API.mafboard.com ', TELEGRAM_WEBHOOK_HOST: 'titanpos.ru' }),
+      'https://api.mafboard.com/api/mafboard/tg-webhook',
+    )
+  })
+
+  it('без своего хоста — как у ботов клубов', () => {
+    assert.equal(mafboardWebhookUrl({ TELEGRAM_WEBHOOK_HOST: 'hooks.titanpos.ru' }), 'https://hooks.titanpos.ru/api/mafboard/tg-webhook')
+    assert.equal(mafboardWebhookUrl({ ROOT_DOMAIN: 'titanpos.ru' }), 'https://titanpos.ru/api/mafboard/tg-webhook')
+    assert.equal(mafboardWebhookUrl({}), 'https://titanpos.ru/api/mafboard/tg-webhook')
   })
 })

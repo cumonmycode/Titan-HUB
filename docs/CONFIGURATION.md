@@ -195,8 +195,10 @@ Platega-реквизиты могут быть заданы на уровне п
 | `MAFBOARD_REVIEW_PASSWORD` | Нет | — | Пароль входа проверяющего App Store (логин `appreview`, `POST /v1/auth/review`), не короче 16 символов. Без него такой вход выключен. |
 | `MAFBOARD_TERMS_URL` | Нет | `<APP_LINK_BASE>/terms` | Пользовательское соглашение, которое бот показывает при входе. |
 | `MAFBOARD_TERMS_VERSION` | Нет | `1` | Версия соглашения: при смене бот попросит принять его заново. |
+| `MAFBOARD_VK_REDIRECT_URI` | Нет | `<APP_LINK_BASE>/api/mafboard/v1/vk/callback` | Адрес возврата VK ID. Должен совпадать с адресом в кабинете VK ID. |
+| `MAFBOARD_WEBHOOK_HOST` | Нет | `TELEGRAM_WEBHOOK_HOST` | Свой хост вебхука бота MafBoard (шлюз, доступный Telegram). |
 
-Вебхук бота: `https://<TELEGRAM_WEBHOOK_HOST|ROOT_DOMAIN>/api/mafboard/tg-webhook` (ставится при старте и раз в час). Шлюз `infra/telegram-relay` должен быть передеплоен с путём `/api/mafboard/tg-webhook` в `WEBHOOK_PATH`.
+Вебхук бота: `https://<MAFBOARD_WEBHOOK_HOST|TELEGRAM_WEBHOOK_HOST|ROOT_DOMAIN>/api/mafboard/tg-webhook`. `MAFBOARD_WEBHOOK_HOST` — только хост, до которого достаёт Telegram: сервер в РФ, поэтому вебхук идёт через шлюз (сейчас `tg.titanpos.ru`) (ставится при старте и раз в час). Шлюз `infra/telegram-relay` должен быть передеплоен с путём `/api/mafboard/tg-webhook` в `WEBHOOK_PATH`.
 
 #### Rate Limiting (Hono-middleware)
 
