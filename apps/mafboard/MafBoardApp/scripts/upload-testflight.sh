@@ -91,5 +91,5 @@ echo "✓ IPA: $IPA ($(du -h "$IPA" | cut -f1))"
 
 echo "› Проверяю и загружаю в App Store Connect"
 xcrun altool --validate-app -f "$IPA" -t ios --apiKey "$KEY_ID" --apiIssuer "$ISSUER_ID" 2>&1 | tail -5
-xcrun altool --upload-app -f "$IPA" -t ios --apiKey "$KEY_ID" --apiIssuer "$ISSUER_ID" 2>&1 | tail -5
+xcrun altool --upload-app -f "$IPA" -t ios ${ASC_APPLE_ID:+--apple-id "$ASC_APPLE_ID"} --apiKey "$KEY_ID" --apiIssuer "$ISSUER_ID" 2>&1 | tail -5
 echo "✓ Билд $VERSION ($BUILD) появится в TestFlight после обработки (обычно 5–15 минут)."
