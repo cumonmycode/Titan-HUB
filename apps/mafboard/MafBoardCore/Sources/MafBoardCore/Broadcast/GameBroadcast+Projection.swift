@@ -72,6 +72,7 @@ extension GameBroadcast {
             status: status(of: seat),
             fouls: seat.fouls,
             techFouls: seat.techFouls,
+            bigTechFouls: seat.bigTechFouls,
             silenced: seat.missesNextSpeech
         )
     }

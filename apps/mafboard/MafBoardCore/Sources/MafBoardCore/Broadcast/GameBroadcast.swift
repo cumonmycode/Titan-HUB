@@ -76,12 +76,15 @@ extension GameBroadcast {
         public var status: PlayerStatus
         public var fouls: Int
         public var techFouls: Int
+        /// Из техфолов — большие (БТФ), остальные — обычные (МТФ).
+        public var bigTechFouls: Int
         /// Пропустит ближайшую речь из-за фолов.
         public var silenced: Bool
 
         public init(
             seat: Int, nickname: String, avatarUrl: String? = nil, role: String? = nil, roleName: String? = nil,
-            team: Team? = nil, status: PlayerStatus = .alive, fouls: Int = 0, techFouls: Int = 0, silenced: Bool = false
+            team: Team? = nil, status: PlayerStatus = .alive, fouls: Int = 0, techFouls: Int = 0, bigTechFouls: Int = 0,
+            silenced: Bool = false
         ) {
             self.seat = seat
             self.nickname = nickname
@@ -92,6 +95,7 @@ extension GameBroadcast {
             self.status = status
             self.fouls = fouls
             self.techFouls = techFouls
+            self.bigTechFouls = bigTechFouls
             self.silenced = silenced
         }
     }

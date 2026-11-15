@@ -63,14 +63,14 @@ struct GameBroadcastTests {
         #expect(object["voting"] == nil)
         #expect(object["outcome"] == nil)
         let player = try #require((object["players"] as? [[String: Any]])?.first)
-        #expect(Set(player.keys) == ["seat", "nickname", "avatarUrl", "role", "roleName", "team", "status", "fouls", "techFouls", "silenced"])
+        #expect(Set(player.keys) == ["seat", "nickname", "avatarUrl", "role", "roleName", "team", "status", "fouls", "techFouls", "bigTechFouls", "silenced"])
     }
 
     @Test("Речь дня: говорящий, таймер на паузе, выставления, фолы и пропуск речи")
     func daySpeech() throws {
         var session = try Fixture.session()
         try session.advance(times: 2)
-        try session.run(.nominate(candidate: 3, by: 1), .foul(5), .foul(5), .foul(5), .techFoul(7))
+        try session.run(.nominate(candidate: 3, by: 1), .foul(5), .foul(5), .foul(5), .techFoul(7), .bigTechFoul(8))
         var countdown = Countdown(seconds: 60)
         countdown.start(at: Self.start)
         countdown.pause(at: Self.start.addingTimeInterval(12))
@@ -84,6 +84,9 @@ struct GameBroadcastTests {
         #expect(five.fouls == 3)
         #expect(five.silenced == session.state.seat(5)?.missesNextSpeech)
         #expect(broadcast.players.first { $0.seat == 7 }?.techFouls == 1)
+        #expect(broadcast.players.first { $0.seat == 7 }?.bigTechFouls == 0)
+        #expect(broadcast.players.first { $0.seat == 8 }?.techFouls == 1)
+        #expect(broadcast.players.first { $0.seat == 8 }?.bigTechFouls == 1)
         #expect(broadcast.days == [.init(number: 1, eliminated: [], finished: false)])
     }
 
