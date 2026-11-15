@@ -23,6 +23,18 @@ public final class StudioLink {
     public private(set) var notice: String?
     public private(set) var localNetworkDenied = false
     public var pendingCount: Int { pending.count }
+    /// Лента чата всех площадок: последние сообщения при открытии и новые по мере прихода.
+    public private(set) var chat: [RemoteChatMessage] = []
+
+    /// Ошибка запроса к студии: текст для ведущего.
+    public struct StudioError: LocalizedError, Sendable {
+        public let message: String
+        public var errorDescription: String? { message }
+    }
+
+    private static let chatLimit = 300
+    private static let askTimeout = Duration.seconds(20)
+    private var waiters: [String: CheckedContinuation<RemoteJSON?, any Error>] = [:]
 
     private enum Phase {
         case idle
@@ -93,10 +105,44 @@ public final class StudioLink {
     }
 
     public func send(_ command: RemoteCommand) {
+        enqueue(command)
+    }
+
+    @discardableResult
+    private func enqueue(_ command: RemoteCommand) -> String {
         let now = Date.now
         let envelope = RemoteEnvelope(id: UUID().uuidString, sentAtMs: Self.milliseconds(now), command: command)
         pending.add(envelope, at: now)
         transmit(envelope)
+        return envelope.id
+    }
+
+    /// Запрос к студии с ответом: оформление эфира, категории, чат. Без ответа за 20 секунд — ошибка.
+    public func ask(_ command: RemoteCommand) async throws -> RemoteJSON? {
+        let id = enqueue(command)
+        let timeout = Task { [weak self] in
+            try? await Task.sleep(for: Self.askTimeout)
+            self?.resolve(id: id, with: .failure(StudioError(message: "Ноутбук не ответил. Проверьте, что MafBoard Studio открыта.")))
+        }
+        defer { timeout.cancel() }
+        return try await withCheckedThrowingContinuation { waiters[id] = $0 }
+    }
+
+    /// Последние сообщения чата: их студия отдаёт по запросу, дальше новые приходят сами.
+    public func loadChat() async throws {
+        let backlog = try await ask(.chatBacklog)?.decode(as: [RemoteChatMessage].self) ?? []
+        merge(chat: backlog)
+    }
+
+    private func resolve(id: String, with result: Result<RemoteJSON?, any Error>) {
+        waiters.removeValue(forKey: id)?.resume(with: result)
+    }
+
+    private func merge(chat incoming: [RemoteChatMessage]) {
+        var known = Set(chat.map(\.id))
+        let fresh = incoming.filter { known.insert($0.id).inserted }
+        guard !fresh.isEmpty else { return }
+        chat = Array((chat + fresh).sorted { $0.seq < $1.seq }.suffix(Self.chatLimit))
     }
 
     public func dismissNotice() {
@@ -292,7 +338,14 @@ public final class StudioLink {
         case let .level(value):
             peakDb = value
         case let .reply(id, error):
-            if pending.acknowledge(id: id), let error { notice = error }
+            if pending.acknowledge(id: id), let error, waiters[id] == nil { notice = error }
+            // Запрос к студии, отклонённый пультом (устарел или не поддерживается), тоже получает ответ.
+            if waiters[id] != nil { resolve(id: id, with: error.map { .failure(StudioError(message: $0)) } ?? .success(nil)) }
+        case let .answer(id, error, data):
+            _ = pending.acknowledge(id: id)
+            resolve(id: id, with: error.map { .failure(StudioError(message: $0)) } ?? .success(data))
+        case let .chat(messages):
+            merge(chat: messages)
         case let .engine(online):
             engineOnline = online
         case .alive, .unknown:

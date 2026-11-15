@@ -11,11 +11,18 @@ public enum RemoteCommand: Sendable, Equatable {
     case selectCamera(String)
     case startRecording
     case stopRecording
+    /// Оформление эфира и чат: отвечает студия (`DesktopMessage.answer`).
+    case getBroadcast
+    case setBroadcast(RemoteBroadcast)
+    case searchCategories(platform: String, query: String)
+    case youtubeUpcoming
+    case chatBacklog
+    case sendChat(platform: String, text: String)
 }
 
 extension RemoteCommand: Encodable {
     private enum CodingKeys: String, CodingKey {
-        case kind, scene, muted, enabled, uid
+        case kind, scene, muted, enabled, uid, broadcast, platform, query, text
     }
 
     public func encode(to encoder: any Encoder) throws {
@@ -37,6 +44,23 @@ extension RemoteCommand: Encodable {
             try container.encode("startRecording", forKey: .kind)
         case .stopRecording:
             try container.encode("stopRecording", forKey: .kind)
+        case .getBroadcast:
+            try container.encode("getBroadcast", forKey: .kind)
+        case let .setBroadcast(broadcast):
+            try container.encode("setBroadcast", forKey: .kind)
+            try container.encode(broadcast, forKey: .broadcast)
+        case let .searchCategories(platform, query):
+            try container.encode("searchCategories", forKey: .kind)
+            try container.encode(platform, forKey: .platform)
+            try container.encode(query, forKey: .query)
+        case .youtubeUpcoming:
+            try container.encode("youtubeUpcoming", forKey: .kind)
+        case .chatBacklog:
+            try container.encode("chatBacklog", forKey: .kind)
+        case let .sendChat(platform, text):
+            try container.encode("sendChat", forKey: .kind)
+            try container.encode(platform, forKey: .platform)
+            try container.encode(text, forKey: .text)
         }
     }
 }
@@ -136,6 +160,10 @@ public enum DesktopMessage: Sendable, Equatable {
     /// `nil` — тишина: у ноутбука нет числового значения уровня.
     case level(peakDb: Double?)
     case reply(id: String, error: String?)
+    /// Ответ студии на запрос оформления или чата.
+    case answer(id: String, error: String?, data: RemoteJSON?)
+    /// Новые сообщения чата всех площадок.
+    case chat([RemoteChatMessage])
     case engine(online: Bool)
     case alive
     case unknown(String)
@@ -143,7 +171,7 @@ public enum DesktopMessage: Sendable, Equatable {
 
 extension DesktopMessage: Decodable {
     private enum CodingKeys: String, CodingKey {
-        case type, state, stats, peakDb, id, error, online
+        case type, state, stats, peakDb, id, error, online, data, messages
     }
 
     public init(from decoder: any Decoder) throws {
@@ -154,6 +182,16 @@ extension DesktopMessage: Decodable {
         case "stats": self = try .stats(container.decode(RemoteStats.self, forKey: .stats))
         case "level": self = try .level(peakDb: container.decodeIfPresent(Double.self, forKey: .peakDb))
         case "reply": self = try .reply(id: container.decode(String.self, forKey: .id), error: container.decodeIfPresent(String.self, forKey: .error))
+        case "answer":
+            self = try .answer(
+                id: container.decode(String.self, forKey: .id),
+                error: container.decodeIfPresent(String.self, forKey: .error),
+                data: container.decodeIfPresent(RemoteJSON.self, forKey: .data)
+            )
+        case "chat":
+            // Сообщение, которое телефон не понял, не ломает весь кадр.
+            let items = try container.decode([RemoteJSON].self, forKey: .messages)
+            self = .chat(items.compactMap { try? $0.decode(as: RemoteChatMessage.self) })
         case "engine": self = try .engine(online: container.decode(Bool.self, forKey: .online))
         case "alive": self = .alive
         default: self = .unknown(type)

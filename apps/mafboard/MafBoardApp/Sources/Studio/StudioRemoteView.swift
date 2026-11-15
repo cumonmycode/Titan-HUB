@@ -62,6 +62,7 @@ private struct StudioRemoteContent: View {
                         MicRow(muted: state.micMuted, peakDb: link.peakDb) { link.send(.setMicMuted(!state.micMuted)) }
                         CameraRow(state: state) { link.send(.selectCamera($0)) }
                         LanRow(enabled: state.lanEnabled, address: state.lanUrls.first) { link.send(.setLanEnabled($0)) }
+                        BroadcastLinks(link: link)
                     } else {
                         ProgressView("Подключаюсь к ноутбуку…").frame(maxWidth: .infinity).padding(.top, 40)
                     }
@@ -81,6 +82,37 @@ private struct StudioRemoteContent: View {
                 }
             }
         }
+    }
+}
+
+/// Оформление эфира и чат: отдельные экраны, данные берёт ноутбук у площадок.
+private struct BroadcastLinks: View {
+    let link: StudioLink
+
+    var body: some View {
+        VStack(spacing: 10) {
+            NavigationLink {
+                BroadcastLookScreen(link: link)
+            } label: {
+                RemoteRow(title: "Оформление эфира", icon: "paintbrush") {
+                    HStack(spacing: -5) {
+                        ForEach(["youtube", "twitch", "vk"], id: \.self) { StudioPlatformBadge(platform: $0, size: 20) }
+                    }
+                    Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary)
+                }
+            }
+            NavigationLink {
+                StudioChatScreen(link: link)
+            } label: {
+                RemoteRow(title: "Чат", icon: "bubble.left.and.bubble.right") {
+                    if let last = link.chat.last {
+                        Text("\(last.author): \(last.text)").font(.footnote).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                    Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary)
+                }
+            }
+        }
+        .buttonStyle(.plain)
     }
 }
 
