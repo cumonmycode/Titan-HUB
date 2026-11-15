@@ -1,8 +1,9 @@
 # MafBoard — сервер приложения для ведущих мафии
 
 MafBoard — отдельное приложение (iOS, затем Android) для ведущих игры «Мафия». Код приложения —
-[`apps/mafboard`](../apps/mafboard/README.md) (Swift, своя сборка, вне pnpm-воркспейса и Docker-образов),
-контракт API — [`apps/mafboard/docs/API.md`](../apps/mafboard/docs/API.md). **Вся серверная часть — этот модуль Titan HUB**:
+[`ios/` в репозитории MafBoardStudio](https://github.com/cumonmycode/MafBoardStudio/blob/main/ios/README.md) (Swift; до 2026-11-15 жил здесь в `apps/mafboard`,
+перенесён вместе с историей — там же MafBoard Studio и общий протокол пульта),
+контракт API — [`ios/docs/API.md`](https://github.com/cumonmycode/MafBoardStudio/blob/main/ios/docs/API.md). **Вся серверная часть — этот модуль Titan HUB**:
 
 - вход через своего Telegram-бота;
 - привязка аккаунта GoMafia;

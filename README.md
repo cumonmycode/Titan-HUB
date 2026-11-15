@@ -54,7 +54,7 @@
 | **My Titan** | клиенты клуба | бонусы, депозит и долг, история, оплата через СБП, уведомления | `apps/client` (iOS/Android), `apps/wallet` (веб-версия, `/residents`); вход и уведомления — бот Tai |
 | **Titan Home** | гости в кабинке | счёт, меню и заказ, оплата по QR, оценка вечера и управление светом и кондиционером (Home Assistant) на Android-планшете | `apps/home` (Android, см. [docs/HOME_APP.md](docs/HOME_APP.md)), веб-версия `apps/web/src/app/tablet` (`/tablet`) |
 | **Titan Menu** | гости в зале | меню на телевизоре (AbleSign) | `apps/web/public/tv-menu.html` (`/menu`) |
-| **MafBoard** | ведущие мафии из любых клубов GoMafia | компаньон ведущего: рассадка, роли, фазы, голосования, фолы, рейтинги; вход через бота @mafboard_bot | `apps/mafboard` (iOS, Swift), сервер — `apps/api/src/modules/mafboard`, см. [docs/MAFBOARD.md](docs/MAFBOARD.md) |
+| **MafBoard** | ведущие мафии из любых клубов GoMafia | компаньон ведущего: рассадка, роли, фазы, голосования, фолы, рейтинги; вход через бота @mafboard_bot | приложение (iOS, Swift) — в репозитории [MafBoardStudio](https://github.com/cumonmycode/MafBoardStudio) (`ios/`), сервер — `apps/api/src/modules/mafboard`, см. [docs/MAFBOARD.md](docs/MAFBOARD.md) |
 
 Технические идентификаторы (bundle ID, пакеты, пути, имена папок) остались прежними — меняются только названия.
 
