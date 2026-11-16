@@ -6,6 +6,7 @@ import { TgBot } from '../../lib/tgBot.js'
 import type { BotMessenger } from './bot.js'
 import { mafboardWebhookUrl, readMafboardConfig, type MafboardConfig } from './config.js'
 import { liveGoMafia, RosterCache } from './gomafia.js'
+import { TitanHubDirectory } from './hubLive.js'
 import { ensureMafboardDatabase, runMafboardMigrations } from './migrations.js'
 import { PgMafboardRepo } from './pgRepo.js'
 import { attachStudioRelay, type StudioRelay } from './relay.js'
@@ -85,6 +86,7 @@ function resolveDeps(): MafboardDeps | { error: string } {
       config,
       gomafia: liveGoMafia,
       roster: new RosterCache(liveGoMafia),
+      hub: new TitanHubDirectory(),
       messenger: messengerFor(config.botToken),
       limiter: redisLimiter,
       vk: liveVkGateway,

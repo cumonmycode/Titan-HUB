@@ -9,7 +9,8 @@ import {
   DESKTOP_PLATFORMS, GOMAFIA_RESYNC_AFTER_MS, LOGIN_TICKET_TTL_MIN, QR_TICKET_TTL_MIN, REFRESH_TOKEN_TTL_DAYS, REVIEW_LOGIN, REVIEW_TG_ID, type MafboardConfig,
 } from './config.js'
 import { validateGameUpload } from './games.js'
-import { MIN_QUERY_LENGTH, refreshLink, resolveLink, searchForHost, type GoMafiaGateway, type RosterCache } from './gomafia.js'
+import { MIN_QUERY_LENGTH, rankForHost, refreshLink, resolveLink, searchForHost, type GoMafiaGateway, type RosterCache } from './gomafia.js'
+import type { ClubHub } from './hub.js'
 import { GomafiaTakenError, type MafboardRepo } from './repo.js'
 import { errorBody, toAccountJSON, toPlayerJSON, toQrStatusJSON, toQrTicketJSON, toSessionsJSON, toTicketStatusJSON } from './serialize.js'
 import {
@@ -38,6 +39,8 @@ export interface MafboardDeps {
   config: MafboardConfig
   gomafia: GoMafiaGateway
   roster: RosterCache
+  /** Titan HUB клубов, где он есть: его клиенты идут в подборе первыми. */
+  hub: ClubHub
   /** null — бот не настроен (нет MAFBOARD_BOT_TOKEN). */
   messenger: BotMessenger | null
   limiter: RateLimiter
@@ -574,7 +577,7 @@ export function createMafboardRouter(resolveDeps: DepsResolver): Hono<Env> {
     return c.json(toAccountJSON(updated ?? user))
   })
 
-  /** Подбор игроков: сначала свой клуб, затем общий поиск GoMafia. */
+  /** Подбор игроков одним списком: клиенты Titan HUB клуба (если он есть), свой клуб GoMafia, затем общий поиск. */
   router.get('/v1/gomafia/players', requireUser, async (c) => {
     const deps = c.get('deps')
     const user = c.get('user')
@@ -583,8 +586,13 @@ export function createMafboardRouter(resolveDeps: DepsResolver): Hono<Env> {
     if (!(await deps.limiter.hit(`mb:search:${user.id}`, SEARCH_LIMIT_PER_MIN, 60))) {
       return fail(c, 429, 'rate_limited', 'Слишком много запросов поиска')
     }
-    const players = await searchForHost(deps.gomafia, deps.roster, query, user.gomafia?.club?.id ?? null)
-    return c.json({ players })
+    const hostClub = user.gomafia?.club?.id ?? null
+    const [players, hubNicknames] = await Promise.all([
+      searchForHost(deps.gomafia, deps.roster, query, hostClub),
+      hostClub == null ? new Set<string>() : deps.hub.nicknames(hostClub, query).catch(() => new Set<string>()),
+    ])
+    const verified = await deps.repo.verifiedGomafiaIds(players.map((p) => p.id)).catch(() => new Set<number>())
+    return c.json({ players: rankForHost(players, hubNicknames, verified) })
   })
 
   router.get('/v1/gomafia/players/:id', requireUser, async (c) => {
@@ -609,7 +617,8 @@ export function createMafboardRouter(resolveDeps: DepsResolver): Hono<Env> {
     if (!roster) return fail(c, 502, 'gomafia_unavailable', 'GoMafia не отвечает, попробуйте позже')
     const inClub = c.get('user').gomafia?.club?.id === Number(id)
     const players = roster.residents.map((p) => toPlayerJSON(p, inClub)).filter((p) => p != null)
-    return c.json({ players })
+    const verified = await deps.repo.verifiedGomafiaIds(players.map((p) => p.id)).catch(() => new Set<number>())
+    return c.json({ players: players.map((p) => ({ ...p, isVerified: verified.has(p.id) })) })
   })
 
   // ─── История игр ────────────────────────────────────────────────────────────

@@ -160,3 +160,16 @@ export async function resolveLink(gateway: GoMafiaGateway, login: string, passwo
   }
   return { ok: true, player, club }
 }
+
+/**
+ * Один список для подбора без групп: порядок — внутреннее ранжирование. Сначала клиенты Titan HUB клуба
+ * (если он есть), затем клуб GoMafia ведущего, затем остальные; внутри групп — как пришло из поиска.
+ * Заодно помечает подтверждённые профили MafBoard.
+ */
+export function rankForHost(players: GoMafiaPlayerJSON[], hubNicknames: Set<string>, verified: Set<number>): GoMafiaPlayerJSON[] {
+  const tier = (player: GoMafiaPlayerJSON) => (hubNicknames.has(player.nickname.toLowerCase()) ? 0 : player.isInHostClub ? 1 : 2)
+  return players
+    .map((player, index) => ({ player: { ...player, isVerified: verified.has(player.id) }, index }))
+    .sort((a, b) => tier(a.player) - tier(b.player) || a.index - b.index)
+    .map(({ player }) => player)
+}

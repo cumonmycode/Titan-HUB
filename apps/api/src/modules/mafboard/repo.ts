@@ -19,6 +19,8 @@ export interface MafboardRepo {
   userById(id: string): Promise<MafboardUser | null>
   userByTgId(tgId: number): Promise<MafboardUser | null>
   userByGomafiaId(gomafiaId: number): Promise<MafboardUser | null>
+  /** Какие из этих аккаунтов GoMafia привязаны к пользователям MafBoard — подтверждённые профили. */
+  verifiedGomafiaIds(gomafiaIds: number[]): Promise<Set<number>>
   /** Создать или обновить пользователя по Telegram (вход подтверждён в боте). */
   upsertUserFromTelegram(profile: TelegramProfile & { phone: string; termsVersion: string }): Promise<MafboardUser>
   /** Привязать (или отвязать — null) аккаунт GoMafia. Бросает GomafiaTakenError при занятом аккаунте. */

@@ -131,6 +131,20 @@ describe('GoMafia', () => {
     assert.ok(roster.json.players.every((p: any) => p.isInHostClub))
   })
 
+  it('подбор одним списком: клиенты Titan HUB первыми, привязавшие GoMafia — подтверждены', async () => {
+    const hub = { async nicknames(club: number) { return club === 77 ? new Set(['шериф ноттингема']) : new Set<string>() } }
+    const ctx = createTestContext({ hub })
+    const host = await linkedHost(ctx)
+    const found = await call(ctx, 'GET', `/v1/gomafia/players?q=${encodeURIComponent('шер')}`, { token: host.accessToken })
+    assert.deepEqual(found.json.players.map((p: any) => p.id), [5002, 5001])
+    assert.ok(found.json.players.every((p: any) => p.isVerified === false))
+
+    const self = await call(ctx, 'GET', '/v1/gomafia/players?q=host', { token: host.accessToken })
+    assert.equal(self.json.players.find((p: any) => p.id === 4242)?.isVerified, true)
+    const roster = await call(ctx, 'GET', '/v1/gomafia/clubs/77/players?page=1', { token: host.accessToken })
+    assert.equal(roster.json.players.find((p: any) => p.id === 4242)?.isVerified, true)
+  })
+
   it('профиль старше суток обновляется в фоне: сменил клуб — сменилась история', async () => {
     const ctx = createTestContext()
     const host = await linkedHost(ctx)

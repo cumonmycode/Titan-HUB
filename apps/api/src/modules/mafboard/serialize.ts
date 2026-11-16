@@ -62,6 +62,7 @@ export function toPlayerJSON(player: GomafiaPlayer, isInHostClub: boolean): GoMa
     city: player.city,
     tournamentsPlayed: player.tournaments == null ? null : Math.round(player.tournaments),
     isInHostClub,
+    isVerified: false,
   }
 }
 

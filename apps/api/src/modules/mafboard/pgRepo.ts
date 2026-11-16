@@ -193,6 +193,13 @@ export class PgMafboardRepo implements MafboardRepo {
     return row ? toUser(row) : null
   }
 
+  async verifiedGomafiaIds(gomafiaIds: number[]): Promise<Set<number>> {
+    const ids = [...new Set(gomafiaIds.filter((id) => Number.isInteger(id)))]
+    if (ids.length === 0) return new Set()
+    const found = await this.query(sql`SELECT gomafia_id FROM mb_users WHERE gomafia_id IN (${sql.join(ids.map((id) => sql`${id}`), sql`, `)})`)
+    return new Set(found.map((row) => Number(row['gomafia_id'])))
+  }
+
   async upsertUserFromTelegram(p: Parameters<MafboardRepo['upsertUserFromTelegram']>[0]): Promise<MafboardUser> {
     const row = await this.one(sql`
       INSERT INTO mb_users (tg_id, tg_username, tg_first_name, tg_last_name, phone, terms_version, terms_accepted_at)

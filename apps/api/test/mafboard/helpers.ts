@@ -4,6 +4,7 @@ import type { GomafiaLoginResult, GomafiaPlayer } from '../../src/lib/gomafia.js
 import type { BotMessenger } from '../../src/modules/mafboard/bot.js'
 import type { MafboardConfig } from '../../src/modules/mafboard/config.js'
 import { RosterCache, type GoMafiaGateway } from '../../src/modules/mafboard/gomafia.js'
+import { noHub } from '../../src/modules/mafboard/hub.js'
 import { DELETED_HOST_ID } from '../../src/modules/mafboard/config.js'
 import { GomafiaTakenError, type MafboardRepo } from '../../src/modules/mafboard/repo.js'
 import { createMafboardRouter, type MafboardDeps } from '../../src/modules/mafboard/router.js'
@@ -67,6 +68,10 @@ export class MemoryRepo implements MafboardRepo {
   async userById(id: string) { return this.users.get(id) ?? null }
   async userByTgId(tgId: number) { return [...this.users.values()].find((u) => u.tgId === tgId) ?? null }
   async userByGomafiaId(id: number) { return [...this.users.values()].find((u) => u.gomafia?.player.id === id) ?? null }
+  async verifiedGomafiaIds(ids: number[]) {
+    const linked = new Set([...this.users.values()].flatMap((u) => (u.gomafia ? [u.gomafia.player.id] : [])))
+    return new Set(ids.filter((id) => linked.has(id)))
+  }
 
   async upsertUserFromTelegram(p: Parameters<MafboardRepo['upsertUserFromTelegram']>[0]) {
     const existing = await this.userByTgId(p.tgId)
@@ -430,6 +435,7 @@ export function createTestContext(overrides: Partial<MafboardDeps> = {}): TestCo
     config,
     gomafia,
     roster: new RosterCache(gomafia, () => clock.now.getTime()),
+    hub: noHub,
     messenger,
     vk: new FakeVk(),
     limiter: {

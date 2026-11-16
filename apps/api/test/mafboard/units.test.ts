@@ -27,6 +27,7 @@ describe('игрок GoMafia', () => {
     assert.deepEqual(player, {
       id: 5001, nickname: 'Шерлок', fullName: null, avatarURL: 'https://gomafia.pro/avatars/5001.jpg',
       elo: 1500, clubID: 77, clubTitle: 'TITAN', city: 'Москва', tournamentsPlayed: 12, isInHostClub: true,
+      isVerified: false,
     })
     assert.equal(toPlayerJSON({ ...gmPlayer(1, 'x'), gomafiaId: 'abc' }, false), null)
     assert.equal(toPlayerJSON({ ...gmPlayer(1, 'x'), avatar: 'javascript:alert(1)' }, false)?.avatarURL, null)

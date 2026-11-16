@@ -14,6 +14,8 @@ export interface GoMafiaPlayerJSON {
   tournamentsPlayed: number | null
   /** Обязательное поле: приложение декодирует его без значения по умолчанию. */
   isInHostClub: boolean
+  /** Игрок вошёл в MafBoard через бота и привязал этот аккаунт GoMafia. Старые клиенты поле не читают. */
+  isVerified: boolean
 }
 
 export interface GoMafiaClubJSON {
