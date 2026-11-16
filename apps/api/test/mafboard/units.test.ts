@@ -216,6 +216,24 @@ describe('приём игры', () => {
     ].map((r) => (r.ok ? 'ok' : r.code))
     assert.deepEqual(codes, ['host_mismatch', 'club_required', 'club_mismatch', 'guest_players', 'unsupported_schema', 'invalid_record'])
   })
+
+  it('игра турнира GoMafia: судья без клуба — личная история; без GoMafia, с гостями или не в режиме турнира — отказ', () => {
+    const tournament = { tournamentID: 2920, gameNumber: 3, tableNumber: 1 }
+    const judge = { ...host, gomafia: host.gomafia ? { ...host.gomafia, club: null } : null }
+    const game = (format: 'tournament' | 'rating', overrides: Parameters<typeof record>[1] = {}) => {
+      const base = record(format, { clubID: null, ...overrides })
+      return { ...base, setup: { ...base.setup, tournament } }
+    }
+    const ok = validateGameUpload(game('tournament'), judge, NOW)
+    assert.ok(ok.ok)
+    assert.equal(ok.game.clubId, null)
+    const codes = [
+      validateGameUpload(game('tournament', { userID: guest.id }), guest, NOW),
+      validateGameUpload(game('tournament', { seats: [goMafiaSeat(1), '00000000-0000-4000-8000-000000000002'] }), judge, NOW),
+      validateGameUpload(game('rating'), judge, NOW),
+    ].map((r) => (r.ok ? 'ok' : r.code))
+    assert.deepEqual(codes, ['gomafia_required', 'guest_players', 'invalid_record'])
+  })
 })
 
 describe('вебхук бота', () => {

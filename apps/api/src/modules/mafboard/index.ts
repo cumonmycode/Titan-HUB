@@ -3,6 +3,7 @@ import { getClubDb } from '@titan/database'
 import { getSharedRedis } from '../../lib/redis.js'
 import { setTelegramWebhook } from '../../lib/telegram.js'
 import { TgBot } from '../../lib/tgBot.js'
+import { AimAccounts, liveAim, liveTournaments } from './aim.js'
 import type { BotMessenger } from './bot.js'
 import { mafboardWebhookUrl, readMafboardConfig, type MafboardConfig } from './config.js'
 import { liveGoMafia, RosterCache } from './gomafia.js'
@@ -83,8 +84,10 @@ function resolveDeps(): MafboardDeps | { error: string } {
   const config = result.config
   const titanGateway = liveTitanConnect(config.titanConnectUrl)
   try {
+    const repo = new PgMafboardRepo(getClubDb(config.databaseUrl))
+    const now = () => new Date()
     deps = {
-      repo: new PgMafboardRepo(getClubDb(config.databaseUrl)),
+      repo,
       config,
       gomafia: liveGoMafia,
       roster: new RosterCache(liveGoMafia),
@@ -94,8 +97,10 @@ function resolveDeps(): MafboardDeps | { error: string } {
       messenger: messengerFor(config.botToken),
       limiter: redisLimiter,
       vk: liveVkGateway,
+      aimAccounts: new AimAccounts(repo, liveAim, config.studioSecretsKey, now),
+      tournaments: liveTournaments,
       firstDelivery,
-      now: () => new Date(),
+      now,
       background,
     }
     return deps

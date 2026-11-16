@@ -25,6 +25,11 @@ const recordSchema = z
             clubID: z.number().int().nullish(),
           })
           .nullish(),
+        /** Игра турнира GoMafia (режим «Турнир GoMafia»): турнир, номер игры и стол. */
+        tournament: z
+          .object({ tournamentID: z.number().int().positive(), gameNumber: z.number().int().positive(), tableNumber: z.number().int().positive() })
+          .passthrough()
+          .nullish(),
         seats: z.array(z.object({ seat: z.number().int(), playerID: z.string().uuid(), role: z.string() }).passthrough()).min(1).max(30),
         createdAt: z.string(),
       })
@@ -50,6 +55,7 @@ const fail = (status: 403 | 422, code: string, message: string): GameUploadResul
  *  • ведущий в записи — это владелец токена;
  *  • рейтинг/миникап/турнир — у ведущего с клубом GoMafia или подключённым клубом Titan HUB, с игроками
  *    GoMafia и (при подключённом Titan) клиентами клуба без GoMafia; гостей там нет;
+ *  • игра турнира GoMafia — у судьи с привязанным GoMafia, клуб не нужен; игроки — только из GoMafia;
  *  • игры ведущего клуба (включая фанки) идут в историю клуба, остальные — в личную.
  */
 export function validateGameUpload(body: unknown, user: MafboardUser, now: Date): GameUploadResult {
@@ -73,7 +79,14 @@ export function validateGameUpload(body: unknown, user: MafboardUser, now: Date)
 
   const userClubId = user.gomafia?.club?.id ?? null
   const hostClubId = setup.host.clubID ?? null
-  if (setup.format !== 'funky') {
+  if (setup.tournament) {
+    // Судья турнира GoMafia может быть из любого клуба или без клуба: права даёт сам турнир.
+    if (setup.format !== 'tournament') return fail(422, 'invalid_record', 'Игра турнира GoMafia должна быть в режиме «Турнир»')
+    if (!user.gomafia) return fail(403, 'gomafia_required', 'Турниры GoMafia доступны после привязки GoMafia')
+    if (!setup.seats.every((seat) => GOMAFIA_PLAYER_ID.test(seat.playerID))) {
+      return fail(422, 'guest_players', 'В турнире GoMafia все игроки должны быть из GoMafia')
+    }
+  } else if (setup.format !== 'funky') {
     const hasTitan = user.titan != null
     if (userClubId == null && !hasTitan) return fail(403, 'club_required', 'Этот режим доступен ведущему клуба GoMafia или Titan HUB')
     if (hostClubId !== userClubId) return fail(403, 'club_mismatch', 'Игра проведена от имени другого клуба')
