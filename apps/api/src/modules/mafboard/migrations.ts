@@ -203,6 +203,19 @@ export const MAFBOARD_MIGRATIONS: readonly { id: string; sql: string }[] = [
       );
     `,
   },
+  {
+    // Вход в АИМ (admin.gomafia.pro) для турниров GoMafia: сервер сам вносит протоколы, поэтому
+    // хранит логин и пароль — только шифротекстом ключа сервера (aim.ts). Стираются при
+    // отвязке GoMafia и вместе с аккаунтом.
+    id: '007_mafboard_aim_credentials',
+    sql: `
+      CREATE TABLE IF NOT EXISTS mb_aim_credentials (
+        user_id    uuid PRIMARY KEY REFERENCES mb_users(id) ON DELETE CASCADE,
+        sealed     text NOT NULL,
+        updated_at timestamptz NOT NULL
+      );
+    `,
+  },
 ]
 
 function rows<T = Record<string, unknown>>(res: unknown): T[] {

@@ -12,6 +12,8 @@ import { validateGameUpload } from './games.js'
 import { MIN_QUERY_LENGTH, rankForHost, refreshLink, resolveLink, searchForHost, type GoMafiaGateway, type RosterCache } from './gomafia.js'
 import type { ClubHub } from './hub.js'
 import { GomafiaTakenError, type MafboardRepo } from './repo.js'
+import type { AimAccounts, TournamentSource } from './aim.js'
+import { registerTournamentRoutes } from './tournaments.js'
 import { errorBody, toAccountJSON, toPlayerJSON, toQrStatusJSON, toQrTicketJSON, toSessionsJSON, toTicketStatusJSON } from './serialize.js'
 import {
   issueAccessToken, newConfirmCode, newDeepCode, newRefreshToken, passwordMatches, qrChoiceCodes, sha256, verifyAccessToken, webhookSecretValid,
@@ -46,6 +48,10 @@ export interface MafboardDeps {
   limiter: RateLimiter
   /** Обмен кода и токенов VK Видео Live с секретом приложения (vk.ts). */
   vk: VkGateway
+  /** Вход в АИМ (admin.gomafia.pro) для турниров GoMafia: хранение пароля и сессии (aim.ts). */
+  aimAccounts: AimAccounts
+  /** Публичная рассадка турниров с gomafia.pro. */
+  tournaments: TournamentSource
   /** Telegram повторяет доставку — true только при первой встрече ключа. */
   firstDelivery(key: string, ttlSec: number): Promise<boolean>
   now(): Date
@@ -55,7 +61,7 @@ export interface MafboardDeps {
 
 export type DepsResolver = () => MafboardDeps | { error: string }
 
-type Env = { Variables: { deps: MafboardDeps; user: MafboardUser; sessionId: string } }
+export type Env = { Variables: { deps: MafboardDeps; user: MafboardUser; sessionId: string } }
 
 const GAMES_PAGE_LIMIT = 50
 /** Запись одной игры с журналом — десятки килобайт; 256 КБ — с большим запасом. */
@@ -123,11 +129,11 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | null> {
   return Promise.race([promise, new Promise<null>((resolve) => setTimeout(() => resolve(null), ms))])
 }
 
-const fail = (c: Context, status: 400 | 401 | 403 | 404 | 409 | 422 | 429 | 502 | 503, code: string, message: string) =>
+export const fail = (c: Context, status: 400 | 401 | 403 | 404 | 409 | 422 | 429 | 502 | 503, code: string, message: string) =>
   c.json(errorBody(code, message), status)
 
 /** zod с ответом в формате приложения (а не сырым результатом zod). */
-function body<T extends z.ZodTypeAny>(schema: T) {
+export function body<T extends z.ZodTypeAny>(schema: T) {
   return zValidator('json', schema, (result, c) => {
     if (!result.success) return c.json(errorBody('validation', 'Некорректные данные запроса'), 422)
   })
@@ -530,7 +536,10 @@ export function createMafboardRouter(resolveDeps: DepsResolver): Hono<Env> {
     return c.json(toAccountJSON(user))
   })
 
-  /** Привязать GoMafia: вход в GoMafia проверяет владение, пароль не сохраняется. */
+  /**
+   * Привязать GoMafia: вход в GoMafia проверяет владение. Пароль GoMafia не сохраняется; если тем же
+   * паролем открывается АИМ, сохраняется вход в АИМ (шифротекстом) — для турниров GoMafia.
+   */
   router.post('/v1/me/gomafia', requireUser, body(linkSchema), async (c) => {
     const deps = c.get('deps')
     const user = c.get('user')
@@ -552,6 +561,9 @@ export function createMafboardRouter(resolveDeps: DepsResolver): Hono<Env> {
     if (owner && owner.id !== user.id) return taken()
     try {
       const updated = await deps.repo.setGomafiaLink(user.id, { player: link.player, club: link.club }, deps.now())
+      // Обычно пароль АИМ тот же, что у GoMafia: сразу подключаем турниры. Не вышло — привязка
+      // всё равно состоялась, АИМ подключается отдельно (POST /v1/me/gomafia/aim).
+      await withTimeout(deps.aimAccounts.connect(user.id, login, password).catch(() => undefined), GOMAFIA_INLINE_TIMEOUT_MS)
       return c.json(toAccountJSON(updated ?? user))
     } catch (error) {
       if (error instanceof GomafiaTakenError) return taken()
@@ -574,6 +586,7 @@ export function createMafboardRouter(resolveDeps: DepsResolver): Hono<Env> {
     const deps = c.get('deps')
     const user = c.get('user')
     const updated = await deps.repo.setGomafiaLink(user.id, null, deps.now())
+    await deps.aimAccounts.disconnect(user.id)
     return c.json(toAccountJSON(updated ?? user))
   })
 
@@ -835,6 +848,8 @@ export function createMafboardRouter(resolveDeps: DepsResolver): Hono<Env> {
     await c.get('deps').repo.deleteActiveGame(c.get('user').id, id.toLowerCase())
     return c.json({ ok: true })
   })
+
+  registerTournamentRoutes(router, requireUser)
 
   return router
 }

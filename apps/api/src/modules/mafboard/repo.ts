@@ -35,6 +35,12 @@ export interface MafboardRepo {
    */
   deleteUser(userId: string): Promise<boolean>
 
+  // ─── Вход в АИМ (турниры GoMafia) ──────────────────────────────────────────
+  /** Логин и пароль АИМ шифротекстом (aim.ts) или null — АИМ не подключён. */
+  aimCredentials(userId: string): Promise<string | null>
+  /** Сохранить (или стереть — null) вход в АИМ. */
+  setAimCredentials(userId: string, sealed: string | null, at: Date): Promise<void>
+
   // ─── Билеты входа ──────────────────────────────────────────────────────────
   createTicket(input: {
     deepCode: string
