@@ -1,7 +1,7 @@
 import { Picker, Section, Slider, Text, Toggle } from '@expo/ui/swift-ui';
 import { pickerStyle, tag } from '@expo/ui/swift-ui/modifiers';
 import { useRouter } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Alert } from 'react-native';
 
 import { ActionRow, LinkRow } from '@/components/native-form';
@@ -84,9 +84,13 @@ function NowSection({ screen }: { screen: Screen }) {
 
 function RemoteSection({ screen }: { screen: Screen }) {
   const volume = screen.deviceState?.volume ?? null;
-  const [percent, setPercent] = useState<number | null>(null);
   // Ползунок держит своё значение, пока его двигают; потом снова показывает то, что прислал ТВ.
-  useEffect(() => setPercent(null), [volume?.level, volume?.max]);
+  // Значение привязано к последнему ответу ТВ: пришла новая громкость — своё значение забыто
+  // (без сброса в эффекте, который давал лишний проход отрисовки).
+  const volumeKey = `${volume?.level ?? ''}/${volume?.max ?? ''}`;
+  const [drag, setDrag] = useState<{ key: string; percent: number } | null>(null);
+  const percent = drag && drag.key === volumeKey ? drag.percent : null;
+  const setPercent = (value: number) => setDrag({ key: volumeKey, percent: value });
   const shown = percent ?? (volume ? volumePercent(volume) : 50);
   const disabled = !screen.online;
 

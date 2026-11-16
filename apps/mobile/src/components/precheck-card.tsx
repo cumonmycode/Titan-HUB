@@ -13,6 +13,8 @@ import type { Precheck } from '@/lib/pos-api';
 import { colors, radius, space, type } from '@/lib/theme';
 
 const HOLD_MS = 600;
+/** Сколько палец должен простоять на карточке, прежде чем начнётся удержание (а не прокрутка). */
+const PRESS_DELAY_MS = 120;
 /** Фиолетовое стекло Tai — как ИИ-карточка предчека в веб-кассе. */
 const TAI_TINT = 'rgba(139,92,246,0.30)';
 
@@ -31,6 +33,9 @@ export function PrecheckCard({ precheck, busy, onOpen, glassKey, compact }: { pr
     <Pressable
       style={styles.pressable}
       disabled={busy}
+      // Касание без задержки ловило и начало прокрутки сетки: карточка вибрировала
+      // и мигала полосой у любого пальца, проведённого по ней.
+      unstable_pressDelay={PRESS_DELAY_MS}
       delayLongPress={HOLD_MS}
       onPressIn={() => {
         haptic.light();
@@ -75,7 +80,12 @@ export function PrecheckCard({ precheck, busy, onOpen, glassKey, compact }: { pr
           </Text>
         </View>
 
-        {(holding || busy) && <Animated.View pointerEvents="none" style={[styles.progress, progressStyle]} />}
+        {/* Пока чек открывается, палец уже отпущен и полоса удержания сброшена — держим её полной. */}
+        {busy ? (
+          <View pointerEvents="none" style={[styles.progress, styles.progressFull]} />
+        ) : (
+          holding && <Animated.View pointerEvents="none" style={[styles.progress, progressStyle]} />
+        )}
       </GlassView>
     </Pressable>
   );
@@ -99,4 +109,5 @@ const styles = StyleSheet.create({
   accent: { color: colors.accent, fontWeight: '600' },
   lines: { flex: 1 },
   progress: { position: 'absolute', left: 0, bottom: 0, height: 3, backgroundColor: colors.accent },
+  progressFull: { right: 0 },
 });
