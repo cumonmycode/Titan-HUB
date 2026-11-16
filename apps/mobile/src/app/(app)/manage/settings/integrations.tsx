@@ -4,6 +4,7 @@ import { Stack, useRouter } from 'expo-router';
 
 import { ActionRow, LinkRow } from '@/components/native-form';
 import { useIntegrations } from '@/lib/admin-api';
+import { useConnect } from '@/lib/connect-api';
 import { CATALOG, openIntegration, statusOf, useGomafiaStatus } from '@/lib/integrations';
 import { colors } from '@/lib/theme';
 
@@ -16,6 +17,7 @@ export default function IntegrationsScreen() {
   const router = useRouter();
   const integrations = useIntegrations(true);
   const gomafia = useGomafiaStatus();
+  const connect = useConnect();
 
   if (!integrations.data) {
     return (
@@ -26,13 +28,14 @@ export default function IntegrationsScreen() {
   }
 
   const items = integrations.data;
-  const installed = CATALOG.map((product) => ({ product, status: statusOf(product, items, gomafia.data) })).filter((x) => x.status.installed);
+  const connectCount = connect.data?.items.length ?? 0;
+  const installed = CATALOG.map((product) => ({ product, status: statusOf(product, items, gomafia.data, connectCount) })).filter((x) => x.status.installed);
 
   return (
     <>
       <Stack.Title>Интеграции</Stack.Title>
       <Host style={{ flex: 1 }} useViewportSizeMeasurement>
-        <Form modifiers={[refreshable(async () => void (await Promise.allSettled([integrations.refetch(), gomafia.refetch()])))]}>
+        <Form modifiers={[refreshable(async () => void (await Promise.allSettled([integrations.refetch(), gomafia.refetch(), connect.refetch()])))]}>
           {installed.length === 0 ? (
             <Section>
               <ContentUnavailableView

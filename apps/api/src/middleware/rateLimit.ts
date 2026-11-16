@@ -9,6 +9,7 @@ import { createMiddleware } from 'hono/factory'
 import { Redis } from 'ioredis'
 import { verifyToken } from '@titan/auth'
 import { clientIp } from '../lib/clientIp.js'
+import { createHash } from 'node:crypto'
 
 const ANON_LIMIT = parseInt(process.env['RATELIMIT_ANON'] ?? '120')
 const AUTH_LIMIT = parseInt(process.env['RATELIMIT_AUTH'] ?? '600')
@@ -53,7 +54,11 @@ export const rateLimit = createMiddleware(async (c, next) => {
   const auth = c.req.header('Authorization')
   const token = auth?.startsWith('Bearer ') ? auth.slice(7) : c.req.query('token')
   let userId: string | null = null
-  if (token) {
+  if (token?.startsWith('tcn_')) {
+    // Ключ Titan Connect (сторонний сервис): свой счётчик на ключ, как у вошедшего
+    // пользователя, — синхронизация клиентов не должна упираться в общий лимит по IP.
+    userId = `connect:${createHash('sha256').update(token).digest('hex').slice(0, 32)}`
+  } else if (token) {
     try {
       const payload = await verifyToken(token)
       userId = payload.sub
