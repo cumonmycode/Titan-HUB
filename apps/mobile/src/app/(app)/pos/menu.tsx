@@ -18,7 +18,7 @@ import { checkTotals } from '@/lib/checks';
 import { formatMoney } from '@/lib/format';
 import { categoryHex, categorySymbol, isTariffCategory } from '@/lib/catalog-api';
 import { haptic } from '@/lib/haptics';
-import { addItem, type MenuCategory, type MenuItem, useMenu } from '@/lib/pos-api';
+import { addItem, type MenuCategory, type MenuItem, useMenu, usePopularItems } from '@/lib/pos-api';
 import { useCheck } from '@/lib/queries';
 import { effectiveTextScale, FONT_SCALE_MAX } from '@/lib/text-scale';
 import { colors, space, springs, type } from '@/lib/theme';
@@ -66,6 +66,7 @@ export default function MenuSheet() {
   useEffect(() => () => Keyboard.dismiss(), []);
   const menu = useMenu();
   const check = useCheck(checkId);
+  const popular = usePopularItems(checkId);
   const now = useNow(30_000);
   const [category, setCategory] = useState<string>(ALL);
   const [query, setQuery] = useState('');
@@ -106,7 +107,12 @@ export default function MenuSheet() {
       ];
     } else {
       // «Все»: популярное, затем категории как в веб-кассе — обычные, «Прочее», тарифы.
-      const top = items.filter((i) => i.isTop);
+      // Сверху — популярное по продажам: у клиента его частые позиции, у гостя — топ клуба
+      // (сервер отсекает тарифы). Нет статистики — запасной вариант, ручная отметка «топ».
+      const byItemId = new Map(items.map((i) => [i.id, i]));
+      const sold = (popular.data?.itemIds ?? []).map((id) => byItemId.get(id)).filter((i): i is MenuItem => !!i);
+      const top = sold.length ? sold : items.filter((i) => i.isTop);
+      const topTitle = sold.length && popular.data?.source === 'player' ? 'Часто берёт' : 'Популярное';
       const regular = categories.filter((c) => !isTariffCategory(c));
       const tariffs = categories.filter(isTariffCategory);
       const other = items.filter((i) => !i.category || !byId.has(i.category));
@@ -118,7 +124,7 @@ export default function MenuSheet() {
         items: items.filter((i) => i.category === c.id),
       });
       sections = [
-        ...(top.length ? [{ key: TOP, title: 'Популярное', symbol: 'star.fill' as SFSymbol, color: '#F59E0B', items: top }] : []),
+        ...(top.length ? [{ key: TOP, title: topTitle, symbol: 'star.fill' as SFSymbol, color: '#F59E0B', items: top }] : []),
         ...regular.map(toSection),
         ...(other.length ? [{ key: OTHER, title: 'Прочее', symbol: 'square.grid.2x2' as SFSymbol, color: '#64748B', items: other }] : []),
         ...tariffs.map(toSection),
@@ -134,7 +140,7 @@ export default function MenuSheet() {
       }
     }
     return result;
-  }, [menu.data, query, category, categories, byId, columns]);
+  }, [menu.data, popular.data, query, category, categories, byId, columns]);
 
   const closed = check.data && check.data.status !== 'open';
   const total = check.data ? checkTotals(check.data, now).total : 0;

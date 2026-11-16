@@ -224,6 +224,22 @@ export function useCheckSuggestions(checkId: string, enabled: boolean) {
   });
 }
 
+/**
+ * Популярное для шторки «Добавить»: у клиента — то, что он сам берёт чаще всего,
+ * у гостя — топ клуба за месяц. Без Tai и подписки; тарифов нет (их отсекает сервер).
+ */
+export type PopularItems = { source: 'player' | 'global'; itemIds: string[] };
+
+export function usePopularItems(checkId: string) {
+  const club = useClubKey();
+  return useQuery({
+    queryKey: [club, 'pos', 'popular', checkId],
+    queryFn: () => api.get<PopularItems>(`/pos/checks/${checkId}/popular`),
+    enabled: !!checkId,
+    staleTime: 5 * 60_000,
+  });
+}
+
 /* ─────────────────────────── Чек ─────────────────────────── */
 
 type CreateCheckBody = { playerId?: string; spaceId?: string; linkedEventId?: string; guestNames?: string[] };

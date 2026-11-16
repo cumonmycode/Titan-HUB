@@ -20,6 +20,7 @@ import { maybePromoteToResident } from '../../lib/loyalty.js'
 import { profileNameCondition, profileTagCondition } from '../../lib/searchVariants.js'
 import { getPrecheckCandidates } from '../../lib/prechecks.js'
 import { getCheckSuggestions, learnFromCheckClose } from '../../lib/suggestions.js'
+import { getPopularItems } from '../../lib/popular-items.js'
 import { accrueBonusLot, spendBonusLots, getBonusExpiryDays } from '../../lib/bonusLots.js'
 import { isRegistrationPending } from '../../lib/registration.js'
 import { getNumericSetting, getStringSetting, LARGE_CHECK_KEY, DEFAULT_LARGE_CHECK, getBoolSetting, STAFF_DISCOUNT_KEY, STAFF_COMP_SCOPE_KEY, STAFF_COMP_OWNERS_KEY, STAFF_MAX_DISCOUNT_KEY, DEFAULT_STAFF_MAX_DISCOUNT } from '../../lib/appSettings.js'
@@ -586,6 +587,12 @@ posRouter.get('/checks/:id/suggestions', requireRole('owner', 'staff', 'tablet')
   if (!aiAllowed(c.var.club)) return c.json({ suggestions: [] }) // функция Tai — по подписке
   const suggestions = await getCheckSuggestions(c.var.db, c.req.param('id'))
   return c.json({ suggestions })
+})
+
+// ПОПУЛЯРНЫЕ ПОЗИЦИИ для шторки «Добавить»: клиент — его частые позиции, гость — топ клуба.
+// Простая статистика продаж, без Tai и подписки; тарифы не попадают.
+posRouter.get('/checks/:id/popular', requireRole('owner', 'staff', 'tablet'), async (c) => {
+  return c.json(await getPopularItems(c.var.db, c.req.param('id')))
 })
 
 posRouter.post('/checks', requireRole('owner', 'staff'), zValidator('json', OpenCheckSchema), async (c) => {
