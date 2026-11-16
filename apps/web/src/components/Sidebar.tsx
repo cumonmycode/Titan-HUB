@@ -7,6 +7,7 @@ import { Icon } from '@/components/Icon'
 import { TaiLogo } from '@/components/TaiLogo'
 import { useClubContext } from '@/components/ClubGate'
 import { NAV_PRIMARY, NAV_SHIFTS, isNavActive } from '@/lib/nav'
+import { hidesAppChrome } from '@/lib/publicRoutes'
 
 const NAV_ITEMS = NAV_PRIMARY
 const BOTTOM_NAV = [NAV_SHIFTS]
@@ -32,8 +33,8 @@ export function Sidebar() {
   }
 
   if (pathname === '/login') return null
-  // Публичные страницы (запись, политика, поддержка) — без меню кассы.
-  if (['/book', '/privacy', '/terms', '/support'].includes(pathname)) return null
+  // Публичные страницы (запись, политика, поддержка, вики) — без меню кассы.
+  if (hidesAppChrome(pathname)) return null
   if (pathname.startsWith('/tablet')) return null
   if (pathname.startsWith('/superadmin')) return null
 

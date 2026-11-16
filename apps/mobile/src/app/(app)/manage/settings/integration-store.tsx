@@ -3,6 +3,7 @@ import { Stack, useRouter } from 'expo-router';
 
 import { LinkRow } from '@/components/native-form';
 import { useIntegrations } from '@/lib/admin-api';
+import { useConnect } from '@/lib/connect-api';
 import { CATALOG, GROUPS, openIntegration, statusOf, useGomafiaStatus } from '@/lib/integrations';
 import { colors } from '@/lib/theme';
 
@@ -11,6 +12,7 @@ export default function IntegrationStoreScreen() {
   const router = useRouter();
   const integrations = useIntegrations(true);
   const gomafia = useGomafiaStatus();
+  const connectCount = useConnect().data?.items.length ?? 0;
 
   if (!integrations.data) {
     return (
@@ -32,7 +34,7 @@ export default function IntegrationStoreScreen() {
             return (
               <Section key={group.key} title={group.title}>
                 {products.map((product) => {
-                  const installed = statusOf(product, items, gomafia.data).installed;
+                  const installed = statusOf(product, items, gomafia.data, connectCount).installed;
                   return (
                     <LinkRow
                       key={product.id}

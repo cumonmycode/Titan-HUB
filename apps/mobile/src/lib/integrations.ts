@@ -15,7 +15,7 @@ import { useSession } from './session';
  */
 
 export type IntegrationField = { key: string; label: string; secure?: boolean; placeholder: string; hint: string; optional?: boolean };
-export type IntegrationGroup = 'tai' | 'payments' | 'fiscal' | 'players' | 'marketing' | 'maps' | 'home';
+export type IntegrationGroup = 'connect' | 'tai' | 'payments' | 'fiscal' | 'players' | 'marketing' | 'maps' | 'home';
 export type PayProvider = 'platega' | 'tbank' | 'yookassa' | 'sber' | 'alfa';
 
 export type IntegrationProduct = {
@@ -28,8 +28,8 @@ export type IntegrationProduct = {
   blurb: string;
   /** Что даёт интеграция — на её экране. */
   about: string;
-  /** keys — ключи в хранилище; gomafia — вход на gomafia.pro; home — свой экран «Home Assistant». */
-  kind: 'keys' | 'gomafia' | 'home';
+  /** keys — ключи в хранилище; gomafia — вход на gomafia.pro; home — свой экран «Home Assistant»; connect — Titan Connect. */
+  kind: 'keys' | 'gomafia' | 'home' | 'connect';
   fields: IntegrationField[];
   /** СБП-эквайер: какой провайдер оплат включает. */
   provider?: PayProvider;
@@ -38,6 +38,7 @@ export type IntegrationProduct = {
 };
 
 export const GROUPS: { key: IntegrationGroup; title: string }[] = [
+  { key: 'connect', title: 'Свои сервисы' },
   { key: 'tai', title: 'Telegram и ИИ' },
   { key: 'payments', title: 'Приём оплат' },
   { key: 'fiscal', title: 'Чеки 54-ФЗ' },
@@ -48,6 +49,17 @@ export const GROUPS: { key: IntegrationGroup; title: string }[] = [
 ];
 
 export const CATALOG: IntegrationProduct[] = [
+  {
+    id: 'titan_connect',
+    name: 'Titan Connect',
+    symbol: 'link.circle.fill',
+    color: '#7C3AED',
+    group: 'connect',
+    blurb: 'Данные клиентов для ваших сервисов',
+    about: 'Сайт рейтинга, бот турниров, CRM получают ники, имена, фото и другие данные клиентов клуба. Подключение одноразовым кодом, дальше — без повторной настройки.',
+    kind: 'connect',
+    fields: [],
+  },
   {
     id: 'poll_bot',
     name: 'Tai — бот клуба',
@@ -266,14 +278,19 @@ export const productById = (id: string) => CATALOG.find((p) => p.id === id) ?? n
 /** Экран интеграции: Home Assistant для кассы — свой экран с помещениями, остальные — общий. */
 export function openIntegration(router: ReturnType<typeof useRouter>, product: IntegrationProduct) {
   if (product.kind === 'home') router.push('/manage/settings/home');
+  else if (product.kind === 'connect') router.push('/manage/settings/connect');
   else router.push({ pathname: '/manage/settings/integration', params: { id: product.id } });
 }
 
 export type GomafiaStatus = { connected: boolean; source: string | null; clubId: string | null; clubTitle: string | null; loginMasked: string | null };
 export type IntegrationStatus = { installed: boolean; complete: boolean; detail: string };
 
-/** Установлена ли интеграция и всё ли введено. home — по ключу HUB, gomafia — по входу. */
-export function statusOf(product: IntegrationProduct, items: IntegrationItem[], gomafia?: GomafiaStatus | null): IntegrationStatus {
+/** Установлена ли интеграция и всё ли введено. home — по ключу HUB, gomafia — по входу, connect — по подключённым сервисам. */
+export function statusOf(product: IntegrationProduct, items: IntegrationItem[], gomafia?: GomafiaStatus | null, connectCount = 0): IntegrationStatus {
+  if (product.kind === 'connect') {
+    if (!connectCount) return { installed: false, complete: false, detail: '' };
+    return { installed: true, complete: true, detail: `Сервисов: ${connectCount}` };
+  }
   if (product.kind === 'gomafia') {
     if (!gomafia?.connected) return { installed: false, complete: false, detail: '' };
     return { installed: true, complete: !!gomafia.clubId, detail: gomafia.clubTitle ? `Клуб «${gomafia.clubTitle}»` : gomafia.clubId ? `Клуб #${gomafia.clubId}` : 'Клуб не указан' };

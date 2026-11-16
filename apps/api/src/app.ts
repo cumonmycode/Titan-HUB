@@ -56,6 +56,8 @@ import { superadminRouter } from './modules/superadmin/index.js'
 import { residentRouter } from './modules/resident/resident.router.js'
 import { broadcastRouter } from './modules/resident/broadcast.router.js'
 import { mafboardRouter } from './modules/mafboard/index.js'
+import { connectPublicRouter } from './modules/connect/public.router.js'
+import { connectManageRouter } from './modules/connect/manage.router.js'
 
 const app = new Hono()
 
@@ -253,6 +255,11 @@ app.route('/api/inventory', inventoryRouter)
 app.route('/api/goods', goodsRouter)
 app.route('/api/pricing', pricingRouter)
 app.route('/api/gomafia', gomafiaRouter)
+// Titan Connect: данные клиентов клуба для сторонних сервисов. Подключение — одноразовым
+// кодом из HUB (manage), дальше сервис ходит с постоянным ключом tcn_… (v1). После гейта
+// подписки: у заблокированного клуба данные наружу не уходят. См. docs/TITAN_CONNECT.md.
+app.route('/api/connect/manage', connectManageRouter)
+app.route('/api/connect/v1', connectPublicRouter)
 // Суперадмин-контур платформы (control-plane): bootstrap/login + управление клубами.
 app.route('/api/superadmin', superadminRouter)
 
