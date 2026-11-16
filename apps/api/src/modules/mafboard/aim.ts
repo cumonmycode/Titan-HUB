@@ -84,6 +84,11 @@ export class AimAccounts {
     return (await this.credentials(userId)) !== null
   }
 
+  /** Логин подключённого АИМ (без пароля) — чтобы в профиле было видно, какой аккаунт. */
+  async connectedLogin(userId: string): Promise<string | null> {
+    return (await this.credentials(userId))?.login ?? null
+  }
+
   /**
    * Выполнить запрос к АИМ от имени пользователя. Сессии нет или она истекла — один раз
    * входит заново сохранённым паролем. Сменил пароль в АИМ — AimError `bad_credentials`.

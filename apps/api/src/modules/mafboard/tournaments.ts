@@ -164,8 +164,8 @@ export function tournamentGamesJSON(seating: TournamentSeating, gomafiaId: numbe
 export function registerTournamentRoutes(router: Hono<Env>, requireUser: MiddlewareHandler<Env>): void {
   /** Подключён ли вход в АИМ. */
   router.get('/v1/me/gomafia/aim', requireUser, async (c) => {
-    const deps = c.get('deps')
-    return c.json({ connected: await deps.aimAccounts.connected(c.get('user').id) })
+    const login = await c.get('deps').aimAccounts.connectedLogin(c.get('user').id)
+    return c.json({ connected: login !== null, login })
   })
 
   /**
@@ -190,14 +190,14 @@ export function registerTournamentRoutes(router: Hono<Env>, requireUser: Middlew
       }
       return aimFailure(c, error)
     }
-    return c.json({ connected: true })
+    return c.json({ connected: true, login })
   })
 
   /** Отключить АИМ: сохранённый пароль стирается. */
   router.delete('/v1/me/gomafia/aim', requireUser, async (c) => {
     const deps = c.get('deps')
     await deps.aimAccounts.disconnect(c.get('user').id)
-    return c.json({ connected: false })
+    return c.json({ connected: false, login: null })
   })
 
   /** Незавершённые турниры пользователя из АИМ и его роль в каждом. */

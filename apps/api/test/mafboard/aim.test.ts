@@ -269,7 +269,7 @@ describe('ручки турниров', () => {
     const ctx = createTestContext()
     const token = await linkedJudge(ctx)
     const status = await call(ctx, 'GET', '/v1/me/gomafia/aim', { token })
-    assert.deepEqual(status.json, { connected: true })
+    assert.deepEqual(status.json, { connected: true, login: 'host' })
     const sealed = [...ctx.repo.aim.values()][0]!
     assert.ok(sealed.startsWith('v1.'))
     assert.ok(!sealed.includes('secret'))
@@ -278,13 +278,20 @@ describe('ручки турниров', () => {
   it('пароль АИМ другой — привязка проходит, АИМ подключается отдельно', async () => {
     const ctx = createTestContext()
     const token = await linkedJudge(ctx, 'aim-other')
-    assert.deepEqual((await call(ctx, 'GET', '/v1/me/gomafia/aim', { token })).json, { connected: false })
+    assert.deepEqual((await call(ctx, 'GET', '/v1/me/gomafia/aim', { token })).json, { connected: false, login: null })
     assert.equal((await call(ctx, 'GET', '/v1/tournaments', { token })).json.error.code, 'aim_not_connected')
 
     const bad = await call(ctx, 'POST', '/v1/me/gomafia/aim', { token, body: { login: 'host', password: 'nope' } })
     assert.equal(bad.status, 422)
     const ok = await call(ctx, 'POST', '/v1/me/gomafia/aim', { token, body: { login: 'host', password: 'aim-other' } })
-    assert.deepEqual(ok.json, { connected: true })
+    assert.deepEqual(ok.json, { connected: true, login: 'host' })
+    // Сменить аккаунт АИМ: новый вход заменяет сохранённый; отключение стирает его.
+    ctx.aim.password = 'other-pass'
+    const changed = await call(ctx, 'POST', '/v1/me/gomafia/aim', { token, body: { login: 'judge2', password: 'other-pass' } })
+    assert.deepEqual(changed.json, { connected: true, login: 'judge2' })
+    assert.deepEqual((await call(ctx, 'GET', '/v1/me/gomafia/aim', { token })).json, { connected: true, login: 'judge2' })
+    assert.deepEqual((await call(ctx, 'DELETE', '/v1/me/gomafia/aim', { token })).json, { connected: false, login: null })
+    assert.equal(ctx.repo.aim.size, 0)
   })
 
   it('список: только незавершённые, роль редактора — по доступу к «Данным игр»', async () => {
