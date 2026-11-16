@@ -2,6 +2,7 @@ import type { Context, Hono, MiddlewareHandler } from 'hono'
 import { zValidator } from '@hono/zod-validator'
 import { z } from 'zod'
 import type { MafboardEnv } from './router.js'
+import { GoMafiaLoginRequired } from './gomafiaSessions.js'
 import { errorBody, toAccountJSON } from './serialize.js'
 import { openSecrets, sealSecrets } from './studio.js'
 import { TitanConnectError, toTitanPlayerJSON, trustedApiBase, type TitanClient } from './titan.js'
@@ -127,7 +128,16 @@ export function registerTitanRoutes(router: Hono<MafboardEnv>, requireUser: Midd
     const deps = c.get('deps')
     const { goMafiaID } = c.req.valid('json')
     // lib/gomafia отвечает null и на «нет игрока», и на сбой GoMafia — различить их нельзя.
-    if (goMafiaID != null && !(await deps.gomafia.player(String(goMafiaID)).catch(() => null))) {
+    const userId = c.get('user').id
+    // С 2026-11-17 GoMafia показывает профили только вошедшим: без входа ведущего номер не проверить —
+    // принимаем его как есть; с входом — проверяем, что игрок существует.
+    const exists = goMafiaID == null
+      ? true
+      : await deps.gomafiaSessions
+          .run(userId, (auth) => deps.gomafia.player(String(goMafiaID), auth))
+          .then((player) => player != null)
+          .catch((error: unknown) => error instanceof GoMafiaLoginRequired)
+    if (!exists) {
       return fail(c, 404, 'not_found', 'Игрок не найден в GoMafia или GoMafia не отвечает')
     }
     return saveMatch(c, { goMafiaId: goMafiaID })

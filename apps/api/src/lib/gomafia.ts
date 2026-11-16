@@ -49,32 +49,69 @@ async function getBuildId(force = false): Promise<string | null> {
   return buildIdCache?.id ?? null
 }
 
-// POST /api/{action}. Возвращает распарсенный JSON или {result:'fail'} при ошибке.
-async function apiPost(action: string, body: Record<string, unknown>): Promise<any> {
-  try {
-    const r = await fetchWithTimeout(`${BASE}/api/${action}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Origin: BASE, Referer: `${BASE}/` },
-      body: JSON.stringify(body),
-    })
-    return await r.json().catch(() => ({ result: 'fail', error: 'bad_json' }))
-  } catch {
-    return { result: 'fail', error: 'network' }
+// ─── Вход (с 2026-11-17 GoMafia отдаёт профили, клубы, турниры и поиск только после входа) ──
+//
+// Сайт хранит сессию в своей cookie (её шифрует сам сайт): вход — POST /api/user/login, cookie
+// из ответа уходит во все следующие запросы. Вызовы с `auth` получают GomafiaAuthRequired, если
+// сайт просит войти (сессии нет или она истекла); без `auth` — как раньше, пустой результат.
+
+export interface GomafiaAuth {
+  /** Cookie сессии GoMafia; null — входа нет. */
+  cookie: string | null
+}
+
+export class GomafiaAuthRequired extends Error {
+  constructor() {
+    super('gomafia_need_auth')
   }
 }
 
+function authHeaders(auth?: GomafiaAuth): Record<string, string> {
+  return auth?.cookie ? { Cookie: auth.cookie } : {}
+}
+
+/** Cookie из Set-Cookie ответа в виде заголовка Cookie (без атрибутов). */
+function cookieHeader(response: Response): string | null {
+  const headers = response.headers as Headers & { getSetCookie?: () => string[] }
+  const all = typeof headers.getSetCookie === 'function' ? headers.getSetCookie() : [response.headers.get('set-cookie') ?? '']
+  const pairs = all.map((line) => line.split(';')[0]?.trim() ?? '').filter((pair) => pair.includes('=') && !pair.endsWith('=deleted'))
+  return pairs.length ? pairs.join('; ') : null
+}
+
+// POST /api/{action}. Возвращает распарсенный JSON или {result:'fail'} при ошибке.
+async function apiPost(action: string, body: Record<string, unknown>, auth?: GomafiaAuth): Promise<any> {
+  let res: any
+  try {
+    const r = await fetchWithTimeout(`${BASE}/api/${action}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Origin: BASE, Referer: `${BASE}/`, ...authHeaders(auth) },
+      body: JSON.stringify(body),
+    })
+    res = await r.json().catch(() => ({ result: 'fail', error: 'bad_json' }))
+  } catch {
+    return { result: 'fail', error: 'network' }
+  }
+  if (auth && res?.error === 'need_auth') throw new GomafiaAuthRequired()
+  return res
+}
+
 // GET /_next/data/{buildId}/{path}. При 404 (сменился buildId) — один повтор со свежим.
-async function nextData(path: string): Promise<any | null> {
+async function nextData(path: string, auth?: GomafiaAuth): Promise<any | null> {
   for (let attempt = 0; attempt < 2; attempt++) {
     const bid = await getBuildId(attempt === 1)
     if (!bid) return null
     try {
-      const r = await fetchWithTimeout(`${BASE}/_next/data/${bid}/${path}`, { headers: { 'x-nextjs-data': '1' } })
+      const r = await fetchWithTimeout(`${BASE}/_next/data/${bid}/${path}`, { headers: { 'x-nextjs-data': '1', ...authHeaders(auth) } })
       if (r.status === 404) { buildIdCache = null; continue } // buildId устарел → повтор
       if (!r.ok) return null
       const j = (await r.json().catch(() => null)) as any
+      // Страница только для вошедших: сайт отвечает переходом на /login.
+      if (auth && typeof j?.pageProps?.__N_REDIRECT === 'string' && j.pageProps.__N_REDIRECT.startsWith('/login')) {
+        throw new GomafiaAuthRequired()
+      }
       return j?.pageProps?.serverData ?? null
-    } catch {
+    } catch (error) {
+      if (error instanceof GomafiaAuthRequired) throw error
       return null
     }
   }
@@ -125,7 +162,7 @@ function normalize(raw: any): GomafiaPlayer | null {
 // ─── Публичные операции ──────────────────────────────────────────────────────
 
 // Поиск по ВСЕМ игрокам сайта (подстрочно по нику). Публично.
-export async function searchPlayers(query: string, opts: { limit?: number; offset?: number } = {}): Promise<{ players: GomafiaPlayer[]; total: number }> {
+export async function searchPlayers(query: string, opts: { limit?: number; offset?: number } = {}, auth?: GomafiaAuth): Promise<{ players: GomafiaPlayer[]; total: number }> {
   const q = query.trim()
   if (!q) return { players: [], total: 0 }
   const res = await apiPost('user/getTop', {
@@ -134,7 +171,7 @@ export async function searchPlayers(query: string, opts: { limit?: number; offse
     offset: opts.offset ?? 0,
     sortType: 'elo',
     sortOrder: 'DESC',
-  })
+  }, auth)
   if (res?.result !== 'success' || !Array.isArray(res.data)) return { players: [], total: 0 }
   const players = res.data.map(normalize).filter(Boolean) as GomafiaPlayer[]
   const total = res.data[0]?.total_rows != null ? Number(res.data[0].total_rows) : players.length
@@ -142,8 +179,8 @@ export async function searchPlayers(query: string, opts: { limit?: number; offse
 }
 
 // Состав клуба по id (представители). Публично, постранично.
-export async function clubResidents(clubId: string, opts: { page?: number } = {}): Promise<{ club: { id: string; title: string | null; city: string | null; description: string | null; rank: number | null } | null; residents: GomafiaPlayer[]; total: number }> {
-  const sd = await nextData(`club/${encodeURIComponent(clubId)}.json?page=${opts.page ?? 1}`)
+export async function clubResidents(clubId: string, opts: { page?: number } = {}, auth?: GomafiaAuth): Promise<{ club: { id: string; title: string | null; city: string | null; description: string | null; rank: number | null } | null; residents: GomafiaPlayer[]; total: number }> {
+  const sd = await nextData(`club/${encodeURIComponent(clubId)}.json?page=${opts.page ?? 1}`, auth)
   if (!sd) return { club: null, residents: [], total: 0 }
   const club = sd.club
     ? { id: String(sd.club.id ?? clubId), title: sd.club.title ?? null, city: sd.club.city ?? null, description: sd.club.description ?? null, rank: num(sd.club.rank) }
@@ -154,15 +191,15 @@ export async function clubResidents(clubId: string, opts: { page?: number } = {}
 }
 
 // Полная карточка игрока (с именем/фамилией). Публично.
-export async function playerDetail(id: string): Promise<GomafiaPlayer | null> {
-  const sd = await nextData(`stats/${encodeURIComponent(id)}.json`)
+export async function playerDetail(id: string, auth?: GomafiaAuth): Promise<GomafiaPlayer | null> {
+  const sd = await nextData(`stats/${encodeURIComponent(id)}.json`, auth)
   if (!sd?.user) return null
   return normalize(sd.user)
 }
 
 // Страница турнира: рассадка, судьи столов, схема. Публично; разбор — gomafiaTournament.ts.
-export async function tournamentServerData(id: number): Promise<unknown | null> {
-  return nextData(`tournament/${id}.json`)
+export async function tournamentServerData(id: number, auth?: GomafiaAuth): Promise<unknown | null> {
+  return nextData(`tournament/${id}.json`, auth)
 }
 
 // ─── Вход (только для подтверждения владельца и определения его клуба) ─────────
@@ -173,13 +210,27 @@ export interface GomafiaLoginResult {
   sessionToken?: string
   userId?: string
   clubId?: string | null
+  /** Cookie сессии сайта — для запросов, которые GoMafia отдаёт только после входа. */
+  cookie?: string | null
 }
 
 // Логин. Возвращает sessionToken (+ id пользователя/клуба, если отдаёт API).
 // Парсим защитно — точную форму ответа знаем неполно (поле sessionToken
 // подтверждено по logout). При неуспехе — текст ошибки от сайта.
 export async function gomafiaLogin(login: string, password: string): Promise<GomafiaLoginResult> {
-  const res = await apiPost('user/login', { login, password })
+  let res: any
+  let cookie: string | null = null
+  try {
+    const r = await fetchWithTimeout(`${BASE}/api/user/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Origin: BASE, Referer: `${BASE}/login` },
+      body: JSON.stringify({ login, password }),
+    })
+    cookie = cookieHeader(r)
+    res = await r.json().catch(() => ({ result: 'fail', error: 'bad_json' }))
+  } catch {
+    res = { result: 'fail', error: 'network' }
+  }
   if (res?.result !== 'success') {
     return { ok: false, error: res?.errorDesc ?? res?.error ?? 'login_failed' }
   }
@@ -191,7 +242,8 @@ export async function gomafiaLogin(login: string, password: string): Promise<Gom
     // Только имена полей, без значений: в ответе есть sessionToken.
     console.warn('[gomafia] вход без id игрока, поля ответа:', Object.keys(res ?? {}), u && u !== res ? Object.keys(u) : [])
   }
-  return { ok: true, sessionToken, userId, clubId: clubId ?? null }
+  if (!cookie) console.warn('[gomafia] вход без cookie сессии — закрытые страницы GoMafia будут недоступны')
+  return { ok: true, sessionToken, userId, clubId: clubId ?? null, cookie }
 }
 
 // Извлечь club id из ссылки/строки: «https://gomafia.pro/club/49», «club/49», «49».

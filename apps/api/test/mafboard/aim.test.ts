@@ -545,3 +545,50 @@ describe('открытая ссылка на итоги', () => {
     assert.equal((await call(ctx, 'POST', '/v1/shares', { token, body: { gameID, snapshot: { ...snapshot, seats: [] } } })).status, 422)
   })
 })
+
+describe('GoMafia только после входа (с 2026-11-17)', () => {
+  async function closedSite() {
+    const ctx = createTestContext()
+    ctx.aim.password = 'other'
+    const session = await signIn(ctx)
+    const linked = await call(ctx, 'POST', '/v1/me/gomafia', { token: session.accessToken, body: { login: 'host', password: 'secret' } })
+    assert.equal(linked.status, 200)
+    ctx.gomafia.requireAuth = true
+    return { ctx, token: session.accessToken }
+  }
+
+  it('привязка сохраняет вход шифротекстом; подбор игроков идёт с cookie этого входа', async () => {
+    const { ctx, token } = await closedSite()
+    const sealed = [...ctx.repo.gomafiaCreds.values()][0]!
+    assert.ok(sealed.startsWith('v1.') && !sealed.includes('secret'))
+    const before = ctx.gomafia.logins
+    const res = await call(ctx, 'GET', '/v1/gomafia/players?q=Шер', { token })
+    assert.equal(res.status, 200)
+    assert.ok(res.json.players.length > 0)
+    // cookie из привязки ещё действует — повторного входа нет.
+    assert.equal(ctx.gomafia.logins, before)
+  })
+
+  it('сессия истекла — сервер входит сохранённым паролем и повторяет запрос', async () => {
+    const { ctx, token } = await closedSite()
+    ctx.gomafia.sessionEpoch = 2
+    const before = ctx.gomafia.logins
+    const res = await call(ctx, 'GET', '/v1/gomafia/players/5001', { token })
+    assert.equal(res.status, 200)
+    assert.equal(ctx.gomafia.logins, before + 1)
+  })
+
+  it('привязан раньше и входа нет — gomafia_relogin_required; отвязка стирает вход', async () => {
+    const { ctx, token } = await closedSite()
+    ctx.repo.gomafiaCreds.clear()
+    // Перезапуск сервера: cookie в памяти не пережили.
+    const fresh = createTestContext({ repo: ctx.repo, gomafia: ctx.gomafia })
+    const res = await call(fresh, 'GET', '/v1/gomafia/players?q=Шер', { token })
+    assert.equal(res.status, 409)
+    assert.equal(res.json.error.code, 'gomafia_relogin_required')
+    await call(ctx, 'POST', '/v1/me/gomafia', { token, body: { login: 'host', password: 'secret' } })
+    assert.equal(ctx.repo.gomafiaCreds.size, 1)
+    await call(ctx, 'DELETE', '/v1/me/gomafia', { token })
+    assert.equal(ctx.repo.gomafiaCreds.size, 0)
+  })
+})

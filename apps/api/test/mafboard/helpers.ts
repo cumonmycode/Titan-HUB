@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
 import type { ReplyMarkup } from '../../src/lib/tgBot.js'
-import type { GomafiaLoginResult, GomafiaPlayer } from '../../src/lib/gomafia.js'
+import { GomafiaAuthRequired, type GomafiaAuth, type GomafiaLoginResult, type GomafiaPlayer } from '../../src/lib/gomafia.js'
+import { GoMafiaSessions } from '../../src/modules/mafboard/gomafiaSessions.js'
 import type { BotMessenger } from '../../src/modules/mafboard/bot.js'
 import type { MafboardConfig } from '../../src/modules/mafboard/config.js'
 import { RosterCache, type GoMafiaGateway } from '../../src/modules/mafboard/gomafia.js'
@@ -162,6 +163,7 @@ export class MemoryRepo implements MafboardRepo {
   activeGames = new Map<string, StoredActiveGame>()
   studio = new Map<string, StoredStudioSettings>()
   aim = new Map<string, string>()
+  gomafiaCreds = new Map<string, string>()
   submissions = new Map<string, StoredProtocolSubmission>()
   shares = new Map<string, StoredShare>()
   titanMatchRows = new Map<string, number | null>()
@@ -213,6 +215,7 @@ export class MemoryRepo implements MafboardRepo {
     for (const [id, game] of this.activeGames) if (game.hostUserId === userId) this.activeGames.delete(id)
     this.studio.delete(userId)
     this.aim.delete(userId)
+    this.gomafiaCreds.delete(userId)
     for (const [id, s] of this.submissions) if (s.refereeUserId === userId) this.submissions.delete(id)
     for (const [token, s] of this.shares) if (s.userId === userId) this.shares.delete(token)
     for (const [id, session] of this.sessions) if (session.userId === userId) this.sessions.delete(id)
@@ -481,6 +484,15 @@ export class MemoryRepo implements MafboardRepo {
     return this.shares.get(token) ?? null
   }
 
+  async gomafiaCredentials(userId: string) {
+    return this.gomafiaCreds.get(userId) ?? null
+  }
+
+  async setGomafiaCredentials(userId: string, sealed: string | null) {
+    if (sealed === null) this.gomafiaCreds.delete(userId)
+    else this.gomafiaCreds.set(userId, sealed)
+  }
+
   async aimCredentials(userId: string) {
     return this.aim.get(userId) ?? null
   }
@@ -567,17 +579,31 @@ export class FakeGoMafia implements GoMafiaGateway {
   clubCalls = 0
   /** Подменить ответ входа (форма успеха без id, сетевая ошибка). */
   loginOverride: GomafiaLoginResult | null = null
+  /** Как GoMafia с 2026-11-17: без cookie входа — GomafiaAuthRequired. */
+  requireAuth = false
+  logins = 0
+  /** Номер сессии: смена «истекает» выданные раньше cookie. */
+  sessionEpoch = 1
+
+  private check(auth?: GomafiaAuth) {
+    if (this.requireAuth && auth?.cookie !== `gm=${this.sessionEpoch}`) throw new GomafiaAuthRequired()
+  }
 
   async login(login: string, password: string): Promise<GomafiaLoginResult> {
+    this.logins += 1
     if (this.loginOverride) return this.loginOverride
     return login === 'host' && password === 'secret'
-      ? { ok: true, userId: '4242', clubId: '77' }
+      ? { ok: true, userId: '4242', clubId: '77', cookie: `gm=${this.sessionEpoch}` }
       : { ok: false, error: 'Никнейм и пароль введены неверно, проверьте правильность введенных данных' }
   }
 
-  async player(id: string) { return this.players.get(id) ?? null }
+  async player(id: string, auth?: GomafiaAuth) {
+    this.check(auth)
+    return this.players.get(id) ?? null
+  }
 
-  async club(clubId: string, page: number) {
+  async club(clubId: string, page: number, auth?: GomafiaAuth) {
+    this.check(auth)
     this.clubCalls += 1
     const residents = clubId === '77' && page === 1 ? this.roster : []
     return {
@@ -587,7 +613,8 @@ export class FakeGoMafia implements GoMafiaGateway {
     }
   }
 
-  async search(query: string) {
+  async search(query: string, _limit?: number, auth?: GomafiaAuth) {
+    this.check(auth)
     return [...this.players.values()].filter((p) => p.login.toLowerCase().includes(query.toLowerCase()))
   }
 }
@@ -613,6 +640,7 @@ export function createTestContext(overrides: Partial<MafboardDeps> = {}): TestCo
   const titan = new FakeTitan()
   const clock = { now: NOW }
   const aim = new FakeAim()
+  const aimAccounts = new AimAccounts(repo, aim, config.studioSecretsKey, () => clock.now)
   const tournaments = new FakeTournaments()
   const pending: Promise<void>[] = []
   const seen = new Set<string>()
@@ -628,7 +656,8 @@ export function createTestContext(overrides: Partial<MafboardDeps> = {}): TestCo
     titanRoster: new TitanRosterCache(titan, () => clock.now.getTime()),
     messenger,
     vk: new FakeVk(),
-    aimAccounts: new AimAccounts(repo, aim, config.studioSecretsKey, () => clock.now),
+    aimAccounts,
+    gomafiaSessions: new GoMafiaSessions(repo, gomafia, config.studioSecretsKey, aimAccounts, () => clock.now),
     tournaments,
     limiter: {
       async hit(key, limit, windowSec) {

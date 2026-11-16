@@ -44,7 +44,7 @@ export async function submitForReview(c: Context<Env>, tournamentId: number, inp
   const player = user.gomafia!.player
   const tournament = (await deps.aimAccounts.tournaments(user.id)).find((candidate) => candidate.id === tournamentId)
   if (!tournament) return fail(c, 404, 'not_found', 'Турнира нет среди ваших турниров в АИМ')
-  const seating = await deps.tournaments.seating(tournamentId)
+  const seating = await deps.gomafiaSessions.run(user.id, (auth) => deps.tournaments.seating(tournamentId, auth))
   if (!seating) return fail(c, 502, 'gomafia_unavailable', 'GoMafia не отдала рассадку турнира, попробуйте позже')
   const table = seating.games.find((game) => game.number === input.gameNumber)?.tables.find((t) => t.number === input.tableNumber)
   if (!table) return fail(c, 409, 'table_mismatch', 'На GoMafia нет такого стола — обновите турнир')
