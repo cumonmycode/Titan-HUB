@@ -189,16 +189,16 @@ function tariffColor(tariff: Tariff, index: number): string {
 type Cell = { kind: 'tariff'; tariff: Tariff; color: string } | { kind: 'none' };
 
 /**
- * Раскладка сетки — подряд: первый ряд из трёх, дальше по два, «Без тарифа» последней
- * плиткой. С порядком sortTariffs это:
- *   Резидент | Новичок | Гость
- *   Студент | Друзья клуба
- *   Одна игра | Без тарифа
+ * Раскладка сетки — ровная, «Без тарифа» последней плиткой. Раньше первый ряд был из
+ * трёх, дальше по два: при семи тарифах выходило 3 + 2 + 2 + 1 — плитки разной ширины
+ * и одинокая «Без тарифа» в половину ряда. Теперь колонок три, если плитки делятся на
+ * три ряда поровну, иначе две; нечётная последняя плитка растягивается на весь ряд.
  */
 function tariffRows(list: Tariff[]): Cell[][] {
   const cells: Cell[] = [...list.map((tariff, index): Cell => ({ kind: 'tariff', tariff, color: tariffColor(tariff, index) })), { kind: 'none' }];
-  const rows: Cell[][] = [cells.slice(0, 3)];
-  for (let i = 3; i < cells.length; i += 2) rows.push(cells.slice(i, i + 2));
+  const columns = cells.length % 3 === 0 ? 3 : 2;
+  const rows: Cell[][] = [];
+  for (let i = 0; i < cells.length; i += columns) rows.push(cells.slice(i, i + columns));
   return rows;
 }
 

@@ -2,7 +2,7 @@ import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
 import { useState } from 'react';
-import { ActivityIndicator, Alert, Linking, ScrollView, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Alert, Linking, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import Animated, { FadeIn } from 'react-native-reanimated';
 
 import { AppRefreshControl } from '@/components/refresh-control';
@@ -36,6 +36,7 @@ export default function SmmKnowledgeScreen() {
   const isOwner = useSession((s) => s.user?.role === 'owner');
   const query = useSmmKnowledge();
   const [pulling, setPulling] = useState(false);
+  const [tab, setTab] = useState<KnowledgeTab>('club');
   const data = query.data;
 
   const request = (method: 'post' | 'delete', path: string, body?: unknown, title = 'Не получилось') => knowledgeRequest(club, method, path, body).then(() => haptic.success()).catch(fail(title));
@@ -62,6 +63,10 @@ export default function SmmKnowledgeScreen() {
           <Appear index={0}>
             <Intro data={data} />
           </Appear>
+          {/* Вкладки вместо одной длинной ленты из семи блоков. */}
+          <Tabs value={tab} onChange={setTab} />
+          {tab === 'club' ? (
+          <>
           <Appear index={1}>
             <ClubCard
               doc={data.club}
@@ -86,7 +91,10 @@ export default function SmmKnowledgeScreen() {
           <Appear index={3}>
             <Socials doc={data.socials} posts={data.socials.posts} onRefresh={() => void request('post', '/smm/knowledge/socials/refresh', undefined, 'Tai не начал')} />
           </Appear>
-          <Appear index={4}>
+          </>
+          ) : null}
+          {tab === 'dates' ? (
+          <Appear index={1}>
             <Dates
               data={data}
               onAdd={() => router.push('/manage/smm/date')}
@@ -98,10 +106,14 @@ export default function SmmKnowledgeScreen() {
               }
             />
           </Appear>
-          <Appear index={5}>
+          ) : null}
+          {tab === 'mafia' ? (
+          <Appear index={1}>
             <Mafia mafia={data.mafia} />
           </Appear>
-          <Appear index={6}>
+          ) : null}
+          {tab === 'memory' ? (
+          <Appear index={1}>
             <PressScale onPress={() => router.push('/manage/smm/memory')} style={styles.linkRow} accessibilityRole="button">
               <SymbolView name="brain.head.profile" size={20} tintColor={colors.purple} />
               <View style={styles.flex}>
@@ -111,9 +123,43 @@ export default function SmmKnowledgeScreen() {
               <SymbolView name="chevron.right" size={13} tintColor={colors.tertiaryLabel} />
             </PressScale>
           </Appear>
+          ) : null}
         </>
       )}
     </ScrollView>
+  );
+}
+
+type KnowledgeTab = 'club' | 'dates' | 'memory' | 'mafia';
+const TABS: { key: KnowledgeTab; label: string }[] = [
+  { key: 'club', label: 'Клуб' },
+  { key: 'dates', label: 'Даты' },
+  { key: 'memory', label: 'Память' },
+  { key: 'mafia', label: 'Мафия' },
+];
+
+function Tabs({ value, onChange }: { value: KnowledgeTab; onChange: (tab: KnowledgeTab) => void }) {
+  return (
+    <View style={styles.tabs}>
+      {TABS.map((t) => {
+        const on = t.key === value;
+        return (
+          <Pressable
+            key={t.key}
+            onPress={() => {
+              haptic.selection();
+              onChange(t.key);
+            }}
+            style={[styles.tab, on && styles.tabOn]}
+            accessibilityRole="tab"
+            accessibilityState={{ selected: on }}>
+            <Text style={[type.subhead, on ? styles.tabTextOn : styles.secondary]} numberOfLines={1}>
+              {t.label}
+            </Text>
+          </Pressable>
+        );
+      })}
+    </View>
   );
 }
 
@@ -322,6 +368,10 @@ function Mafia({ mafia }: { mafia: SmmKnowledge['mafia'] }) {
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.groupedBackground },
   content: { gap: space.md, paddingTop: space.md, paddingBottom: space.xxxl },
+  tabs: { flexDirection: 'row', padding: 3, borderRadius: 19, backgroundColor: colors.card },
+  tab: { flex: 1, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
+  tabOn: { backgroundColor: colors.accent },
+  tabTextOn: { color: 'white', fontWeight: '600' },
   flex: { flex: 1, minWidth: 0 },
   label: { color: colors.label },
   secondary: { color: colors.secondaryLabel },

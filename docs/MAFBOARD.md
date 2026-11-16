@@ -81,6 +81,11 @@ apps/api/test/mafboard/ — тесты (node:test через tsx), хранил�
 | `GET /v1/gomafia/players?q=` | Bearer | Поиск (от 2 символов): сначала свой клуб (`isInHostClub`), затем общий, до 30 |
 | `GET /v1/gomafia/players/:id` | Bearer | Игрок GoMafia |
 | `GET /v1/gomafia/clubs/:id/players?page=` | Bearer | Состав клуба |
+| `POST /v1/me/titan` `{code}` | Bearer (10 за 10 мин) | Подключить клуб Titan HUB одноразовым кодом Titan Connect → `UserAccount` с `titan: {club: {name}, scopes, linkedAt}`. 422 `invalid_code`, 502 `titan_unavailable` |
+| `DELETE /v1/me/titan` | Bearer | Отключить клуб: ключ стирается, в HUB отзывается в фоне (`DELETE /connection`) |
+| `GET /v1/titan/players` | Bearer (60 в минуту) | `{club: {name}, players: [TitanPlayer]}` — все клиенты клуба без удалённых, резиденты первыми. 409 `titan_not_linked`, 409 `titan_revoked` — клуб отключил MafBoard в HUB |
+| `PUT /v1/titan/players/:id/gomafia` `{goMafiaID: число \| null}` | Bearer (300 в час) | Ручное сопоставление клиента с GoMafia → `TitanPlayer`. `null` — у клиента нет GoMafia (номер в HUB неверный). 404 — нет такого клиента или игрока GoMafia |
+| `DELETE /v1/titan/players/:id/gomafia` | Bearer | Снять сопоставление: снова действует номер GoMafia из HUB |
 | `POST /v1/games` (GameRecord) | Bearer | 201 — сохранено, 200 — уже было (повтор безопасен), 409 — номер занят чужой игрой |
 | `GET /v1/me/games?since=` | Bearer | Все игры ведущего, включая фанки |
 | `GET /v1/clubs/:id/games?since=` | Bearer, участник клуба | История клуба |
@@ -101,13 +106,32 @@ WebSocket идёт мимо Hono: обработчик `upgrade` на HTTP-се�
 
 Комната — `userId:studioId`, по одному соединению на роль, роль следует из платформы сессии. Лимиты: кадр 64 КБ, 60 кадров в секунду на соединение, 60 подключений за 10 минут с адреса. Коды закрытия: 4400, 4401, 4403, 4409, 4429. Комнаты живут в памяти, поэтому при нескольких экземплярах API понадобится Redis. Сейчас контейнер `titan-api` один. Протокол и шифрование описаны в `docs/login-and-remote.md` репозитория MafBoard Studio.
 
+### Titan Connect (`titan.ts`, `titanRoutes.ts`)
+
+Клуб Titan HUB даёт ведущему своих клиентов как игроков через собственный API Titan Connect
+([TITAN_CONNECT.md](TITAN_CONNECT.md)). Владелец клуба выдаёт код в HUB («Интеграции» → «Titan Connect»), ведущий
+вводит его в приложении, сервер меняет код на ключ (`POST <MAFBOARD_TITAN_CONNECT_URL>/exchange`, по умолчанию
+`https://titanpos.ru/api/connect/v1`). `apiBase` из ответа принимается только на домене этого адреса или его
+поддомене. Ключ хранится в `mb_users.titan_link` шифротекстом тем же ключом, что секреты студии, и в приложение
+не уходит. Подключение у каждого ведущего своё: на каждого — свой код.
+
+Клиенты читаются целиком (`GET /clients`, страницы по 200, до 2000), кэш на 5 минут по `apiBase`. Если Titan не
+ответил, отдаётся последний состав; отозванный ключ — всегда 409 `titan_revoked`.
+
+`TitanPlayer`: `id` (клиент HUB), `playerID`, `nickname`, `fullName`, `avatarURL`, `statusLabel`, `isResident`,
+`goMafiaID`, `goMafiaSource: hub | manual | null`. `playerID` с GoMafia — `PlayerID.goMafia` (тот же игрок, что
+в GoMafia); без GoMafia — `6d616662-7463-8000-8000-` + первые 12 hex SHA-256(`apiBase|id`): постоянный для
+клиента клуба на всех устройствах. Ручное сопоставление (`mb_titan_matches`, ключ `apiBase + id клиента`) общее
+для всех ведущих клуба и важнее номера из HUB: ник в GoMafia часто другой, а в POS бывает чужой номер.
+
 ### Права ведущего (проверяет `POST /v1/games`)
 
 | Аккаунт | Режимы | Куда идёт игра |
 |---|---|---|
-| Без GoMafia | только фанка (игроки — кто угодно) | личная история |
+| Без клуба | только фанка (игроки — кто угодно) | личная история |
 | GoMafia без клуба | только фанка | личная история |
-| GoMafia + клуб | все режимы; в рейтинг, миникап и турнир — только игроки GoMafia | история клуба |
+| GoMafia + клуб | все режимы; в рейтинг, миникап и турнир — только игроки GoMafia (и клиенты Titan, если клуб Titan подключён) | история клуба |
+| Подключён клуб Titan HUB | все режимы; в рейтинг, миникап и турнир — игроки GoMafia и клиенты клуба Titan (`playerID` с префиксом `mafbtc`), гостей нет | история клуба GoMafia, если он есть, иначе личная |
 
 Ведущий в записи (`setup.host.userID`) должен совпадать с владельцем токена,
 а клуб игры (`setup.host.clubID`) — с его текущим клубом GoMafia.
@@ -134,6 +158,8 @@ WebSocket идёт мимо Hono: обработчик `upgrade` на HTTP-се�
 | `mb_sessions` | Сессии устройств: имя и платформа из `start`, время входа, последней активности (не чаще раза в 5 минут и при каждом refresh), срок, отзыв |
 | `mb_refresh_tokens` | SHA-256 refresh-токенов, отзыв и ротация; `session_id` — сессия, к которой выдан токен |
 | `mb_studio_settings` | Настройки MafBoard Studio: ревизия, `document jsonb`, `secrets` — шифротекст (миграция `006`) |
+| `mb_users.titan_link` | Клуб Titan HUB ведущего: `apiBase`, название, права, `tokenSealed` — ключ Titan Connect шифротекстом (миграция `007`) |
+| `mb_titan_matches` | Ручные сопоставления клиентов Titan с GoMafia: `api_base`, `client_id`, `gomafia_id` (`NULL` — «нет GoMafia»), кто и когда (миграция `007`) |
 | `mb_games` | Игры: ведущий, клуб (`NULL` — личная), формат, даты, `record jsonb` — GameRecord приложения целиком |
 
 Истёкшие билеты, сессии и токены удаляются раз в сутки, через 30 дней после истечения.

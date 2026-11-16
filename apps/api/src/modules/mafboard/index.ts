@@ -8,6 +8,7 @@ import type { BotMessenger } from './bot.js'
 import { mafboardWebhookUrl, readMafboardConfig, type MafboardConfig } from './config.js'
 import { liveGoMafia, RosterCache } from './gomafia.js'
 import { TitanHubDirectory } from './hubLive.js'
+import { liveTitanConnect, TitanRosterCache } from './titan.js'
 import { ensureMafboardDatabase, runMafboardMigrations } from './migrations.js'
 import { PgMafboardRepo } from './pgRepo.js'
 import { attachStudioRelay, type StudioRelay } from './relay.js'
@@ -81,6 +82,7 @@ function resolveDeps(): MafboardDeps | { error: string } {
   const result = readMafboardConfig()
   if (!result.ok) return { error: result.error }
   const config = result.config
+  const titanGateway = liveTitanConnect(config.titanConnectUrl)
   try {
     const repo = new PgMafboardRepo(getClubDb(config.databaseUrl))
     const now = () => new Date()
@@ -90,6 +92,8 @@ function resolveDeps(): MafboardDeps | { error: string } {
       gomafia: liveGoMafia,
       roster: new RosterCache(liveGoMafia),
       hub: new TitanHubDirectory(),
+      titan: titanGateway,
+      titanRoster: new TitanRosterCache(titanGateway),
       messenger: messengerFor(config.botToken),
       limiter: redisLimiter,
       vk: liveVkGateway,

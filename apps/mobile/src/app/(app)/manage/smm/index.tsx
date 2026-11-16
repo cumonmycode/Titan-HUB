@@ -1,24 +1,35 @@
 import { Stack, useRouter } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
 import { useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import type { SFSymbol } from 'sf-symbols-typescript';
 
+import { GlassView } from '@/components/glass';
 import { AppRefreshControl } from '@/components/refresh-control';
 import { Appear, PressScale } from '@/components/smm/motion';
-import { BigButton, Card, PlatformBadge, PostRow, ProgressBanner, SectionTitle } from '@/components/smm/parts';
+import { PostThumb, ProgressBanner } from '@/components/smm/parts';
 import { TaiMark } from '@/components/tai/mark';
 import { Text } from '@/components/text';
 import { ToolbarButton } from '@/components/toolbar';
+import { haptic } from '@/lib/haptics';
 import { usePageGutter } from '@/lib/layout';
+import { useClubKey } from '@/lib/queries';
 import { useSession } from '@/lib/session';
-import { PLATFORM_LOOK, busyText, dayTitle, monthTitle, msk, todayMsk, useSmmOverview, type SmmOverview, type SmmPost } from '@/lib/smm-api';
+import { busyText, dayTitle, monthTitle, msk, postAction, statusLook, todayMsk, useSmmOverview, type SmmOverview, type SmmPost } from '@/lib/smm-api';
 import { colors, space, type } from '@/lib/theme';
 
+/** Сколько дней показывает полоса недели: сегодня и шесть следующих (столько отдаёт сводка). */
+const WEEK_DAYS = 7;
+const DAY_MS = 86_400_000;
+const WEEKDAY_SHORT = ['ВС', 'ПН', 'ВТ', 'СР', 'ЧТ', 'ПТ', 'СБ'];
+/** Ширина карточки «Ждёт тебя»: две помещаются в экран телефона, остальные — прокруткой. */
+const ATTENTION_CARD_WIDTH = 172;
+
 /**
- * «СММ» — штаб соцсетей клуба. Сверху — что требует человека (одобрить, прислать
- * ссылку, не вышло), дальше лента на две недели по дням, план месяца, площадки с
- * цифрами, идеи и память Tai. Всю работу делает Tai; здесь — решения и правки.
+ * «СММ» — штаб соцсетей клуба (макет «2 + 3»): сверху месяц и состояние плана, полоса
+ * недели с цветными точками статусов, карточки «Ждёт тебя» с действием прямо на них,
+ * посты выбранного дня и инструменты. Каждый пост — в одном месте: то, что ждёт
+ * человека, не повторяется в списке дня; новая публикация — только кнопкой «+».
  */
 export default function SmmScreen() {
   const router = useRouter();
@@ -26,9 +37,11 @@ export default function SmmScreen() {
   const overview = useSmmOverview();
   const isOwner = useSession((s) => s.user?.role === 'owner');
   const [pulling, setPulling] = useState(false);
+  const [day, setDay] = useState(todayMsk);
   const data = overview.data;
 
   const open = (post: SmmPost) => router.push({ pathname: '/manage/smm/post', params: { id: post.id } });
+  const openPlan = (month: string) => router.push({ pathname: '/manage/smm/plan', params: { month } });
 
   return (
     <View style={styles.screen}>
@@ -59,24 +72,28 @@ export default function SmmScreen() {
         ) : (
           <>
             <Appear index={0}>
-              <Hero data={data} isOwner={isOwner} onSetup={() => router.push('/manage/smm/settings')} />
+              <MonthHeader data={data} isOwner={isOwner} onPlan={() => openPlan(data.month)} onSetup={() => router.push('/manage/smm/settings')} />
             </Appear>
-            <Attention data={data} onOpen={open} />
-            <Appear index={2} style={styles.section}>
-              <Feed posts={data.upcoming} onOpen={open} onNew={() => router.push('/manage/smm/new')} />
+            <Appear index={1}>
+              <WeekStrip posts={data.upcoming} day={day} onDay={setDay} />
             </Appear>
+            <Attention data={data} onOpen={open} onDone={() => void overview.refetch()} />
             <Appear index={3} style={styles.section}>
-              <PlanCard data={data} onOpen={(month) => router.push({ pathname: '/manage/smm/plan', params: { month } })} />
+              <DayPosts posts={data.upcoming} day={day} onOpen={open} />
             </Appear>
-            <Appear index={4} style={styles.section}>
-              <SectionTitle title="Инструменты" />
-              <View style={styles.tiles}>
-                <Tile icon="chart.xyaxis.line" color="#30B0C7" title="Аналитика" text={data.lastReport ? 'Есть свежий отчёт' : 'Цифры, прогноз и факт'} onPress={() => router.push('/manage/smm/analytics')} />
-                <Tile icon="lightbulb.fill" color="#FF9F0A" title="Идеи" text="По всем направлениям и праздникам" onPress={() => router.push('/manage/smm/ideas')} />
-              </View>
-              <View style={styles.tiles}>
-                <Tile icon="photo.stack.fill" color="#34A853" title="Фотоархив" text="Фото клуба для постов" onPress={() => router.push('/manage/smm/library')} />
-                <Tile icon="books.vertical.fill" color="#AF52DE" title="База знаний" text="Клуб, интерьер, даты, память" onPress={() => router.push('/manage/smm/knowledge')} />
+            {data.nextPlan?.summary ? (
+              <Pressable onPress={() => openPlan(data.nextMonth)} style={({ pressed }) => [styles.nextPlan, pressed && styles.pressed]} accessibilityRole="button">
+                <SymbolView name="calendar.badge.clock" size={18} tintColor={colors.accent} />
+                <Text style={[type.subhead, styles.label, styles.flex]}>{`План на ${monthWord(data.nextMonth).toLowerCase()} готов${data.nextPlan.status === 'draft' ? ' — утверди' : ''}`}</Text>
+                <SymbolView name="chevron.right" size={13} tintColor={colors.tertiaryLabel} />
+              </Pressable>
+            ) : null}
+            <Appear index={4}>
+              <View style={styles.tools}>
+                <Tool icon="chart.xyaxis.line" color="#5AC8FA" title="Аналитика" onPress={() => router.push('/manage/smm/analytics')} />
+                <Tool icon="lightbulb.fill" color="#FFB340" title="Идеи" onPress={() => router.push('/manage/smm/ideas')} />
+                <Tool icon="photo.stack.fill" color="#34C759" title="Фото" onPress={() => router.push('/manage/smm/library')} />
+                <Tool icon="books.vertical.fill" color="#BF5AF2" title="Знания" onPress={() => router.push('/manage/smm/knowledge')} />
               </View>
             </Appear>
             <Footer data={data} />
@@ -87,26 +104,30 @@ export default function SmmScreen() {
   );
 }
 
-/** Шапка: кто ведёт соцсети и всё ли подключено. */
-function Hero({ data, isOwner, onSetup }: { data: SmmOverview; isOwner: boolean; onSetup: () => void }) {
-  const channel = data.accounts.find((a) => a.platform === 'telegram' && a.isActive);
-  const insta = data.accounts.find((a) => a.platform === 'instagram' && a.isActive);
+const monthWord = (month: string) => monthTitle(month).split(' ')[0] ?? month;
+
+/** Шапка: месяц, состояние плана и площадки одной строкой. Тап — план месяца. */
+function MonthHeader({ data, isOwner, onPlan, onSetup }: { data: SmmOverview; isOwner: boolean; onPlan: () => void; onSetup: () => void }) {
+  const plan = data.plan;
+  const planText = !plan?.summary ? 'Плана нет — составь' : plan.status === 'active' ? 'План утверждён' : 'План ждёт утверждения';
+  const followers = data.accounts
+    .filter((a) => a.isActive && a.followers != null && (a.platform === 'telegram' || a.platform === 'instagram'))
+    .map((a) => `${a.platform === 'telegram' ? 'TG' : 'IG'} ${a.followers!.toLocaleString('ru-RU')}`);
+  const line = [planText, `за неделю вышло ${data.counts.publishedWeek}`, ...followers].join(' · ');
   const missing = [!data.ready.channel && 'канал Telegram', !data.ready.instagram && 'Instagram', !data.ready.publisher && 'кто выкладывает Instagram'].filter(Boolean) as string[];
+
   return (
-    <Card style={styles.hero}>
-      <View style={styles.heroTop}>
-        <TaiMark size={52} breathe />
-        <View style={styles.flex}>
-          <Text style={[type.title3, styles.label]}>Tai ведёт соцсети</Text>
-          <Text style={[type.footnote, styles.secondary]}>
-            {data.autopilot ? 'Автопилот: Telegram выходит сам, ты можешь остановить' : 'Готовит посты, ты одобряешь — дальше сам'}
-          </Text>
+    <View style={styles.header}>
+      <PressScale onPress={onPlan} style={styles.headerPress} accessibilityRole="button" accessibilityLabel={`${monthTitle(data.month)}. ${line}`}>
+        <View style={styles.headerRow}>
+          <Text style={[styles.month, styles.label]}>{monthWord(data.month)}</Text>
+          <TaiMark size={30} breathe />
         </View>
-      </View>
-      <View style={styles.accounts}>
-        <AccountChip platform="telegram" title={channel?.title ?? 'Канал не подключён'} value={channel?.followers} ok={data.ready.channel} />
-        <AccountChip platform="instagram" title={insta?.title ?? 'Не подключён'} value={insta?.followers} ok={data.ready.instagram} />
-      </View>
+        <Text style={[type.footnote, styles.secondary]} numberOfLines={2}>
+          {line}
+        </Text>
+        {plan?.busy ? <ProgressBanner progress={plan.progress} text={busyText[plan.busy]} /> : null}
+      </PressScale>
       {missing.length && isOwner ? (
         <Pressable onPress={onSetup} style={({ pressed }) => [styles.setup, pressed && styles.pressed]} accessibilityRole="button">
           <SymbolView name="exclamationmark.circle.fill" size={18} tintColor={colors.orange} />
@@ -114,118 +135,174 @@ function Hero({ data, isOwner, onSetup }: { data: SmmOverview; isOwner: boolean;
           <SymbolView name="chevron.right" size={13} tintColor={colors.tertiaryLabel} />
         </Pressable>
       ) : null}
-    </Card>
-  );
-}
-
-function AccountChip({ platform, title, value, ok }: { platform: 'telegram' | 'instagram'; title: string; value?: number | null; ok: boolean }) {
-  return (
-    <View style={[styles.account, !ok && styles.muted]}>
-      <PlatformBadge platform={platform} size={26} />
-      <View style={styles.flex}>
-        <Text style={[type.caption1, styles.secondary]} numberOfLines={1}>
-          {PLATFORM_LOOK[platform].label}
-        </Text>
-        <Text style={[type.subhead, styles.label, styles.bold]} numberOfLines={1}>
-          {value != null ? `${value.toLocaleString('ru-RU')} подписч.` : title}
-        </Text>
-      </View>
     </View>
   );
 }
 
-/** Что ждёт человека: одобрить, прислать ссылку, разобраться с невышедшим. */
-function Attention({ data, onOpen }: { data: SmmOverview; onOpen: (post: SmmPost) => void }) {
-  const review = data.upcoming.filter((p) => p.status === 'review' && !p.busy);
-  const link = data.upcoming.filter((p) => p.status === 'approved' && p.handoffAt && !p.publishedUrl);
-  const failed = data.upcoming.filter((p) => p.status === 'failed');
-  const busy = data.upcoming.find((p) => p.busy && p.busy !== 'video');
-  const items = [...failed, ...link, ...review];
-  if (!items.length && !busy) return null;
+/** Неделя от сегодня: под каждым днём точки статусов его публикаций. */
+function WeekStrip({ posts, day, onDay }: { posts: SmmPost[]; day: string; onDay: (day: string) => void }) {
+  const today = todayMsk();
+  const start = Date.parse(`${today}T12:00:00Z`);
+  const days = Array.from({ length: WEEK_DAYS }, (_, i) => new Date(start + i * DAY_MS).toISOString().slice(0, 10));
+  const byDay = new Map<string, SmmPost[]>();
+  for (const post of posts) {
+    const date = msk(post.publishAt)?.date;
+    if (date && post.status !== 'skipped') byDay.set(date, [...(byDay.get(date) ?? []), post]);
+  }
+
   return (
-    <Appear index={1} style={styles.section}>
-      <SectionTitle title="Нужно твоё внимание" />
+    <View style={styles.week}>
+      {days.map((date) => {
+        const selected = date === day;
+        const list = byDay.get(date) ?? [];
+        const d = new Date(`${date}T12:00:00Z`);
+        return (
+          <Pressable
+            key={date}
+            onPress={() => {
+              haptic.selection();
+              onDay(date);
+            }}
+            style={[styles.weekDay, selected && styles.weekDaySelected]}
+            accessibilityRole="button"
+            accessibilityState={{ selected }}
+            accessibilityLabel={`${dayTitle(date)}, публикаций: ${list.length}`}>
+            <Text style={[type.caption2, styles.weekName, selected && styles.weekNameSelected]}>{WEEKDAY_SHORT[d.getUTCDay()]}</Text>
+            <Text style={[type.headline, styles.label, selected && styles.white]}>{d.getUTCDate()}</Text>
+            <View style={styles.dots}>
+              {list.slice(0, 3).map((post) => (
+                <View key={post.id} style={[styles.dot, { backgroundColor: selected ? 'white' : statusLook(post).color }]} />
+              ))}
+            </View>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
+const needsHuman = (p: SmmPost) =>
+  p.status === 'failed' || (p.status === 'approved' && !!p.handoffAt && !p.publishedUrl) || (p.status === 'review' && !p.busy);
+
+/** Что ждёт человека: не вышло, ждём ссылку, одобрить. Действие — прямо на карточке. */
+function Attention({ data, onOpen, onDone }: { data: SmmOverview; onOpen: (post: SmmPost) => void; onDone: () => void }) {
+  const failed = data.upcoming.filter((p) => p.status === 'failed');
+  const link = data.upcoming.filter((p) => p.status === 'approved' && p.handoffAt && !p.publishedUrl);
+  const review = data.upcoming.filter((p) => p.status === 'review' && !p.busy);
+  const items = [...failed, ...link, ...review];
+  const busy = data.upcoming.find((p) => p.busy && p.busy !== 'video');
+  if (!items.length && !busy) return null;
+
+  return (
+    <Appear index={2} style={styles.section}>
+      {items.length ? <Text style={[styles.sectionTitle, styles.label]}>{`Ждёт тебя · ${items.length}`}</Text> : null}
       {busy ? <ProgressBanner progress={busy.progress ? { ...busy.progress, label: `«${busy.topic}»: ${busy.progress.label.toLowerCase()}` } : null} text={`«${busy.topic}»: ${busyText[busy.busy!].toLowerCase()}`} /> : null}
-      {items.map((post) => (
-        <PostRow key={post.id} post={post} onPress={() => onOpen(post)} showDay />
-      ))}
+      {items.length ? (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.attentionRow} style={styles.attentionScroll}>
+          {items.map((post) => (
+            <AttentionCard key={post.id} post={post} onOpen={() => onOpen(post)} onDone={onDone} />
+          ))}
+        </ScrollView>
+      ) : null}
     </Appear>
   );
 }
 
-/** Лента на две недели вперёд по дням (вчерашние вышедшие — тоже, чтобы видеть результат). */
-function Feed({ posts, onOpen, onNew }: { posts: SmmPost[]; onOpen: (post: SmmPost) => void; onNew: () => void }) {
-  const today = todayMsk();
-  const upcoming = posts.filter((p) => (msk(p.publishAt)?.date ?? '') >= today && p.status !== 'failed');
-  const days = new Map<string, SmmPost[]>();
-  for (const post of upcoming) {
-    const day = msk(post.publishAt)?.date ?? 'none';
-    days.set(day, [...(days.get(day) ?? []), post]);
-  }
+function AttentionCard({ post, onOpen, onDone }: { post: SmmPost; onOpen: () => void; onDone: () => void }) {
+  const club = useClubKey();
+  const [busy, setBusy] = useState(false);
+  const m = msk(post.publishAt);
+  const when = m ? `${m.weekday.toUpperCase()} ${m.time}` : 'без даты';
+  const platform = post.platform === 'telegram' ? 'TG' : post.platform === 'instagram' ? 'IG' : '';
+  const review = post.status === 'review';
+  const button = post.status === 'failed' ? 'Разобраться' : review ? 'Одобрить' : 'Дать ссылку';
+
+  const approve = async () => {
+    haptic.medium();
+    setBusy(true);
+    try {
+      await postAction(club, post.id, 'approve');
+      haptic.success();
+      onDone();
+    } catch (error) {
+      haptic.error();
+      Alert.alert('Не одобрилось', error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <PressScale onPress={onOpen} style={styles.attentionCard} accessibilityRole="button" accessibilityLabel={`${post.topic}, ${statusLook(post).label}`}>
+      <View>
+        <PostThumb post={post} width={ATTENTION_CARD_WIDTH} height={86} />
+        <View style={styles.attentionTag}>
+          <Text style={[type.caption2, styles.white, styles.bold]}>{[when, platform].filter(Boolean).join(' · ')}</Text>
+        </View>
+      </View>
+      <View style={styles.attentionBody}>
+        <Text style={[type.subhead, styles.label, styles.bold]} numberOfLines={2}>
+          {post.topic}
+        </Text>
+        <Pressable
+          disabled={busy}
+          onPress={review ? () => void approve() : onOpen}
+          style={({ pressed }) => [styles.attentionButton, review ? styles.attentionPrimary : styles.attentionSecondary, pressed && styles.pressed]}
+          accessibilityRole="button">
+          {busy ? <ActivityIndicator color="white" /> : <Text style={[type.subhead, styles.bold, review ? styles.white : styles.label]}>{button}</Text>}
+        </Pressable>
+      </View>
+    </PressScale>
+  );
+}
+
+/** Публикации выбранного дня; то, что ждёт человека, уже стоит в «Ждёт тебя». */
+function DayPosts({ posts, day, onOpen }: { posts: SmmPost[]; day: string; onOpen: (post: SmmPost) => void }) {
+  const list = posts.filter((p) => msk(p.publishAt)?.date === day && p.status !== 'skipped' && !needsHuman(p));
   return (
     <>
-      <SectionTitle title="Ближайшие публикации" action="Добавить" onAction={onNew} />
-      {!upcoming.length ? (
-        <Card>
-          <Text style={[type.subhead, styles.secondary]}>На ближайшие две недели публикаций нет. Составьте план месяца — Tai распишет темы по дням и сам будет готовить посты.</Text>
-        </Card>
+      <Text style={[styles.sectionTitle, styles.label]}>{dayTitle(day).split(' · ')[0]}</Text>
+      {!list.length ? (
+        <Text style={[type.subhead, styles.secondary]}>В этот день других публикаций нет.</Text>
       ) : (
-        [...days.entries()].map(([day, list]) => (
-          <View key={day} style={styles.day}>
-            <Text style={[type.footnote, styles.dayTitle]}>{day === 'none' ? 'Без даты' : dayTitle(day).toUpperCase()}</Text>
-            {list.map((post) => (
-              <PostRow key={post.id} post={post} onPress={() => onOpen(post)} />
-            ))}
-          </View>
-        ))
+        <GlassView style={styles.dayCard}>
+          {list.map((post, i) => {
+            const look = statusLook(post);
+            const m = msk(post.publishAt);
+            return (
+              <View key={post.id}>
+                {i > 0 ? <View style={styles.divider} /> : null}
+                <Pressable onPress={() => onOpen(post)} style={({ pressed }) => [styles.dayRow, pressed && styles.pressed]} accessibilityRole="button">
+                  <PostThumb post={post} size={44} />
+                  <View style={styles.flex}>
+                    <Text style={[type.body, styles.label]} numberOfLines={1}>
+                      {post.topic}
+                    </Text>
+                    <Text style={[type.footnote, styles.secondary]} numberOfLines={1}>
+                      {[m?.time, post.platform === 'telegram' ? 'Telegram' : post.platform === 'instagram' ? 'Instagram' : null].filter(Boolean).join(' · ')}
+                    </Text>
+                  </View>
+                  <View style={[styles.pill, { backgroundColor: `${look.color}2E` }]}>
+                    <Text style={[type.caption1, styles.bold, { color: look.color }]}>{look.label}</Text>
+                  </View>
+                </Pressable>
+              </View>
+            );
+          })}
+        </GlassView>
       )}
     </>
   );
 }
 
-function PlanCard({ data, onOpen }: { data: SmmOverview; onOpen: (month: string) => void }) {
-  const plan = data.plan;
-  const status = !plan?.summary ? 'Плана ещё нет' : plan.status === 'active' ? 'Утверждён — Tai готовит посты' : 'Черновик — ждёт утверждения';
+function Tool({ icon, color, title, onPress }: { icon: SFSymbol; color: string; title: string; onPress: () => void }) {
   return (
-    <>
-      <SectionTitle title="Стратегия" />
-      <PressScale onPress={() => onOpen(data.month)} style={styles.planCard} accessibilityRole="button">
-        <View style={styles.planHead}>
-          <View style={styles.flex}>
-            <Text style={[type.caption1, styles.secondary]}>ПЛАН НА МЕСЯЦ</Text>
-            <Text style={[type.title3, styles.label]}>{monthTitle(data.month)}</Text>
-          </View>
-          <SymbolView name="calendar" size={26} tintColor={colors.accent} />
-        </View>
-        {plan?.busy ? <ProgressBanner progress={plan.progress} text={busyText[plan.busy]} /> : null}
-        <Text style={[type.subhead, styles.label]} numberOfLines={4}>
-          {plan?.summary || 'Tai составит стратегию на месяц: цели, рубрики и календарь публикаций по всем направлениям клуба — турниры, вечера, дни рождения, школа, бар.'}
-        </Text>
-        <Text style={[type.footnote, { color: plan?.status === 'active' ? colors.green : colors.orange }]}>{status}</Text>
-      </PressScale>
-      {data.nextPlan?.summary ? (
-        <Pressable onPress={() => onOpen(data.nextMonth)} style={({ pressed }) => [styles.nextPlan, pressed && styles.pressed]} accessibilityRole="button">
-          <SymbolView name="calendar.badge.clock" size={18} tintColor={colors.accent} />
-          <Text style={[type.subhead, styles.label, styles.flex]}>{`План на ${monthTitle(data.nextMonth).toLowerCase()} готов${data.nextPlan.status === 'draft' ? ' — утверди' : ''}`}</Text>
-          <SymbolView name="chevron.right" size={13} tintColor={colors.tertiaryLabel} />
-        </Pressable>
-      ) : null}
-      {!plan?.summary ? <BigButton title="Открыть план" icon="wand.and.stars" onPress={() => onOpen(data.month)} /> : null}
-    </>
-  );
-}
-
-function Tile({ icon, color, title, text, onPress }: { icon: SFSymbol; color: string; title: string; text: string; onPress: () => void }) {
-  return (
-    <PressScale onPress={onPress} style={styles.tile} accessibilityRole="button" accessibilityLabel={title}>
-      <View style={[styles.tileIcon, { backgroundColor: color }]}>
-        <SymbolView name={icon} size={17} tintColor="white" />
-      </View>
-      <Text style={[type.headline, styles.label]} numberOfLines={1}>
+    <PressScale onPress={onPress} style={styles.tool} accessibilityRole="button" accessibilityLabel={title}>
+      <GlassView style={styles.toolIcon}>
+        <SymbolView name={icon} size={22} tintColor={color} />
+      </GlassView>
+      <Text style={[type.caption1, styles.secondary]} numberOfLines={1}>
         {title}
-      </Text>
-      <Text style={[type.caption1, styles.secondary]} numberOfLines={2}>
-        {text}
       </Text>
     </PressScale>
   );
@@ -235,36 +312,53 @@ function Footer({ data }: { data: SmmOverview }) {
   const budget = data.spend.budget ? ` из ${data.spend.budget.toLocaleString('ru-RU')} ₽` : '';
   const balance = data.balance != null ? ` · баланс Polza ${Math.floor(data.balance).toLocaleString('ru-RU')} ₽` : '';
   return (
-    <Text style={[type.footnote, styles.secondary, styles.center, styles.footer]}>
-      {`Нейросети в этом месяце: ${data.spend.month.toLocaleString('ru-RU')} ₽${budget}${balance}. За неделю вышло ${data.counts.publishedWeek}.`}
+    <Text style={[type.caption1, styles.tertiary, styles.center, styles.footer]}>
+      {`Нейросети в этом месяце: ${data.spend.month.toLocaleString('ru-RU')} ₽${budget}${balance}`}
     </Text>
   );
 }
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.groupedBackground },
-  content: { gap: space.md, paddingTop: space.md, paddingBottom: space.xxxl },
+  content: { gap: space.lg, paddingTop: space.sm, paddingBottom: space.xxxl },
   flex: { flex: 1, minWidth: 0 },
   label: { color: colors.label },
   secondary: { color: colors.secondaryLabel },
+  tertiary: { color: colors.tertiaryLabel },
+  white: { color: 'white' },
   bold: { fontWeight: '600' },
   center: { textAlign: 'center' },
   loading: { marginTop: space.xxl },
   pressed: { opacity: 0.7 },
-  muted: { opacity: 0.55 },
-  hero: { gap: space.md },
-  heroTop: { flexDirection: 'row', alignItems: 'center', gap: space.md },
-  accounts: { flexDirection: 'row', gap: space.sm },
-  account: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: space.sm, padding: space.sm, borderRadius: 14, borderCurve: 'continuous', backgroundColor: colors.fill },
-  setup: { flexDirection: 'row', alignItems: 'center', gap: space.sm, paddingTop: space.xs },
-  day: { gap: space.sm },
-  dayTitle: { color: colors.secondaryLabel, fontWeight: '600', marginTop: space.xs, marginLeft: space.xs },
-  planCard: { backgroundColor: colors.card, borderRadius: 22, borderCurve: 'continuous', padding: space.lg, gap: space.sm },
-  planHead: { flexDirection: 'row', alignItems: 'center' },
-  nextPlan: { flexDirection: 'row', alignItems: 'center', gap: space.sm, padding: space.md, borderRadius: 16, borderCurve: 'continuous', backgroundColor: colors.card },
-  tiles: { flexDirection: 'row', gap: space.sm },
   section: { gap: space.md },
-  tile: { flex: 1, padding: space.md, gap: 4, borderRadius: 18, borderCurve: 'continuous', backgroundColor: colors.card },
-  tileIcon: { width: 32, height: 32, borderRadius: 9, alignItems: 'center', justifyContent: 'center', marginBottom: space.xs },
-  footer: { marginTop: space.md },
+  sectionTitle: { fontSize: 20, lineHeight: 25, fontWeight: '700', letterSpacing: -0.4 },
+  header: { gap: space.sm },
+  headerPress: { gap: 6, paddingHorizontal: space.xs },
+  headerRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
+  month: { flex: 1, fontSize: 34, lineHeight: 41, fontWeight: '700', letterSpacing: -0.8 },
+  setup: { flexDirection: 'row', alignItems: 'center', gap: space.sm, padding: space.md, borderRadius: 16, borderCurve: 'continuous', backgroundColor: colors.card },
+  week: { flexDirection: 'row', gap: 2 },
+  weekDay: { flex: 1, minHeight: 66, borderRadius: 18, borderCurve: 'continuous', alignItems: 'center', justifyContent: 'center', gap: 3 },
+  weekDaySelected: { backgroundColor: colors.accent },
+  weekName: { color: colors.secondaryLabel, fontWeight: '600' },
+  weekNameSelected: { color: 'rgba(255,255,255,0.85)' },
+  dots: { flexDirection: 'row', gap: 3, height: 6 },
+  dot: { width: 6, height: 6, borderRadius: 3 },
+  attentionScroll: { marginHorizontal: -space.lg },
+  attentionRow: { gap: 10, paddingHorizontal: space.lg },
+  attentionCard: { width: ATTENTION_CARD_WIDTH, borderRadius: 22, borderCurve: 'continuous', overflow: 'hidden', backgroundColor: colors.card },
+  attentionTag: { position: 'absolute', left: 8, top: 8, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10, backgroundColor: 'rgba(0,0,0,0.5)' },
+  attentionBody: { padding: space.md, gap: space.sm, flex: 1, justifyContent: 'space-between' },
+  attentionButton: { minHeight: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center', paddingHorizontal: space.md },
+  attentionPrimary: { backgroundColor: colors.accent },
+  attentionSecondary: { backgroundColor: colors.fill },
+  dayCard: { borderRadius: 22, borderCurve: 'continuous', paddingHorizontal: space.md, overflow: 'hidden' },
+  dayRow: { flexDirection: 'row', alignItems: 'center', gap: space.md, minHeight: 64, paddingVertical: space.sm },
+  divider: { height: StyleSheet.hairlineWidth, backgroundColor: colors.separator, marginLeft: 56 },
+  pill: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10 },
+  nextPlan: { flexDirection: 'row', alignItems: 'center', gap: space.sm, padding: space.md, borderRadius: 16, borderCurve: 'continuous', backgroundColor: colors.card },
+  tools: { flexDirection: 'row' },
+  tool: { flex: 1, alignItems: 'center', gap: 6 },
+  toolIcon: { width: 54, height: 54, borderRadius: 17, borderCurve: 'continuous', alignItems: 'center', justifyContent: 'center' },
+  footer: { marginTop: space.sm },
 });

@@ -4,7 +4,7 @@ import { DELETED_HOST_ID } from './config.js'
 import { GomafiaTakenError, type MafboardRepo } from './repo.js'
 import type {
   DeviceSession, GoMafiaClubJSON, GoMafiaPlayerJSON, LoginTicket, MafboardUser, QrTicket, QrTicketStatus, RefreshTokenRow, StoredActiveGame, StoredGame, StoredProtocolSubmission, StoredShare, StoredStudioSettings,
-  TicketGuard, TicketPatch, TicketStatus, TicketStep,
+  TicketGuard, TicketPatch, TicketStatus, TicketStep, TitanLinkState,
 } from './types.js'
 
 // Хранилище MafBoard в Postgres (raw SQL, как modules/smm/db.ts). Даты передаём
@@ -37,6 +37,12 @@ function json<T>(v: unknown): T | null {
   return v as T
 }
 
+/** titan_link хранит дату строкой ISO — как её записал JSON.stringify. */
+function toTitanLink(v: unknown): TitanLinkState | null {
+  const raw = json<Omit<TitanLinkState, 'linkedAt'> & { linkedAt: string }>(v)
+  return raw ? { ...raw, linkedAt: date(raw.linkedAt) } : null
+}
+
 function toUser(r: Row): MafboardUser {
   const player = json<GoMafiaPlayerJSON>(r['gomafia_player'])
   return {
@@ -55,6 +61,7 @@ function toUser(r: Row): MafboardUser {
           syncedAt: date(r['gomafia_synced_at']),
         }
       : null,
+    titan: toTitanLink(r['titan_link']),
   }
 }
 
@@ -300,6 +307,37 @@ export class PgMafboardRepo implements MafboardRepo {
   }
 
   // ─── Билеты входа ──────────────────────────────────────────────────────────
+
+  async setTitanLink(userId: string, link: TitanLinkState | null): Promise<MafboardUser | null> {
+    if (!UUID.test(userId)) return null
+    const row = await this.one(sql`
+      UPDATE mb_users SET titan_link = ${link ? JSON.stringify(link) : null}::jsonb, updated_at = now()
+      WHERE id = ${userId}::uuid RETURNING *
+    `)
+    return row ? toUser(row) : null
+  }
+
+  async titanMatches(apiBase: string): Promise<Map<string, number | null>> {
+    const found = await this.query(sql`SELECT client_id, gomafia_id FROM mb_titan_matches WHERE api_base = ${apiBase}`)
+    return new Map(found.map((row) => [String(row['client_id']), num(row['gomafia_id'])]))
+  }
+
+  async setTitanMatch(
+    apiBase: string,
+    clientId: string,
+    match: { goMafiaId: number | null; userId: string; at: Date } | null,
+  ): Promise<void> {
+    if (!match) {
+      await this.query(sql`DELETE FROM mb_titan_matches WHERE api_base = ${apiBase} AND client_id = ${clientId}`)
+      return
+    }
+    await this.query(sql`
+      INSERT INTO mb_titan_matches (api_base, client_id, gomafia_id, set_by, set_at)
+      VALUES (${apiBase}, ${clientId}, ${match.goMafiaId}, ${match.userId}::uuid, ${iso(match.at)}::timestamptz)
+      ON CONFLICT (api_base, client_id) DO UPDATE
+        SET gomafia_id = EXCLUDED.gomafia_id, set_by = EXCLUDED.set_by, set_at = EXCLUDED.set_at
+    `)
+  }
 
   async createTicket(input: Parameters<MafboardRepo['createTicket']>[0]): Promise<LoginTicket> {
     const row = await this.one(sql`

@@ -5,7 +5,7 @@ import { useState } from 'react';
 import { ActivityIndicator, Alert, Linking, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { AppRefreshControl } from '@/components/refresh-control';
-import { Card, EmptyNote, ErrorBanner, ProgressBanner, SectionTitle } from '@/components/smm/parts';
+import { EmptyNote, ErrorBanner, ProgressBanner, SectionTitle } from '@/components/smm/parts';
 import { PhotoGrid } from '@/components/smm/photo-grid';
 import { Text, TextInput } from '@/components/text';
 import { ToolbarMenu, ToolbarMenuAction } from '@/components/toolbar';
@@ -113,29 +113,7 @@ export default function SmmLibraryScreen() {
           />
         ) : (
           <>
-            <Card>
-              <View style={styles.head}>
-                <View style={styles.headIcon}>
-                  <SymbolView name="photo.stack.fill" size={20} tintColor="white" />
-                </View>
-                <View style={styles.flex}>
-                  <Text style={[type.headline, styles.label]} numberOfLines={1}>
-                    {data.state?.title ?? 'Фотоархив'}
-                  </Text>
-                  <Text style={[type.footnote, styles.secondary]}>
-                    {`${data.counts.albums} альбомов · ${data.counts.files.toLocaleString('ru-RU')} фото · описано ${data.counts.described.toLocaleString('ru-RU')}`}
-                  </Text>
-                </View>
-              </View>
-              <Text style={[type.footnote, styles.secondary]}>
-                {postId
-                  ? 'Найдите фото поиском или в альбоме и нажмите на него — оно встанет в публикацию, обрезанное под формат.'
-                  : `Tai сам ищет здесь фото по описаниям, когда пишет посты.${data.state?.syncedAt ? ` Архив обновлён ${msk(data.state.syncedAt)?.date.slice(5).split('-').reverse().join('.')}.` : ''} Новые фото Tai описывает сам раз в день.`}
-              </Text>
-            </Card>
-            {data.state?.progress ? <ProgressBanner progress={data.state.progress} /> : null}
-            {data.state?.error ? <ErrorBanner text={data.state.error} /> : null}
-
+            {/* Поиск — первым и крупно: ради него сюда и заходят. Сводка архива — одной строкой под ним. */}
             <View style={styles.search}>
               <SymbolView name="magnifyingglass" size={16} tintColor={colors.tertiaryLabel} />
               <TextInput
@@ -162,6 +140,19 @@ export default function SmmLibraryScreen() {
                 </Pressable>
               ) : null}
             </View>
+            <Text style={[type.footnote, styles.secondary, styles.summary]}>
+              {postId
+                ? 'Нажмите на фото — оно встанет в публикацию, обрезанное под формат.'
+                : [
+                    `${data.counts.files.toLocaleString('ru-RU')} фото`,
+                    `описано ${data.counts.described.toLocaleString('ru-RU')}`,
+                    data.state?.syncedAt ? `обновлён ${msk(data.state.syncedAt)?.date.slice(5).split('-').reverse().join('.')}` : null,
+                  ]
+                    .filter(Boolean)
+                    .join(' · ')}
+            </Text>
+            {data.state?.progress ? <ProgressBanner progress={data.state.progress} /> : null}
+            {data.state?.error ? <ErrorBanner text={data.state.error} /> : null}
 
             {search ? (
               <>
@@ -170,26 +161,21 @@ export default function SmmLibraryScreen() {
               </>
             ) : (
               <>
-                <SectionTitle title="Альбомы" />
-                {data.albums.map((album) => (
-                  <Pressable key={album.id} onPress={() => openAlbum(album)} style={({ pressed }) => [styles.album, pressed && styles.pressed]} accessibilityRole="button">
-                    {album.cover ? <Image source={{ uri: album.cover }} style={styles.cover} contentFit="cover" recyclingKey={album.id} /> : <View style={styles.cover} />}
-                    <View style={styles.flex}>
-                      <Text style={[type.headline, styles.label]} numberOfLines={1}>
+                <SectionTitle title={`Альбомы · ${data.counts.albums}`} />
+                {/* Обложки сеткой по два: по крупной обложке альбом узнаётся быстрее, чем по строке пути. */}
+                <View style={styles.albums}>
+                  {data.albums.map((album) => (
+                    <Pressable key={album.id} onPress={() => openAlbum(album)} style={({ pressed }) => [styles.album, pressed && styles.pressed]} accessibilityRole="button" accessibilityLabel={`${album.title || 'Без названия'}, ${album.files} фото`}>
+                      {album.cover ? <Image source={{ uri: album.cover }} style={styles.cover} contentFit="cover" recyclingKey={album.id} /> : <View style={[styles.cover, styles.coverEmpty]}><SymbolView name="photo" size={22} tintColor={colors.tertiaryLabel} /></View>}
+                      <Text style={[type.subhead, styles.label, styles.bold]} numberOfLines={1}>
                         {album.title || 'Без названия'}
                       </Text>
-                      <Text style={[type.footnote, styles.secondary]} numberOfLines={1}>
-                        {[album.path.split(' / ').slice(0, -1).join(' / '), `${album.files} фото`, KIND_NOTE[album.kind]].filter(Boolean).join(' · ')}
+                      <Text style={[type.caption1, styles.secondary]} numberOfLines={1}>
+                        {[`${album.files} фото`, KIND_NOTE[album.kind]].filter(Boolean).join(' · ')}
                       </Text>
-                      {album.about ? (
-                        <Text style={[type.caption1, styles.secondary]} numberOfLines={2}>
-                          {album.about}
-                        </Text>
-                      ) : null}
-                    </View>
-                    <SymbolView name="chevron.right" size={13} tintColor={colors.tertiaryLabel} />
-                  </Pressable>
-                ))}
+                    </Pressable>
+                  ))}
+                </View>
               </>
             )}
           </>
@@ -209,8 +195,12 @@ const styles = StyleSheet.create({
   pressed: { opacity: 0.7 },
   head: { flexDirection: 'row', alignItems: 'center', gap: space.md },
   headIcon: { width: 40, height: 40, borderRadius: 11, backgroundColor: '#34A853', alignItems: 'center', justifyContent: 'center' },
-  search: { flexDirection: 'row', alignItems: 'center', gap: space.sm, paddingHorizontal: space.md, borderRadius: 14, borderCurve: 'continuous', backgroundColor: colors.card },
-  input: { flex: 1, color: colors.label, minHeight: 44 },
-  album: { flexDirection: 'row', alignItems: 'center', gap: space.md, padding: space.sm, borderRadius: 16, borderCurve: 'continuous', backgroundColor: colors.card },
-  cover: { width: 56, height: 56, borderRadius: 10, backgroundColor: colors.fill },
+  search: { flexDirection: 'row', alignItems: 'center', gap: space.sm, paddingHorizontal: space.lg, borderRadius: 24, borderCurve: 'continuous', backgroundColor: colors.card },
+  input: { flex: 1, color: colors.label, minHeight: 48 },
+  summary: { marginTop: -space.xs, paddingHorizontal: space.xs },
+  bold: { fontWeight: '600' },
+  albums: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', rowGap: space.md },
+  album: { width: '48.5%', gap: 4 },
+  cover: { width: '100%', aspectRatio: 1.4, borderRadius: 16, borderCurve: 'continuous', backgroundColor: colors.fill },
+  coverEmpty: { alignItems: 'center', justifyContent: 'center' },
 });

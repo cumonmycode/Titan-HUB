@@ -204,10 +204,26 @@ export const MAFBOARD_MIGRATIONS: readonly { id: string; sql: string }[] = [
     `,
   },
   {
+    // Titan Connect: клуб Titan HUB ведущего (ключ — шифротекстом в titan_link) и ручные
+    // сопоставления клиентов клуба с GoMafia, общие для всех ведущих этого клуба.
+    id: '007_mafboard_titan_connect',
+    sql: `
+      ALTER TABLE mb_users ADD COLUMN IF NOT EXISTS titan_link jsonb;
+      CREATE TABLE IF NOT EXISTS mb_titan_matches (
+        api_base   text NOT NULL,
+        client_id  text NOT NULL,
+        gomafia_id integer,
+        set_by     uuid REFERENCES mb_users(id) ON DELETE SET NULL,
+        set_at     timestamptz NOT NULL,
+        PRIMARY KEY (api_base, client_id)
+      );
+    `,
+  },
+  {
     // Вход в АИМ (admin.gomafia.pro) для турниров GoMafia: сервер сам вносит протоколы, поэтому
     // хранит логин и пароль — только шифротекстом ключа сервера (aim.ts). Стираются при
     // отвязке GoMafia и вместе с аккаунтом.
-    id: '007_mafboard_aim_credentials',
+    id: '008_mafboard_aim_credentials',
     sql: `
       CREATE TABLE IF NOT EXISTS mb_aim_credentials (
         user_id    uuid PRIMARY KEY REFERENCES mb_users(id) ON DELETE CASCADE,
@@ -219,7 +235,7 @@ export const MAFBOARD_MIGRATIONS: readonly { id: string; sql: string }[] = [
   {
     // Протоколы судей турниров GoMafia, которые ждут подтверждения ГС: обычный судья не может сам
     // внести стол в АИМ — его протокол вносит ГС от своего имени. Плюс открытые ссылки на итоги игр.
-    id: '008_mafboard_protocol_queue_and_shares',
+    id: '009_mafboard_protocol_queue_and_shares',
     sql: `
       CREATE TABLE IF NOT EXISTS mb_tournament_protocols (
         id                 uuid PRIMARY KEY,

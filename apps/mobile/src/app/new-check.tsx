@@ -3,7 +3,7 @@ import { pickerStyle, tag } from '@expo/ui/swift-ui/modifiers';
 import { useMutation } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Keyboard, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import Animated, { FadeInLeft, FadeInRight, FadeOut, LayoutAnimationConfig } from 'react-native-reanimated';
 
@@ -41,6 +41,9 @@ export default function NewCheckSheet() {
   const [step, setStep] = useState<Step>({ name: 'search' });
   const [forward, setForward] = useState(true);
   const [query, setQuery] = useState('');
+  // Шторку смахнули или закрыли крестиком, а поле поиска осталось в фокусе — клавиатура
+  // висела над кассой без единого поля ввода.
+  useEffect(() => () => Keyboard.dismiss(), []);
 
   const create = useMutation({
     mutationFn: async (input: CreateInput) => {
@@ -50,7 +53,10 @@ export default function NewCheckSheet() {
       if (input.tariffItemId) await addEntryTariff(check.id, input.tariffItemId);
       return check;
     },
-    onSuccess: (check) => openCreatedCheck(router, check),
+    onSuccess: (check) => {
+      Keyboard.dismiss();
+      openCreatedCheck(router, check);
+    },
     onError: (error) => {
       haptic.error();
       Alert.alert('Чек не открыт', createCheckErrorMessage(error.message));
@@ -65,6 +71,12 @@ export default function NewCheckSheet() {
   };
 
   const busyInput = create.isPending ? create.variables : undefined;
+  // Одна шторка — один чек: пока первый открывается, второе нажатие (та же плитка,
+  // другой игрок, «Без клиента») раньше создавало ещё один чек.
+  const open = (input: CreateInput) => {
+    if (create.isPending) return;
+    create.mutate(input);
+  };
 
   return (
     <View style={styles.sheet}>
@@ -89,14 +101,14 @@ export default function NewCheckSheet() {
               // Сотрудник на чеке — без игрового тарифа: шаг выбора тарифа не нужен.
               if (player.role === 'staff' || player.role === 'owner') {
                 haptic.light();
-                create.mutate({ playerId: player.id });
+                open({ playerId: player.id });
               } else go({ name: 'tariff', player });
             }}
             onNewClient={(nickname) => go({ name: 'client', nickname })}
             onSpace={() => go({ name: 'space' })}
             onNoClient={() => {
               haptic.light();
-              create.mutate({});
+              open({});
             }}
             noClientBusy={!!busyInput && !busyInput.playerId && !busyInput.spaceId}
           />
@@ -105,11 +117,11 @@ export default function NewCheckSheet() {
           <TariffStep
             player={step.player}
             busy={create.isPending}
-            onOpen={(tariff) => create.mutate({ playerId: step.player.id, tariffItemId: tariff?.itemId })}
+            onOpen={(tariff) => open({ playerId: step.player.id, tariffItemId: tariff?.itemId })}
           />
         )}
-        {step.name === 'client' && <ClientStep initialNickname={step.nickname} onCreate={(playerId) => create.mutate({ playerId })} creatingCheck={create.isPending} />}
-        {step.name === 'space' && <SpaceStep busySpaceId={busyInput?.spaceId} onPick={(spaceId) => create.mutate({ spaceId })} />}
+        {step.name === 'client' && <ClientStep initialNickname={step.nickname} onCreate={(playerId) => open({ playerId })} creatingCheck={create.isPending} />}
+        {step.name === 'space' && <SpaceStep busySpaceId={busyInput?.spaceId} onPick={(spaceId) => open({ spaceId })} />}
       </Animated.View>
       </LayoutAnimationConfig>
     </View>

@@ -116,6 +116,20 @@ export default function PayScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [checkId]);
 
+  // Сумма выросла, пока шторка открыта (тикает аренда, позицию добавили с другого
+  // устройства): выбранные наличные или карта остались на старой сумме, и экран сам
+  // переходил к частям с «Доплатить 600 ₽». Один способ на весь чек идёт за суммой.
+  const liveDue = data && data.status === 'open' ? payTotals(data, now).due : null;
+  useEffect(() => {
+    if (liveDue === null || splitRequested) return;
+    const draft = usePaymentDraft.getState();
+    if (draft.checkId !== checkId || draft.parts.length !== 1) return;
+    const part = draft.parts[0];
+    if (part.locked) return;
+    const behind = part.method === 'cash' ? part.amount < liveDue - EPS : part.method === 'card' && Math.abs(part.amount - liveDue) > EPS;
+    if (behind) draft.setParts([{ ...part, amount: liveDue }]);
+  }, [liveDue, splitRequested, checkId]);
+
   const close = () => router.back();
 
   const finish = () => {

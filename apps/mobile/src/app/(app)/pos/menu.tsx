@@ -3,7 +3,7 @@ import { Image } from 'expo-image';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
 import { useEffect, useMemo, useState } from 'react';
-import { Alert, Platform, Pressable, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
+import { Alert, Keyboard, Pressable, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { KeyboardAvoidingView, useKeyboardState } from 'react-native-keyboard-controller';
 import Animated, { Keyframe, useAnimatedStyle, useSharedValue, withSequence, withSpring, withTiming } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -37,12 +37,12 @@ const SEARCH_HEIGHT = 48;
  * двух): на «Увеличенном» виде и с крупным текстом три колонки рвали названия по буквам.
  */
 const TILE_MIN_TEXT_WIDTH = 110;
-/**
- * На Android шторка с двумя высотами раскладывает содержимое на полную высоту и
- * просто сдвигает его вниз: на средней высоте нижний край — за экраном, и капсула
- * поиска у нижнего края была не видна вовсе. Поэтому там поиск — сверху, как в веб-кассе.
+/*
+ * Поиск — сверху, под заголовком, на обеих платформах. Капсула у нижнего края на iOS
+ * уходила под клавиатуру (шторка на средней высоте не поднимала её над клавиатурой),
+ * а без клавиатуры висела полупрозрачной поверх плиток и терялась. На Android шторка
+ * с двумя высотами и вовсе уводила нижний край за экран.
  */
-const SEARCH_ON_TOP = Platform.OS === 'android';
 const TOP = 'top';
 const OTHER = 'other';
 
@@ -60,9 +60,10 @@ export default function MenuSheet() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const keyboardOpen = useKeyboardState((state) => state.isVisible);
-  // Капсула поиска парит над сеткой у нижнего края; с клавиатурой — прямо над ней.
-  const searchBottom = keyboardOpen ? space.sm : Math.max(insets.bottom - 6, space.md);
-  const listBottom = SEARCH_ON_TOP ? insets.bottom + space.xxxl : SEARCH_HEIGHT + searchBottom + space.lg;
+  // С клавиатурой низ списка — у её края (KeyboardAvoidingView), без неё — над индикатором дома.
+  const listBottom = keyboardOpen ? space.lg : insets.bottom + space.xxxl;
+  // Шторку закрыли, пока поиск был в фокусе, — клавиатура оставалась над кассой.
+  useEffect(() => () => Keyboard.dismiss(), []);
   const menu = useMenu();
   const check = useCheck(checkId);
   const now = useNow(30_000);
@@ -169,7 +170,7 @@ export default function MenuSheet() {
           <CircleButton icon="xmark" label="Закрыть" onPress={() => router.back()} />
         </View>
 
-        {SEARCH_ON_TOP && <SearchField value={query} onChange={setQuery} />}
+        <SearchField value={query} onChange={setQuery} />
 
         {!query && (
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipsScroll} contentContainerStyle={styles.chips}>
@@ -235,13 +236,6 @@ export default function MenuSheet() {
           </View>
         }
       />
-
-      {/* Поиск внизу, как в iOS 26: стеклянная капсула поверх сетки, плитки прокручиваются под ней. */}
-      {!SEARCH_ON_TOP && (
-        <View pointerEvents="box-none" style={[styles.floatingSearch, { bottom: searchBottom }]}>
-          <SearchField value={query} onChange={setQuery} />
-        </View>
-      )}
       </View>
     </KeyboardAvoidingView>
   );
@@ -296,7 +290,8 @@ function MenuTile({
       }}
       accessibilityRole="button"
       accessibilityLabel={`${item.name}, ${formatMoney(item.price)}${inCheck ? `, в чеке ${inCheck}` : ''}`}>
-      <GlassView isInteractive tintColor={inCheck > 0 ? `${color}3D` : undefined} style={styles.tile}>
+      {/* Закончившаяся позиция выглядела как обычная — её добавляли, не заметив «нет». */}
+      <GlassView isInteractive tintColor={inCheck > 0 ? `${color}3D` : undefined} style={[styles.tile, stock !== null && stock <= 0 && styles.tileOut]}>
         {item.imageUrl ? (
           <Image source={{ uri: item.imageUrl }} style={styles.photo} contentFit="cover" transition={150} />
         ) : (
@@ -313,7 +308,8 @@ function MenuTile({
           </Text>
           {stock !== null && (
             <Text style={[type.caption1, stock <= 0 ? styles.stockOut : stock <= 3 ? styles.stockLow : sheetStyles.tertiary]}>
-              {stock <= 0 ? 'нет' : `×${stock}`}
+              {/* «×5» читалось как «пять штук в чеке» — рядом стоит счётчик чека. */}
+              {stock <= 0 ? 'нет' : `${stock} шт`}
             </Text>
           )}
         </View>
@@ -352,7 +348,6 @@ const styles = StyleSheet.create({
   flex: { flex: 1 },
   top: { paddingHorizontal: space.lg, paddingTop: space.xl, gap: space.md, paddingBottom: space.sm },
   listContent: { paddingHorizontal: space.lg },
-  floatingSearch: { position: 'absolute', left: space.lg, right: space.lg },
   titleRow: { flexDirection: 'row', alignItems: 'center', gap: space.md },
   totalPill: { flexShrink: 1, flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 32, paddingVertical: 4, paddingHorizontal: space.md, borderRadius: 16 },
   totalText: { color: colors.label, fontWeight: '700' },
@@ -364,6 +359,7 @@ const styles = StyleSheet.create({
   sectionHeader: { flexDirection: 'row', alignItems: 'center', gap: space.sm, paddingTop: space.md, paddingBottom: space.sm, paddingHorizontal: space.xs },
   row: { flexDirection: 'row', gap: 10, marginBottom: 10 },
   tile: { minHeight: 122, padding: space.md, gap: 6, borderRadius: 20, borderCurve: 'continuous', overflow: 'hidden' },
+  tileOut: { opacity: 0.5 },
   tileIcon: { width: 28, height: 28, borderRadius: 9, alignItems: 'center', justifyContent: 'center' },
   photo: { width: 28, height: 28, borderRadius: 9 },
   tileName: { flex: 1, color: colors.label, fontWeight: '600' },

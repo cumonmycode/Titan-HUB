@@ -2,14 +2,15 @@ import { Image } from 'expo-image';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
 import { useEffect, useReducer, useState } from 'react';
-import { ActivityIndicator, Alert, Linking, Pressable, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
+import { ActivityIndicator, Alert, Linking, Pressable, ScrollView, StyleSheet, useWindowDimensions, View, type ColorValue } from 'react-native';
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 
 import Animated from 'react-native-reanimated';
+import type { SFSymbol } from 'sf-symbols-typescript';
 
 import { AppRefreshControl } from '@/components/refresh-control';
 import { Appear, glide } from '@/components/smm/motion';
-import { BigButton, Card, ChipButton, Composer, ErrorBanner, PlatformBadge, ProgressBanner, StatusPill, Thread } from '@/components/smm/parts';
+import { BigButton, Card, Composer, ErrorBanner, PlatformBadge, ProgressBanner, StatusPill, Thread } from '@/components/smm/parts';
 import { TaiGenerating, TaiRevealImage } from '@/components/tai/generating';
 import { Text } from '@/components/text';
 import { ToolbarMenu, ToolbarMenuAction } from '@/components/toolbar';
@@ -160,7 +161,11 @@ export default function SmmPostScreen() {
           <Appear index={1}>
             <MediaBlock post={post} disabled={working} acting={acting} onRun={run} />
           </Appear>
+          {/* Следующий шаг — сразу под превью: «Одобрить» раньше был в самом низу, под текстом, сценарием и цифрами. */}
           <Appear index={2}>
+            <NextStep post={post} canApprove={data.canApprove} acting={acting} working={working} onAction={action} />
+          </Appear>
+          <Appear index={3}>
             <BodyBlock post={post} onEdit={() => router.push({ pathname: '/manage/smm/edit-text', params: { postId: post.id } })} />
           </Appear>
           {post.script ? (
@@ -173,9 +178,6 @@ export default function SmmPostScreen() {
           </Appear>
           <Appear index={5}>
             <ResultBlock post={post} />
-          </Appear>
-          <Appear index={6}>
-            <NextStep post={post} canApprove={data.canApprove} acting={acting} working={working} onAction={action} />
           </Appear>
           <Text style={[type.title3, styles.label, styles.remarksTitle]}>Замечания для Tai</Text>
           <Thread comments={data.comments} />
@@ -298,17 +300,51 @@ function MediaBlock({ post, disabled, acting, onRun }: { post: SmmPost; disabled
           ))}
         </ScrollView>
       ) : null}
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
-        <ChipButton title={acting === 'image' ? 'Рисую…' : 'Новый вариант'} icon="wand.and.stars" disabled={disabled || !!acting} onPress={() => void regenerate()} />
-        <ChipButton title="Описать картинку" icon="text.bubble" disabled={disabled || !!acting} onPress={describe} />
-        <ChipButton title="Из архива" icon="photo.stack" disabled={!editable || !!acting} onPress={() => router.push({ pathname: '/manage/smm/library', params: { postId: post.id } })} />
-        <ChipButton title={acting === 'upload' ? 'Загружаю…' : 'Своё фото/видео'} icon="square.and.arrow.up.on.square" disabled={!editable || !!acting} onPress={() => void upload()} />
-        <ChipButton title="Видео ИИ" icon="film" disabled={disabled || !!acting || post.media.some((m) => m.kind === 'video' && m.status === 'pending')} onPress={video} />
-        {media.length > 1 && editable ? <ChipButton title="Порядок" icon="arrow.up.arrow.down" disabled={disabled || !!acting} onPress={() => router.push({ pathname: '/manage/smm/order', params: { postId: post.id } })} /> : null}
-        {current?.url && current.status === 'done' ? <ChipButton title="Сохранить" icon="square.and.arrow.down" onPress={() => void shareMedia(current.url!)} /> : null}
-        {current && current.status !== 'pending' && editable ? <ChipButton title={acting === 'remove' ? 'Убираю…' : 'Убрать'} icon="trash" disabled={disabled || !!acting} onPress={remove} /> : null}
-      </ScrollView>
+      {/* Четыре главных способа получить визуал — крупными плитками; редкие действия — строкой ссылок под ними
+          (раньше восемь одинаковых чипов уезжали за край экрана). */}
+      {editable ? (
+        <View style={styles.mediaTiles}>
+          <MediaTile title={acting === 'image' ? 'Рисую…' : 'Новый вариант'} icon="wand.and.stars" color={colors.accent} disabled={disabled || !!acting} onPress={() => void regenerate()} />
+          <MediaTile title="Из архива" icon="photo.stack" color={colors.green} disabled={!!acting} onPress={() => router.push({ pathname: '/manage/smm/library', params: { postId: post.id } })} />
+          <MediaTile title={acting === 'upload' ? 'Загружаю…' : 'Своё'} icon="square.and.arrow.up" color={colors.blue} disabled={!!acting} onPress={() => void upload()} />
+          <MediaTile title="Видео ИИ" icon="film" color={colors.pink} disabled={disabled || !!acting || post.media.some((m) => m.kind === 'video' && m.status === 'pending')} onPress={video} />
+        </View>
+      ) : null}
+      <View style={styles.mediaLinks}>
+        {editable ? <MediaLink title="Описать картинку" disabled={disabled || !!acting} onPress={describe} /> : null}
+        {media.length > 1 && editable ? <MediaLink title="Порядок" disabled={disabled || !!acting} onPress={() => router.push({ pathname: '/manage/smm/order', params: { postId: post.id } })} /> : null}
+        {current?.url && current.status === 'done' ? <MediaLink title="Сохранить" onPress={() => void shareMedia(current.url!)} /> : null}
+        {current && current.status !== 'pending' && editable ? <MediaLink title={acting === 'remove' ? 'Убираю…' : 'Убрать'} destructive disabled={disabled || !!acting} onPress={remove} /> : null}
+      </View>
     </View>
+  );
+}
+
+function MediaTile({ title, icon, color, disabled, onPress }: { title: string; icon: SFSymbol; color: ColorValue; disabled?: boolean; onPress: () => void }) {
+  return (
+    <Pressable
+      disabled={disabled}
+      onPress={() => {
+        haptic.light();
+        onPress();
+      }}
+      style={({ pressed }) => [styles.mediaTile, disabled && styles.disabled, pressed && styles.pressed]}
+      accessibilityRole="button"
+      accessibilityLabel={title}
+      accessibilityState={{ disabled }}>
+      <SymbolView name={icon} size={20} tintColor={color} />
+      <Text style={[type.caption1, styles.label, styles.bold]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
+        {title}
+      </Text>
+    </Pressable>
+  );
+}
+
+function MediaLink({ title, destructive, disabled, onPress }: { title: string; destructive?: boolean; disabled?: boolean; onPress: () => void }) {
+  return (
+    <Pressable disabled={disabled} onPress={onPress} hitSlop={8} style={({ pressed }) => [disabled && styles.disabled, pressed && styles.pressed]} accessibilityRole="button">
+      <Text style={[type.subhead, { color: destructive ? colors.red : colors.accent }]}>{title}</Text>
+    </Pressable>
   );
 }
 
@@ -360,17 +396,22 @@ function BodyBlock({ post, onEdit }: { post: SmmPost; onEdit: () => void }) {
   const label = post.format === 'story' ? 'Текст на сторис' : post.platform === 'instagram' ? 'Подпись' : 'Текст поста';
   return (
     <Card>
+      {/* Действия — в шапке блока, а не чипами под длинным текстом. */}
       <View style={styles.cardHead}>
         <Text style={[type.headline, styles.label, styles.flex]}>{label}</Text>
         <Text style={[type.caption1, styles.secondary]}>{`${text.length} зн.`}</Text>
+        <Pressable onPress={() => shareText(text)} hitSlop={10} accessibilityRole="button" accessibilityLabel="Поделиться текстом">
+          <SymbolView name="square.and.arrow.up" size={17} tintColor={colors.accent} />
+        </Pressable>
+        {post.status !== 'published' ? (
+          <Pressable onPress={onEdit} hitSlop={10} accessibilityRole="button">
+            <Text style={[type.subhead, { color: colors.accent }]}>Изменить</Text>
+          </Pressable>
+        ) : null}
       </View>
       <Text style={[type.body, styles.label]} selectable>
         {text}
       </Text>
-      <View style={styles.row}>
-        {post.status !== 'published' ? <ChipButton title="Изменить" icon="pencil" onPress={onEdit} /> : null}
-        <ChipButton title="Поделиться текстом" icon="square.and.arrow.up" onPress={() => shareText(text)} />
-      </View>
     </Card>
   );
 }
@@ -625,7 +666,11 @@ const styles = StyleSheet.create({
   variants: { gap: space.sm, paddingHorizontal: 2 },
   variant: { width: 54, height: 66, borderRadius: 10, opacity: 0.6 },
   variantOn: { opacity: 1, borderWidth: 2, borderColor: colors.accent },
-  chips: { gap: space.sm, paddingVertical: 2 },
+  mediaTiles: { flexDirection: 'row', gap: space.sm },
+  mediaTile: { flex: 1, minHeight: 62, borderRadius: 16, borderCurve: 'continuous', backgroundColor: colors.card, alignItems: 'center', justifyContent: 'center', gap: 4, paddingHorizontal: 4 },
+  mediaLinks: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', columnGap: space.lg, rowGap: space.xs },
+  disabled: { opacity: 0.4 },
+  pressed: { opacity: 0.6 },
   cardHead: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
   hook: { gap: 2, padding: space.md, borderRadius: 14, borderCurve: 'continuous', backgroundColor: colors.fill },
   shot: { flexDirection: 'row', alignItems: 'flex-start', gap: space.md },

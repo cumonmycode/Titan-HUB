@@ -1,10 +1,10 @@
 import { BlurView } from 'expo-blur';
 import { GlassContainer } from 'expo-glass-effect';
-import { Link, useNavigation, useRouter } from 'expo-router';
+import { Link, useFocusEffect, useNavigation, useRouter } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
 import { makeImageFromView } from '@shopify/react-native-skia';
-import { useEffect, useEffectEvent, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Platform, Pressable, RefreshControl, StyleSheet, useWindowDimensions, View } from 'react-native';
+import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, Alert, Keyboard, Platform, Pressable, RefreshControl, StyleSheet, useWindowDimensions, View } from 'react-native';
 import Animated, {
   LayoutAnimationConfig,
   useAnimatedStyle,
@@ -150,6 +150,9 @@ export default function PosScreen() {
   // Свет и климат (Home Assistant): подол свёрнутой шторки лежит поверх кассы под строкой
   // состояния, шапка (и панель чека на iPad) опускается только на его видимую часть.
   const home = useHomeShade();
+  // На кассе нет полей ввода: клавиатура, оставшаяся от закрытой шторки или Tai, висела
+  // поверх сетки. Каждый возврат на кассу её убирает.
+  useFocusEffect(useCallback(() => Keyboard.dismiss(), []));
   const topSpace = insets.top + (home.ready ? HEM_SPACE : 0);
 
   const wide = screenWidth === 0 ? window.width : screenWidth;
