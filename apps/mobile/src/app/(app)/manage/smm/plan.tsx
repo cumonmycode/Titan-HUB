@@ -9,6 +9,7 @@ import { AppRefreshControl } from '@/components/refresh-control';
 import { Appear, PressScale, glide } from '@/components/smm/motion';
 import { BigButton, Card, Composer, EmptyNote, ErrorBanner, PostRow, ProgressBanner, SectionTitle, Thread } from '@/components/smm/parts';
 import { Text } from '@/components/text';
+import { ToolbarButton } from '@/components/toolbar';
 import { ApiError } from '@/lib/api';
 import { promptText } from '@/lib/dialog';
 import { haptic } from '@/lib/haptics';
@@ -38,6 +39,7 @@ export default function SmmPlanScreen() {
   const [acting, setActing] = useState<string | null>(null);
   const [ordering, setOrdering] = useState(false);
   const [swapping, setSwapping] = useState<string | null>(null);
+  const [details, setDetails] = useState(false);
   const plan = query.data?.plan;
   const posts = query.data?.posts ?? [];
   const dates = (query.data?.dates ?? []).filter((d) => !d.until);
@@ -103,6 +105,12 @@ export default function SmmPlanScreen() {
   return (
     <View style={styles.screen}>
       <Stack.Title>План</Stack.Title>
+      {/* «Пересоставить» — одно место, в шапке; раньше ещё и ссылкой над списком публикаций. */}
+      {plan?.summary && !pastMonth && !busy ? (
+        <Stack.Toolbar placement="right">
+          <ToolbarButton icon="arrow.clockwise" accessibilityLabel="Пересоставить план" onPress={generate} />
+        </Stack.Toolbar>
+      ) : null}
       <KeyboardAvoidingView behavior="padding" style={styles.flex}>
         <ScrollView
           contentInsetAdjustmentBehavior="automatic"
@@ -122,7 +130,7 @@ export default function SmmPlanScreen() {
             <Pressable onPress={() => setMonth(shiftMonth(month, -1))} hitSlop={12} accessibilityRole="button" accessibilityLabel="Прошлый месяц">
               <SymbolView name="chevron.left" size={18} tintColor={accent} />
             </Pressable>
-            <Text style={[type.title2, styles.label]}>{monthTitle(month)}</Text>
+            <Text style={[styles.monthTitle, styles.label]}>{monthTitle(month)}</Text>
             <Pressable onPress={() => setMonth(shiftMonth(month, 1))} hitSlop={12} accessibilityRole="button" accessibilityLabel="Следующий месяц">
               <SymbolView name="chevron.right" size={18} tintColor={accent} />
             </Pressable>
@@ -145,61 +153,65 @@ export default function SmmPlanScreen() {
             )
           ) : (
             <>
+              {/* Стратегия — одной карточкой: статус, суть и раскрытие «цели, рубрики, поводы».
+                  Раньше это были три длинные карточки подряд, и до публикаций приходилось листать. */}
               <Appear index={0}>
-              <Card>
-                <View style={styles.statusRow}>
-                  <SymbolView name={plan.status === 'active' ? 'checkmark.seal.fill' : 'pencil.circle'} size={18} tintColor={plan.status === 'active' ? colors.green : colors.orange} />
-                  <Text style={[type.subhead, styles.label, styles.flex]}>{plan.status === 'active' ? 'Утверждён — Tai готовит посты заранее' : 'Черновик — утверди, и Tai начнёт готовить посты'}</Text>
-                </View>
-                <Text style={[type.headline, styles.label]}>Стратегия</Text>
-                <Text style={[type.body, styles.label]} selectable>
-                  {plan.summary}
-                </Text>
-                {plan.goals.length ? (
-                  <View style={styles.goals}>
-                    <Text style={[type.headline, styles.label]}>Цели</Text>
-                    {plan.goals.map((g) => (
-                      <View key={g} style={styles.goal}>
-                        <SymbolView name="target" size={15} tintColor={accent} />
-                        <Text style={[type.subhead, styles.label, styles.flex]}>{g}</Text>
-                      </View>
-                    ))}
+                <Card>
+                  <View style={styles.statusRow}>
+                    <View style={[styles.statusPill, { backgroundColor: plan.status === 'active' ? 'rgba(52,199,89,0.18)' : 'rgba(255,149,0,0.18)' }]}>
+                      <Text style={[type.caption1, styles.bold, { color: plan.status === 'active' ? colors.green : colors.orange }]}>{plan.status === 'active' ? 'Утверждён' : 'Черновик'}</Text>
+                    </View>
+                    <Text style={[type.footnote, styles.secondary, styles.flex]} numberOfLines={1}>{`${live.length} публикаций · вышло ${live.filter((p) => p.status === 'published').length}`}</Text>
                   </View>
-                ) : null}
-              </Card>
+                  <Text style={[type.body, styles.label]} selectable numberOfLines={details ? undefined : 4}>
+                    {plan.summary}
+                  </Text>
+                  {details && plan.goals.length ? (
+                    <View style={styles.goals}>
+                      <Text style={[type.headline, styles.label]}>Цели</Text>
+                      {plan.goals.map((g) => (
+                        <View key={g} style={styles.goal}>
+                          <SymbolView name="target" size={15} tintColor={accent} />
+                          <Text style={[type.subhead, styles.label, styles.flex]}>{g}</Text>
+                        </View>
+                      ))}
+                    </View>
+                  ) : null}
+                  {details && plan.pillars.length ? (
+                    <View style={styles.goals}>
+                      <Text style={[type.headline, styles.label]}>Рубрики</Text>
+                      {plan.pillars.map((p, i) => (
+                        <View key={p.key} style={styles.pillar}>
+                          <View style={[styles.swatch, { backgroundColor: PILLAR_COLORS[i % PILLAR_COLORS.length] }]} />
+                          <View style={styles.flex}>
+                            <Text style={[type.subhead, styles.label, styles.bold]}>{`${p.title} · ${Math.round(p.share)}%`}</Text>
+                            {p.about ? <Text style={[type.footnote, styles.secondary]}>{p.about}</Text> : null}
+                          </View>
+                        </View>
+                      ))}
+                    </View>
+                  ) : null}
+                  {details && dates.length ? <Occasions dates={dates} /> : null}
+                  <Pressable onPress={() => setDetails((v) => !v)} hitSlop={8} accessibilityRole="button" accessibilityState={{ expanded: details }}>
+                    <Text style={[type.subhead, styles.bold, { color: accent }]}>{details ? 'Свернуть' : 'Цели, рубрики и поводы'}</Text>
+                  </Pressable>
+                </Card>
               </Appear>
 
               {plan.pillars.length ? (
-                <Appear index={1}>
-                <Card>
-                  <Text style={[type.headline, styles.label]}>Рубрики</Text>
-                  <View style={styles.bar}>
-                    {plan.pillars.map((p, i) => (
-                      <View key={p.key} style={{ flex: Math.max(p.share, 3), backgroundColor: PILLAR_COLORS[i % PILLAR_COLORS.length] }} />
-                    ))}
-                  </View>
+                <Appear index={1} style={styles.chips}>
                   {plan.pillars.map((p, i) => (
-                    <View key={p.key} style={styles.pillar}>
-                      <View style={[styles.swatch, { backgroundColor: PILLAR_COLORS[i % PILLAR_COLORS.length] }]} />
-                      <View style={styles.flex}>
-                        <Text style={[type.subhead, styles.label, styles.bold]}>{`${p.title} · ${Math.round(p.share)}%`}</Text>
-                        {p.about ? <Text style={[type.footnote, styles.secondary]}>{p.about}</Text> : null}
-                      </View>
+                    <View key={p.key} style={styles.chip}>
+                      <View style={[styles.chipDot, { backgroundColor: PILLAR_COLORS[i % PILLAR_COLORS.length] }]} />
+                      <Text style={[type.footnote, styles.label, styles.bold]}>{`${p.title} · ${Math.round(p.share)}%`}</Text>
                     </View>
                   ))}
-                </Card>
-                </Appear>
-              ) : null}
-
-              {dates.length ? (
-                <Appear index={2}>
-                  <Occasions dates={dates} />
                 </Appear>
               ) : null}
 
               {plan.status === 'draft' && !pastMonth ? <BigButton title="Утвердить план" icon="checkmark.seal" busy={acting === 'approve'} disabled={!!busy} onPress={() => void act('approve')} /> : null}
 
-              <SectionTitle title={`Публикации · ${live.length}`} action={pastMonth || busy || ordering ? undefined : 'Пересоставить'} onAction={generate} />
+              <SectionTitle title={`Публикации · ${live.length}`} />
               <View style={styles.countsRow}>
                 <Text style={[type.footnote, styles.secondary, styles.flex]}>{ordering ? 'Стрелки меняют публикацию местами с соседней: время выхода переходит к ней.' : counts}</Text>
                 {!pastMonth && movable.length > 1 ? (
@@ -263,12 +275,12 @@ function weeks(posts: SmmPost[]): [string, SmmPost[], number, number][] {
 /** Поводы месяца: праздники, памятные и свои даты клуба — Tai ставит под них посты. */
 function Occasions({ dates }: { dates: SmmClubDate[] }) {
   return (
-    <Card>
+    <View style={styles.goals}>
       <Text style={[type.headline, styles.label]}>Поводы месяца</Text>
       {dates.map((d) => (
         <OccasionLine key={`${d.date}-${d.title}`} date={d} detailed />
       ))}
-    </Card>
+    </View>
   );
 }
 
@@ -294,6 +306,11 @@ const styles = StyleSheet.create({
   bold: { fontWeight: '600' },
   loading: { marginTop: space.xxl },
   monthNav: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: space.xs },
+  monthTitle: { fontSize: 30, lineHeight: 36, fontWeight: '700', letterSpacing: -0.6 },
+  statusPill: { paddingHorizontal: 9, paddingVertical: 3, borderRadius: 11 },
+  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm },
+  chip: { flexDirection: 'row', alignItems: 'center', gap: 6, height: 30, paddingHorizontal: 12, borderRadius: 15, backgroundColor: colors.card },
+  chipDot: { width: 8, height: 8, borderRadius: 4 },
   statusRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
   goals: { gap: space.sm },
   goal: { flexDirection: 'row', alignItems: 'flex-start', gap: space.sm },

@@ -2,13 +2,14 @@ import { Image } from 'expo-image';
 import { Stack, useRouter } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
 import { useState } from 'react';
-import { ActivityIndicator, Alert, Linking, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Alert, Linking, Pressable, ScrollView, StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
 
 import { AppRefreshControl } from '@/components/refresh-control';
 import { Appear } from '@/components/smm/motion';
 import { DayBars, HBar, MetricGrid } from '@/components/smm/charts';
-import { BigButton, Card, ChipButton, PlatformBadge, PostRow, ProgressBanner, SectionTitle, estimate } from '@/components/smm/parts';
+import { BigButton, Card, PlatformBadge, PostRow, ProgressBanner, SectionTitle, estimate } from '@/components/smm/parts';
 import { Text } from '@/components/text';
+import { ToolbarButton } from '@/components/toolbar';
 import { api, ApiError } from '@/lib/api';
 import { haptic } from '@/lib/haptics';
 import { usePageGutter } from '@/lib/layout';
@@ -46,6 +47,7 @@ export default function SmmAnalyticsScreen() {
   const [days, setDays] = useState<7 | 30>(7);
   const [progress, setProgress] = useState<SmmProgress | null>(null);
   const [acting, setActing] = useState<string | null>(null);
+  const [accountId, setAccountId] = useState<string | null>(null);
   const data = query.data;
 
   const store = (next: Partial<SmmAnalytics>) => queryClient.setQueryData<SmmAnalytics>([club, 'smm', 'analytics'], (prev) => (prev ? { ...prev, ...next } : prev));
@@ -77,10 +79,15 @@ export default function SmmAnalyticsScreen() {
       'Отчёт не получился',
     );
   const openPost = (id: string) => router.push({ pathname: '/manage/smm/post', params: { id } });
+  const active = data?.accounts.filter((a) => a.isActive) ?? [];
+  const shown = active.find((a) => a.id === accountId) ?? active[0];
 
   return (
     <View style={styles.screen}>
       <Stack.Title>Аналитика</Stack.Title>
+      <Stack.Toolbar placement="right">
+        <ToolbarButton icon="arrow.clockwise" accessibilityLabel="Обновить цифры" disabled={!!acting} onPress={() => void collect()} />
+      </Stack.Toolbar>
       <ScrollView
         contentInsetAdjustmentBehavior="automatic"
         contentContainerStyle={[styles.content, gutter]}
@@ -98,30 +105,28 @@ export default function SmmAnalyticsScreen() {
           query.error ? <Text style={[type.body, styles.secondary]}>{query.error.message}</Text> : <ActivityIndicator style={styles.loading} />
         ) : (
           <>
+            {/* Одна площадка за раз: раньше карточки всех площадок шли подряд, и до прогноза
+                и отчётов было несколько экранов прокрутки. */}
             <View style={styles.row}>
-              {([7, 30] as const).map((d) => (
-                <Pressable
-                  key={d}
-                  onPress={() => {
-                    haptic.selection();
-                    setDays(d);
-                  }}
-                  style={[styles.segment, days === d && styles.segmentOn]}
-                  accessibilityRole="button"
-                  accessibilityState={{ selected: days === d }}>
-                  <Text style={[type.subhead, days === d ? styles.segmentTextOn : styles.label]}>{`${d} дней`}</Text>
-                </Pressable>
-              ))}
-              <View style={styles.flex} />
-              <ChipButton title={acting === 'collect' ? 'Обновляю…' : 'Обновить'} icon="arrow.clockwise" disabled={!!acting} onPress={() => void collect()} />
+              {active.length > 1 ? (
+                <Segmented
+                  style={styles.flex}
+                  items={active.map((a) => ({ key: a.id, label: PLATFORM_LOOK[a.platform].label }))}
+                  value={shown?.id ?? ''}
+                  onChange={setAccountId}
+                />
+              ) : (
+                <View style={styles.flex} />
+              )}
+              <Segmented items={[{ key: '7', label: '7 дн' }, { key: '30', label: '30 дн' }]} value={String(days)} onChange={(v) => setDays(v === '30' ? 30 : 7)} />
             </View>
             {progress ? <ProgressBanner progress={progress} /> : null}
 
-            {data.accounts.filter((a) => a.isActive).map((a, i) => (
-              <Appear key={a.id} index={i}>
-              <PlatformCard account={a} days={days} history={data.history.filter((h) => h.accountId === a.id)} insight={data.platforms.find((p) => p.accountId === a.id)} onOpenPost={openPost} />
+            {shown ? (
+              <Appear key={shown.id} index={0}>
+                <PlatformCard account={shown} days={days} history={data.history.filter((h) => h.accountId === shown.id)} insight={data.platforms.find((p) => p.accountId === shown.id)} onOpenPost={openPost} />
               </Appear>
-            ))}
+            ) : null}
             {!data.accounts.length ? (
               <Card>
                 <Text style={[type.subhead, styles.secondary]}>Площадки не подключены. Владелец добавляет канал Telegram и Instagram в настройках СММ.</Text>
@@ -130,7 +135,7 @@ export default function SmmAnalyticsScreen() {
 
             <SectionTitle title="Прогноз и факт" />
             <Accuracy data={data} />
-            {data.posts.slice(-8).reverse().map((post) => (
+            {data.posts.slice(-5).reverse().map((post) => (
               <PostRow key={post.id} post={post} showDay onPress={() => openPost(post.id)} />
             ))}
 
@@ -327,18 +332,57 @@ function Accuracy({ data }: { data: SmmAnalytics }) {
       </Card>
     );
   }
+  // Одна полоса вместо таблицы из четырёх чисел: доли «в коридоре / выше / ниже» видны сразу.
+  const parts = [
+    { key: 'inside', label: 'в коридоре', value: a.inside, color: colors.accent },
+    { key: 'above', label: 'выше', value: a.above, color: colors.green },
+    { key: 'below', label: 'ниже', value: a.below, color: colors.red },
+  ];
   return (
     <Card>
-      <MetricGrid
-        items={[
-          { label: 'Постов с прогнозом', value: a.posts },
-          { label: 'В коридоре прогноза', value: a.inside },
-          { label: 'Выше прогноза', value: a.above },
-          { label: 'Ниже прогноза', value: a.below },
-        ]}
-      />
+      <View style={styles.row}>
+        <Text style={[type.subhead, styles.label, styles.bold, styles.flex]}>Прогноз Tai и факт</Text>
+        <Text style={[type.footnote, styles.secondary]}>{`${a.posts} постов`}</Text>
+      </View>
+      <View style={styles.stack}>
+        {parts.map((p) => (p.value > 0 ? <View key={p.key} style={{ flex: p.value, backgroundColor: p.color }} /> : null))}
+      </View>
+      <View style={styles.legend}>
+        {parts.map((p) => (
+          <View key={p.key} style={styles.legendItem}>
+            <View style={[styles.legendDot, { backgroundColor: p.color }]} />
+            <Text style={[type.footnote, styles.secondary]}>{`${p.label} ${p.value}`}</Text>
+          </View>
+        ))}
+      </View>
       {a.ratio != null ? <Text style={[type.footnote, styles.secondary]}>{`В среднем посты набирают ${Math.round(a.ratio * 100)}% от прогноза.`}</Text> : null}
     </Card>
+  );
+}
+
+/** Сегментный переключатель в стиле карточек раздела. */
+function Segmented({ items, value, onChange, style }: { items: { key: string; label: string }[]; value: string; onChange: (key: string) => void; style?: StyleProp<ViewStyle> }) {
+  return (
+    <View style={[styles.segmented, style]}>
+      {items.map((item) => {
+        const on = item.key === value;
+        return (
+          <Pressable
+            key={item.key}
+            onPress={() => {
+              haptic.selection();
+              onChange(item.key);
+            }}
+            style={[styles.segment, on && styles.segmentOn]}
+            accessibilityRole="button"
+            accessibilityState={{ selected: on }}>
+            <Text style={[type.subhead, on ? styles.segmentTextOn : styles.secondary]} numberOfLines={1}>
+              {item.label}
+            </Text>
+          </Pressable>
+        );
+      })}
+    </View>
   );
 }
 
@@ -399,9 +443,14 @@ const styles = StyleSheet.create({
   pressed: { opacity: 0.7 },
   loading: { marginTop: space.xxl },
   row: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
-  segment: { paddingHorizontal: space.md, height: 34, borderRadius: 17, justifyContent: 'center', backgroundColor: colors.card },
+  segmented: { flexDirection: 'row', padding: 3, borderRadius: 19, backgroundColor: colors.card },
+  segment: { flex: 1, paddingHorizontal: space.md, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
   segmentOn: { backgroundColor: colors.accent },
   segmentTextOn: { color: 'white', fontWeight: '600' },
+  stack: { flexDirection: 'row', height: 10, borderRadius: 5, overflow: 'hidden', gap: 2, backgroundColor: colors.fill },
+  legend: { flexDirection: 'row', flexWrap: 'wrap', columnGap: space.lg, rowGap: 4 },
+  legendItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  legendDot: { width: 8, height: 8, borderRadius: 4 },
   right: { alignItems: 'flex-end' },
   accountHead: { flexDirection: 'row', alignItems: 'center', gap: space.md },
   block: { gap: space.sm },
