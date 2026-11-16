@@ -9,8 +9,12 @@ import { TitanConnectError, TitanRosterCache, type TitanClient, type TitanConnec
 import { DELETED_HOST_ID } from '../../src/modules/mafboard/config.js'
 import { GomafiaTakenError, type MafboardRepo } from '../../src/modules/mafboard/repo.js'
 import { createMafboardRouter, type MafboardDeps } from '../../src/modules/mafboard/router.js'
-import type { DeviceSession, LoginTicket, MafboardUser, QrTicket, RefreshTokenRow, StoredActiveGame, StoredGame, StoredStudioSettings, TicketGuard, TitanLinkState } from '../../src/modules/mafboard/types.js'
+import type { DeviceSession, LoginTicket, MafboardUser, QrTicket, RefreshTokenRow, StoredActiveGame, StoredGame, StoredProtocolSubmission, StoredShare, StoredStudioSettings, TicketGuard, TitanLinkState } from '../../src/modules/mafboard/types.js'
 import { VkError, type VkAppConfig, type VkGateway, type VkTokens } from '../../src/modules/mafboard/vk.js'
+import { AimError, AimSession } from '../../src/lib/gomafiaAim.js'
+import type { AimGame, AimProtocol, AimTournament } from '../../src/lib/gomafiaAimParse.js'
+import type { TournamentSeating } from '../../src/lib/gomafiaTournament.js'
+import { AimAccounts, type AimGateway, type TournamentSource } from '../../src/modules/mafboard/aim.js'
 
 // Вебхук бота подписывается от JWT_SECRET Titan HUB (lib/tgWebhook.ts).
 process.env['JWT_SECRET'] ??= 'test-titan-jwt-secret-0123456789abcdef'
@@ -92,6 +96,60 @@ export class FakeVk implements VkGateway {
   }
 }
 
+/**
+ * АИМ без сети. Пароль — `password` (по умолчанию `aim-pass`); у каждого логина свои турниры и протоколы. Протокол
+ * открывается только редактору (`editors`), остальным — AimError `access_denied`.
+ * `expireNext` — следующий запрос ответит «сессия истекла», как настоящий АИМ.
+ */
+export class FakeAim implements AimGateway {
+  tournamentsByLogin = new Map<string, AimTournament[]>()
+  games = new Map<number, AimGame[]>()
+  editors = new Map<number, Set<string>>()
+  saved: Array<{ login: string; tournamentId: number; aimTableId: number; protocol: AimProtocol }> = []
+  logins: string[] = []
+  expireNext = false
+  down = false
+  password = 'aim-pass'
+
+  async login(login: string, password: string): Promise<AimSession> {
+    if (this.down) throw new AimError('unavailable', 'АИМ не отвечает')
+    this.logins.push(login)
+    if (password !== this.password) throw new AimError('bad_credentials', 'Неверный логин или пароль АИМ')
+    return new AimSession(`session=${login}`, null)
+  }
+
+  private loginOf(session: AimSession): string {
+    if (this.expireNext) {
+      this.expireNext = false
+      throw new AimError('session_expired', 'Сессия АИМ истекла')
+    }
+    return session.cookie.replace('session=', '')
+  }
+
+  async tournaments(session: AimSession): Promise<AimTournament[]> {
+    return this.tournamentsByLogin.get(this.loginOf(session)) ?? []
+  }
+
+  async gameData(session: AimSession, tournamentId: number): Promise<AimGame[]> {
+    const login = this.loginOf(session)
+    if (!this.editors.get(tournamentId)?.has(login)) throw new AimError('access_denied', 'Нет доступа')
+    return this.games.get(tournamentId) ?? []
+  }
+
+  async saveProtocol(session: AimSession, tournamentId: number, aimTableId: number, protocol: AimProtocol): Promise<void> {
+    const login = this.loginOf(session)
+    if (!this.editors.get(tournamentId)?.has(login)) throw new AimError('access_denied', 'Нет доступа')
+    this.saved.push({ login, tournamentId, aimTableId, protocol })
+  }
+}
+
+export class FakeTournaments implements TournamentSource {
+  seatings = new Map<number, TournamentSeating>()
+  async seating(id: number) {
+    return this.seatings.get(id) ?? null
+  }
+}
+
 /** Хранилище в памяти с той же семантикой, что у Postgres-версии. */
 export class MemoryRepo implements MafboardRepo {
   users = new Map<string, MafboardUser>()
@@ -103,6 +161,9 @@ export class MemoryRepo implements MafboardRepo {
   games = new Map<string, StoredGame>()
   activeGames = new Map<string, StoredActiveGame>()
   studio = new Map<string, StoredStudioSettings>()
+  aim = new Map<string, string>()
+  submissions = new Map<string, StoredProtocolSubmission>()
+  shares = new Map<string, StoredShare>()
   titanMatchRows = new Map<string, number | null>()
   private seq = 0
 
@@ -151,6 +212,9 @@ export class MemoryRepo implements MafboardRepo {
     }
     for (const [id, game] of this.activeGames) if (game.hostUserId === userId) this.activeGames.delete(id)
     this.studio.delete(userId)
+    this.aim.delete(userId)
+    for (const [id, s] of this.submissions) if (s.refereeUserId === userId) this.submissions.delete(id)
+    for (const [token, s] of this.shares) if (s.userId === userId) this.shares.delete(token)
     for (const [id, session] of this.sessions) if (session.userId === userId) this.sessions.delete(id)
     for (const [hash, row] of this.refresh) if (row.userId === userId) this.refresh.delete(hash)
     for (const [id, ticket] of this.tickets) if (ticket.userId === userId) this.tickets.delete(id)
@@ -376,6 +440,56 @@ export class MemoryRepo implements MafboardRepo {
     else this.titanMatchRows.delete(key)
   }
 
+  async upsertProtocolSubmission(input: Parameters<MafboardRepo['upsertProtocolSubmission']>[0]) {
+    const existing = [...this.submissions.values()].find((s) =>
+      s.tournamentId === input.tournamentId && s.gameNumber === input.gameNumber && s.tableNumber === input.tableNumber && s.refereeUserId === input.refereeUserId)
+    const { at, ...rest } = input
+    const row: StoredProtocolSubmission = {
+      ...rest, id: existing?.id ?? input.id, status: 'pending', reason: null, decidedBy: null,
+      createdAt: existing?.createdAt ?? at, updatedAt: at,
+    }
+    this.submissions.set(row.id, row)
+    return row
+  }
+
+  async protocolSubmissions(tournamentId: number, filter: { status?: StoredProtocolSubmission['status']; refereeUserId?: string }) {
+    return [...this.submissions.values()]
+      .filter((s) => s.tournamentId === tournamentId && (!filter.status || s.status === filter.status) && (!filter.refereeUserId || s.refereeUserId === filter.refereeUserId))
+      .sort((a, b) => a.gameNumber - b.gameNumber || a.tableNumber - b.tableNumber)
+  }
+
+  async decideProtocolSubmission(id: string, decision: Parameters<MafboardRepo['decideProtocolSubmission']>[1]) {
+    const current = this.submissions.get(id)
+    if (!current || current.status !== 'pending') return null
+    const row = { ...current, status: decision.status, reason: decision.reason, protocol: decision.protocol, decidedBy: decision.decidedBy, updatedAt: decision.at }
+    this.submissions.set(id, row)
+    return row
+  }
+
+  async protocolSubmissionById(id: string) {
+    return this.submissions.get(id) ?? null
+  }
+
+  async saveShare(input: StoredShare) {
+    const existing = [...this.shares.values()].find((s) => s.userId === input.userId && s.gameId === input.gameId)
+    const row = existing ? { ...existing, snapshot: input.snapshot } : input
+    this.shares.set(row.token, row)
+    return row
+  }
+
+  async shareByToken(token: string) {
+    return this.shares.get(token) ?? null
+  }
+
+  async aimCredentials(userId: string) {
+    return this.aim.get(userId) ?? null
+  }
+
+  async setAimCredentials(userId: string, sealed: string | null) {
+    if (sealed === null) this.aim.delete(userId)
+    else this.aim.set(userId, sealed)
+  }
+
   async studioSettings(userId: string) {
     return this.studio.get(userId) ?? null
   }
@@ -484,6 +598,8 @@ export interface TestContext {
   repo: MemoryRepo
   messenger: FakeMessenger
   gomafia: FakeGoMafia
+  aim: FakeAim
+  tournaments: FakeTournaments
   titan: FakeTitan
   /** Дождаться фоновых задач (обработка апдейтов бота). */
   flush(): Promise<void>
@@ -496,6 +612,8 @@ export function createTestContext(overrides: Partial<MafboardDeps> = {}): TestCo
   const gomafia = new FakeGoMafia()
   const titan = new FakeTitan()
   const clock = { now: NOW }
+  const aim = new FakeAim()
+  const tournaments = new FakeTournaments()
   const pending: Promise<void>[] = []
   const seen = new Set<string>()
   const counters = new Map<string, { count: number; until: number }>()
@@ -510,6 +628,8 @@ export function createTestContext(overrides: Partial<MafboardDeps> = {}): TestCo
     titanRoster: new TitanRosterCache(titan, () => clock.now.getTime()),
     messenger,
     vk: new FakeVk(),
+    aimAccounts: new AimAccounts(repo, aim, config.studioSecretsKey, () => clock.now),
+    tournaments,
     limiter: {
       async hit(key, limit, windowSec) {
         const now = clock.now.getTime()
@@ -534,7 +654,7 @@ export function createTestContext(overrides: Partial<MafboardDeps> = {}): TestCo
 
   const app = new Hono().route('/api/mafboard', createMafboardRouter(() => deps))
   return {
-    app, deps, repo, messenger, gomafia, titan, clock,
+    app, deps, repo, messenger, gomafia, titan, clock, aim, tournaments,
     async flush() {
       while (pending.length > 0) await pending.shift()
     },

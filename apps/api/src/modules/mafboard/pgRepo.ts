@@ -3,7 +3,7 @@ import type { SQL } from 'drizzle-orm'
 import { DELETED_HOST_ID } from './config.js'
 import { GomafiaTakenError, type MafboardRepo } from './repo.js'
 import type {
-  DeviceSession, GoMafiaClubJSON, GoMafiaPlayerJSON, LoginTicket, MafboardUser, QrTicket, QrTicketStatus, RefreshTokenRow, StoredActiveGame, StoredGame, StoredStudioSettings,
+  DeviceSession, GoMafiaClubJSON, GoMafiaPlayerJSON, LoginTicket, MafboardUser, QrTicket, QrTicketStatus, RefreshTokenRow, StoredActiveGame, StoredGame, StoredProtocolSubmission, StoredShare, StoredStudioSettings,
   TicketGuard, TicketPatch, TicketStatus, TicketStep, TitanLinkState,
 } from './types.js'
 
@@ -138,6 +138,35 @@ function toActiveGame(r: Row): StoredActiveGame {
     revision: Number(r['revision']),
     updatedAt: date(r['updated_at']),
     snapshot: json<unknown>(r['snapshot']),
+  }
+}
+
+function toSubmission(r: Row): StoredProtocolSubmission {
+  return {
+    id: String(r['id']),
+    tournamentId: Number(r['tournament_id']),
+    tournamentTitle: String(r['tournament_title']),
+    gameNumber: Number(r['game_number']),
+    tableNumber: Number(r['table_number']),
+    refereeUserId: String(r['referee_user_id']),
+    refereeName: String(r['referee_name']),
+    reviewerGomafiaId: r['reviewer_gomafia_id'] == null ? null : Number(r['reviewer_gomafia_id']),
+    protocol: json<unknown>(r['protocol']),
+    status: String(r['status']) as StoredProtocolSubmission['status'],
+    reason: r['reason'] == null ? null : String(r['reason']),
+    decidedBy: r['decided_by'] == null ? null : String(r['decided_by']),
+    createdAt: date(r['created_at']),
+    updatedAt: date(r['updated_at']),
+  }
+}
+
+function toShare(r: Row): StoredShare {
+  return {
+    token: String(r['token']),
+    userId: String(r['user_id']),
+    gameId: String(r['game_id']),
+    snapshot: json<unknown>(r['snapshot']),
+    createdAt: date(r['created_at']),
   }
 }
 
@@ -621,6 +650,86 @@ export class PgMafboardRepo implements MafboardRepo {
     `)
     if (saved.length > 0) return { saved: true as const, revision: Number(saved[0]!['revision']) }
     return { saved: false as const, current: await this.studioSettings(input.userId) }
+  }
+
+  async upsertProtocolSubmission(input: Parameters<MafboardRepo['upsertProtocolSubmission']>[0]): Promise<StoredProtocolSubmission> {
+    const rows = await this.query(sql`
+      INSERT INTO mb_tournament_protocols (id, tournament_id, tournament_title, game_number, table_number, referee_user_id,
+        referee_name, reviewer_gomafia_id, protocol, status, created_at, updated_at)
+      VALUES (${input.id}::uuid, ${input.tournamentId}, ${input.tournamentTitle}, ${input.gameNumber}, ${input.tableNumber},
+        ${input.refereeUserId}::uuid, ${input.refereeName}, ${input.reviewerGomafiaId}, ${JSON.stringify(input.protocol)}::jsonb,
+        'pending', ${iso(input.at)}::timestamptz, ${iso(input.at)}::timestamptz)
+      ON CONFLICT (tournament_id, game_number, table_number, referee_user_id) DO UPDATE
+        SET protocol = EXCLUDED.protocol, status = 'pending', reason = NULL, decided_by = NULL,
+            tournament_title = EXCLUDED.tournament_title, referee_name = EXCLUDED.referee_name,
+            reviewer_gomafia_id = EXCLUDED.reviewer_gomafia_id, updated_at = EXCLUDED.updated_at
+      RETURNING *
+    `)
+    return toSubmission(rows[0]!)
+  }
+
+  async protocolSubmissions(tournamentId: number, filter: { status?: StoredProtocolSubmission['status']; refereeUserId?: string }) {
+    if (filter.refereeUserId && !UUID.test(filter.refereeUserId)) return []
+    const rows = await this.query(sql`
+      SELECT * FROM mb_tournament_protocols
+      WHERE tournament_id = ${tournamentId}
+        AND (${filter.status ?? null}::text IS NULL OR status = ${filter.status ?? null})
+        AND (${filter.refereeUserId ?? null}::uuid IS NULL OR referee_user_id = ${filter.refereeUserId ?? null}::uuid)
+      ORDER BY game_number, table_number, updated_at
+    `)
+    return rows.map(toSubmission)
+  }
+
+  async decideProtocolSubmission(id: string, decision: Parameters<MafboardRepo['decideProtocolSubmission']>[1]) {
+    if (!UUID.test(id)) return null
+    const rows = await this.query(sql`
+      UPDATE mb_tournament_protocols
+        SET status = ${decision.status}, reason = ${decision.reason}, protocol = ${JSON.stringify(decision.protocol)}::jsonb,
+            decided_by = ${decision.decidedBy}::uuid, updated_at = ${iso(decision.at)}::timestamptz
+      WHERE id = ${id}::uuid AND status = 'pending'
+      RETURNING *
+    `)
+    return rows[0] ? toSubmission(rows[0]) : null
+  }
+
+  async protocolSubmissionById(id: string) {
+    if (!UUID.test(id)) return null
+    const row = await this.one(sql`SELECT * FROM mb_tournament_protocols WHERE id = ${id}::uuid`)
+    return row ? toSubmission(row) : null
+  }
+
+  async saveShare(input: StoredShare): Promise<StoredShare> {
+    const rows = await this.query(sql`
+      INSERT INTO mb_shares (token, user_id, game_id, snapshot, created_at)
+      VALUES (${input.token}, ${input.userId}::uuid, ${input.gameId}::uuid, ${JSON.stringify(input.snapshot)}::jsonb, ${iso(input.createdAt)}::timestamptz)
+      ON CONFLICT (user_id, game_id) DO UPDATE SET snapshot = EXCLUDED.snapshot
+      RETURNING *
+    `)
+    return toShare(rows[0]!)
+  }
+
+  async shareByToken(token: string) {
+    const row = await this.one(sql`SELECT * FROM mb_shares WHERE token = ${token}`)
+    return row ? toShare(row) : null
+  }
+
+  async aimCredentials(userId: string): Promise<string | null> {
+    if (!UUID.test(userId)) return null
+    const row = await this.one(sql`SELECT sealed FROM mb_aim_credentials WHERE user_id = ${userId}::uuid`)
+    return row ? String(row['sealed']) : null
+  }
+
+  async setAimCredentials(userId: string, sealed: string | null, at: Date): Promise<void> {
+    if (!UUID.test(userId)) return
+    if (sealed === null) {
+      await this.query(sql`DELETE FROM mb_aim_credentials WHERE user_id = ${userId}::uuid`)
+      return
+    }
+    await this.query(sql`
+      INSERT INTO mb_aim_credentials (user_id, sealed, updated_at)
+      VALUES (${userId}::uuid, ${sealed}, ${iso(at)}::timestamptz)
+      ON CONFLICT (user_id) DO UPDATE SET sealed = EXCLUDED.sealed, updated_at = EXCLUDED.updated_at
+    `)
   }
 
 }

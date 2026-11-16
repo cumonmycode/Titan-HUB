@@ -160,6 +160,11 @@ export async function playerDetail(id: string): Promise<GomafiaPlayer | null> {
   return normalize(sd.user)
 }
 
+// Страница турнира: рассадка, судьи столов, схема. Публично; разбор — gomafiaTournament.ts.
+export async function tournamentServerData(id: number): Promise<unknown | null> {
+  return nextData(`tournament/${id}.json`)
+}
+
 // ─── Вход (только для подтверждения владельца и определения его клуба) ─────────
 
 export interface GomafiaLoginResult {
