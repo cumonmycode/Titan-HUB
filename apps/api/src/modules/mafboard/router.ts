@@ -14,6 +14,7 @@ import type { ClubHub } from './hub.js'
 import { GomafiaTakenError, type MafboardRepo } from './repo.js'
 import type { AimAccounts, TournamentSource } from './aim.js'
 import { registerTournamentRoutes } from './tournaments.js'
+import { registerShareRoutes } from './shares.js'
 import { errorBody, toAccountJSON, toPlayerJSON, toQrStatusJSON, toQrTicketJSON, toSessionsJSON, toTicketStatusJSON } from './serialize.js'
 import {
   issueAccessToken, newConfirmCode, newDeepCode, newRefreshToken, passwordMatches, qrChoiceCodes, sha256, verifyAccessToken, webhookSecretValid,
@@ -850,6 +851,7 @@ export function createMafboardRouter(resolveDeps: DepsResolver): Hono<Env> {
   })
 
   registerTournamentRoutes(router, requireUser)
+  registerShareRoutes(router, requireUser)
 
   return router
 }

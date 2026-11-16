@@ -8,7 +8,7 @@ import { noHub } from '../../src/modules/mafboard/hub.js'
 import { DELETED_HOST_ID } from '../../src/modules/mafboard/config.js'
 import { GomafiaTakenError, type MafboardRepo } from '../../src/modules/mafboard/repo.js'
 import { createMafboardRouter, type MafboardDeps } from '../../src/modules/mafboard/router.js'
-import type { DeviceSession, LoginTicket, MafboardUser, QrTicket, RefreshTokenRow, StoredActiveGame, StoredGame, StoredStudioSettings, TicketGuard } from '../../src/modules/mafboard/types.js'
+import type { DeviceSession, LoginTicket, MafboardUser, QrTicket, RefreshTokenRow, StoredActiveGame, StoredGame, StoredProtocolSubmission, StoredShare, StoredStudioSettings, TicketGuard } from '../../src/modules/mafboard/types.js'
 import { VkError, type VkAppConfig, type VkGateway, type VkTokens } from '../../src/modules/mafboard/vk.js'
 import { AimError, AimSession } from '../../src/lib/gomafiaAim.js'
 import type { AimGame, AimProtocol, AimTournament } from '../../src/lib/gomafiaAimParse.js'
@@ -117,6 +117,8 @@ export class MemoryRepo implements MafboardRepo {
   activeGames = new Map<string, StoredActiveGame>()
   studio = new Map<string, StoredStudioSettings>()
   aim = new Map<string, string>()
+  submissions = new Map<string, StoredProtocolSubmission>()
+  shares = new Map<string, StoredShare>()
   private seq = 0
 
   private uuid(): string {
@@ -164,6 +166,8 @@ export class MemoryRepo implements MafboardRepo {
     for (const [id, game] of this.activeGames) if (game.hostUserId === userId) this.activeGames.delete(id)
     this.studio.delete(userId)
     this.aim.delete(userId)
+    for (const [id, s] of this.submissions) if (s.refereeUserId === userId) this.submissions.delete(id)
+    for (const [token, s] of this.shares) if (s.userId === userId) this.shares.delete(token)
     for (const [id, session] of this.sessions) if (session.userId === userId) this.sessions.delete(id)
     for (const [hash, row] of this.refresh) if (row.userId === userId) this.refresh.delete(hash)
     for (const [id, ticket] of this.tickets) if (ticket.userId === userId) this.tickets.delete(id)
@@ -366,6 +370,47 @@ export class MemoryRepo implements MafboardRepo {
 
   async deleteActiveGame(userId: string, id: string) {
     if (this.activeGames.get(id)?.hostUserId === userId) this.activeGames.delete(id)
+  }
+
+  async upsertProtocolSubmission(input: Parameters<MafboardRepo['upsertProtocolSubmission']>[0]) {
+    const existing = [...this.submissions.values()].find((s) =>
+      s.tournamentId === input.tournamentId && s.gameNumber === input.gameNumber && s.tableNumber === input.tableNumber && s.refereeUserId === input.refereeUserId)
+    const { at, ...rest } = input
+    const row: StoredProtocolSubmission = {
+      ...rest, id: existing?.id ?? input.id, status: 'pending', reason: null, decidedBy: null,
+      createdAt: existing?.createdAt ?? at, updatedAt: at,
+    }
+    this.submissions.set(row.id, row)
+    return row
+  }
+
+  async protocolSubmissions(tournamentId: number, filter: { status?: StoredProtocolSubmission['status']; refereeUserId?: string }) {
+    return [...this.submissions.values()]
+      .filter((s) => s.tournamentId === tournamentId && (!filter.status || s.status === filter.status) && (!filter.refereeUserId || s.refereeUserId === filter.refereeUserId))
+      .sort((a, b) => a.gameNumber - b.gameNumber || a.tableNumber - b.tableNumber)
+  }
+
+  async decideProtocolSubmission(id: string, decision: Parameters<MafboardRepo['decideProtocolSubmission']>[1]) {
+    const current = this.submissions.get(id)
+    if (!current || current.status !== 'pending') return null
+    const row = { ...current, status: decision.status, reason: decision.reason, protocol: decision.protocol, decidedBy: decision.decidedBy, updatedAt: decision.at }
+    this.submissions.set(id, row)
+    return row
+  }
+
+  async protocolSubmissionById(id: string) {
+    return this.submissions.get(id) ?? null
+  }
+
+  async saveShare(input: StoredShare) {
+    const existing = [...this.shares.values()].find((s) => s.userId === input.userId && s.gameId === input.gameId)
+    const row = existing ? { ...existing, snapshot: input.snapshot } : input
+    this.shares.set(row.token, row)
+    return row
+  }
+
+  async shareByToken(token: string) {
+    return this.shares.get(token) ?? null
   }
 
   async aimCredentials(userId: string) {

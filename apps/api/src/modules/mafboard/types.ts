@@ -179,6 +179,36 @@ export interface StoredGame {
   record: unknown
 }
 
+/** Протокол судьи турнира GoMafia, ждущий подтверждения ГС. */
+export interface StoredProtocolSubmission {
+  id: string
+  tournamentId: number
+  tournamentTitle: string
+  gameNumber: number
+  tableNumber: number
+  refereeUserId: string
+  /** Ник судьи в GoMafia — для списка ГС. */
+  refereeName: string
+  /** GoMafia id ГС турнира (кто должен подтвердить). */
+  reviewerGomafiaId: number | null
+  /** Протокол в полях АИМ (ProtocolInput в tournaments.ts). */
+  protocol: unknown
+  status: 'pending' | 'saved' | 'rejected'
+  reason: string | null
+  decidedBy: string | null
+  createdAt: Date
+  updatedAt: Date
+}
+
+/** Открытая ссылка на итоги игры: снимок итогов, который прислало приложение. */
+export interface StoredShare {
+  token: string
+  userId: string
+  gameId: string
+  snapshot: unknown
+  createdAt: Date
+}
+
 /** Ответ об ошибке в формате приложения: `{"error": {"code", "message"}}`. */
 export interface ErrorBody {
   error: { code: string; message: string }

@@ -400,17 +400,141 @@ describe('отправка протокола', () => {
     assert.equal(saved.protocol.seats[9]!.fineDiscipline, 0.3)
   })
 
-  it('судья без прав — editor_required; нет стола — table_mismatch; кривой протокол — 422', async () => {
+  it('нет стола — table_mismatch; кривой протокол — 422', async () => {
     const ctx = createTestContext()
     const token = await linkedJudge(ctx)
     withTournaments(ctx)
-    const referee = await call(ctx, 'POST', '/v1/tournaments/3001/protocols', { token, body: protocol() })
-    assert.equal(referee.status, 403)
-    assert.equal(referee.json.error.code, 'editor_required')
     const missing = await call(ctx, 'POST', '/v1/tournaments/2920/protocols', { token, body: protocol(7, 1) })
     assert.equal(missing.json.error.code, 'table_mismatch')
     const short = { ...protocol(), seats: protocol().seats.slice(1) }
     assert.equal((await call(ctx, 'POST', '/v1/tournaments/2920/protocols', { token, body: short })).status, 422)
     assert.equal(ctx.aim.saved.length, 0)
+  })
+})
+
+describe('очередь протоколов ГС', () => {
+  const protocolBody = (gameNumber = 1, tableNumber = 1) => ({
+    gameNumber,
+    tableNumber,
+    win: 'mafia',
+    seats: ROLES.map((role, i) => ({
+      place: i + 1, role, firstKill: 'no', selfKill: false, sheriffOpen: role === 'sheriff',
+      extraPoint: 0, fine: 0, fineDiscipline: 0, replacement: false,
+    })),
+  })
+
+  /** Судья (host, GoMafia 4242) и ГС (второй пользователь, GoMafia 5001) турнира 3001. */
+  async function judgeAndReviewer() {
+    const ctx = createTestContext()
+    const judge = await linkedJudge(ctx)
+    withTournaments(ctx)
+    const reviewerSession = await signIn(ctx, { id: 2002, is_bot: false, first_name: 'ГС', username: 'gs' })
+    ctx.gomafia.players.set('5001', { ...ctx.gomafia.players.get('5001')!, login: 'gs' })
+    const { id: reviewerId } = (await ctx.repo.userByTgId(2002))!
+    await ctx.repo.setGomafiaLink(reviewerId, { player: { id: 5001, nickname: 'gs', fullName: null, avatarURL: null, elo: null, clubID: null, clubTitle: null, city: null, tournamentsPlayed: null, isInHostClub: false, isVerified: false } as any, club: null }, ctx.clock.now)
+    await ctx.deps.aimAccounts.connect(reviewerId, 'gs', 'secret')
+    ctx.aim.tournamentsByLogin.set('gs', ctx.aim.tournamentsByLogin.get('host')!)
+    ctx.aim.editors.set(3001, new Set(['gs']))
+    ctx.aim.games.set(3001, AIM_GAMES)
+    const seating = ctx.tournaments.seatings.get(3001)!
+    ctx.tournaments.seatings.set(3001, { ...seating, mainRefereeId: 5001 })
+    return { ctx, judge, reviewer: reviewerSession.accessToken }
+  }
+
+  it('судья стола отправляет протокол ГС; ГС получает уведомление в боте', async () => {
+    const { ctx, judge } = await judgeAndReviewer()
+    const res = await call(ctx, 'POST', '/v1/tournaments/3001/protocols', { token: judge, body: protocolBody() })
+    assert.equal(res.status, 200)
+    assert.equal(res.json.status, 'pending')
+    assert.equal(res.json.reviewerUsesMafBoard, true)
+    await ctx.flush()
+    assert.ok(ctx.messenger.sent.some((m) => m.chatId === 2002 && m.text.includes('прислал протокол')))
+    assert.equal(ctx.aim.saved.length, 0)
+    const mine = await call(ctx, 'GET', '/v1/tournaments/3001/protocols/mine', { token: judge })
+    assert.deepEqual(mine.json.protocols.map((p: any) => [p.gameNumber, p.tableNumber, p.status]), [[1, 1, 'pending']])
+  })
+
+  it('чужой стол — not_your_table', async () => {
+    const { ctx, judge } = await judgeAndReviewer()
+    const res = await call(ctx, 'POST', '/v1/tournaments/3001/protocols', { token: judge, body: protocolBody(1, 2) })
+    assert.equal(res.json.error.code, 'not_your_table')
+  })
+
+  it('ГС видит очередь и подтверждает с правкой — протокол уходит в АИМ от имени ГС', async () => {
+    const { ctx, judge, reviewer } = await judgeAndReviewer()
+    await call(ctx, 'POST', '/v1/tournaments/3001/protocols', { token: judge, body: protocolBody() })
+    const list = await call(ctx, 'GET', '/v1/tournaments', { token: reviewer })
+    assert.equal(list.json.tournaments.find((t: any) => t.id === 3001).pendingProtocols, 1)
+    const queue = await call(ctx, 'GET', '/v1/tournaments/3001/protocols', { token: reviewer })
+    assert.equal(queue.json.protocols.length, 1)
+    const pid = queue.json.protocols[0].id
+    // Судья не видит чужую очередь.
+    assert.equal((await call(ctx, 'GET', '/v1/tournaments/3001/protocols', { token: judge })).json.error.code, 'editor_required')
+
+    const edited = { ...protocolBody(9, 9), win: 'city' }
+    const approved = await call(ctx, 'POST', `/v1/tournaments/3001/protocols/${pid}/approve`, { token: reviewer, body: { protocol: edited } })
+    assert.equal(approved.status, 200)
+    assert.equal(approved.json.submission.status, 'saved')
+    const saved = ctx.aim.saved.at(-1)!
+    assert.equal(saved.login, 'gs')
+    assert.equal(saved.aimTableId, 78520)
+    assert.equal(saved.protocol.win, 'city')
+    await ctx.flush()
+    assert.ok(ctx.messenger.sent.some((m) => m.text.includes('ГС внёс ваш протокол')))
+    const again = await call(ctx, 'POST', `/v1/tournaments/3001/protocols/${pid}/approve`, { token: reviewer, body: {} })
+    assert.equal(again.json.error.code, 'already_decided')
+  })
+
+  it('ГС отклоняет с причиной; судья видит причину и отправляет заново', async () => {
+    const { ctx, judge, reviewer } = await judgeAndReviewer()
+    const first = await call(ctx, 'POST', '/v1/tournaments/3001/protocols', { token: judge, body: protocolBody() })
+    const pid = first.json.submission.id
+    const rejected = await call(ctx, 'POST', `/v1/tournaments/3001/protocols/${pid}/reject`, { token: reviewer, body: { reason: 'Не тот ПУ' } })
+    assert.equal(rejected.json.submission.status, 'rejected')
+    const mine = await call(ctx, 'GET', '/v1/tournaments/3001/protocols/mine', { token: judge })
+    assert.equal(mine.json.protocols[0].reason, 'Не тот ПУ')
+    const resent = await call(ctx, 'POST', '/v1/tournaments/3001/protocols', { token: judge, body: protocolBody() })
+    assert.equal(resent.json.submission.id, pid)
+    assert.equal(resent.json.submission.status, 'pending')
+  })
+})
+
+describe('открытая ссылка на итоги', () => {
+  const snapshot = {
+    title: 'Турнир «ALIN <CUP>» · Игра 1 · стол 1',
+    subtitle: 'Судья: host',
+    winner: 'black',
+    winnerText: 'Победа мафии',
+    reason: 'Мафия сравнялась с городом',
+    finishedAt: '16 нояб. 2026, 21:40',
+    seats: ROLES.map((role, i) => ({ place: i + 1, nickname: `Игрок ${i + 1}`, role, team: role === 'don' || role === 'mafia' ? 'black' : 'red', points: i === 0 ? 1.4 : 0, details: i === 1 ? 'ПУ 2-ка' : null })),
+  }
+  const gameID = '6F1C2E3A-0000-4000-8000-000000000042'
+
+  it('ссылка открывается без входа; повтор для той же игры — тот же адрес; текст экранирован', async () => {
+    const ctx = createTestContext()
+    const token = await linkedJudge(ctx)
+    const first = await call(ctx, 'POST', '/v1/shares', { token, body: { gameID, snapshot }, headers: { host: 'api.mafboard.test' } })
+    assert.equal(first.status, 200)
+    assert.match(first.json.url, /^https:\/\/api\.mafboard\.test\/api\/mafboard\/s\/[A-Za-z0-9_-]{16}$/)
+    const second = await call(ctx, 'POST', '/v1/shares', { token, body: { gameID, snapshot: { ...snapshot, winnerText: 'Победа мафии!' } }, headers: { host: 'api.mafboard.test' } })
+    assert.equal(second.json.url, first.json.url)
+
+    const path = new URL(first.json.url).pathname
+    const page = await ctx.app.request(path)
+    assert.equal(page.status, 200)
+    const html = await page.text()
+    assert.ok(html.includes('ALIN &lt;CUP&gt;'))
+    assert.ok(html.includes('Победа мафии!'))
+    assert.ok(html.includes('ПУ 2-ка'))
+    assert.equal(page.headers.get('x-robots-tag'), 'noindex')
+    assert.equal((await ctx.app.request('/api/mafboard/s/nope-nope-nope')).status, 404)
+  })
+
+  it('без входа ссылку не создать; кривой снимок — 422', async () => {
+    const ctx = createTestContext()
+    assert.equal((await call(ctx, 'POST', '/v1/shares', { body: { gameID, snapshot } })).status, 401)
+    const token = await linkedJudge(ctx)
+    assert.equal((await call(ctx, 'POST', '/v1/shares', { token, body: { gameID, snapshot: { ...snapshot, seats: [] } } })).status, 422)
   })
 })

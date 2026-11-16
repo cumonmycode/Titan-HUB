@@ -69,7 +69,13 @@ apps/api/test/mafboard/ — тесты (node:test через tsx), хранил�
 | `DELETE /v1/me/gomafia/aim` | Bearer | Отключить АИМ — пароль стирается |
 | `GET /v1/tournaments` | Bearer | `{tournaments: [{id, title, dateStart, dateEnd, city, mainReferee, status, role}]}` — незавершённые турниры пользователя из АИМ; `role`: `editor` (АИМ открывает ему «Данные игр»), `referee`. 409 `aim_not_connected` / `aim_relogin_required`, 502 `aim_unavailable` |
 | `GET /v1/tournaments/:id` | Bearer | `{tournament, role, games: [{number, stage, tables: [{number, refereeId, refereeName, isMine, win, seats: [{place, playerId, login, elo}], protocol?}]}]}`. Рассадка — с gomafia.pro. Редактор видит все столы и внесённые протоколы (`protocol`), судья — только свои столы. 404 — турнира нет в АИМ пользователя |
-| `POST /v1/tournaments/:id/protocols` `{gameNumber, tableNumber, win, seats: [{place, role, firstKill, selfKill, sheriffOpen, extraPoint, fine, fineDiscipline, replacement}]}` | Bearer | Внести протокол стола в АИМ от имени редактора (`save_game_result`): стол ищется по номеру игры и стола, места — по номеру. `{status: "saved"}`; 403 `editor_required` — не ГС, 409 `table_mismatch` — стола нет или рассадка изменилась; 120 в час |
+| `POST /v1/tournaments/:id/protocols` `{gameNumber, tableNumber, win, seats: [{place, role, firstKill, selfKill, sheriffOpen, extraPoint, fine, fineDiscipline, replacement}]}` | Bearer | Протокол стола. Редактор: сразу в АИМ (`save_game_result`; стол — по номеру игры и стола, места — по номеру) → `{status: "saved"}`. Обычный судья своего стола: в очередь ГС → `{status: "pending", submission, reviewerUsesMafBoard}`, ГС получает сообщение в боте. 403 `not_your_table`, 409 `table_mismatch`; 120 в час |
+| `GET /v1/tournaments/:id/protocols/mine` | Bearer | `{protocols: [TournamentSubmission]}` — свои отправки ГС: `status` `pending`/`saved`/`rejected`, `reason` |
+| `GET /v1/tournaments/:id/protocols[?status=all]` | Bearer | Очередь ГС (по умолчанию — ждущие). 403 `editor_required` — не ГС |
+| `POST /v1/tournaments/:id/protocols/:pid/approve` `{protocol?}` | Bearer | ГС вносит протокол судьи (можно с правками; игра и стол — из отправки) в АИМ от своего имени, судья получает сообщение в боте. 409 `already_decided` |
+| `POST /v1/tournaments/:id/protocols/:pid/reject` `{reason}` | Bearer | ГС возвращает протокол с причиной; судья видит её и отправляет заново |
+| `POST /v1/shares` `{gameID, snapshot}` | Bearer | Открытая ссылка на итоги игры: `{url}`. Снимок (`title, subtitle, winner, winnerText, reason, finishedAt, seats[{place, nickname, role, team, points, details}]`) считает приложение. Для той же игры — тот же адрес с новым снимком; до 64 КБ, 60 в час |
+| `GET /s/:token` | — | Страница итогов по ссылке (HTML, `noindex`). Нет ссылки — 404 |
 | `POST /v1/auth/review` `{login, password, deviceName, platform}` | — | Вход проверяющего App Store (логин `appreview`, пароль — `MAFBOARD_REVIEW_PASSWORD`, есть в заметках для App Review). Аккаунт без GoMafia, удалённый создаётся заново. Без пароля в .env — 404; лимит 10 попыток/10 мин на IP |
 | `DELETE /v1/me` | Bearer | Удалить аккаунт (Профиль → «Удалить аккаунт», требование App Store): сессии, билеты, идущие и личные игры удаляются, игры клуба остаются в его истории без ведущего (`host_user_id = NULL`, без `setup.host`) |
 | `GET /v1/gomafia/players?q=` | Bearer | Поиск (от 2 символов): сначала свой клуб (`isInHostClub`), затем общий, до 30 |
@@ -120,6 +126,8 @@ WebSocket идёт мимо Hono: обработчик `upgrade` на HTTP-се�
 
 | Таблица | Что хранит |
 |---|---|
+| `mb_tournament_protocols` | Протоколы обычных судей турниров, ждущие ГС: статус, причина отказа, кто решил |
+| `mb_shares` | Открытые ссылки на итоги игр: токен и снимок итогов |
 | `mb_aim_credentials` | Вход в АИМ (логин и пароль шифротекстом) — для турниров GoMafia |
 | `mb_users` | Telegram (`tg_id` уникален), телефон, версия соглашения, привязка GoMafia (`gomafia_id` уникален, профиль и клуб в `jsonb`) |
 | `mb_login_tickets` | Билеты входа: хэш секрета устройства, шаг в боте, статус, срок |

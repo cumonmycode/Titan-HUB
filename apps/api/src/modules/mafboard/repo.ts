@@ -1,5 +1,5 @@
 import type {
-  DeviceSession, GoMafiaClubJSON, GoMafiaPlayerJSON, LoginTicket, MafboardUser, QrTicket, RefreshTokenRow, StoredActiveGame, StoredGame, StoredStudioSettings, TelegramProfile,
+  DeviceSession, GoMafiaClubJSON, GoMafiaPlayerJSON, LoginTicket, MafboardUser, QrTicket, RefreshTokenRow, StoredActiveGame, StoredGame, StoredProtocolSubmission, StoredShare, StoredStudioSettings, TelegramProfile,
   TicketGuard, TicketPatch, TicketStep,
 } from './types.js'
 
@@ -40,6 +40,22 @@ export interface MafboardRepo {
   aimCredentials(userId: string): Promise<string | null>
   /** Сохранить (или стереть — null) вход в АИМ. */
   setAimCredentials(userId: string, sealed: string | null, at: Date): Promise<void>
+
+  // ─── Протоколы судей на подтверждение ГС ───────────────────────────────────
+  /** Отправить (или отправить заново) протокол стола: запись этого судьи снова ждёт ГС. */
+  upsertProtocolSubmission(input: Omit<StoredProtocolSubmission, 'id' | 'status' | 'reason' | 'decidedBy' | 'createdAt' | 'updatedAt'> & { id: string; at: Date }): Promise<StoredProtocolSubmission>
+  protocolSubmissions(tournamentId: number, filter: { status?: StoredProtocolSubmission['status']; refereeUserId?: string }): Promise<StoredProtocolSubmission[]>
+  /** Атомарно: решение по протоколу, только пока он ждёт. null — уже решён другим или его нет. */
+  decideProtocolSubmission(
+    id: string,
+    decision: { status: 'saved' | 'rejected'; reason: string | null; protocol: unknown; decidedBy: string; at: Date },
+  ): Promise<StoredProtocolSubmission | null>
+  protocolSubmissionById(id: string): Promise<StoredProtocolSubmission | null>
+
+  // ─── Открытые ссылки на итоги игр ──────────────────────────────────────────
+  /** Ссылка этого пользователя на эту игру: повторная выдача обновляет снимок и сохраняет адрес. */
+  saveShare(input: StoredShare): Promise<StoredShare>
+  shareByToken(token: string): Promise<StoredShare | null>
 
   // ─── Билеты входа ──────────────────────────────────────────────────────────
   createTicket(input: {

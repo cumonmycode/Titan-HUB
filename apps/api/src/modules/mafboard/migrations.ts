@@ -216,6 +216,40 @@ export const MAFBOARD_MIGRATIONS: readonly { id: string; sql: string }[] = [
       );
     `,
   },
+  {
+    // Протоколы судей турниров GoMafia, которые ждут подтверждения ГС: обычный судья не может сам
+    // внести стол в АИМ — его протокол вносит ГС от своего имени. Плюс открытые ссылки на итоги игр.
+    id: '008_mafboard_protocol_queue_and_shares',
+    sql: `
+      CREATE TABLE IF NOT EXISTS mb_tournament_protocols (
+        id                 uuid PRIMARY KEY,
+        tournament_id      integer NOT NULL,
+        tournament_title   text NOT NULL,
+        game_number        integer NOT NULL,
+        table_number       integer NOT NULL,
+        referee_user_id    uuid NOT NULL REFERENCES mb_users(id) ON DELETE CASCADE,
+        referee_name       text NOT NULL,
+        reviewer_gomafia_id integer,
+        protocol           jsonb NOT NULL,
+        status             text NOT NULL,
+        reason             text,
+        decided_by         uuid,
+        created_at         timestamptz NOT NULL,
+        updated_at         timestamptz NOT NULL,
+        UNIQUE (tournament_id, game_number, table_number, referee_user_id)
+      );
+      CREATE INDEX IF NOT EXISTS mb_tournament_protocols_tournament ON mb_tournament_protocols (tournament_id, status);
+
+      CREATE TABLE IF NOT EXISTS mb_shares (
+        token      text PRIMARY KEY,
+        user_id    uuid NOT NULL REFERENCES mb_users(id) ON DELETE CASCADE,
+        game_id    uuid NOT NULL,
+        snapshot   jsonb NOT NULL,
+        created_at timestamptz NOT NULL,
+        UNIQUE (user_id, game_id)
+      );
+    `,
+  },
 ]
 
 function rows<T = Record<string, unknown>>(res: unknown): T[] {

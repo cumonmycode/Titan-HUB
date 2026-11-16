@@ -6,6 +6,7 @@ import type { AimGame, AimProtocol, AimTable, AimTournament } from '../../lib/go
 import type { TournamentSeating, TournamentTable } from '../../lib/gomafiaTournament.js'
 import { AimNotConnectedError, type AimAccounts } from './aim.js'
 import { body, fail, ipKey, type Env } from './router.js'
+import { registerReviewRoutes, submitForReview } from './tournamentReview.js'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Режим «Турнир GoMafia»: турниры пользователя из АИМ, рассадка с gomafia.pro и протоколы.
@@ -28,7 +29,7 @@ const PROTOCOLS_PER_HOUR = 120
 const SEATS_PER_TABLE = 10
 
 const points = z.number().min(-10).max(10)
-const protocolSchema = z.object({
+export const protocolSchema = z.object({
   gameNumber: z.number().int().positive(),
   tableNumber: z.number().int().positive(),
   win: z.enum(['city', 'mafia', 'draw']),
@@ -89,7 +90,7 @@ export function aimFailure(c: Context, error: unknown) {
 }
 
 /** Протокол турнира, если пользователь — его редактор; null — АИМ не открывает ему «Данные игр». */
-async function editorData(aim: AimAccounts, userId: string, tournamentId: number): Promise<AimGame[] | null> {
+export async function editorData(aim: AimAccounts, userId: string, tournamentId: number): Promise<AimGame[] | null> {
   try {
     return await aim.gameData(userId, tournamentId)
   } catch (error) {
@@ -214,7 +215,8 @@ export function registerTournamentRoutes(router: Hono<Env>, requireUser: Middlew
       // По очереди: одна сессия АИМ на пользователя, а открытых турниров у судьи единицы.
       for (const tournament of open) {
         const data = await editorData(deps.aimAccounts, user.id, tournament.id)
-        result.push(tournamentJSON(tournament, data ? 'editor' : 'referee'))
+        const pending = data ? (await deps.repo.protocolSubmissions(tournament.id, { status: 'pending' })).length : 0
+        result.push({ ...tournamentJSON(tournament, data ? 'editor' : 'referee'), pendingProtocols: pending })
       }
       return c.json({ tournaments: result })
     } catch (error) {
@@ -250,8 +252,8 @@ export function registerTournamentRoutes(router: Hono<Env>, requireUser: Middlew
   })
 
   /**
-   * Внести протокол стола в АИМ от имени редактора турнира. Судье без прав на «Данные игр» —
-   * 403 `editor_required`: его результат подтверждает ГС (этап 4).
+   * Протокол стола: редактор турнира вносит его в АИМ сразу (`{status: "saved"}`), обычный судья —
+   * отправляет ГС на подтверждение (`{status: "pending"}`, tournamentReview.ts).
    */
   router.post('/v1/tournaments/:id/protocols', requireUser, body(protocolSchema), async (c) => {
     const deps = c.get('deps')
@@ -265,7 +267,8 @@ export function registerTournamentRoutes(router: Hono<Env>, requireUser: Middlew
     const input = c.req.valid('json')
     try {
       const games = await editorData(deps.aimAccounts, user.id, id)
-      if (!games) return fail(c, 403, 'editor_required', 'Вносить протоколы этого турнира может только ГС')
+      // Не ГС — протокол ждёт подтверждения ГС турнира.
+      if (!games) return await submitForReview(c, id, input)
       const target = aimProtocolFor(games, input)
       if (!target) return fail(c, 409, 'table_mismatch', 'В АИМ нет такого стола или рассадка изменилась — обновите турнир')
       await deps.aimAccounts.saveProtocol(user.id, id, target.aimTableId, target.protocol)
@@ -276,4 +279,6 @@ export function registerTournamentRoutes(router: Hono<Env>, requireUser: Middlew
       return aimFailure(c, error)
     }
   })
+
+  registerReviewRoutes(router, requireUser)
 }
