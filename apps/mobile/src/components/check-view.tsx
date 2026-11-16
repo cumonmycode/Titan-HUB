@@ -14,10 +14,11 @@ import { TaiMark } from '@/components/tai/mark';
 import type { CheckTotals } from '@/lib/checks';
 import { promptText } from '@/lib/dialog';
 import { eventErrorMessage, eventTitle, updateEvent, useEvent, useEventRates } from '@/lib/events-api';
-import { formatDuration, formatMoney, formatTime, plural, toNumber } from '@/lib/format';
+import { formatDuration, formatMoney, formatTime, toNumber } from '@/lib/format';
 import { haptic } from '@/lib/haptics';
 import type { PosPlayer } from '@/lib/payment';
-import { addItem, reloadCheck, TIER_LABEL, useCheckSuggestions } from '@/lib/pos-api';
+import { categoryHex, categorySymbol } from '@/lib/catalog-api';
+import { addItem, reloadCheck, TIER_LABEL, useCheckSuggestions, useMenu } from '@/lib/pos-api';
 import { parseAmount } from '@/lib/shift-api';
 import { FONT_SCALE_MAX, useTextLayout } from '@/lib/text-scale';
 import { colors, radius, space, type } from '@/lib/theme';
@@ -53,22 +54,20 @@ export function CheckView({ check, totals, actions, player, now, contentInsetAdj
   const guestTwoLines = useTextLayout().layout !== 'regular';
   const isOpen = check.status === 'open';
   const itemRows = check.items.filter((row) => row.checkItem.quantity > 0);
-  const discountsTotal = check.discounts.reduce((sum, d) => sum + toNumber(d.amount), 0);
   const guests = check.guestNames ?? [];
   // Списание на персонал: сервер закрывает чек за 0 ₽ (аренда, база и предоплата не берутся,
   // как payTotals) — иначе сверху «тикала» бы живая аренда как долг гостя.
   const due = check.staffCompId ? 0 : totals.due;
   const prepaid = check.staffCompId ? 0 : totals.prepaid;
-  // Сумма позиций нужна отдельно, только когда к оплате добавляются аренда или мероприятие
-  // (их суммы — в своих карточках) или вычитается предоплата; иначе она равна сумме сверху.
-  const hasExtras = totals.rental > 0 || totals.eventBase > 0 || prepaid > 0;
-  const itemsDetail = [
-    itemRows.length > 0 ? `${itemRows.length} ${plural(itemRows.length, ['позиция', 'позиции', 'позиций'])}` : null,
-    hasExtras && itemRows.length > 0 ? formatMoney(totals.items) : null,
-  ]
-    .filter(Boolean)
-    .join(' · ');
-  const opened = isOpen ? `Открыт в ${formatTime(check.createdAt)} · ${formatDuration(check.createdAt, now)}` : `Открыт в ${formatTime(check.createdAt)}`;
+  const hasRental = !!(check.spaceId && check.spaceStartAt);
+  // Значок позиции — иконка и цвет её категории, как на плитках меню (меню уже в кэше).
+  const menu = useMenu();
+  const categories = new Map((menu.data?.categories ?? []).map((c) => [c.id, c]));
+  const itemCategory = new Map((menu.data?.items ?? []).map((i) => [i.id, i.category]));
+  const iconFor = (itemId: string): RowIconLook => {
+    const cat = categories.get(itemCategory.get(itemId) ?? '');
+    return { symbol: categorySymbol(cat?.icon), color: categoryHex(cat?.color) };
+  };
 
   return (
     <ScrollView
@@ -77,12 +76,15 @@ export function CheckView({ check, totals, actions, player, now, contentInsetAdj
       showsVerticalScrollIndicator={false}>
       {/* При открытии чек появляется целиком; анимации — только на изменения. */}
       <LayoutAnimationConfig skipEntering skipExiting>
+        {/* Сумма крупно, под ней — капсулы со значками вместо строки «Открыт в 19:40 · 2 ч 05 мин». */}
         <View style={styles.hero}>
-          <Text style={[type.footnote, styles.heroCaption]}>{isOpen ? 'К ОПЛАТЕ' : check.status === 'closed' ? 'ОПЛАЧЕН' : 'ОТМЕНЁН'}</Text>
+          {!isOpen ? <Text style={[type.footnote, styles.heroCaption, check.status === 'closed' && styles.green]}>{check.status === 'closed' ? 'ОПЛАЧЕН' : 'ОТМЕНЁН'}</Text> : null}
           <RollingText text={formatMoney(due)} style={[styles.heroAmount, type.amount]} maxFontSizeMultiplier={FONT_SCALE_MAX.display} />
-          <Text style={[type.subhead, styles.secondary]}>
-            {prepaid > 0 ? `${opened} · предоплата ${formatMoney(-prepaid)}` : opened}
-          </Text>
+          <View style={styles.capsules}>
+            {isOpen ? <Capsule icon="timer" text={formatDuration(check.createdAt, now)} strong /> : null}
+            <Capsule text={`с ${formatTime(check.createdAt)}`} />
+            {prepaid > 0 ? <Capsule text={`предоплата ${formatMoney(-prepaid)}`} /> : null}
+          </View>
           {check.staffCompId && <Pill icon="person.badge.shield.checkmark" text="Списание на персонал — гостю бесплатно" color={colors.indigo} />}
         </View>
 
@@ -97,18 +99,30 @@ export function CheckView({ check, totals, actions, player, now, contentInsetAdj
                     <SymbolView name="person.crop.circle.badge.plus" size={24} tintColor={colors.accent} />
                   </View>
                 )}
-                <View style={styles.flex}>
-                  <Text style={[type.headline, styles.label]} numberOfLines={1}>
-                    {check.playerId ? (player?.nickname ?? 'Клиент') : 'Добавить клиента'}
-                  </Text>
-                  <Text style={[type.footnote, styles.secondary]} numberOfLines={1}>
-                    {check.playerId
-                      ? player
-                        ? (TIER_LABEL[player.clientTier] ?? player.clientTier)
-                        : 'Загружаем…'
-                      : 'Бонусы, депозит и долг — только с клиентом'}
-                  </Text>
-                </View>
+                {check.playerId ? (
+                  // Статус — меткой рядом с именем, а не отдельной серой строкой под ним.
+                  <View style={[styles.flex, styles.nameRow]}>
+                    <Text style={[type.headline, styles.label, styles.shrink]} numberOfLines={1}>
+                      {player?.nickname ?? 'Клиент'}
+                    </Text>
+                    {player ? (
+                      <View style={styles.tierPill}>
+                        <Text style={[type.caption2, styles.tierText]} numberOfLines={1}>
+                          {(TIER_LABEL[player.clientTier] ?? player.clientTier).toUpperCase()}
+                        </Text>
+                      </View>
+                    ) : null}
+                  </View>
+                ) : (
+                  <View style={styles.flex}>
+                    <Text style={[type.headline, styles.label]} numberOfLines={1}>
+                      Добавить клиента
+                    </Text>
+                    <Text style={[type.footnote, styles.secondary]} numberOfLines={1}>
+                      Бонусы, депозит и долг — только с клиентом
+                    </Text>
+                  </View>
+                )}
                 {player && <BalanceChips balance={player.balance} bonusPoints={player.bonusPoints} />}
                 {isOpen && <SymbolView name="chevron.right" size={13} weight="semibold" tintColor={colors.tertiaryLabel} />}
               </View>
@@ -181,77 +195,112 @@ export function CheckView({ check, totals, actions, player, now, contentInsetAdj
             );
           })}
 
-        <GlassView style={styles.card}>
-          <CardHeader title="Позиции" detail={itemsDetail || undefined} />
-          {itemRows.length === 0 ? (
+        {/* Счёт — одной карточкой в порядке денег: аренда, позиции, скидки. Итога внутри нет:
+            он один — крупно сверху. Раньше аренда и скидки были отдельными карточками, аренда — в самом низу. */}
+        <GlassView style={[styles.card, styles.billCard]}>
+          {hasRental ? <RentalRow check={check} amount={totals.rental} isOpen={isOpen} onEdit={actions.onEditRental} /> : null}
+          {itemRows.length === 0 && !hasRental ? (
             <Text style={[type.subhead, styles.secondary, styles.empty]}>{isOpen ? 'Чек пуст — нажмите «Добавить» внизу' : 'Позиций нет'}</Text>
           ) : (
             itemRows.map((row, index) => (
               <Animated.View key={row.checkItem.id} entering={FadeIn} exiting={FadeOut} layout={rowLayout}>
-                {index > 0 && <View style={styles.divider} />}
+                {index > 0 || hasRental ? <View style={[styles.divider, styles.billDivider]} /> : null}
                 <ItemRow
                   name={row.item?.name ?? '—'}
                   checkItemId={row.checkItem.id}
                   quantity={row.checkItem.quantity}
                   price={toNumber(row.checkItem.priceAtTime)}
                   isOpen={isOpen}
+                  icon={iconFor(row.checkItem.itemId)}
                   onQuantity={actions.onQuantity}
                 />
               </Animated.View>
             ))
           )}
+          {check.discounts.map((d) => (
+            <Animated.View key={d.id} entering={FadeIn} exiting={FadeOut} layout={rowLayout}>
+              <View style={[styles.divider, styles.billDivider]} />
+              <SwipeToDelete enabled={isOpen} label="Снять" onDelete={() => actions.onRemoveDiscount(d.id)}>
+                <View style={styles.billRow}>
+                  <RowIcon symbol="tag" color={GREEN_HEX} />
+                  <View style={styles.flex}>
+                    <Text style={[type.body, styles.label]} numberOfLines={1}>
+                      {d.name}
+                    </Text>
+                    {d.discountId ? <Text style={[type.footnote, styles.secondary]}>автоматическая</Text> : null}
+                  </View>
+                  <Text style={[type.body, type.amount, styles.green, styles.itemSum]}>{formatMoney(-toNumber(d.amount))}</Text>
+                </View>
+              </SwipeToDelete>
+            </Animated.View>
+          ))}
         </GlassView>
 
         {isOpen && check.playerId && <TaiSuggestions checkId={check.id} itemIds={new Set(itemRows.map((row) => row.checkItem.itemId))} />}
 
         {check.linkedEventId && <LinkedEventCard check={check} isOpen={isOpen} base={totals.eventBase} />}
 
-        {/* Скидка добавляется из меню «…», здесь — только уже применённые (снимаются свайпом). */}
-        {check.discounts.length > 0 && (
-          <Animated.View entering={FadeIn} exiting={FadeOut} layout={rowLayout}>
-            <GlassView style={styles.card}>
-              <CardHeader title="Скидки" detail={formatMoney(-discountsTotal)} detailColor={colors.green} />
-              {check.discounts.map((d, index) => (
-                <Animated.View key={d.id} entering={FadeIn} exiting={FadeOut} layout={rowLayout}>
-                  {index > 0 && <View style={styles.divider} />}
-                  <SwipeToDelete enabled={isOpen} label="Снять" onDelete={() => actions.onRemoveDiscount(d.id)}>
-                    <View style={styles.lineRow}>
-                      <View style={styles.flex}>
-                        <Text style={[type.body, styles.label]} numberOfLines={1}>
-                          {d.name}
-                        </Text>
-                        {d.discountId && <Text style={[type.caption1, styles.tertiary]}>автоматическая</Text>}
-                      </View>
-                      <Text style={[type.body, type.amount, styles.green]}>{formatMoney(-toNumber(d.amount))}</Text>
-                    </View>
-                  </SwipeToDelete>
-                </Animated.View>
-              ))}
-            </GlassView>
-          </Animated.View>
-        )}
-
-        {check.spaceId && check.spaceStartAt && (
-          <GlassView style={styles.card}>
-            <CardHeader icon="timer" title="Аренда зоны" detail={check.spaceEndAt ? 'завершена' : 'идёт'} detailColor={check.spaceEndAt ? undefined : colors.green} />
-            <RentalTimer startAt={check.spaceStartAt} endAt={check.spaceEndAt} />
-            <View style={styles.lineRow}>
-              <Text style={[type.subhead, styles.secondary, styles.flex]}>
-                {check.spaceEndAt ? `${formatTime(check.spaceStartAt)} – ${formatTime(check.spaceEndAt)}` : `с ${formatTime(check.spaceStartAt)}`}
-                {check.spaceHourlyRate ? ` · ${formatMoney(check.spaceHourlyRate)}/ч` : ''}
-              </Text>
-              <RollingText text={formatMoney(totals.rental)} style={[type.headline, type.amount, styles.label]} />
-            </View>
-            {isOpen && (
-              <Pressable onPress={actions.onEditRental} style={({ pressed }) => [styles.softButton, pressed && styles.pressed]} accessibilityRole="button">
-                <SymbolView name="clock.arrow.circlepath" size={15} weight="semibold" tintColor={colors.accent} />
-                <Text style={[type.subhead, styles.softButtonText]}>Изменить время</Text>
-              </Pressable>
-            )}
-          </GlassView>
-        )}
       </LayoutAnimationConfig>
     </ScrollView>
+  );
+}
+
+/* ─────────────────────────── Подписи и строки счёта ─────────────────────────── */
+
+type RowIconLook = { symbol: SFSymbol; color: string };
+/** Значкам нужен hex: к нему добавляется прозрачность подложки, а системные цвета iOS — не строки. */
+const GREEN_HEX = '#34C759';
+const PURPLE_HEX = '#AF52DE';
+
+/** Капсула под суммой: сколько идёт чек, с какого времени, предоплата. */
+function Capsule({ icon, text, strong }: { icon?: SFSymbol; text: string; strong?: boolean }) {
+  return (
+    <View style={styles.capsule}>
+      {icon ? <SymbolView name={icon} size={13} weight="semibold" tintColor={colors.accent} /> : null}
+      <Text style={[type.subhead, type.amount, strong ? styles.capsuleStrong : styles.secondary]} numberOfLines={1} maxFontSizeMultiplier={FONT_SCALE_MAX.compact}>
+        {text}
+      </Text>
+    </View>
+  );
+}
+
+/** Значок типа строки счёта: зона, категория позиции, скидка. */
+function RowIcon({ symbol, color }: RowIconLook) {
+  return (
+    <View style={[styles.rowIcon, { backgroundColor: `${color}29` }]}>
+      <SymbolView name={symbol} size={15} weight="semibold" tintColor={color} />
+    </View>
+  );
+}
+
+/** Аренда — первой строкой счёта: живая точка вместо «идёт», время меняется кнопкой-часами. */
+function RentalRow({ check, amount, isOpen, onEdit }: { check: CheckDetail; amount: number; isOpen: boolean; onEdit: () => void }) {
+  const live = !check.spaceEndAt;
+  const now = useNow(30_000);
+  const minutes = Math.max(0, Math.floor(((check.spaceEndAt ? Date.parse(check.spaceEndAt) : now) - Date.parse(check.spaceStartAt!)) / 60_000));
+  const hours = Math.ceil(minutes / 60);
+  const rate = check.spaceHourlyRate ? `${formatMoney(check.spaceHourlyRate)}/ч` : null;
+  return (
+    <View style={styles.billRow}>
+      <RowIcon symbol="house" color={GREEN_HEX} />
+      <View style={styles.flex}>
+        <Text style={[type.body, styles.label]} numberOfLines={1}>
+          Аренда
+        </Text>
+        <View style={styles.rentalMeta}>
+          {live ? <View style={styles.liveDot} /> : null}
+          <Text style={[type.footnote, styles.secondary]} numberOfLines={1}>
+            {[`${hours} ч`, rate].filter(Boolean).join(' · ')}
+          </Text>
+        </View>
+      </View>
+      {isOpen ? (
+        <Pressable onPress={onEdit} hitSlop={8} style={({ pressed }) => [styles.clockButton, pressed && styles.pressed]} accessibilityRole="button" accessibilityLabel="Изменить время аренды">
+          <SymbolView name="clock" size={14} weight="semibold" tintColor={colors.accent} />
+        </Pressable>
+      ) : null}
+      <RollingText text={formatMoney(amount)} style={[type.body, type.amount, styles.label, styles.itemSum]} />
+    </View>
   );
 }
 
@@ -263,6 +312,7 @@ function ItemRow({
   quantity,
   price,
   isOpen,
+  icon,
   onQuantity,
 }: {
   name: string;
@@ -270,6 +320,7 @@ function ItemRow({
   quantity: number;
   price: number;
   isOpen: boolean;
+  icon: RowIconLook;
   onQuantity: CheckActions['onQuantity'];
 }) {
   // Количество меняется сразу, сервер подтверждает следом; быстрые нажатия не прыгают назад.
@@ -296,11 +347,13 @@ function ItemRow({
   return (
     <SwipeToDelete enabled={isOpen} label="Удалить" onDelete={() => change(0)}>
       <View style={[styles.itemRow, stacked && styles.itemRowStacked, qty === 0 && styles.removing]}>
+        {!stacked ? <RowIcon symbol={icon.symbol} color={icon.color} /> : null}
         <View style={[styles.flex, stacked && styles.itemNameStacked]}>
           <Text style={[type.body, styles.label]} numberOfLines={2}>
             {name}
           </Text>
-          {qty > 1 && <RollingText text={`${isOpen ? '' : `${qty} × `}${formatMoney(price)}${isOpen ? ' за шт.' : ''}`} style={[type.footnote, styles.secondary]} />}
+          {/* «× 360 ₽» вместо «360 ₽ за шт.»; при одной штуке подписи нет — цена справа. */}
+          {qty > 1 && <RollingText text={isOpen ? `× ${formatMoney(price)}` : `${qty} × ${formatMoney(price)}`} style={[type.footnote, styles.secondary]} />}
         </View>
         {isOpen && (
           <View style={styles.stepper}>
@@ -533,17 +586,6 @@ function Pill({ icon, text, color }: { icon: SFSymbol; text: string; color: type
 }
 
 /** Живой таймер аренды: обновляется каждую секунду, не перерисовывая весь чек. */
-function RentalTimer({ startAt, endAt }: { startAt: string; endAt: string | null }) {
-  const now = useNow(1000);
-  const end = endAt ? new Date(endAt).getTime() : now;
-  const seconds = Math.max(0, Math.floor((end - new Date(startAt).getTime()) / 1000));
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  const s = seconds % 60;
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return <Text style={[styles.timer, type.amount]} maxFontSizeMultiplier={FONT_SCALE_MAX.display}>{`${h}:${pad(m)}:${pad(s)}`}</Text>;
-}
-
 const styles = StyleSheet.create({
   // Низ: на iOS отступ под таб-бар и плашку чека даёт сам UIKit (contentInsetAdjustmentBehavior),
   // прежние 120 pt добавлялись сверху и оставляли пустоту под последней карточкой.
@@ -558,6 +600,20 @@ const styles = StyleSheet.create({
   hero: { alignItems: 'center', gap: 2, paddingTop: space.sm, paddingBottom: space.sm },
   heroCaption: { color: colors.secondaryLabel, letterSpacing: 0.6, fontWeight: '600' },
   heroAmount: { fontSize: 52, lineHeight: 62, color: colors.label },
+  capsules: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: space.sm, marginTop: space.xs },
+  capsule: { flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 30, paddingHorizontal: 11, borderRadius: 15, backgroundColor: colors.fill },
+  capsuleStrong: { color: colors.label, fontWeight: '600' },
+  nameRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
+  shrink: { flexShrink: 1 },
+  tierPill: { paddingHorizontal: 7, paddingVertical: 2, borderRadius: 9, backgroundColor: `${PURPLE_HEX}33` },
+  tierText: { color: PURPLE_HEX, fontWeight: '700', letterSpacing: 0.3 },
+  billCard: { paddingVertical: space.xs },
+  billRow: { flexDirection: 'row', alignItems: 'center', gap: space.md, paddingVertical: space.sm, minHeight: 52 },
+  billDivider: { marginLeft: 44 },
+  rowIcon: { width: 32, height: 32, borderRadius: 10, borderCurve: 'continuous', alignItems: 'center', justifyContent: 'center' },
+  rentalMeta: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  liveDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: colors.green },
+  clockButton: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.fill },
   pill: {
     marginTop: space.sm,
     flexDirection: 'row',
