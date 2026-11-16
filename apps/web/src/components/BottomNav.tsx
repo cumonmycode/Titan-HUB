@@ -5,6 +5,7 @@ import { Icon } from '@/components/Icon'
 import { TaiLogo } from '@/components/TaiLogo'
 import { useClubContext } from '@/components/ClubGate'
 import { NAV_PRIMARY, isNavActive, type NavItem as NavItemType } from '@/lib/nav'
+import { hidesAppChrome } from '@/lib/publicRoutes'
 
 function NavItem({ href, icon, label, short, pathname }: NavItemType & { pathname: string }) {
   const active = isNavActive(href, pathname)
@@ -77,8 +78,8 @@ export function BottomNav() {
   const aiEnabled = moduleEnabled('ai')
 
   if (pathname === '/login') return null
-  // Публичные страницы (запись, политика, поддержка) — без меню кассы.
-  if (['/book', '/privacy', '/terms', '/support'].includes(pathname)) return null
+  // Публичные страницы (запись, политика, поддержка, вики) — без меню кассы.
+  if (hidesAppChrome(pathname)) return null
   if (pathname.startsWith('/tablet')) return null
   if (pathname.startsWith('/superadmin')) return null
   // Карточка чека (/pos/<id>) — свой back-кнопка + прижатая плашка оплаты,

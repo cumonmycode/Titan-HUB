@@ -17,6 +17,7 @@ import { Icon } from '@/components/Icon'
 import { INP, LBL, Button, Sheet, ConfirmDialog } from '@/components/manage/DesignSystem'
 import { StateView } from '@/components/StateView'
 import { useToast } from '@/components/Toast'
+import { ConnectSheet, useConnectOverview } from './ConnectSheet'
 
 interface IntegrationItem { key: string; label: string; configured: boolean; masked: string | null }
 interface Field { key: string; label: string; type: 'text' | 'password'; placeholder: string; hint: string; optional?: boolean }
@@ -27,12 +28,19 @@ interface Product {
   color: string
   blurb: string // короткое описание для магазина
   about: string // что даёт интеграция (детально)
-  kind: 'keys' | 'gomafia'
+  kind: 'keys' | 'gomafia' | 'connect'
   fields: Field[]
   comingSoon?: boolean // карточка-витрина «Скоро» (без установки)
 }
 
 const CATALOG: Product[] = [
+  {
+    id: 'titan_connect', name: 'Titan Connect', icon: 'hub', color: '#8B5CF6',
+    blurb: 'Данные клиентов для ваших сервисов',
+    about: 'Своя интеграция Titan HUB: сайт рейтинга, бот турниров, CRM получают ники, имена, фото и другие данные клиентов клуба. Подключение одноразовым кодом — сервис вводит его один раз и дальше работает без повторной настройки, пока вы его не отключите.',
+    kind: 'connect',
+    fields: [],
+  },
   {
     id: 'poll_bot', name: 'Tai — бот клуба', icon: 'smart_toy', color: '#8B5CF6',
     blurb: 'Один Telegram-бот на всё',
@@ -182,7 +190,11 @@ const CATALOG: Product[] = [
 type GmStatus = { connected: boolean; source: string | null; clubId: string | null; clubTitle: string | null; loginMasked: string | null }
 
 interface Status { installed: boolean; ok: boolean; partial: boolean; masked: string | null; detail: string }
-function statusOf(p: Product, items: IntegrationItem[], gm?: GmStatus): Status {
+function statusOf(p: Product, items: IntegrationItem[], gm?: GmStatus, connectCount = 0): Status {
+  if (p.kind === 'connect') {
+    if (!connectCount) return { installed: false, ok: false, partial: false, masked: null, detail: '' }
+    return { installed: true, ok: true, partial: false, masked: null, detail: `сервисов: ${connectCount}` }
+  }
   if (p.kind === 'gomafia') {
     if (!gm?.connected) return { installed: false, ok: false, partial: false, masked: null, detail: '' }
     return { installed: true, ok: !!gm.clubId, partial: !gm.clubId, masked: gm.loginMasked ?? null, detail: gm.clubTitle ? `клуб «${gm.clubTitle}»` : gm.clubId ? `клуб #${gm.clubId}` : 'клуб не указан' }
@@ -202,6 +214,8 @@ export function IntegrationsTab() {
 
   const { data, isLoading, error } = useQuery<{ items: IntegrationItem[] }>({ queryKey: ['integrations'], queryFn: () => api.get('/system/integrations') })
   const { data: gm } = useQuery<GmStatus>({ queryKey: ['gomafia-status'], queryFn: () => api.get('/gomafia/status') })
+  const connectCount = useConnectOverview().data?.items.length ?? 0
+  const [connectOpen, setConnectOpen] = useState(false)
 
   const [storeOpen, setStoreOpen] = useState(false)
   const [storeProduct, setStoreProduct] = useState<Product | null>(null) // карточка в магазине (инфо)
@@ -241,15 +255,23 @@ export function IntegrationsTab() {
     onError: () => show('Не удалось удалить', 'error'),
   })
 
-  function startWizard(p: Product) { setStoreProduct(null); setStoreOpen(false); setWizard(p); setStep(0); setVals({}) }
+  // Titan Connect — без ключей: своё окно со списком сервисов и одноразовыми кодами.
+  function startWizard(p: Product) {
+    setStoreProduct(null); setStoreOpen(false)
+    if (p.kind === 'connect') { setConnectOpen(true); return }
+    setWizard(p); setStep(0); setVals({})
+  }
   function closeWizard() { setWizard(null); setStep(0); setVals({}) }
-  function openSettings(p: Product) { setSettings(p); setVals({}) }
+  function openSettings(p: Product) {
+    if (p.kind === 'connect') { setConnectOpen(true); return }
+    setSettings(p); setVals({})
+  }
 
   if (isLoading && !data) return <StateView state="loading" />
   if (error) return <StateView state="error" description="Не удалось загрузить интеграции" />
 
   const items = data?.items ?? []
-  const withStatus = CATALOG.map(p => ({ p, st: statusOf(p, items, gm) }))
+  const withStatus = CATALOG.map(p => ({ p, st: statusOf(p, items, gm, connectCount) }))
   const installed = withStatus.filter(x => x.st.installed)
   const available = CATALOG.filter(p => !withStatus.find(x => x.p.id === p.id)!.st.installed)
 
@@ -451,6 +473,8 @@ export function IntegrationsTab() {
           </Sheet>
         )
       })()}
+
+      <ConnectSheet open={connectOpen} onClose={() => setConnectOpen(false)} />
 
       <ConfirmDialog
         open={!!confirmDel}

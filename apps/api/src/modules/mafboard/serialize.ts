@@ -62,6 +62,7 @@ export function toPlayerJSON(player: GomafiaPlayer, isInHostClub: boolean): GoMa
     city: player.city,
     tournamentsPlayed: player.tournaments == null ? null : Math.round(player.tournaments),
     isInHostClub,
+    isVerified: false,
   }
 }
 
@@ -92,6 +93,10 @@ export function toAccountJSON(user: MafboardUser) {
           linkedAt: user.gomafia.linkedAt.toISOString(),
           syncedAt: user.gomafia.syncedAt.toISOString(),
         }
+      : null,
+    // Ключ клуба наружу не уходит: приложению хватает названия и времени подключения.
+    titan: user.titan
+      ? { club: { name: user.titan.clubName }, scopes: user.titan.scopes, linkedAt: user.titan.linkedAt.toISOString() }
       : null,
   }
 }

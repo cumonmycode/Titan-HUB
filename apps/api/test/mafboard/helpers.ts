@@ -4,10 +4,12 @@ import type { GomafiaLoginResult, GomafiaPlayer } from '../../src/lib/gomafia.js
 import type { BotMessenger } from '../../src/modules/mafboard/bot.js'
 import type { MafboardConfig } from '../../src/modules/mafboard/config.js'
 import { RosterCache, type GoMafiaGateway } from '../../src/modules/mafboard/gomafia.js'
+import { noHub } from '../../src/modules/mafboard/hub.js'
+import { TitanConnectError, TitanRosterCache, type TitanClient, type TitanConnectGateway } from '../../src/modules/mafboard/titan.js'
 import { DELETED_HOST_ID } from '../../src/modules/mafboard/config.js'
 import { GomafiaTakenError, type MafboardRepo } from '../../src/modules/mafboard/repo.js'
 import { createMafboardRouter, type MafboardDeps } from '../../src/modules/mafboard/router.js'
-import type { DeviceSession, LoginTicket, MafboardUser, QrTicket, RefreshTokenRow, StoredActiveGame, StoredGame, StoredStudioSettings, TicketGuard } from '../../src/modules/mafboard/types.js'
+import type { DeviceSession, LoginTicket, MafboardUser, QrTicket, RefreshTokenRow, StoredActiveGame, StoredGame, StoredStudioSettings, TicketGuard, TitanLinkState } from '../../src/modules/mafboard/types.js'
 import { VkError, type VkAppConfig, type VkGateway, type VkTokens } from '../../src/modules/mafboard/vk.js'
 
 // Вебхук бота подписывается от JWT_SECRET Titan HUB (lib/tgWebhook.ts).
@@ -26,6 +28,50 @@ export const config: MafboardConfig = {
   termsVersion: '1',
   reviewPassword: 'review-password-0123456789',
   vk: { clientId: 'vk-client', clientSecret: 'vk-secret', redirectUri: 'https://mafboard.test/api/mafboard/v1/vk/callback' },
+  titanConnectUrl: 'https://titanpos.test/api/connect/v1',
+}
+
+export const TITAN_API_BASE = 'https://club.titanpos.test/api/connect/v1'
+
+export function titanClient(id: string, nickname: string, extra: Partial<TitanClient> = {}): TitanClient {
+  return { id, nickname, fullName: null, status: null, isResident: false, gomafiaId: null, deleted: false, photoUrl: null, ...extra }
+}
+
+/**
+ * Titan Connect без сети: код `GOOD-CODE` меняется на ключ `tcn_live`, клиенты — `clients`
+ * (страницами по `pageSize`). `revoked` — ключ отозван в HUB, `down` — HUB не отвечает.
+ */
+export class FakeTitan implements TitanConnectGateway {
+  members: TitanClient[] = []
+  pageSize = 200
+  revoked = false
+  down = false
+  apiBase = TITAN_API_BASE
+  calls = { clients: 0, disconnect: [] as string[] }
+
+  async exchange(code: string) {
+    if (this.down) throw new TitanConnectError('unavailable', 'нет связи')
+    if (code.replace(/[\s-]/g, '').toUpperCase() !== 'GOODCODE') throw new TitanConnectError('invalid_code', 'Код неверный, уже использован или истёк.')
+    return { accessToken: 'tcn_live', connectionId: 'conn-1', scopes: ['clients:read', 'clients:photos'], apiBase: this.apiBase }
+  }
+
+  async clubName() {
+    return 'TITAN Нальчик'
+  }
+
+  async clients(_apiBase: string, token: string, cursor: string | null) {
+    this.calls.clients += 1
+    if (this.down) throw new TitanConnectError('unavailable', 'нет связи')
+    if (this.revoked || token !== 'tcn_live') throw new TitanConnectError('invalid_token', 'Ключ не действует')
+    const start = cursor ? Number(cursor) : 0
+    const items = this.members.slice(start, start + this.pageSize)
+    const next = start + this.pageSize < this.members.length ? String(start + this.pageSize) : null
+    return { items, nextCursor: next }
+  }
+
+  async disconnect(_apiBase: string, token: string) {
+    this.calls.disconnect.push(token)
+  }
 }
 
 /** VK без сети: код `good` меняется на токены, токен обновления `dead-token` отозван. */
@@ -57,6 +103,7 @@ export class MemoryRepo implements MafboardRepo {
   games = new Map<string, StoredGame>()
   activeGames = new Map<string, StoredActiveGame>()
   studio = new Map<string, StoredStudioSettings>()
+  titanMatchRows = new Map<string, number | null>()
   private seq = 0
 
   private uuid(): string {
@@ -67,6 +114,10 @@ export class MemoryRepo implements MafboardRepo {
   async userById(id: string) { return this.users.get(id) ?? null }
   async userByTgId(tgId: number) { return [...this.users.values()].find((u) => u.tgId === tgId) ?? null }
   async userByGomafiaId(id: number) { return [...this.users.values()].find((u) => u.gomafia?.player.id === id) ?? null }
+  async verifiedGomafiaIds(ids: number[]) {
+    const linked = new Set([...this.users.values()].flatMap((u) => (u.gomafia ? [u.gomafia.player.id] : [])))
+    return new Set(ids.filter((id) => linked.has(id)))
+  }
 
   async upsertUserFromTelegram(p: Parameters<MafboardRepo['upsertUserFromTelegram']>[0]) {
     const existing = await this.userByTgId(p.tgId)
@@ -79,6 +130,7 @@ export class MemoryRepo implements MafboardRepo {
       phone: p.phone,
       termsVersion: p.termsVersion,
       gomafia: existing?.gomafia ?? null,
+      titan: existing?.titan ?? null,
     }
     this.users.set(user.id, user)
     return user
@@ -303,6 +355,27 @@ export class MemoryRepo implements MafboardRepo {
     if (this.activeGames.get(id)?.hostUserId === userId) this.activeGames.delete(id)
   }
 
+  async setTitanLink(userId: string, link: TitanLinkState | null) {
+    const user = this.users.get(userId)
+    if (!user) return null
+    const updated: MafboardUser = { ...user, titan: link }
+    this.users.set(userId, updated)
+    return updated
+  }
+
+  async titanMatches(apiBase: string) {
+    const prefix = `${apiBase}|`
+    return new Map(
+      [...this.titanMatchRows].filter(([key]) => key.startsWith(prefix)).map(([key, value]) => [key.slice(prefix.length), value] as const),
+    )
+  }
+
+  async setTitanMatch(apiBase: string, clientId: string, match: { goMafiaId: number | null } | null) {
+    const key = `${apiBase}|${clientId}`
+    if (match) this.titanMatchRows.set(key, match.goMafiaId)
+    else this.titanMatchRows.delete(key)
+  }
+
   async studioSettings(userId: string) {
     return this.studio.get(userId) ?? null
   }
@@ -411,6 +484,7 @@ export interface TestContext {
   repo: MemoryRepo
   messenger: FakeMessenger
   gomafia: FakeGoMafia
+  titan: FakeTitan
   /** Дождаться фоновых задач (обработка апдейтов бота). */
   flush(): Promise<void>
   clock: { now: Date }
@@ -420,6 +494,7 @@ export function createTestContext(overrides: Partial<MafboardDeps> = {}): TestCo
   const repo = new MemoryRepo()
   const messenger = new FakeMessenger()
   const gomafia = new FakeGoMafia()
+  const titan = new FakeTitan()
   const clock = { now: NOW }
   const pending: Promise<void>[] = []
   const seen = new Set<string>()
@@ -430,6 +505,9 @@ export function createTestContext(overrides: Partial<MafboardDeps> = {}): TestCo
     config,
     gomafia,
     roster: new RosterCache(gomafia, () => clock.now.getTime()),
+    hub: noHub,
+    titan,
+    titanRoster: new TitanRosterCache(titan, () => clock.now.getTime()),
     messenger,
     vk: new FakeVk(),
     limiter: {
@@ -456,7 +534,7 @@ export function createTestContext(overrides: Partial<MafboardDeps> = {}): TestCo
 
   const app = new Hono().route('/api/mafboard', createMafboardRouter(() => deps))
   return {
-    app, deps, repo, messenger, gomafia, clock,
+    app, deps, repo, messenger, gomafia, titan, clock,
     async flush() {
       while (pending.length > 0) await pending.shift()
     },

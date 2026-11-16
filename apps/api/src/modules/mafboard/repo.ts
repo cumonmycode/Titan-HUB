@@ -1,6 +1,6 @@
 import type {
   DeviceSession, GoMafiaClubJSON, GoMafiaPlayerJSON, LoginTicket, MafboardUser, QrTicket, RefreshTokenRow, StoredActiveGame, StoredGame, StoredStudioSettings, TelegramProfile,
-  TicketGuard, TicketPatch, TicketStep,
+  TicketGuard, TicketPatch, TicketStep, TitanLinkState,
 } from './types.js'
 
 /** Аккаунт GoMafia уже привязан к другому пользователю (уникальность gomafia_id). */
@@ -19,6 +19,8 @@ export interface MafboardRepo {
   userById(id: string): Promise<MafboardUser | null>
   userByTgId(tgId: number): Promise<MafboardUser | null>
   userByGomafiaId(gomafiaId: number): Promise<MafboardUser | null>
+  /** Какие из этих аккаунтов GoMafia привязаны к пользователям MafBoard — подтверждённые профили. */
+  verifiedGomafiaIds(gomafiaIds: number[]): Promise<Set<number>>
   /** Создать или обновить пользователя по Telegram (вход подтверждён в боте). */
   upsertUserFromTelegram(profile: TelegramProfile & { phone: string; termsVersion: string }): Promise<MafboardUser>
   /** Привязать (или отвязать — null) аккаунт GoMafia. Бросает GomafiaTakenError при занятом аккаунте. */
@@ -27,6 +29,8 @@ export interface MafboardRepo {
     link: { player: GoMafiaPlayerJSON; club: GoMafiaClubJSON | null } | null,
     at: Date,
   ): Promise<MafboardUser | null>
+  /** Подключить (или отключить — null) клуб Titan HUB через Titan Connect. */
+  setTitanLink(userId: string, link: TitanLinkState | null): Promise<MafboardUser | null>
   /**
    * Удалить аккаунт: сессии, билеты, идущие и личные игры уходят вместе с ним, игры клуба
    * остаются в его истории без ведущего. false — такого пользователя уже нет.
@@ -117,6 +121,12 @@ export interface MafboardRepo {
   saveActiveGame(game: StoredActiveGame): Promise<'saved' | 'stale' | 'conflict'>
   activeGamesByHost(userId: string, limit: number): Promise<StoredActiveGame[]>
   deleteActiveGame(userId: string, id: string): Promise<void>
+
+  // ─── Сопоставления Titan ↔ GoMafia ─────────────────────────────────────────
+  /** Ручные сопоставления клуба Titan: общие для всех его ведущих. */
+  titanMatches(apiBase: string): Promise<Map<string, number | null>>
+  /** Записать сопоставление клиента; `match` null — снять его (вернуть номер из HUB). */
+  setTitanMatch(apiBase: string, clientId: string, match: { goMafiaId: number | null; userId: string; at: Date } | null): Promise<void>
 
   // ─── Настройки MafBoard Studio ─────────────────────────────────────────────
   studioSettings(userId: string): Promise<StoredStudioSettings | null>

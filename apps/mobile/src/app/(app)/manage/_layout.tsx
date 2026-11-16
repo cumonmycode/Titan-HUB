@@ -111,6 +111,10 @@ export default function ManageLayout() {
       <Stack.Screen name="settings/integrations" options={formHeader({ title: 'Интеграции' })} />
       <Stack.Screen name="settings/integration-store" options={formHeader({ title: 'Добавить интеграцию' })} />
       <Stack.Screen name="settings/integration" options={formHeader()} />
+      {/* Titan Connect: данные клиентов для сторонних сервисов по одноразовому коду. */}
+      <Stack.Screen name="settings/connect/index" options={formHeader({ title: 'Titan Connect' })} />
+      <Stack.Screen name="settings/connect/new" options={editorModal} />
+      <Stack.Screen name="settings/connect/connection" options={formHeader()} />
       {/* Home Assistant для HUB: подключение и помещения шторки «Свет и климат» на кассе. */}
       <Stack.Screen name="settings/home/index" options={formHeader({ title: 'Home Assistant' })} />
       <Stack.Screen name="settings/home/zone" options={formHeader()} />

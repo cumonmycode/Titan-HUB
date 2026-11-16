@@ -8,6 +8,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { studioSecretsKey } from './studio.js'
+import { titanConnectUrl } from './titan.js'
 import type { VkAppConfig } from './vk.js'
 
 export interface MafboardConfig {
@@ -28,6 +29,8 @@ export interface MafboardConfig {
   studioSecretsKey: Uint8Array
   /** Приложение VK Видео Live для входа MBS (vk.ts). null — вход VK выключен. */
   vk: VkAppConfig | null
+  /** Titan Connect для обмена кода клуба (MAFBOARD_TITAN_CONNECT_URL); адреса клубов — только на его домене. */
+  titanConnectUrl: string
 }
 
 /** Логин проверяющего App Store — пароль к нему только в MAFBOARD_REVIEW_PASSWORD. */
@@ -107,6 +110,7 @@ export function readMafboardConfig(env: NodeJS.ProcessEnv = process.env): Config
         ? env['MAFBOARD_REVIEW_PASSWORD']!.trim()
         : null,
       vk: readVk(env, appLinkBase),
+      titanConnectUrl: titanConnectUrl(env),
     },
   }
 }

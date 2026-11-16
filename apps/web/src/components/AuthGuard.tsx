@@ -2,8 +2,7 @@
 import { useEffect } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
 import { useAuthStore } from '@/store/auth.store'
-
-const PUBLIC = ['/login', '/privacy', '/terms', '/book', '/support']
+import { isPublicPath } from '@/lib/publicRoutes'
 
 export function AuthGuard({ children }: { children: React.ReactNode }) {
   const router = useRouter()
@@ -23,7 +22,7 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
     if (!_hasHydrated) return
 
     // Публичные страницы, планшетный киоск и суперадмин — никаких редиректов
-    if (PUBLIC.includes(pathname) || isTablet || isSuperadmin) return
+    if (isPublicPath(pathname) || isTablet || isSuperadmin) return
 
     if (!token) {
       router.replace('/login')
@@ -36,6 +35,6 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
   }, [token, user, pathname, router, _hasHydrated, isTablet])
 
   if (!_hasHydrated) return null
-  if (!token && !PUBLIC.includes(pathname) && !isTablet && !isSuperadmin) return null
+  if (!token && !isPublicPath(pathname) && !isTablet && !isSuperadmin) return null
   return <>{children}</>
 }

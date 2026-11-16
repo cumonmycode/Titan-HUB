@@ -1,0 +1,170 @@
+import type { Context, Hono, MiddlewareHandler } from 'hono'
+import { zValidator } from '@hono/zod-validator'
+import { z } from 'zod'
+import type { MafboardEnv } from './router.js'
+import { errorBody, toAccountJSON } from './serialize.js'
+import { openSecrets, sealSecrets } from './studio.js'
+import { TitanConnectError, toTitanPlayerJSON, trustedApiBase, type TitanClient } from './titan.js'
+import type { MafboardUser, TitanLinkState } from './types.js'
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Ручки Titan Connect приложения MafBoard (контракт — docs/MAFBOARD.md, раздел «Titan Connect»):
+//   POST/DELETE /v1/me/titan                — подключить клуб кодом из HUB / отключить;
+//   GET         /v1/titan/players           — клиенты клуба как игроки для подбора;
+//   PUT/DELETE  /v1/titan/players/:id/gomafia — ручное сопоставление с GoMafia.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const LINK_LIMIT = { count: 10, windowSec: 600 }
+const ROSTER_LIMIT_PER_MIN = 60
+const MATCH_LIMIT_PER_HOUR = 300
+/** Код вида K7QM-3XPA; регистр, пробелы и дефис Titan не важны — проверяет он сам. */
+const codeSchema = z.object({ code: z.string().trim().min(6).max(20) })
+const matchSchema = z.object({ goMafiaID: z.number().int().positive().max(2 ** 48 - 1).nullable() })
+const CLIENT_ID = /^[0-9a-f-]{8,64}$/i
+
+type Status = 400 | 404 | 409 | 422 | 429 | 502
+const fail = (c: Context, status: Status, code: string, message: string) => c.json(errorBody(code, message), status)
+
+function body<T extends z.ZodTypeAny>(schema: T) {
+  return zValidator('json', schema, (result, c) => {
+    if (!result.success) return c.json(errorBody('validation', 'Некорректные данные запроса'), 422)
+  })
+}
+
+/** Ошибка Titan → ответ приложению. Отозванный ключ — отдельный код: приложение предложит переподключить клуб. */
+function titanFailure(c: Context, error: unknown) {
+  if (error instanceof TitanConnectError) {
+    if (error.code === 'invalid_token') {
+      return fail(c, 409, 'titan_revoked', 'Клуб отключил MafBoard в Titan HUB. Получите новый код и подключите клуб заново')
+    }
+    if (error.code === 'invalid_code') return fail(c, 422, 'invalid_code', error.message)
+    if (error.code === 'too_many_attempts') return fail(c, 429, 'rate_limited', error.message)
+  }
+  return fail(c, 502, 'titan_unavailable', 'Titan HUB не отвечает, попробуйте позже')
+}
+
+function tokenOf(c: Context<MafboardEnv>, link: TitanLinkState): string | null {
+  const secret = openSecrets(c.get('deps').config.studioSecretsKey, link.tokenSealed)
+  return typeof secret?.['token'] === 'string' ? secret['token'] : null
+}
+
+/** Клиенты клуба ведущего и его ручные сопоставления. Ошибку уже превратили в ответ — вернётся Response. */
+async function clubRoster(c: Context<MafboardEnv>, user: MafboardUser) {
+  const deps = c.get('deps')
+  const link = user.titan
+  if (!link) return fail(c, 409, 'titan_not_linked', 'Подключите клуб Titan HUB')
+  const token = tokenOf(c, link)
+  if (!token) return fail(c, 409, 'titan_revoked', 'Ключ клуба не читается. Подключите клуб заново')
+  try {
+    const [clients, matches] = await Promise.all([deps.titanRoster.roster(link.apiBase, token), deps.repo.titanMatches(link.apiBase)])
+    return { link, clients, matches }
+  } catch (error) {
+    return titanFailure(c, error)
+  }
+}
+
+/** Сначала резиденты, затем по нику — так ведущему проще найти своих. */
+function byClubOrder(a: TitanClient, b: TitanClient): number {
+  return Number(b.isResident) - Number(a.isResident) || a.nickname.localeCompare(b.nickname, 'ru')
+}
+
+export function registerTitanRoutes(router: Hono<MafboardEnv>, requireUser: MiddlewareHandler<MafboardEnv>): void {
+  /** Подключить клуб: одноразовый код из Titan HUB меняется на постоянный ключ, ключ — шифротекстом в БД. */
+  router.post('/v1/me/titan', requireUser, body(codeSchema), async (c) => {
+    const deps = c.get('deps')
+    const user = c.get('user')
+    const allowed = await deps.limiter.hit(`mb:titan:link:${user.id}`, LINK_LIMIT.count, LINK_LIMIT.windowSec, { failClosed: true })
+    if (!allowed) return fail(c, 429, 'rate_limited', 'Слишком много попыток, попробуйте позже')
+
+    let exchange
+    try {
+      exchange = await deps.titan.exchange(c.req.valid('json').code)
+    } catch (error) {
+      return titanFailure(c, error)
+    }
+    const apiBase = trustedApiBase(exchange.apiBase, deps.config.titanConnectUrl)
+    if (!apiBase) return fail(c, 502, 'titan_unavailable', 'Titan HUB вернул адрес клуба вне домена Titan — подключение отменено')
+    const clubName = await deps.titan.clubName(apiBase, exchange.accessToken).catch(() => null)
+
+    const previous = user.titan
+    const updated = await deps.repo.setTitanLink(user.id, {
+      apiBase,
+      clubName,
+      connectionId: exchange.connectionId,
+      scopes: exchange.scopes,
+      tokenSealed: sealSecrets(deps.config.studioSecretsKey, { token: exchange.accessToken }),
+      linkedAt: deps.now(),
+    })
+    if (previous) releaseLink(c, previous)
+    deps.titanRoster.forget(apiBase)
+    return c.json(toAccountJSON(updated ?? user))
+  })
+
+  /** Отключить клуб: ключ удаляется у нас и (по возможности) отзывается в Titan HUB. */
+  router.delete('/v1/me/titan', requireUser, async (c) => {
+    const deps = c.get('deps')
+    const user = c.get('user')
+    const updated = await deps.repo.setTitanLink(user.id, null)
+    if (user.titan) releaseLink(c, user.titan)
+    return c.json(toAccountJSON(updated ?? user))
+  })
+
+  /** Клиенты клуба целиком (без удалённых): приложение ищет по ним само. */
+  router.get('/v1/titan/players', requireUser, async (c) => {
+    const deps = c.get('deps')
+    const user = c.get('user')
+    if (!(await deps.limiter.hit(`mb:titan:roster:${user.id}`, ROSTER_LIMIT_PER_MIN, 60))) {
+      return fail(c, 429, 'rate_limited', 'Слишком много запросов')
+    }
+    const roster = await clubRoster(c, user)
+    if (roster instanceof Response) return roster
+    const players = [...roster.clients].sort(byClubOrder).map((client) => toTitanPlayerJSON(roster.link.apiBase, client, roster.matches))
+    return c.json({ club: { name: roster.link.clubName }, players })
+  })
+
+  /** Сопоставить клиента с игроком GoMafia (`goMafiaID: null` — у клиента нет GoMafia, номер из HUB неверный). */
+  router.put('/v1/titan/players/:id/gomafia', requireUser, body(matchSchema), async (c) => {
+    const deps = c.get('deps')
+    const { goMafiaID } = c.req.valid('json')
+    // lib/gomafia отвечает null и на «нет игрока», и на сбой GoMafia — различить их нельзя.
+    if (goMafiaID != null && !(await deps.gomafia.player(String(goMafiaID)).catch(() => null))) {
+      return fail(c, 404, 'not_found', 'Игрок не найден в GoMafia или GoMafia не отвечает')
+    }
+    return saveMatch(c, { goMafiaId: goMafiaID })
+  })
+
+  /** Снять ручное сопоставление: снова действует номер GoMafia из профиля в HUB. */
+  router.delete('/v1/titan/players/:id/gomafia', requireUser, async (c) => saveMatch(c, null))
+}
+
+async function saveMatch(c: Context<MafboardEnv>, match: { goMafiaId: number | null } | null) {
+  const deps = c.get('deps')
+  const user = c.get('user')
+  const clientId = c.req.param('id') ?? ''
+  if (!CLIENT_ID.test(clientId)) return fail(c, 422, 'validation', 'Некорректный клиент')
+  if (!(await deps.limiter.hit(`mb:titan:match:${user.id}`, MATCH_LIMIT_PER_HOUR, 3600))) {
+    return fail(c, 429, 'rate_limited', 'Слишком много изменений, попробуйте позже')
+  }
+  const roster = await clubRoster(c, user)
+  if (roster instanceof Response) return roster
+  const client = roster.clients.find((item) => item.id === clientId)
+  if (!client) return fail(c, 404, 'not_found', 'Клиент не найден в клубе')
+
+  const apiBase = roster.link.apiBase
+  await deps.repo.setTitanMatch(apiBase, clientId, match ? { ...match, userId: user.id, at: deps.now() } : null)
+  const matches = new Map(roster.matches)
+  if (match) matches.set(clientId, match.goMafiaId)
+  else matches.delete(clientId)
+  return c.json(toTitanPlayerJSON(apiBase, client, matches))
+}
+
+/** Отозвать ключ в Titan в фоне: отключение у нас не должно зависеть от доступности HUB. */
+function releaseLink(c: Context<MafboardEnv>, link: TitanLinkState): void {
+  const deps = c.get('deps')
+  deps.titanRoster.forget(link.apiBase)
+  const token = tokenOf(c, link)
+  if (!token) return
+  deps.background(`mb:titan:release:${link.connectionId}`, async () => {
+    await deps.titan.disconnect(link.apiBase, token).catch(() => undefined)
+  })
+}
