@@ -15,6 +15,7 @@ import type { TitanConnectGateway, TitanRosterCache } from './titan.js'
 import { registerTitanRoutes } from './titanRoutes.js'
 import { GomafiaTakenError, type MafboardRepo } from './repo.js'
 import type { AimAccounts, TournamentSource } from './aim.js'
+import { gomafiaFailure, type GoMafiaSessions } from './gomafiaSessions.js'
 import { registerTournamentRoutes } from './tournaments.js'
 import { registerShareRoutes } from './shares.js'
 import { errorBody, toAccountJSON, toPlayerJSON, toQrStatusJSON, toQrTicketJSON, toSessionsJSON, toTicketStatusJSON } from './serialize.js'
@@ -56,6 +57,8 @@ export interface MafboardDeps {
   vk: VkGateway
   /** Вход в АИМ (admin.gomafia.pro) для турниров GoMafia: хранение пароля и сессии (aim.ts). */
   aimAccounts: AimAccounts
+  /** Вход в GoMafia от имени пользователя: сайт отдаёт профили, клубы и турниры только вошедшим. */
+  gomafiaSessions: GoMafiaSessions
   /** Публичная рассадка турниров с gomafia.pro. */
   tournaments: TournamentSource
   /** Telegram повторяет доставку — true только при первой встрече ключа. */
@@ -213,7 +216,10 @@ async function withFreshClub(deps: MafboardDeps, user: MafboardUser): Promise<Ma
   const age = deps.now().getTime() - link.syncedAt.getTime()
   if (age <= GOMAFIA_RESYNC_AFTER_MS) return user
 
-  const fresh = await withTimeout(refreshLink(deps.gomafia, link).catch(() => null), GOMAFIA_INLINE_TIMEOUT_MS)
+  const fresh = await withTimeout(
+    deps.gomafiaSessions.run(user.id, (auth) => refreshLink(deps.gomafia, link, auth)).catch(() => null),
+    GOMAFIA_INLINE_TIMEOUT_MS,
+  )
   if (fresh) return (await deps.repo.setGomafiaLink(user.id, fresh, deps.now())) ?? user
   return age > CLUB_TRUST_MAX_MS ? { ...user, gomafia: { ...link, club: null } } : user
 }
@@ -536,7 +542,7 @@ export function createMafboardRouter(resolveDeps: DepsResolver): Hono<Env> {
     const link = user.gomafia
     if (link && deps.now().getTime() - link.syncedAt.getTime() > GOMAFIA_RESYNC_AFTER_MS) {
       deps.background(`mb:sync:${user.id}`, async () => {
-        const fresh = await refreshLink(deps.gomafia, link)
+        const fresh = await deps.gomafiaSessions.run(user.id, (auth) => refreshLink(deps.gomafia, link, auth)).catch(() => null)
         if (fresh) await deps.repo.setGomafiaLink(user.id, fresh, deps.now())
       })
     }
@@ -568,6 +574,8 @@ export function createMafboardRouter(resolveDeps: DepsResolver): Hono<Env> {
     if (owner && owner.id !== user.id) return taken()
     try {
       const updated = await deps.repo.setGomafiaLink(user.id, { player: link.player, club: link.club }, deps.now())
+      // GoMafia отдаёт профили, клубы и турниры только вошедшим — сервер ходит туда этим входом.
+      await deps.gomafiaSessions.remember(user.id, login, password, link.cookie)
       // Обычно пароль АИМ тот же, что у GoMafia: сразу подключаем турниры. Не вышло — привязка
       // всё равно состоялась, АИМ подключается отдельно (POST /v1/me/gomafia/aim).
       await withTimeout(deps.aimAccounts.connect(user.id, login, password).catch(() => undefined), GOMAFIA_INLINE_TIMEOUT_MS)
@@ -594,6 +602,7 @@ export function createMafboardRouter(resolveDeps: DepsResolver): Hono<Env> {
     const user = c.get('user')
     const updated = await deps.repo.setGomafiaLink(user.id, null, deps.now())
     await deps.aimAccounts.disconnect(user.id)
+    await deps.gomafiaSessions.forget(user.id)
     return c.json(toAccountJSON(updated ?? user))
   })
 
@@ -607,10 +616,16 @@ export function createMafboardRouter(resolveDeps: DepsResolver): Hono<Env> {
       return fail(c, 429, 'rate_limited', 'Слишком много запросов поиска')
     }
     const hostClub = user.gomafia?.club?.id ?? null
-    const [players, hubNicknames] = await Promise.all([
-      searchForHost(deps.gomafia, deps.roster, query, hostClub),
-      hostClub == null ? new Set<string>() : deps.hub.nicknames(hostClub, query).catch(() => new Set<string>()),
-    ])
+    let players: Awaited<ReturnType<typeof searchForHost>>
+    let hubNicknames: Set<string>
+    try {
+      ;[players, hubNicknames] = await Promise.all([
+        deps.gomafiaSessions.run(user.id, (auth) => searchForHost(deps.gomafia, deps.roster, query, hostClub, auth)),
+        hostClub == null ? new Set<string>() : deps.hub.nicknames(hostClub, query).catch(() => new Set<string>()),
+      ])
+    } catch (error) {
+      return gomafiaFailure(c, error)
+    }
     const verified = await deps.repo.verifiedGomafiaIds(players.map((p) => p.id)).catch(() => new Set<number>())
     return c.json({ players: rankForHost(players, hubNicknames, verified) })
   })
@@ -619,7 +634,13 @@ export function createMafboardRouter(resolveDeps: DepsResolver): Hono<Env> {
     const deps = c.get('deps')
     const id = c.req.param('id')
     if (!/^\d+$/.test(id)) return fail(c, 422, 'validation', 'Некорректный номер игрока')
-    const detail = await deps.gomafia.player(id).catch(() => null)
+    let detail: Awaited<ReturnType<MafboardDeps['gomafia']['player']>>
+    try {
+      detail = await deps.gomafiaSessions.run(c.get('user').id, (auth) => deps.gomafia.player(id, auth))
+    } catch (error) {
+      if (error instanceof Error && /relogin|unavailable/.test(error.message)) return gomafiaFailure(c, error)
+      detail = null
+    }
     const hostClub = c.get('user').gomafia?.club?.id
     const player = detail ? toPlayerJSON(detail, hostClub != null && String(hostClub) === detail.clubId) : null
     if (!player) return fail(c, 404, 'not_found', 'Игрок не найден в GoMafia')
@@ -633,7 +654,13 @@ export function createMafboardRouter(resolveDeps: DepsResolver): Hono<Env> {
     if (!/^\d+$/.test(id) || !Number.isInteger(page) || page < 1 || page > 100) {
       return fail(c, 422, 'validation', 'Некорректный клуб или страница')
     }
-    const roster = await deps.gomafia.club(id, page).catch(() => null)
+    let roster: Awaited<ReturnType<MafboardDeps['gomafia']['club']>> | null
+    try {
+      roster = await deps.gomafiaSessions.run(c.get('user').id, (auth) => deps.gomafia.club(id, page, auth))
+    } catch (error) {
+      if (error instanceof Error && /relogin|unavailable/.test(error.message)) return gomafiaFailure(c, error)
+      roster = null
+    }
     if (!roster) return fail(c, 502, 'gomafia_unavailable', 'GoMafia не отвечает, попробуйте позже')
     const inClub = c.get('user').gomafia?.club?.id === Number(id)
     const players = roster.residents.map((p) => toPlayerJSON(p, inClub)).filter((p) => p != null)

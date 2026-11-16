@@ -6,18 +6,27 @@ import type { GoMafiaClubJSON, GoMafiaPlayerJSON } from './types.js'
 // (владение подтверждается входом в GoMafia, пароль не хранится), подбор игроков
 // «сначала свой клуб», состав клуба. Публичного API у GoMafia нет — всё на сервере.
 
+/** С `auth` закрытые страницы GoMafia идут с cookie входа; сайт просит войти — GomafiaAuthRequired. */
 export interface GoMafiaGateway {
   login(login: string, password: string): Promise<gm.GomafiaLoginResult>
-  player(id: string): Promise<gm.GomafiaPlayer | null>
-  club(clubId: string, page: number): ReturnType<typeof gm.clubResidents>
-  search(query: string, limit: number): Promise<gm.GomafiaPlayer[]>
+  player(id: string, auth?: gm.GomafiaAuth): Promise<gm.GomafiaPlayer | null>
+  club(clubId: string, page: number, auth?: gm.GomafiaAuth): ReturnType<typeof gm.clubResidents>
+  search(query: string, limit: number, auth?: gm.GomafiaAuth): Promise<gm.GomafiaPlayer[]>
 }
 
 export const liveGoMafia: GoMafiaGateway = {
   login: (login, password) => gm.gomafiaLogin(login, password),
-  player: (id) => gm.playerDetail(id),
-  club: (clubId, page) => gm.clubResidents(clubId, { page }),
-  search: async (query, limit) => (await gm.searchPlayers(query, { limit })).players,
+  player: (id, auth) => gm.playerDetail(id, auth),
+  club: (clubId, page, auth) => gm.clubResidents(clubId, { page }, auth),
+  search: async (query, limit, auth) => (await gm.searchPlayers(query, { limit }, auth)).players,
+}
+
+/** Сбой GoMafia глотаем как раньше (пустой результат), а просьбу войти — пробрасываем. */
+function unlessAuth<T>(fallback: T) {
+  return (error: unknown): T => {
+    if (error instanceof gm.GomafiaAuthRequired) throw error
+    return fallback
+  }
 }
 
 const ROSTER_TTL_MS = 5 * 60_000
@@ -35,14 +44,14 @@ export class RosterCache {
     private readonly ttlMs = ROSTER_TTL_MS,
   ) {}
 
-  async roster(clubId: number): Promise<gm.GomafiaPlayer[]> {
+  async roster(clubId: number, auth?: gm.GomafiaAuth): Promise<gm.GomafiaPlayer[]> {
     const key = String(clubId)
     const cached = this.entries.get(key)
     if (cached && this.now() - cached.at < this.ttlMs) return cached.players
 
     const players: gm.GomafiaPlayer[] = []
     for (let page = 1; page <= ROSTER_MAX_PAGES; page++) {
-      const { residents, total } = await this.gateway.club(key, page)
+      const { residents, total } = await this.gateway.club(key, page, auth)
       if (residents.length === 0) break
       players.push(...residents)
       if (players.length >= total) break
@@ -62,10 +71,11 @@ export async function searchForHost(
   roster: RosterCache,
   query: string,
   hostClubId: number | null,
+  auth?: gm.GomafiaAuth,
 ): Promise<GoMafiaPlayerJSON[]> {
   const needle = query.trim().toLowerCase()
-  const own = hostClubId == null ? [] : (await roster.roster(hostClubId).catch(() => [])).filter((p) => matches(p, needle))
-  const global = await gateway.search(query.trim(), 20).catch(() => [])
+  const own = hostClubId == null ? [] : (await roster.roster(hostClubId, auth).catch(unlessAuth([]))).filter((p) => matches(p, needle))
+  const global = await gateway.search(query.trim(), 20, auth).catch(unlessAuth([]))
 
   const seen = new Set<number>()
   const result: GoMafiaPlayerJSON[] = []
@@ -85,13 +95,14 @@ export async function searchForHost(
 export async function refreshLink(
   gateway: GoMafiaGateway,
   current: { player: GoMafiaPlayerJSON; club: GoMafiaClubJSON | null },
+  auth?: gm.GomafiaAuth,
 ): Promise<{ player: GoMafiaPlayerJSON; club: GoMafiaClubJSON | null } | null> {
-  const detail = await gateway.player(String(current.player.id)).catch(() => null)
+  const detail = await gateway.player(String(current.player.id), auth).catch(unlessAuth(null))
   const player = detail ? toPlayerJSON(detail, false) : null
   if (!detail || !player) return null
   if (!detail.clubId) return { player, club: null }
   if (current.club && String(current.club.id) === detail.clubId) return { player, club: current.club }
-  const info = await gateway.club(detail.clubId, 1).catch(() => null)
+  const info = await gateway.club(detail.clubId, 1, auth).catch(unlessAuth(null))
   return { player, club: toClubJSON(info?.club ?? { id: detail.clubId, title: detail.clubTitle, city: null }) }
 }
 
@@ -102,7 +113,7 @@ function isNickname(login: string): boolean {
 }
 
 export type LinkResolution =
-  | { ok: true; player: GoMafiaPlayerJSON; club: GoMafiaClubJSON | null }
+  | { ok: true; player: GoMafiaPlayerJSON; club: GoMafiaClubJSON | null; cookie: string | null }
   | { ok: false; reason: 'bad_credentials' | 'unavailable'; message: string }
 
 /** Ошибки транспорта из lib/gomafia.ts — это не «неверный пароль». */
@@ -110,9 +121,9 @@ const TRANSPORT_ERRORS = new Set(['network', 'bad_json'])
 const UNAVAILABLE = 'GoMafia не отвечает, попробуйте позже'
 
 /** Игрок с точно таким ником (без учёта регистра) — по поиску GoMafia. */
-async function playerIdByNickname(gateway: GoMafiaGateway, nickname: string): Promise<string | undefined> {
+async function playerIdByNickname(gateway: GoMafiaGateway, nickname: string, auth: gm.GomafiaAuth): Promise<string | undefined> {
   const needle = nickname.trim().toLowerCase()
-  const found = await gateway.search(nickname.trim(), 20).catch(() => [])
+  const found = await gateway.search(nickname.trim(), 20, auth).catch(() => [])
   return found.find((p) => p.login.trim().toLowerCase() === needle)?.gomafiaId
 }
 
@@ -134,12 +145,14 @@ export async function resolveLink(gateway: GoMafiaGateway, login: string, passwo
 
   // Форма успешного ответа GoMafia известна не полностью: если id игрока в нём нет,
   // ищем профиль по нику — пароль только что подтверждён именно для него.
-  const userId = auth.userId ?? (isNickname(login) ? await playerIdByNickname(gateway, login) : undefined)
+  // Профиль и клуб GoMafia теперь отдаёт только вошедшим — запросы идут с cookie этого входа.
+  const session: gm.GomafiaAuth = { cookie: auth.cookie ?? null }
+  const userId = auth.userId ?? (isNickname(login) ? await playerIdByNickname(gateway, login, session) : undefined)
   if (!userId) {
     return { ok: false, reason: 'unavailable', message: 'Вход в GoMafia прошёл, но профиль не найден. Войдите по никнейму, а не по почте или телефону' }
   }
 
-  const detail = await gateway.player(userId).catch(() => null)
+  const detail = await gateway.player(userId, session).catch(() => null)
   // id игрока берём из ответа входа, форма которого известна не полностью. Если вошли по нику,
   // профиль обязан быть с тем же ником — иначе мы бы привязали чужой аккаунт.
   if (detail && isNickname(login) && detail.login.trim().toLowerCase() !== login.trim().toLowerCase()) {
@@ -155,10 +168,10 @@ export async function resolveLink(gateway: GoMafiaGateway, login: string, passwo
 
   let club: GoMafiaClubJSON | null = null
   if (clubId) {
-    const info = await gateway.club(clubId, 1).catch(() => null)
+    const info = await gateway.club(clubId, 1, session).catch(() => null)
     club = toClubJSON(info?.club ?? { id: clubId, title: base.clubTitle, city: null })
   }
-  return { ok: true, player, club }
+  return { ok: true, player, club, cookie: session.cookie }
 }
 
 /**

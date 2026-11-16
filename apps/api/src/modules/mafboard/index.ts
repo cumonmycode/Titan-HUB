@@ -4,6 +4,7 @@ import { getSharedRedis } from '../../lib/redis.js'
 import { setTelegramWebhook } from '../../lib/telegram.js'
 import { TgBot } from '../../lib/tgBot.js'
 import { AimAccounts, liveAim, liveTournaments } from './aim.js'
+import { GoMafiaSessions } from './gomafiaSessions.js'
 import type { BotMessenger } from './bot.js'
 import { mafboardWebhookUrl, readMafboardConfig, type MafboardConfig } from './config.js'
 import { liveGoMafia, RosterCache } from './gomafia.js'
@@ -86,6 +87,7 @@ function resolveDeps(): MafboardDeps | { error: string } {
   try {
     const repo = new PgMafboardRepo(getClubDb(config.databaseUrl))
     const now = () => new Date()
+    const aimAccounts = new AimAccounts(repo, liveAim, config.studioSecretsKey, now)
     deps = {
       repo,
       config,
@@ -97,7 +99,8 @@ function resolveDeps(): MafboardDeps | { error: string } {
       messenger: messengerFor(config.botToken),
       limiter: redisLimiter,
       vk: liveVkGateway,
-      aimAccounts: new AimAccounts(repo, liveAim, config.studioSecretsKey, now),
+      aimAccounts,
+      gomafiaSessions: new GoMafiaSessions(repo, liveGoMafia, config.studioSecretsKey, aimAccounts, now),
       tournaments: liveTournaments,
       firstDelivery,
       now,

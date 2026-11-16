@@ -172,6 +172,8 @@ describe('Titan Connect: сопоставление с GoMafia', () => {
   it('несуществующий игрок GoMafia или клиент — 404', async () => {
     const ctx = seededContext()
     const host = await titanHost(ctx)
+    // С 2026-11-17 GoMafia показывает профили только вошедшим: проверка номера — входом ведущего.
+    await call(ctx, 'POST', '/v1/me/gomafia', { token: host.accessToken, body: { login: 'host', password: 'secret' } })
     const noPlayer = await call(ctx, 'PUT', `/v1/titan/players/${CLIENT_B}/gomafia`, { token: host.accessToken, body: { goMafiaID: 999 } })
     assert.equal(noPlayer.status, 404)
     const noClient = await call(ctx, 'PUT', `/v1/titan/players/${CLIENT_C}/gomafia`, { token: host.accessToken, body: { goMafiaID: 4242 } })

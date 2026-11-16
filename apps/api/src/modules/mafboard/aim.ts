@@ -1,5 +1,5 @@
 import { hkdfSync } from 'node:crypto'
-import { tournamentServerData } from '../../lib/gomafia.js'
+import { tournamentServerData, type GomafiaAuth } from '../../lib/gomafia.js'
 import { AimClient, AimError, type AimSession } from '../../lib/gomafiaAim.js'
 import type { AimGame, AimProtocol, AimTournament } from '../../lib/gomafiaAimParse.js'
 import { parseTournamentSeating, type TournamentSeating } from '../../lib/gomafiaTournament.js'
@@ -24,14 +24,15 @@ export interface AimGateway {
 
 /** Публичная рассадка турнира с gomafia.pro. */
 export interface TournamentSource {
-  seating(tournamentId: number): Promise<TournamentSeating | null>
+  /** С 2026-11-17 страница турнира открыта только вошедшим — `auth` с cookie входа GoMafia. */
+  seating(tournamentId: number, auth?: GomafiaAuth): Promise<TournamentSeating | null>
 }
 
 export const liveAim: AimGateway = new AimClient()
 
 export const liveTournaments: TournamentSource = {
-  async seating(tournamentId) {
-    return parseTournamentSeating(await tournamentServerData(tournamentId))
+  async seating(tournamentId, auth) {
+    return parseTournamentSeating(await tournamentServerData(tournamentId, auth))
   },
 }
 
@@ -119,6 +120,11 @@ export class AimAccounts {
   /** Внести протокол стола от имени пользователя (редактора турнира). */
   saveProtocol(userId: string, tournamentId: number, aimTableId: number, protocol: AimProtocol): Promise<void> {
     return this.run(userId, (session) => this.gateway.saveProtocol(session, tournamentId, aimTableId, protocol))
+  }
+
+  /** Сохранённые логин и пароль АИМ — обычно те же, что у GoMafia (gomafiaSessions.ts). */
+  storedCredentials(userId: string): Promise<Credentials | null> {
+    return this.credentials(userId)
   }
 
   private async credentials(userId: string): Promise<Credentials | null> {

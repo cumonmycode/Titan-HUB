@@ -713,6 +713,25 @@ export class PgMafboardRepo implements MafboardRepo {
     return row ? toShare(row) : null
   }
 
+  async gomafiaCredentials(userId: string): Promise<string | null> {
+    if (!UUID.test(userId)) return null
+    const row = await this.one(sql`SELECT sealed FROM mb_gomafia_credentials WHERE user_id = ${userId}::uuid`)
+    return row ? String(row['sealed']) : null
+  }
+
+  async setGomafiaCredentials(userId: string, sealed: string | null, at: Date): Promise<void> {
+    if (!UUID.test(userId)) return
+    if (sealed === null) {
+      await this.query(sql`DELETE FROM mb_gomafia_credentials WHERE user_id = ${userId}::uuid`)
+      return
+    }
+    await this.query(sql`
+      INSERT INTO mb_gomafia_credentials (user_id, sealed, updated_at)
+      VALUES (${userId}::uuid, ${sealed}, ${iso(at)}::timestamptz)
+      ON CONFLICT (user_id) DO UPDATE SET sealed = EXCLUDED.sealed, updated_at = EXCLUDED.updated_at
+    `)
+  }
+
   async aimCredentials(userId: string): Promise<string | null> {
     if (!UUID.test(userId)) return null
     const row = await this.one(sql`SELECT sealed FROM mb_aim_credentials WHERE user_id = ${userId}::uuid`)

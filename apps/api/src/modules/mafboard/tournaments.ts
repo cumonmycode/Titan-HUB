@@ -7,6 +7,7 @@ import type { TournamentSeating, TournamentTable } from '../../lib/gomafiaTourna
 import { AimNotConnectedError, type AimAccounts } from './aim.js'
 import { body, fail, ipKey, type Env } from './router.js'
 import { registerReviewRoutes, submitForReview } from './tournamentReview.js'
+import { GoMafiaLoginRequired, GoMafiaUnavailable, gomafiaFailure } from './gomafiaSessions.js'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Режим «Турнир GoMafia»: турниры пользователя из АИМ, рассадка с gomafia.pro и протоколы.
@@ -71,6 +72,8 @@ const aimLoginSchema = z.object({ login: z.string().trim().min(1).max(100), pass
 
 /** Ошибки АИМ → ответ приложению. Пароль и ответы АИМ в лог не пишутся. */
 export function aimFailure(c: Context, error: unknown) {
+  // Рассадка турнира идёт с GoMafia входом пользователя — его ошибки отвечаем так же, как в подборе.
+  if (error instanceof GoMafiaLoginRequired || error instanceof GoMafiaUnavailable) return gomafiaFailure(c, error)
   if (error instanceof AimNotConnectedError) {
     return fail(c, 409, 'aim_not_connected', 'Подключите АИМ: войдите в GoMafia ещё раз в профиле')
   }
@@ -238,7 +241,10 @@ export function registerTournamentRoutes(router: Hono<Env>, requireUser: Middlew
       // Турнир должен быть в разделе «Турниры» пользователя в АИМ — иначе он к нему не относится.
       const tournament = (await deps.aimAccounts.tournaments(user.id)).find((candidate) => candidate.id === id)
       if (!tournament) return fail(c, 404, 'not_found', 'Турнира нет среди ваших турниров в АИМ')
-      const [aimGames, seating] = await Promise.all([editorData(deps.aimAccounts, user.id, id), deps.tournaments.seating(id)])
+      const [aimGames, seating] = await Promise.all([
+        editorData(deps.aimAccounts, user.id, id),
+        deps.gomafiaSessions.run(user.id, (auth) => deps.tournaments.seating(id, auth)),
+      ])
       if (!seating) return fail(c, 502, 'gomafia_unavailable', 'GoMafia не отдала рассадку турнира, попробуйте позже')
       const role: TournamentRole = aimGames ? 'editor' : 'referee'
       return c.json({

@@ -43,6 +43,10 @@ export interface MafboardRepo {
   /** Сохранить (или стереть — null) вход в АИМ. */
   setAimCredentials(userId: string, sealed: string | null, at: Date): Promise<void>
 
+  // ─── Вход в GoMafia (закрытые с 2026-11-17 страницы сайта) ─────────────────
+  gomafiaCredentials(userId: string): Promise<string | null>
+  setGomafiaCredentials(userId: string, sealed: string | null, at: Date): Promise<void>
+
   // ─── Протоколы судей на подтверждение ГС ───────────────────────────────────
   /** Отправить (или отправить заново) протокол стола: запись этого судьи снова ждёт ГС. */
   upsertProtocolSubmission(input: Omit<StoredProtocolSubmission, 'id' | 'status' | 'reason' | 'decidedBy' | 'createdAt' | 'updatedAt'> & { id: string; at: Date }): Promise<StoredProtocolSubmission>

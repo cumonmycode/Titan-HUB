@@ -266,6 +266,19 @@ export const MAFBOARD_MIGRATIONS: readonly { id: string; sql: string }[] = [
       );
     `,
   },
+  {
+    // С 2026-11-17 GoMafia отдаёт профили, клубы, турниры и поиск только после входа: сервер ходит
+    // туда входом самого пользователя. Логин и пароль GoMafia — шифротекстом (gomafiaSessions.ts),
+    // сохраняются при привязке, стираются при отвязке и вместе с аккаунтом.
+    id: '010_mafboard_gomafia_credentials',
+    sql: `
+      CREATE TABLE IF NOT EXISTS mb_gomafia_credentials (
+        user_id    uuid PRIMARY KEY REFERENCES mb_users(id) ON DELETE CASCADE,
+        sealed     text NOT NULL,
+        updated_at timestamptz NOT NULL
+      );
+    `,
+  },
 ]
 
 function rows<T = Record<string, unknown>>(res: unknown): T[] {
