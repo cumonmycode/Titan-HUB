@@ -1,6 +1,6 @@
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
-import { useEffect, useRef, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Keyboard, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { KeyboardAvoidingView, useKeyboardState } from 'react-native-keyboard-controller';
 import Animated, { FadeIn, FadeOut, LinearTransition } from 'react-native-reanimated';
@@ -8,7 +8,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Text, TextInput, type TextInputRef } from '@/components/text';
 import { GlassView } from '@/components/glass';
-import { Avatar, BalanceChips, GlassCard, PrimaryButton, sheetStyles } from '@/components/new-check-parts';
+import { GlassCard, PrimaryButton, sheetStyles } from '@/components/new-check-parts';
 import { PaymentSuccess } from '@/components/payment-success';
 import { ToolbarButton } from '@/components/toolbar';
 import { checkTitle } from '@/lib/checks';
@@ -46,11 +46,6 @@ const SHEET_DISMISS_MS = 420;
 const NO_PARTS: PaymentPart[] = [];
 const EPS = 0.01;
 
-/** Сетка способов — как в веб-кассе (по три в ряд). Сертификат есть только у чеков мероприятий. */
-const METHOD_ROWS: TenderMethod[][] = [
-  ['cash', 'card', 'transfer'],
-  ['deposit', 'bonus', 'debt'],
-];
 
 type Mode = 'single' | 'split';
 
@@ -200,10 +195,16 @@ export default function PayScreen() {
       certificate: nextCertificate,
     });
   const ledger = ledgerFor(parts);
-  const perRow = stacked ? 2 : 3;
-  // Сертификатом можно платить в любом чеке — сколько можно, решает сам сертификат (его «на что»).
-  const methods = [...METHOD_ROWS.flat(), 'certificate' as const];
-  const methodRows = Array.from({ length: Math.ceil(methods.length / perRow) }, (_, i) => methods.slice(i * perRow, (i + 1) * perRow));
+  // Способы — по смыслу, без пустых мест: раньше семь плиток шли 3 + 3 + 1, а без клиента
+  // депозит, бонусы и долг висели серыми. С клиентом: «Наличные · Карта · СБП», ниже его
+  // счёт «Депозит · Бонусы · В долг», сертификат — ссылкой. Без клиента — четыре плитки 2 × 2.
+  const perRow = stacked || !hasPlayer ? 2 : 3;
+  const baseMethods: TenderMethod[] = hasPlayer ? ['cash', 'card', 'transfer'] : ['cash', 'card', 'transfer', 'certificate'];
+  const clientMethods: TenderMethod[] = hasPlayer ? ['deposit', 'bonus', 'debt'] : [];
+  const chunkRows = (list: TenderMethod[]) => Array.from({ length: Math.ceil(list.length / perRow) }, (_, i) => list.slice(i * perRow, (i + 1) * perRow));
+  const methodRows = chunkRows(baseMethods);
+  const clientRows = chunkRows(clientMethods);
+  const payerName = hasPlayer ? (player.data?.nickname ?? 'клиента') : checkTitle(data);
 
   // Подтверждённая банком часть (СБП) меняться не может — показываем её списком частей.
   const hasLocked = parts.some((p) => p.locked);
@@ -464,8 +465,12 @@ export default function PayScreen() {
 
   const methodGrid = (
     <View style={styles.methodGrid}>
-      {methodRows.map((row) => (
-        <View key={row.join()} style={styles.methodRow}>
+      {[...methodRows, ...clientRows].map((row, rowIndex) => (
+        <Fragment key={row.join()}>
+        {rowIndex === methodRows.length ? (
+          <Text style={[type.footnote, styles.sectionTitle]} numberOfLines={1}>{`СО СЧЁТА ${payerName.toUpperCase()}`}</Text>
+        ) : null}
+        <View style={styles.methodRow}>
           {row.map((method) => {
             const look = METHODS[method];
             const { blocked, caption } = tileState(method);
@@ -520,7 +525,19 @@ export default function PayScreen() {
           })}
           {row.length < perRow && Array.from({ length: perRow - row.length }, (_, i) => <View key={i} style={styles.flex} />)}
         </View>
+        </Fragment>
       ))}
+      {hasPlayer && !tileState('certificate').blocked ? (
+        <Pressable
+          disabled={busy}
+          onPress={() => (view === 'single' ? pickSingle('certificate') : addSplit('certificate'))}
+          hitSlop={8}
+          style={({ pressed }) => [styles.splitButton, pressed && styles.pressed]}
+          accessibilityRole="button">
+          <SymbolView name={METHODS.certificate.symbol} size={15} weight="semibold" tintColor={colors.accent} />
+          <Text style={[type.subhead, styles.splitText]}>{certificate ? `Сертификат · остаток ${formatMoney(certificate.remaining)}` : 'Сертификат'}</Text>
+        </Pressable>
+      ) : null}
     </View>
   );
 
@@ -545,12 +562,11 @@ export default function PayScreen() {
             keyboardDismissMode={KEYBOARD_DISMISS}
           >
             <View style={styles.hero}>
-              {/* С клиентом имя — в карточке плательщика ниже, второй раз не пишем. */}
-              {!hasPlayer && (
-                <Text style={[type.subhead, sheetStyles.secondary]} numberOfLines={1}>
-                  {checkTitle(data)}
-                </Text>
-              )}
+              {/* Кто платит — строкой над суммой; отдельной карточки плательщика больше нет:
+                  его депозит и бонусы видны на плитках способов. */}
+              <Text style={[type.subhead, sheetStyles.secondary]} numberOfLines={1}>
+                {`Оплата · ${payerName}`}
+              </Text>
               <Text style={[styles.heroAmount, type.amount]} numberOfLines={1} adjustsFontSizeToFit>
                 {money(totals.due)}
               </Text>
@@ -563,18 +579,6 @@ export default function PayScreen() {
               )}
             </View>
 
-            {hasPlayer && (
-              <GlassCard style={styles.payer}>
-                <Avatar name={player.data?.nickname ?? '··'} photoUrl={player.data?.photoUrl} size={40} />
-                <View style={styles.flex}>
-                  <Text style={[type.headline, sheetStyles.label]} numberOfLines={1}>
-                    {player.data?.nickname ?? 'Клиент'}
-                  </Text>
-                  <Text style={[type.footnote, sheetStyles.secondary]}>Плательщик</Text>
-                </View>
-                {player.data && <BalanceChips balance={player.data.balance} bonusPoints={player.data.bonusPoints} />}
-              </GlassCard>
-            )}
 
             {notice && (
               <Animated.View entering={FadeIn}>
