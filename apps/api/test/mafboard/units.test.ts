@@ -164,11 +164,12 @@ describe('приём игры', () => {
     id: '00000000-0000-4000-8000-000000000001', tgId: 1, tgUsername: null, tgFirstName: 'Кай', tgLastName: null,
     phone: '+79161234567', termsVersion: '1',
     gomafia: {
-      player: { id: 4242, nickname: 'Ведущий', fullName: null, avatarURL: null, elo: null, clubID: 77, clubTitle: 'TITAN', city: null, tournamentsPlayed: null, isInHostClub: false },
+      player: { id: 4242, nickname: 'Ведущий', fullName: null, avatarURL: null, elo: null, clubID: 77, clubTitle: 'TITAN', city: null, tournamentsPlayed: null, isInHostClub: false, isVerified: false },
       club: { id: 77, title: 'TITAN', city: null },
       linkedAt: NOW,
       syncedAt: NOW,
     },
+    titan: null,
   }
   const guest = { ...host, gomafia: null }
   const goMafiaSeat = (n: number) => `6D616662-676D-8000-8000-${String(1000 + n).padStart(12, '0')}`

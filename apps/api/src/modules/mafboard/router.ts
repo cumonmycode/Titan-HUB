@@ -11,6 +11,8 @@ import {
 import { validateGameUpload } from './games.js'
 import { MIN_QUERY_LENGTH, rankForHost, refreshLink, resolveLink, searchForHost, type GoMafiaGateway, type RosterCache } from './gomafia.js'
 import type { ClubHub } from './hub.js'
+import type { TitanConnectGateway, TitanRosterCache } from './titan.js'
+import { registerTitanRoutes } from './titanRoutes.js'
 import { GomafiaTakenError, type MafboardRepo } from './repo.js'
 import { errorBody, toAccountJSON, toPlayerJSON, toQrStatusJSON, toQrTicketJSON, toSessionsJSON, toTicketStatusJSON } from './serialize.js'
 import {
@@ -41,6 +43,9 @@ export interface MafboardDeps {
   roster: RosterCache
   /** Titan HUB клубов, где он есть: его клиенты идут в подборе первыми. */
   hub: ClubHub
+  /** Titan Connect: обмен кода из HUB и клиенты подключённого клуба (titan.ts). */
+  titan: TitanConnectGateway
+  titanRoster: TitanRosterCache
   /** null — бот не настроен (нет MAFBOARD_BOT_TOKEN). */
   messenger: BotMessenger | null
   limiter: RateLimiter
@@ -55,7 +60,8 @@ export interface MafboardDeps {
 
 export type DepsResolver = () => MafboardDeps | { error: string }
 
-type Env = { Variables: { deps: MafboardDeps; user: MafboardUser; sessionId: string } }
+export type MafboardEnv = { Variables: { deps: MafboardDeps; user: MafboardUser; sessionId: string } }
+type Env = MafboardEnv
 
 const GAMES_PAGE_LIMIT = 50
 /** Запись одной игры с журналом — десятки килобайт; 256 КБ — с большим запасом. */
@@ -620,6 +626,8 @@ export function createMafboardRouter(resolveDeps: DepsResolver): Hono<Env> {
     const verified = await deps.repo.verifiedGomafiaIds(players.map((p) => p.id)).catch(() => new Set<number>())
     return c.json({ players: players.map((p) => ({ ...p, isVerified: verified.has(p.id) })) })
   })
+
+  registerTitanRoutes(router, requireUser)
 
   // ─── История игр ────────────────────────────────────────────────────────────
 

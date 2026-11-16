@@ -94,6 +94,10 @@ export function toAccountJSON(user: MafboardUser) {
           syncedAt: user.gomafia.syncedAt.toISOString(),
         }
       : null,
+    // Ключ клуба наружу не уходит: приложению хватает названия и времени подключения.
+    titan: user.titan
+      ? { club: { name: user.titan.clubName }, scopes: user.titan.scopes, linkedAt: user.titan.linkedAt.toISOString() }
+      : null,
   }
 }
 

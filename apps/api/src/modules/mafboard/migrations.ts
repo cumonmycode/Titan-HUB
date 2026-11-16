@@ -203,6 +203,22 @@ export const MAFBOARD_MIGRATIONS: readonly { id: string; sql: string }[] = [
       );
     `,
   },
+  {
+    // Titan Connect: клуб Titan HUB ведущего (ключ — шифротекстом в titan_link) и ручные
+    // сопоставления клиентов клуба с GoMafia, общие для всех ведущих этого клуба.
+    id: '007_mafboard_titan_connect',
+    sql: `
+      ALTER TABLE mb_users ADD COLUMN IF NOT EXISTS titan_link jsonb;
+      CREATE TABLE IF NOT EXISTS mb_titan_matches (
+        api_base   text NOT NULL,
+        client_id  text NOT NULL,
+        gomafia_id integer,
+        set_by     uuid REFERENCES mb_users(id) ON DELETE SET NULL,
+        set_at     timestamptz NOT NULL,
+        PRIMARY KEY (api_base, client_id)
+      );
+    `,
+  },
 ]
 
 function rows<T = Record<string, unknown>>(res: unknown): T[] {
