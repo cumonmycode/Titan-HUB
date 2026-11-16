@@ -362,3 +362,55 @@ describe('ручки турниров', () => {
     assert.equal((await call(ctx, 'GET', '/v1/tournaments', { token })).json.error.code, 'gomafia_required')
   })
 })
+
+describe('отправка протокола', () => {
+  const ROLE_TO_AIM: Record<string, string> = { don: 'don', mafia: 'mafia', sheriff: 'sheriff', red: 'red' }
+  const protocol = (gameNumber = 1, tableNumber = 1) => ({
+    gameNumber,
+    tableNumber,
+    win: 'city',
+    // Места в обратном порядке: сервер сопоставляет их по номеру, а не по порядку.
+    seats: ROLES.map((role, i) => ({
+      place: i + 1,
+      role: ROLE_TO_AIM[role === 'red' ? 'red' : role],
+      firstKill: i === 1 ? '2-ka' : 'no',
+      selfKill: false,
+      sheriffOpen: role === 'sheriff',
+      extraPoint: i === 4 ? 0.5 : 0,
+      fine: 0,
+      fineDiscipline: i === 9 ? 0.3 : 0,
+      replacement: false,
+    })).reverse(),
+  })
+
+  it('ГС вносит протокол: стол и места АИМ по номерам', async () => {
+    const ctx = createTestContext()
+    const token = await linkedJudge(ctx)
+    withTournaments(ctx)
+    const res = await call(ctx, 'POST', '/v1/tournaments/2920/protocols', { token, body: protocol(1, 2) })
+    assert.equal(res.status, 200)
+    assert.deepEqual(res.json, { status: 'saved' })
+    const saved = ctx.aim.saved.at(-1)!
+    assert.equal(saved.tournamentId, 2920)
+    assert.equal(saved.aimTableId, 78521)
+    assert.equal(saved.protocol.win, 'city')
+    assert.deepEqual(saved.protocol.seats.map((s) => s.aimSeatId), Array.from({ length: 10 }, (_, i) => 1010 + i))
+    assert.equal(saved.protocol.seats[1]!.firstKill, '2-ka')
+    assert.equal(saved.protocol.seats[4]!.extraPoint, 0.5)
+    assert.equal(saved.protocol.seats[9]!.fineDiscipline, 0.3)
+  })
+
+  it('судья без прав — editor_required; нет стола — table_mismatch; кривой протокол — 422', async () => {
+    const ctx = createTestContext()
+    const token = await linkedJudge(ctx)
+    withTournaments(ctx)
+    const referee = await call(ctx, 'POST', '/v1/tournaments/3001/protocols', { token, body: protocol() })
+    assert.equal(referee.status, 403)
+    assert.equal(referee.json.error.code, 'editor_required')
+    const missing = await call(ctx, 'POST', '/v1/tournaments/2920/protocols', { token, body: protocol(7, 1) })
+    assert.equal(missing.json.error.code, 'table_mismatch')
+    const short = { ...protocol(), seats: protocol().seats.slice(1) }
+    assert.equal((await call(ctx, 'POST', '/v1/tournaments/2920/protocols', { token, body: short })).status, 422)
+    assert.equal(ctx.aim.saved.length, 0)
+  })
+})

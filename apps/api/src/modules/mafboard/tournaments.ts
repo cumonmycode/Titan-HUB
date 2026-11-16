@@ -2,7 +2,7 @@ import type { Context, Hono, MiddlewareHandler } from 'hono'
 import { z } from 'zod'
 import { clientIp } from '../../lib/clientIp.js'
 import { AimError } from '../../lib/gomafiaAim.js'
-import type { AimGame, AimTable, AimTournament } from '../../lib/gomafiaAimParse.js'
+import type { AimGame, AimProtocol, AimTable, AimTournament } from '../../lib/gomafiaAimParse.js'
 import type { TournamentSeating, TournamentTable } from '../../lib/gomafiaTournament.js'
 import { AimNotConnectedError, type AimAccounts } from './aim.js'
 import { body, fail, ipKey, type Env } from './router.js'
@@ -23,6 +23,48 @@ const AIM_CONNECT_IP_LIMIT = { count: 20, windowSec: 3600 }
 const TOURNAMENTS_PER_MIN = 30
 /** Завершённые и заблокированные турниры судье уже не нужны. */
 const CLOSED_STATUSES: ReadonlySet<string> = new Set(['completed', 'blocked'])
+
+const PROTOCOLS_PER_HOUR = 120
+const SEATS_PER_TABLE = 10
+
+const points = z.number().min(-10).max(10)
+const protocolSchema = z.object({
+  gameNumber: z.number().int().positive(),
+  tableNumber: z.number().int().positive(),
+  win: z.enum(['city', 'mafia', 'draw']),
+  seats: z
+    .array(
+      z.object({
+        place: z.number().int().min(1).max(SEATS_PER_TABLE),
+        role: z.enum(['sheriff', 'red', 'mafia', 'don']),
+        firstKill: z.enum(['no', 'guessed_wrong', '1-ka', '2-ka', '3-ka']),
+        selfKill: z.boolean(),
+        sheriffOpen: z.boolean(),
+        extraPoint: points,
+        fine: points,
+        fineDiscipline: points,
+        replacement: z.boolean(),
+      }),
+    )
+    .length(SEATS_PER_TABLE),
+})
+export type ProtocolInput = z.infer<typeof protocolSchema>
+
+/**
+ * Протокол приложения → форма АИМ: стол ищется по номеру игры и стола, места — по номеру
+ * места (id мест в АИМ свои). null — такого стола или места в АИМ нет.
+ */
+export function aimProtocolFor(games: AimGame[], input: ProtocolInput): { aimTableId: number; protocol: AimProtocol } | null {
+  const table = games.find((game) => game.number === input.gameNumber)?.tables.find((candidate) => candidate.number === input.tableNumber)
+  if (!table || table.seats.length !== input.seats.length) return null
+  const seats = []
+  for (const aimSeat of table.seats) {
+    const seat = input.seats.find((candidate) => candidate.place === aimSeat.place)
+    if (!seat) return null
+    seats.push({ aimSeatId: aimSeat.aimSeatId, ...seat })
+  }
+  return { aimTableId: table.aimTableId, protocol: { win: input.win, seats } }
+}
 
 const aimLoginSchema = z.object({ login: z.string().trim().min(1).max(100), password: z.string().min(1).max(200) })
 
@@ -202,6 +244,34 @@ export function registerTournamentRoutes(router: Hono<Env>, requireUser: Middlew
         role,
         games: tournamentGamesJSON(seating, user.gomafia.player.id, aimGames),
       })
+    } catch (error) {
+      return aimFailure(c, error)
+    }
+  })
+
+  /**
+   * Внести протокол стола в АИМ от имени редактора турнира. Судье без прав на «Данные игр» —
+   * 403 `editor_required`: его результат подтверждает ГС (этап 4).
+   */
+  router.post('/v1/tournaments/:id/protocols', requireUser, body(protocolSchema), async (c) => {
+    const deps = c.get('deps')
+    const user = c.get('user')
+    if (!user.gomafia) return fail(c, 403, 'gomafia_required', 'Турниры доступны после привязки GoMafia')
+    const id = Number(c.req.param('id'))
+    if (!Number.isInteger(id) || id <= 0) return fail(c, 404, 'not_found', 'Турнир не найден')
+    if (!(await deps.limiter.hit(`mb:protocols:${user.id}`, PROTOCOLS_PER_HOUR, 3600))) {
+      return fail(c, 429, 'rate_limited', 'Слишком много отправок, попробуйте позже')
+    }
+    const input = c.req.valid('json')
+    try {
+      const games = await editorData(deps.aimAccounts, user.id, id)
+      if (!games) return fail(c, 403, 'editor_required', 'Вносить протоколы этого турнира может только ГС')
+      const target = aimProtocolFor(games, input)
+      if (!target) return fail(c, 409, 'table_mismatch', 'В АИМ нет такого стола или рассадка изменилась — обновите турнир')
+      await deps.aimAccounts.saveProtocol(user.id, id, target.aimTableId, target.protocol)
+      // Журнал внесения: кто, турнир, игра и стол. Без данных входа.
+      console.info(`[mafboard] протокол внесён: турнир ${id}, игра ${input.gameNumber}, стол ${input.tableNumber}, пользователь ${user.id}`)
+      return c.json({ status: 'saved' })
     } catch (error) {
       return aimFailure(c, error)
     }
