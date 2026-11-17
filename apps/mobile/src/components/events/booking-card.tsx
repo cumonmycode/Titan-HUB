@@ -14,12 +14,15 @@ import { colors, space, type } from '@/lib/theme';
  * Подтверждённая заявка-мероприятие становится мероприятием, его детали уточняют уже в
  * форме. Решение уходит гостю в Telegram, если он подписался на статус.
  */
-// Что значат решения для каждого вида заявки с сайта.
+// Что значат решения для каждого вида заявки с сайта. Мероприятие подтверждение превращает
+// в мероприятие; запись на игру и обращение — просто «приняты», без события.
 const LOOK = {
-  event: { confirm: 'Подтвердить', reject: 'Отклонить', symbol: null },
-  game: { confirm: 'Ждём', reject: 'Отклонить', symbol: 'person.badge.plus' },
-  message: { confirm: 'Обработано', reject: 'Скрыть', symbol: 'envelope' },
+  event: { kind: 'Мероприятие', confirm: 'Подтвердить', reject: 'Отклонить', rejectQuestion: 'Отклонить заявку?', symbol: null },
+  game: { kind: 'Запись на игру', confirm: 'Записать', reject: 'Отклонить', rejectQuestion: 'Отклонить запись на игру?', symbol: 'person.badge.plus' },
+  message: { kind: 'Обращение', confirm: 'Обработано', reject: 'Скрыть', rejectQuestion: 'Скрыть обращение?', symbol: 'envelope' },
 } as const;
+
+export const bookingLook = (booking: BookingRequest) => LOOK[booking.kind ?? 'event'];
 
 /** Telegram гостя из формы сайта (@ник или t.me-ссылка) → https://t.me/<ник>. */
 function telegramOf(b: BookingRequest): string | null {
@@ -45,7 +48,7 @@ function ContactChip({ icon, label, url }: { icon: SFSymbol; label: string; url:
 }
 
 export function BookingCard({ booking, busy, onConfirm, onReject }: { booking: BookingRequest; busy: boolean; onConfirm: () => void; onReject: () => void }) {
-  const look = LOOK[booking.kind ?? 'event'];
+  const look = bookingLook(booking);
   // Очень крупный текст: кнопки друг под другом, иначе подписи не помещаются.
   const { stacked } = useTextLayout();
   const startsAt = parsePgTimestamp(booking.starts_at);
@@ -66,8 +69,9 @@ export function BookingCard({ booking, busy, onConfirm, onReject }: { booking: B
         </Text>
       </View>
       <Text style={[type.subhead, styles.label]}>{when}</Text>
+      {/* Телефон — текстом, только если по нему не позвонить кнопкой ниже: иначе он дважды. */}
       <Text style={[type.footnote, styles.secondary]} numberOfLines={2}>
-        {`${where} · ${booking.name} · ${booking.phone}`}
+        {[look.kind === 'Мероприятие' ? where : look.kind, booking.name, phoneNumber ? null : booking.phone].filter(Boolean).join(' · ')}
       </Text>
       {booking.comment ? (
         <Text style={[type.footnote, styles.tertiary]} numberOfLines={3}>

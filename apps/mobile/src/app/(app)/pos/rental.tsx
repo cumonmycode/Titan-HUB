@@ -2,7 +2,8 @@ import { DatePicker, Host, Toggle } from '@expo/ui/swift-ui';
 import { tint } from '@expo/ui/swift-ui/modifiers';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useState } from 'react';
-import { Alert, StyleSheet, View } from 'react-native';
+import { SymbolView } from 'expo-symbols';
+import { Alert, Pressable, StyleSheet, View } from 'react-native';
 
 import { Text } from '@/components/text';
 import { GlassCard, PrimaryButton, SheetHeader, sheetStyles } from '@/components/new-check-parts';
@@ -57,6 +58,24 @@ export default function RentalSheet() {
   return (
     <View style={styles.sheet}>
       <SheetHeader title="Время аренды" onClose={() => router.back()} />
+
+      {/* Зона — здесь же: сменить её или снять аренду, не уходя искать в меню чека. */}
+      {data?.status === 'open' && (
+        <Pressable
+          onPress={() => {
+            haptic.light();
+            router.replace({ pathname: '/pos/zone', params: { checkId } });
+          }}
+          style={({ pressed }) => [styles.zone, pressed && sheetStyles.pressedRow]}
+          accessibilityRole="button"
+          accessibilityLabel={`Зона ${data.spaceName ?? ''}, сменить`}>
+          <SymbolView name="square.split.bottomrightquarter" size={15} weight="semibold" tintColor={colors.secondaryLabel} />
+          <Text style={[type.subhead, sheetStyles.label, styles.flex]} numberOfLines={1}>
+            {data.spaceName ?? 'Зона'}
+          </Text>
+          <Text style={[type.subhead, styles.zoneAction]}>Сменить</Text>
+        </Pressable>
+      )}
 
       <GlassCard style={styles.card}>
         <Host matchContents={{ vertical: true }} style={styles.row} seedColor={accent}>
@@ -124,4 +143,7 @@ const styles = StyleSheet.create({
   row: { alignSelf: 'stretch', paddingHorizontal: space.lg, paddingVertical: space.sm },
   summary: { color: colors.secondaryLabel, paddingHorizontal: space.xs, fontVariant: ['tabular-nums'] },
   error: { color: colors.red },
+  flex: { flex: 1 },
+  zone: { flexDirection: 'row', alignItems: 'center', gap: space.sm, minHeight: 40, paddingHorizontal: space.xs, borderRadius: 10 },
+  zoneAction: { color: colors.accent, fontWeight: '600' },
 });

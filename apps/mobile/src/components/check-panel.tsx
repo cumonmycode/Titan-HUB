@@ -110,6 +110,11 @@ function SelectedCheck({ checkId }: { checkId: string }) {
               {isOpen && (
                 <>
                   <Button label="Спросить Tai" systemImage="sparkles" onPress={() => router.push({ pathname: '/tai', params: { screen: 'check', checkId } })} />
+                  <Button
+                    label={data.spaceId ? 'Пересадить в другую зону' : 'Аренда зоны'}
+                    systemImage={data.spaceId ? 'arrow.left.arrow.right' : 'timer'}
+                    onPress={actions.onPickZone}
+                  />
                   <Button label="Скидка" systemImage="percent" onPress={actions.onAddDiscount} />
                   <Button label="Отменить чек" systemImage="xmark.circle" role="destructive" onPress={actions.onCancel} />
                 </>

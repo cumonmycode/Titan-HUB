@@ -9,8 +9,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Text } from '@/components/text';
 import { CustomerSection } from '@/components/event-form/customer-section';
 import { DetailsSection } from '@/components/event-form/details-section';
-import { buildInput, effectiveMode, initialForm, type FormState } from '@/components/event-form/form-state';
-import { MinicapMoney, MinicapTitle } from '@/components/event-form/minicap-section';
+import { buildInput, effectiveMode, fallbackTitle, initialForm, type FormState } from '@/components/event-form/form-state';
+import { EventTitleField, MinicapMoney, MinicapTitle } from '@/components/event-form/minicap-section';
 import { endTimeFor, formTotal, KIND_LABEL, type FormKind } from '@/components/event-form/model';
 import { formStyles } from '@/components/event-form/parts';
 import { PaymentSection } from '@/components/event-form/payment-section';
@@ -130,8 +130,12 @@ function EventForm({
   });
   const verb = initial ? 'Сохранить' : 'Создать';
   const plainTitle = initial ? 'Сохранить' : isMinicap ? 'Создать миникап' : 'Создать мероприятие';
+  // Занятую зону выбрать можно (чтобы сдвинуть время), но сохранить — нет: сервер откажет.
+  const zoneBusy = form.kind === 'titan' && !!zone?.conflict;
   const buttonTitle = busy
     ? 'Сохраняем…'
+    : zoneBusy
+      ? 'Зона занята в это время'
     : !isMinicap && total.value > 0
       ? `${verb} · ${total.approximate ? '≈ ' : ''}${formatMoney(total.value)}`
       : plainTitle;
@@ -195,6 +199,8 @@ function EventForm({
         {isMinicap ? (
           <MinicapTitle value={form.title} onChange={(title) => patch({ title })} autoFocus={!initial && format === 'minicap'} />
         ) : (
+          <>
+          <EventTitleField value={form.title} onChange={(title) => patch({ title })} fallback={fallbackTitle(form)} />
           <CustomerSection
             name={form.customerName}
             phone={form.customerPhone}
@@ -202,6 +208,7 @@ function EventForm({
             onName={(customerName) => patch({ customerName })}
             onPhone={(customerPhone) => patch({ customerPhone })}
           />
+          </>
         )}
 
         <WhenSection
@@ -251,7 +258,7 @@ function EventForm({
           </>
         )}
 
-        <PrimaryButton title={buttonTitle} icon="checkmark" busy={busy} onPress={() => void save()} />
+        <PrimaryButton title={buttonTitle} icon="checkmark" busy={busy} disabled={zoneBusy} onPress={() => void save()} />
       </ScrollView>
     </KeyboardAvoidingView>
   );

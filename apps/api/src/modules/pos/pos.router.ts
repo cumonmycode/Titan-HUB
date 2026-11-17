@@ -110,9 +110,12 @@ async function getCheckWithItems(checkId: string, exec: DbOrTx) {
 
   // Получаем hourlyRate пространства для live-расчёта аренды на фронте
   let spaceHourlyRate: string | null = null
+  // Название зоны — строке аренды в чеке («Кабинка 3»), а не безликое «Аренда».
+  let spaceName: string | null = null
   if (check.spaceId) {
-    const [space] = await exec.select({ hourlyRate: spaces.hourlyRate }).from(spaces).where(eq(spaces.id, check.spaceId))
+    const [space] = await exec.select({ hourlyRate: spaces.hourlyRate, name: spaces.name }).from(spaces).where(eq(spaces.id, check.spaceId))
     spaceHourlyRate = space?.hourlyRate ?? null
+    spaceName = space?.name ?? null
   }
 
   // Имя для заголовка чека: ник привязанного клиента либо первый из гостей.
@@ -141,7 +144,7 @@ async function getCheckWithItems(checkId: string, exec: DbOrTx) {
     .where(and(eq(pendingOrders.checkId, checkId), eq(pendingOrders.status, 'pending')))
     .orderBy(pendingOrders.createdAt)
 
-  return { ...check, items: itemsWithMods, payments, discounts: discountRows, excludedDiscounts, spaceHourlyRate, guestName, pendingOrders: pending }
+  return { ...check, items: itemsWithMods, payments, discounts: discountRows, excludedDiscounts, spaceHourlyRate, spaceName, guestName, pendingOrders: pending }
 }
 
 // Уведомление «заканчивается» по товарам, чей остаток продажа опустила до точки
@@ -798,6 +801,15 @@ posRouter.patch('/checks/:id', requireRole('owner', 'staff'), zValidator('json',
   if (!prev) return c.json({ error: 'Not found' }, 404)
   // Закрытый/отменённый чек не правим: иначе меняли бы время аренды уже оплаченного.
   if (prev.status !== 'open') return c.json({ error: 'Чек уже закрыт' }, 400)
+  if (rest.spaceId && rest.spaceId !== prev.spaceId) {
+    // Пересадка в другую зону — те же правила, что при открытии: одна открытая аренда на зону.
+    const [occupied] = await db.select({ id: checks.id }).from(checks)
+      .where(and(eq(checks.spaceId, rest.spaceId), eq(checks.status, 'open'), ne(checks.id, checkId)))
+      .limit(1)
+    if (occupied) return c.json({ error: 'Зона уже занята другим открытым чеком' }, 409)
+    const [target] = await db.select({ isActive: spaces.isActive }).from(spaces).where(eq(spaces.id, rest.spaceId))
+    if (!target?.isActive) return c.json({ error: 'Зона выключена или удалена' }, 400)
+  }
   if (rest.spaceId === null) {
     // Сняли зону — аренды больше нет.
     update.spaceStartAt = null

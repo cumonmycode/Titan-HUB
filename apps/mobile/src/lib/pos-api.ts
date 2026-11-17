@@ -447,6 +447,24 @@ export function setCheckRental(checkId: string, rental: { spaceStartAt: string; 
   });
 }
 
+/**
+ * Зона чека: пересадить в другую (время аренды сохраняется, ставка — новой зоны) или снять
+ * аренду (`null`). Зоне без аренды сервер сам ставит начало — сейчас.
+ */
+export function setCheckSpace(checkId: string, spaceId: string | null) {
+  return enqueue(checkId, async () => {
+    try {
+      await fetchOpenCheck(checkId);
+      const { check } = await api.patch<{ check: CheckDetail }>(`/pos/checks/${checkId}`, { spaceId });
+      applyCheck(check);
+      return check;
+    } catch (error) {
+      await refetchCheck(checkId);
+      throw error;
+    }
+  });
+}
+
 /** Отмена чека без оплаты: остатки склада возвращаются, позиции остаются в истории. */
 export function cancelCheck(checkId: string) {
   return enqueue(checkId, async () => {

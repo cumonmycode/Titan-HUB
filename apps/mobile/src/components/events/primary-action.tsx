@@ -1,4 +1,5 @@
-import { StyleSheet, View } from 'react-native';
+import { SymbolView } from 'expo-symbols';
+import { Pressable, StyleSheet, View } from 'react-native';
 
 import { PrimaryButton } from '@/components/new-check-parts';
 import { Text } from '@/components/text';
@@ -63,6 +64,15 @@ export function EventPrimaryAction({ event, players, lineupLoading, busy, onStar
   if (event.status === 'active') {
     return <PrimaryButton title={event.checkId ? 'Открыть чек' : 'Перейти в кассу'} icon="rublesign.circle" onPress={onOpenCheck} />;
   }
+  // Завершённое: чек уже оплачен — его можно открыть посмотреть (что взяли, чем оплатили).
+  if (event.status === 'completed' && event.checkId && !isMinicap) {
+    return (
+      <Pressable onPress={onOpenCheck} accessibilityRole="button" style={({ pressed }) => [styles.link, pressed && styles.pressed]}>
+        <SymbolView name="doc.text" size={15} weight="semibold" tintColor={colors.accent} />
+        <Text style={[type.headline, styles.linkText]}>Чек мероприятия</Text>
+      </Pressable>
+    );
+  }
   return null;
 }
 
@@ -73,4 +83,7 @@ function Hint({ text }: { text: string }) {
 const styles = StyleSheet.create({
   block: { gap: space.sm },
   hint: { color: colors.secondaryLabel, textAlign: 'center', paddingHorizontal: space.md },
+  link: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, minHeight: 44 },
+  linkText: { color: colors.accent },
+  pressed: { opacity: 0.6 },
 });

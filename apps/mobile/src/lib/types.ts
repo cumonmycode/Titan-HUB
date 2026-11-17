@@ -132,6 +132,8 @@ export type CheckDetail = CheckRow & {
   /** Снятые с чека авто- и тировые скидки — их можно вернуть. */
   excludedDiscounts: { id: string; name: string; type: 'percent' | 'fixed'; value: NumericString }[];
   spaceHourlyRate: NumericString | null;
+  /** Название зоны аренды; старый сервер его не отдаёт. */
+  spaceName?: string | null;
   guestName: string | null;
   pendingOrders: PendingOrder[];
 };

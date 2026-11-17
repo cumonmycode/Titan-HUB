@@ -17,7 +17,7 @@ import { billedHours, endTimeFor, initialDuration, initialKind, parseGuests, typ
 /** Всё, что вводится в форме мероприятия; меняется только целиком (`{ ...form, ...patch }`). */
 export type FormState = {
   kind: FormKind;
-  /** Название — только у миникапа; у мероприятия в клубе им станет заказчик, у выезда — адрес. */
+  /** Своё название; пусто — у мероприятия в клубе им станет заказчик, у выезда — адрес. */
   title: string;
   customerName: string;
   customerPhone: string;
@@ -40,7 +40,7 @@ export function initialForm(initial: EventRow | undefined, format: string | unde
   const amount = initial?.manualAmount ?? initial?.fixedAmount;
   return {
     kind: initialKind(initial, format),
-    title: initial?.format === 'minicap' ? (initial.title ?? '') : '',
+    title: ownTitle(initial),
     customerName: initial?.customerName ?? '',
     customerPhone: initial?.customerPhone ?? '',
     address: initial?.type === 'exit' ? (initial.location ?? '') : '',
@@ -55,6 +55,26 @@ export function initialForm(initial: EventRow | undefined, format: string | unde
     fee: toNumber(initial?.participationFee) > 0 ? moneyText(initial?.participationFee) : '',
     costs: { prize: costFrom(initial?.prizeFund), lunch: costFrom(initial?.lunchCost), other: costFrom(initial?.otherCost) },
   };
+}
+
+/**
+ * Своё название мероприятия. Раньше название в клубе всегда было именем заказчика, у выезда —
+ * адресом, а «Бронь: Анна» ставил сервер при подтверждении заявки: такие названия — не свои,
+ * поле остаётся пустым и название по-прежнему следует за заказчиком/адресом.
+ */
+function ownTitle(initial: EventRow | undefined): string {
+  const title = initial?.title?.trim() ?? '';
+  if (!initial || !title) return '';
+  if (initial.format === 'minicap') return title;
+  const customer = initial.customerName?.trim() ?? '';
+  const derived = [customer, `Бронь: ${customer}`, initial.type === 'exit' ? (initial.location?.trim() ?? '') : ''];
+  return derived.includes(title) ? '' : title;
+}
+
+/** Название, которое уйдёт на сервер, если своё не задано: заказчик в клубе, адрес у выезда. */
+export function fallbackTitle(form: Pick<FormState, 'kind' | 'customerName' | 'address'>): string {
+  if (form.kind === 'exit') return form.address.trim() || 'Выезд';
+  return form.customerName.trim() || 'Мероприятие';
 }
 
 /** «По ставке» есть только в клубе: у выезда он становится фиксом. */
@@ -121,7 +141,8 @@ export function buildInput(form: FormState, { initial, staffAvailable }: { initi
     minicap: false,
     input: {
       type: kind,
-      title: kind === 'titan' ? name : place,
+      // Своё название — как есть; без него — заказчик (в клубе) или адрес (выезд).
+      title: form.title.trim() || (kind === 'titan' ? name : place),
       location: kind === 'exit' ? place : null,
       spaceId: kind === 'titan' ? form.spaceId : null,
       date: toDateString(form.start),

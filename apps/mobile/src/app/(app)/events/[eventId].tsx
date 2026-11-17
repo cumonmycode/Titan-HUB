@@ -12,11 +12,13 @@ import { AppRefreshControl } from '@/components/refresh-control';
 import { Text } from '@/components/text';
 import { ToolbarMenu, ToolbarMenuAction } from '@/components/toolbar';
 import {
+  dayLabel,
   eventBase,
   eventErrorMessage,
   eventTitle,
   purgeEvent,
   startEvent,
+  todayMsk,
   updateEvent,
   useEvent,
   useEventParticipants,
@@ -90,7 +92,20 @@ export default function EventScreen() {
 
   const setStatus = (next: EventStatus) => void run(`status-${next}`, () => updateEvent(data.id, { status: next }), 'Статус не изменён');
 
-  const start = () => void run('start', () => startEvent(data.id), isMinicap ? 'Миникап не начался' : 'Мероприятие не началось');
+  const runStart = () => void run('start', () => startEvent(data.id), isMinicap ? 'Миникап не начался' : 'Мероприятие не началось');
+  // Старт открывает чек сейчас: мероприятие на другой день начинаем только после вопроса —
+  // иначе случайный тап открывал аренду на неделю раньше.
+  const start = () => {
+    if (data.date === todayMsk()) return runStart();
+    Alert.alert(
+      `${isMinicap ? 'Миникап' : 'Мероприятие'} — ${dayLabel(data.date).toLowerCase()}`,
+      `Запланировано на ${dayLabel(data.date).toLowerCase()}, ${data.startTime}. Начать сейчас? Счёт откроется в кассе сразу.`,
+      [
+        { text: 'Назад', style: 'cancel' },
+        { text: 'Начать сейчас', onPress: runStart },
+      ],
+    );
+  };
 
   const openCheck = () => {
     haptic.light();

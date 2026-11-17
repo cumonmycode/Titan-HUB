@@ -29,7 +29,7 @@ export function useTabBarClearance(withAccessory = false): number {
  * где шторка закрывает таб-бар. Держать в соответствии с `_layout.tsx` вкладок.
  */
 export const SHEET_ROUTES: Record<string, ReadonlySet<string>> = {
-  pos: new Set(['menu', 'chat', 'refund', 'player', 'discount', 'rental']),
+  pos: new Set(['menu', 'chat', 'refund', 'player', 'discount', 'rental', 'zone']),
   events: new Set(['edit', 'participants']),
   analytics: new Set(['check/[checkId]', 'period']),
   manage: new Set([

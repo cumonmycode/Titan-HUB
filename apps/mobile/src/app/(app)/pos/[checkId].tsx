@@ -67,6 +67,11 @@ export default function CheckScreen() {
                 через Children.toArray с фильтром по типу, и фрагмент выпадает целиком —
                 меню оставалось пустым и не открывалось. */}
             {isOpen && (
+              <ToolbarMenuAction icon={spaceId ? 'arrow.left.arrow.right' : 'timer'} onPress={actions.onPickZone}>
+                {spaceId ? 'Пересадить в другую зону' : 'Аренда зоны'}
+              </ToolbarMenuAction>
+            )}
+            {isOpen && (
               <ToolbarMenuAction icon="percent" onPress={actions.onAddDiscount}>
                 Скидка
               </ToolbarMenuAction>

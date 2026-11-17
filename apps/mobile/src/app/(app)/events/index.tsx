@@ -8,7 +8,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AmbientBackdrop } from '@/components/ambient-backdrop';
 import { EventCard, type EventCardLead } from '@/components/event-card';
-import { BookingCard } from '@/components/events/booking-card';
+import { BookingCard, bookingLook } from '@/components/events/booking-card';
 import { AddButton, GroupHeader, MonthFolder } from '@/components/events/list-parts';
 import { AppRefreshControl } from '@/components/refresh-control';
 import { Text } from '@/components/text';
@@ -35,7 +35,8 @@ import { colors, space, type } from '@/lib/theme';
 
 type Tab = 'upcoming' | 'past';
 
-const rowLayout = LinearTransition.springify().damping(22).stiffness(200);
+// Перестановка без пружины — быстро и без отскока, как во всём приложении.
+const rowLayout = LinearTransition.duration(180);
 
 /**
  * События — лента по дням. Предстоящие: сверху заявки с сайта, дальше дни («Сегодня»,
@@ -110,11 +111,13 @@ export default function EventsScreen() {
     }
   };
 
-  const rejectBooking = (booking: BookingRequest) =>
-    Alert.alert('Отклонить заявку?', `${booking.name} · ${booking.phone}`, [
+  const rejectBooking = (booking: BookingRequest) => {
+    const look = bookingLook(booking);
+    Alert.alert(look.rejectQuestion, [booking.name, booking.phone].filter(Boolean).join(' · '), [
       { text: 'Назад', style: 'cancel' },
-      { text: 'Отклонить', style: 'destructive', onPress: () => void onBooking(booking, 'cancelled') },
+      { text: look.reject, style: 'destructive', onPress: () => void onBooking(booking, 'cancelled') },
     ]);
+  };
 
   const renderEvent = (event: EventRow, lead: EventCardLead) => (
     <Animated.View key={event.id} entering={FadeIn} exiting={FadeOut} layout={rowLayout}>

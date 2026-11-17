@@ -22,7 +22,8 @@ import { haptic } from '@/lib/haptics';
 import { TIER_LABEL } from '@/lib/pos-api';
 import { colors, space, type } from '@/lib/theme';
 
-const rowLayout = LinearTransition.springify().damping(22).stiffness(220);
+// Без пружины: быстро и без отскока.
+const rowLayout = LinearTransition.duration(180);
 const errorText = (error: unknown) => eventErrorMessage(error instanceof Error ? error.message : String(error));
 
 /**

@@ -12,6 +12,8 @@ export type CheckActions = {
   onOpenPlayer: () => void;
   onRemoveGuest: (name: string) => void;
   onEditRental: () => void;
+  /** Выбор зоны: добавить аренду, пересадить или снять. */
+  onPickZone: () => void;
   onAddDiscount: () => void;
   onRemoveDiscount: (discountRowId: string) => void;
   onAddItems: () => void;
@@ -61,6 +63,10 @@ export function useCheckActions(checkId: string, guestNames: string[] = []): Che
     onEditRental: () => {
       haptic.light();
       router.push({ pathname: '/pos/rental', params: { checkId } });
+    },
+    onPickZone: () => {
+      haptic.light();
+      router.push({ pathname: '/pos/zone', params: { checkId } });
     },
     onAddDiscount: () => {
       haptic.light();

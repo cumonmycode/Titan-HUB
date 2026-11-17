@@ -40,6 +40,20 @@ export function MinicapTitle({ value, onChange, autoFocus }: { value: string; on
   );
 }
 
+/**
+ * Название мероприятия в клубе или выезда — необязательное: пусто — в ленте имя заказчика
+ * (у выезда — адрес), как раньше. Название из заявки с сайта («День рождения») приходит сюда.
+ */
+export function EventTitleField({ value, onChange, fallback }: { value: string; onChange: (value: string) => void; fallback: string }) {
+  return (
+    <FormSection title="НАЗВАНИЕ · НЕОБЯЗАТЕЛЬНО" footer={value.trim() ? undefined : `Без названия в ленте будет «${fallback}».`}>
+      <GlassCard style={formStyles.card}>
+        <FormField icon="tag" value={value} onChange={onChange} placeholder="Например, День рождения Маши" autoCapitalize="sentences" />
+      </GlassCard>
+    </FormSection>
+  );
+}
+
 export function MinicapMoney({
   fee,
   onFee,

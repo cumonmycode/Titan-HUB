@@ -287,7 +287,7 @@ function RentalRow({ check, amount, isOpen, onEdit }: { check: CheckDetail; amou
       <RowIcon symbol="house" color={GREEN_HEX} />
       <View style={styles.flex}>
         <Text style={[type.body, styles.label]} numberOfLines={1}>
-          Аренда
+          {check.spaceName ? `Аренда · ${check.spaceName}` : 'Аренда'}
         </Text>
         <View style={styles.rentalMeta}>
           {live ? <View style={styles.liveDot} /> : null}

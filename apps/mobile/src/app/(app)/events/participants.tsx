@@ -25,7 +25,8 @@ import { createClient, TIER_LABEL, type ClientTier } from '@/lib/pos-api';
 import { colors, space, type } from '@/lib/theme';
 import { chooseAction } from '@/lib/dialog';
 
-const rowLayout = LinearTransition.springify().damping(22).stiffness(220);
+// Без пружины: быстро и без отскока.
+const rowLayout = LinearTransition.duration(180);
 /** Как в веб-кассе: новому участнику миникапа выбирают один из трёх статусов. */
 const NEW_CLIENT_TIERS: ClientTier[] = ['guest', 'resident', 'student'];
 
@@ -50,6 +51,8 @@ export default function ParticipantsSheet() {
   const full = role === 'player' ? players.length >= MINICAP_MAX_PLAYERS : judge !== null;
 
   const add = async (profileId: string, nickname: string) => {
+    // Пока один игрок добавляется, второй тап по списку раньше слал ещё запрос.
+    if (adding) return;
     haptic.medium();
     setAdding(nickname);
     try {

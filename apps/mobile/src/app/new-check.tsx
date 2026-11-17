@@ -2,20 +2,19 @@ import { Host, Picker, Text as SwiftText } from '@expo/ui/swift-ui';
 import { pickerStyle, tag } from '@expo/ui/swift-ui/modifiers';
 import { useMutation } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
-import { SymbolView } from 'expo-symbols';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Keyboard, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Alert, Keyboard, StyleSheet, View } from 'react-native';
 import Animated, { FadeInLeft, FadeInRight, FadeOut, LayoutAnimationConfig } from 'react-native-reanimated';
 
 import { Text, TextInput } from '@/components/text';
 import { GlassCard, PrimaryButton, QuickTile, SheetHeader, sheetStyles } from '@/components/new-check-parts';
 import { PlayerCard, PlayerSearch, TariffGrid, useTariffChoice } from '@/components/player-picker';
+import { useZoneStates, ZoneList } from '@/components/zone-list';
 import { useAutoFocus } from '@/lib/auto-focus';
 import { formatMoney } from '@/lib/format';
 import { haptic } from '@/lib/haptics';
 import { createCheckErrorMessage, openCreatedCheck } from '@/lib/new-check';
-import { addEntryTariff, createCheck, createClient, SPACE_TYPE_LABEL, useSpaces, type ClientTier, type PlayerSearchItem, type Tariff } from '@/lib/pos-api';
-import { useChecks } from '@/lib/queries';
+import { addEntryTariff, createCheck, createClient, useSpaces, type ClientTier, type PlayerSearchItem, type Tariff } from '@/lib/pos-api';
 import { colors, space, type } from '@/lib/theme';
 
 /**
@@ -24,7 +23,12 @@ import { colors, space, type } from '@/lib/theme';
  * Поле поиска получает фокус сразу — клавиатура поднимается вместе со шторкой.
  */
 
-type Step = { name: 'search' } | { name: 'tariff'; player: PlayerSearchItem } | { name: 'client'; nickname: string } | { name: 'space' };
+type Step =
+  | { name: 'search' }
+  | { name: 'tariff'; player: PlayerSearchItem }
+  | { name: 'client'; nickname: string; spaceId?: string }
+  | { name: 'space' }
+  | { name: 'spaceClient'; spaceId: string };
 type CreateInput = { playerId?: string; spaceId?: string; tariffItemId?: string | null };
 
 const TITLES: Record<Step['name'], string> = {
@@ -32,7 +36,16 @@ const TITLES: Record<Step['name'], string> = {
   tariff: 'Тариф',
   client: 'Новый клиент',
   space: 'Аренда зоны',
+  spaceClient: 'Кто в зоне',
 };
+
+/** Куда ведёт «Назад»: из выбора клиента для зоны — к зонам, остальное — к поиску. */
+function backOf(step: Step): Step | null {
+  if (step.name === 'search') return null;
+  if (step.name === 'spaceClient') return { name: 'space' };
+  if (step.name === 'client' && step.spaceId) return { name: 'spaceClient', spaceId: step.spaceId };
+  return { name: 'search' };
+}
 
 
 
@@ -63,12 +76,13 @@ export default function NewCheckSheet() {
     },
   });
 
-  const go = (next: Step) => {
+  const go = (next: Step, back = false) => {
     haptic.selection();
-    if (next.name !== 'client') Keyboard.dismiss();
-    setForward(next.name !== 'search');
+    if (next.name !== 'client' && next.name !== 'spaceClient') Keyboard.dismiss();
+    setForward(!back && next.name !== 'search');
     setStep(next);
   };
+  const back = backOf(step);
 
   const busyInput = create.isPending ? create.variables : undefined;
   // Одна шторка — один чек: пока первый открывается, второе нажатие (та же плитка,
@@ -82,7 +96,7 @@ export default function NewCheckSheet() {
     <View style={styles.sheet}>
       <SheetHeader
         title={TITLES[step.name]}
-        onBack={step.name === 'search' ? undefined : () => go({ name: 'search' })}
+        onBack={back ? () => go(back, true) : undefined}
         onClose={() => router.back()}
       />
 
@@ -120,8 +134,25 @@ export default function NewCheckSheet() {
             onOpen={(tariff) => open({ playerId: step.player.id, tariffItemId: tariff?.itemId })}
           />
         )}
-        {step.name === 'client' && <ClientStep initialNickname={step.nickname} onCreate={(playerId) => open({ playerId })} creatingCheck={create.isPending} />}
-        {step.name === 'space' && <SpaceStep busySpaceId={busyInput?.spaceId} onPick={(spaceId) => open({ spaceId })} />}
+        {step.name === 'client' && (
+          <ClientStep initialNickname={step.nickname} onCreate={(playerId) => open({ playerId, spaceId: step.spaceId })} creatingCheck={create.isPending} />
+        )}
+        {step.name === 'space' && <SpaceStep onPick={(spaceId) => go({ name: 'spaceClient', spaceId })} />}
+        {step.name === 'spaceClient' && (
+          <SpaceClientStep
+            spaceId={step.spaceId}
+            query={query}
+            onQuery={setQuery}
+            busy={create.isPending}
+            noClientBusy={!!busyInput && !busyInput.playerId && !!busyInput.spaceId}
+            onPlayer={(player) => open({ playerId: player.id, spaceId: step.spaceId })}
+            onNewClient={(nickname) => go({ name: 'client', nickname, spaceId: step.spaceId })}
+            onNoClient={() => {
+              haptic.light();
+              open({ spaceId: step.spaceId });
+            }}
+          />
+        )}
       </Animated.View>
       </LayoutAnimationConfig>
     </View>
@@ -252,60 +283,51 @@ function ClientStep({
 
 /* ─────────────────────────── Аренда зоны ─────────────────────────── */
 
-function SpaceStep({ busySpaceId, onPick }: { busySpaceId?: string; onPick: (spaceId: string) => void }) {
-  const spaces = useSpaces();
-  const checks = useChecks();
-  const occupied = new Set((checks.data ?? []).map((c) => c.spaceId).filter(Boolean));
-  const list = spaces.data ?? [];
-
+function SpaceStep({ onPick }: { onPick: (spaceId: string) => void }) {
+  const { zones, loading } = useZoneStates();
   return (
     <View style={styles.stepGap}>
-      {spaces.isLoading ? (
-        <ActivityIndicator style={styles.loading} />
-      ) : list.length === 0 ? (
-        <Text style={[type.subhead, sheetStyles.secondary, styles.emptyText]}>Активных зон нет — их добавляют в «Тарифах и аренде».</Text>
-      ) : (
-        <GlassCard>
-          <ScrollView style={styles.spaceList} showsVerticalScrollIndicator={false}>
-            {list.map((space, index) => {
-              const busy = occupied.has(space.id);
-              const opening = busySpaceId === space.id;
-              return (
-                <View key={space.id}>
-                  {index > 0 && <View style={[sheetStyles.separator, styles.spaceSeparator]} />}
-                  <Pressable
-                    disabled={busy || !!busySpaceId}
-                    onPress={() => {
-                      haptic.medium();
-                      onPick(space.id);
-                    }}
-                    style={({ pressed }) => [styles.spaceRow, pressed && sheetStyles.pressedRow]}
-                    accessibilityRole="button"
-                    accessibilityState={{ disabled: busy }}>
-                    <View style={[styles.spaceIcon, { backgroundColor: busy ? colors.fill : colors.accent }]}>
-                      {opening ? (
-                        <ActivityIndicator color="white" />
-                      ) : (
-                        <SymbolView name={busy ? 'lock.fill' : 'timer'} size={16} weight="semibold" tintColor={busy ? colors.secondaryLabel : 'white'} />
-                      )}
-                    </View>
-                    <View style={styles.flex}>
-                      <Text style={[type.body, busy ? sheetStyles.secondary : sheetStyles.label]} numberOfLines={1}>
-                        {space.name}
-                      </Text>
-                      <Text style={[type.footnote, sheetStyles.secondary]} numberOfLines={1}>
-                        {busy ? 'Занята открытым чеком' : (SPACE_TYPE_LABEL[space.type] ?? 'Зона')}
-                      </Text>
-                    </View>
-                    <Text style={[type.subhead, styles.rate]}>{`${formatMoney(space.hourlyRate)}/ч`}</Text>
-                  </Pressable>
-                </View>
-              );
-            })}
-          </ScrollView>
-        </GlassCard>
-      )}
+      <ZoneList zones={zones} loading={loading} onPick={onPick} />
       <Text style={[type.footnote, sheetStyles.secondary, styles.footnote]}>Аренда считается по начатым часам — до оплаты чека.</Text>
+    </View>
+  );
+}
+
+/**
+ * После зоны — кто в ней: клиент из базы, новый или без клиента. Аренда с клиентом сразу
+ * даёт ему его скидки и бонусы; раньше чек аренды открывался только без клиента.
+ */
+function SpaceClientStep({
+  spaceId,
+  query,
+  onQuery,
+  busy,
+  noClientBusy,
+  onPlayer,
+  onNewClient,
+  onNoClient,
+}: {
+  spaceId: string;
+  query: string;
+  onQuery: (q: string) => void;
+  busy: boolean;
+  noClientBusy: boolean;
+  onPlayer: (player: PlayerSearchItem) => void;
+  onNewClient: (nickname: string) => void;
+  onNoClient: () => void;
+}) {
+  const spaces = useSpaces();
+  const zone = spaces.data?.find((s) => s.id === spaceId);
+  return (
+    <View style={styles.stepGap}>
+      {zone ? (
+        <Text style={[type.subhead, sheetStyles.secondary, styles.footnote]}>{`${zone.name} · ${formatMoney(zone.hourlyRate)}/ч`}</Text>
+      ) : null}
+      <View style={styles.quickRow}>
+        <QuickTile icon="person.crop.circle.badge.questionmark" title="Без клиента" tint={colors.gray} busy={noClientBusy} onPress={onNoClient} />
+        <QuickTile icon="person.badge.plus" title="Новый клиент" tint={colors.blue} onPress={() => onNewClient(query.trim())} />
+      </View>
+      <PlayerSearch query={query} onQuery={onQuery} onPlayer={(player) => !busy && onPlayer(player)} onCreate={onNewClient} />
     </View>
   );
 }
@@ -314,8 +336,6 @@ const styles = StyleSheet.create({
   sheet: { paddingHorizontal: space.lg, paddingTop: space.md, paddingBottom: space.md, gap: space.md },
   step: { gap: space.md },
   stepGap: { gap: space.md },
-  flex: { flex: 1 },
-  loading: { paddingVertical: space.xxl },
   quickRow: { flexDirection: 'row', gap: 10 },
 
   field: { paddingHorizontal: space.lg },
@@ -323,13 +343,5 @@ const styles = StyleSheet.create({
   segment: { alignSelf: 'stretch' },
   error: { color: colors.red, paddingHorizontal: space.xs },
 
-  // Высота — минимальная: с крупным текстом строка зоны растёт, а не обрезает подписи.
-  spaceRow: { flexDirection: 'row', alignItems: 'center', gap: space.md, paddingHorizontal: space.md, paddingVertical: space.sm, minHeight: 64 },
-  spaceIcon: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center' },
-  spaceSeparator: { marginLeft: 58 },
-  // В шторке «по содержимому» ScrollView не должен сжиматься: его высота входит в высоту шторки.
-  spaceList: { maxHeight: 64 * 5.5, flexShrink: 0 },
-  rate: { color: colors.secondaryLabel, fontVariant: ['tabular-nums'] },
-  emptyText: { paddingVertical: space.lg, textAlign: 'center' },
   footnote: { paddingHorizontal: space.xs },
 });
