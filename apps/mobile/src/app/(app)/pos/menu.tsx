@@ -66,7 +66,7 @@ export default function MenuSheet() {
   useEffect(() => () => Keyboard.dismiss(), []);
   const menu = useMenu();
   const check = useCheck(checkId);
-  const popular = usePopularItems(checkId);
+  const popular = usePopularItems(checkId, check.data ? check.data.playerId ?? null : undefined);
   const now = useNow(30_000);
   const [category, setCategory] = useState<string>(ALL);
   const [query, setQuery] = useState('');
@@ -198,6 +198,10 @@ export default function MenuSheet() {
       <View style={styles.flex}>
       <FlashList
         data={rows}
+        // Блок «Популярное» приходит чуть позже меню и встаёт в начало списка. С удержанием
+        // позиции (включено во FlashList 2 по умолчанию) список уезжал вниз и блок оставался
+        // за верхним краем — виден был только при повторном открытии.
+        maintainVisibleContentPosition={{ disabled: true }}
         keyExtractor={(row) => row.key}
         getItemType={(row) => row.type}
         contentContainerStyle={{ ...styles.listContent, paddingBottom: listBottom }}

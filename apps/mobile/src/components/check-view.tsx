@@ -18,7 +18,7 @@ import { formatDuration, formatMoney, formatTime, toNumber } from '@/lib/format'
 import { haptic } from '@/lib/haptics';
 import type { PosPlayer } from '@/lib/payment';
 import { categoryHex, categorySymbol } from '@/lib/catalog-api';
-import { addItem, reloadCheck, TIER_LABEL, useCheckSuggestions, useMenu } from '@/lib/pos-api';
+import { addItem, reloadCheck, TIER_LABEL, useCheckSuggestions, useMenu, usePopularItems } from '@/lib/pos-api';
 import { parseAmount } from '@/lib/shift-api';
 import { FONT_SCALE_MAX, useTextLayout } from '@/lib/text-scale';
 import { colors, radius, space, type } from '@/lib/theme';
@@ -62,6 +62,8 @@ export function CheckView({ check, totals, actions, player, now, contentInsetAdj
   const hasRental = !!(check.spaceId && check.spaceStartAt);
   // Значок позиции — иконка и цвет её категории, как на плитках меню (меню уже в кэше).
   const menu = useMenu();
+  // Заранее: шторка «Добавить» откроется уже с блоком «Популярное».
+  usePopularItems(isOpen ? check.id : '', check.playerId ?? null);
   const categories = new Map((menu.data?.categories ?? []).map((c) => [c.id, c]));
   const itemCategory = new Map((menu.data?.items ?? []).map((i) => [i.id, i.category]));
   const iconFor = (itemId: string): RowIconLook => {

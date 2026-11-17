@@ -230,12 +230,17 @@ export function useCheckSuggestions(checkId: string, enabled: boolean) {
  */
 export type PopularItems = { source: 'player' | 'global'; itemIds: string[] };
 
-export function usePopularItems(checkId: string) {
+/**
+ * Популярное для шторки «Добавить». Клиент — в ключе: сменили клиента в чеке — сразу его
+ * позиции, а не прежнего. Чек вызывает хук заранее, чтобы шторка открывалась с готовым блоком.
+ */
+export function usePopularItems(checkId: string, playerId: string | null | undefined) {
   const club = useClubKey();
   return useQuery({
-    queryKey: [club, 'pos', 'popular', checkId],
+    queryKey: [club, 'pos', 'popular', checkId, playerId ?? null],
     queryFn: () => api.get<PopularItems>(`/pos/checks/${checkId}/popular`),
-    enabled: !!checkId,
+    // Пока чек не загружен, клиент неизвестен — не запрашиваем «гостевое» впустую.
+    enabled: !!checkId && playerId !== undefined,
     staleTime: 5 * 60_000,
   });
 }
