@@ -29,7 +29,34 @@ export interface DiscountContext {
   lines: CheckLine[]
   /** Позиции + платные модификаторы (база скидки на весь чек). */
   gross: number
+  /**
+   * Штамп-карты: сколько единиц «на что» скидки клиент уже купил в прошлых чеках
+   * (с даты создания скидки). Ключ — id скидки с free_units + free_history.
+   */
+  history?: Record<string, number>
 }
+
+/** Условия «кому/когда» — общие для скидок и правил начисления бонусов. */
+export interface ConditionFields {
+  audience: string
+  tiers: string[]
+  clientIds: string[]
+  birthdayDays: number | null
+  weekdays: number[]
+  timeFrom: string | null
+  timeTo: string | null
+  startsOn: string | null
+  endsOn: string | null
+}
+
+/** «На что» — общее для скидок и правил начисления. */
+export interface ScopeFields {
+  scope: string
+  categoryIds: string[]
+  itemIds: string[]
+}
+
+export type ConditionContext = Pick<DiscountContext, 'playerId' | 'player' | 'openedAt'>
 
 export interface DiscountRow {
   discountId: string
@@ -66,7 +93,7 @@ function birthdayDistance(birthday: string | null, today: string): number | null
 }
 
 /** Подходит ли скидка чеку по «кому» и «когда» (без суммы и состава). */
-export function matchesConditions(d: Discount, ctx: DiscountContext): boolean {
+export function matchesConditions(d: ConditionFields, ctx: ConditionContext): boolean {
   const when = mskParts(ctx.openedAt)
   if (d.weekdays.length && !d.weekdays.includes(when.weekday)) return false
   const from = toMinutes(d.timeFrom)
@@ -92,19 +119,53 @@ export function matchesConditions(d: Discount, ctx: DiscountContext): boolean {
   return true
 }
 
-function scopeLines(d: Discount, ctx: DiscountContext): CheckLine[] {
-  if (d.scope === 'categories') return ctx.lines.filter((l) => l.categoryId && d.categoryIds.includes(l.categoryId))
-  if (d.scope === 'items') return ctx.lines.filter((l) => d.itemIds.includes(l.itemId))
-  return ctx.lines
+/** Подходит ли строка чека под «на что». */
+export function lineInScope(d: ScopeFields, l: Pick<CheckLine, 'itemId' | 'categoryId'>): boolean {
+  if (d.scope === 'categories') return !!l.categoryId && d.categoryIds.includes(l.categoryId)
+  if (d.scope === 'items') return d.itemIds.includes(l.itemId)
+  return true
+}
+
+function scopeLines(d: ScopeFields, ctx: Pick<DiscountContext, 'lines'>): CheckLine[] {
+  return ctx.lines.filter((l) => lineInScope(d, l))
+}
+
+/** Сколько единиц станут бесплатными: каждая N-я по счёту, считая прошлые покупки. */
+export function freeUnitsCount(every: number, prior: number, current: number): number {
+  if (!(every >= 2) || current <= 0) return 0
+  const before = Math.max(0, Math.floor(prior))
+  return Math.floor((before + current) / every) - Math.floor(before / every)
+}
+
+/** «Каждый N-й бесплатно»: бесплатными становятся самые дешёвые единицы «на что». */
+function freeUnitRows(d: Discount, ctx: DiscountContext, lines: CheckLine[]): { rows: DiscountRow[]; effect: number } | null {
+  const qty = lines.reduce((s, l) => s + l.qty, 0)
+  const prior = d.freeHistory ? ctx.history?.[d.id] ?? 0 : 0
+  let free = freeUnitsCount(d.freeEvery ?? 0, prior, qty)
+  if (free <= 0) return null
+  const rows: DiscountRow[] = []
+  let effect = 0
+  for (const l of [...lines].sort((a, b) => a.price - b.price)) {
+    if (free <= 0) break
+    const units = Math.min(free, l.qty)
+    const amount = round2(units * l.price)
+    free -= units
+    if (amount <= 0) continue
+    effect += amount
+    rows.push({ discountId: d.id, name: d.name, type: 'fixed', value: String(amount), amount: String(amount), target: 'item', itemId: l.id })
+  }
+  return rows.length ? { rows, effect } : null
 }
 
 /** Строки скидки для чека и её эффект в рублях; null — по сумме/составу не подходит. */
 export function discountRows(d: Discount, ctx: DiscountContext): { rows: DiscountRow[]; effect: number } | null {
-  const value = parseFloat(d.value)
-  if (!(value > 0) || ctx.gross < parseFloat(d.minCheckSum ?? '0')) return null
+  if (ctx.gross < parseFloat(d.minCheckSum ?? '0')) return null
   const lines = scopeLines(d, ctx)
+  if (!lines.length) return null
+  if (d.mechanic === 'free_units') return freeUnitRows(d, ctx, lines)
+  const value = parseFloat(d.value)
   const qty = lines.reduce((s, l) => s + l.qty, 0)
-  if (!lines.length || qty < (d.minQuantity ?? 1)) return null
+  if (!(value > 0) || qty < (d.minQuantity ?? 1)) return null
   const base = { discountId: d.id, name: d.name, type: d.type as 'percent' | 'fixed' }
 
   if (d.scope === 'check') {

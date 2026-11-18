@@ -21,8 +21,8 @@ import { profileNameCondition, profileTagCondition } from '../../lib/searchVaria
 import { getPrecheckCandidates } from '../../lib/prechecks.js'
 import { getCheckSuggestions, learnFromCheckClose } from '../../lib/suggestions.js'
 import { getPopularItems } from '../../lib/popular-items.js'
-import { accrueBonusLot, spendBonusLots, getBonusExpiryDays } from '../../lib/bonusLots.js'
-import { isRegistrationPending } from '../../lib/registration.js'
+import { spendBonusLots } from '../../lib/bonusLots.js'
+import { accrueForCheck } from '../../lib/bonusAccrual.js'
 import { getNumericSetting, getStringSetting, LARGE_CHECK_KEY, DEFAULT_LARGE_CHECK, getBoolSetting, STAFF_DISCOUNT_KEY, STAFF_COMP_SCOPE_KEY, STAFF_COMP_OWNERS_KEY, STAFF_MAX_DISCOUNT_KEY, DEFAULT_STAFF_MAX_DISCOUNT } from '../../lib/appSettings.js'
 import { shiftWorkers } from '../../lib/salary.js'
 import { matchesConditions, discountRows, pickDiscounts, type DiscountContext } from '../../lib/discounts.js'
@@ -240,13 +240,6 @@ async function addCheckItemTx(
 type Tx = Parameters<Parameters<Database['transaction']>[0]>[0]
 type DbOrTx = Database | Tx
 
-function parseJsonObject(raw: string | undefined): Record<string, unknown> {
-  try { const v = JSON.parse(raw ?? '{}'); return v && typeof v === 'object' && !Array.isArray(v) ? v : {} } catch { return {} }
-}
-function parseJsonArray(raw: string | undefined): string[] {
-  try { const v = JSON.parse(raw ?? '[]'); return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [] } catch { return [] }
-}
-
 async function applyAutoDiscounts(exec: DbOrTx, checkId: string) {
   const [check] = await exec.select().from(checks).where(eq(checks.id, checkId))
   if (!check) return
@@ -301,7 +294,36 @@ async function discountContext(exec: DbOrTx, check: typeof checks.$inferSelect):
     openedAt: check.createdAt,
     lines,
     gross: lines.reduce((s, l) => s + l.price * l.qty, 0) + modsSum,
+    history: check.playerId ? await stampHistory(exec, check.playerId, check.id) : {},
   }
+}
+
+/**
+ * Штамп-карты («каждый N-й бесплатно» с учётом прошлых визитов): сколько единиц
+ * «на что» гость купил в закрытых чеках с даты запуска скидки. Ключ — id скидки.
+ */
+async function stampHistory(exec: DbOrTx, playerId: string, checkId: string): Promise<Record<string, number>> {
+  const cards = await exec.select().from(discounts)
+    .where(and(eq(discounts.isActive, true), eq(discounts.mechanic, 'free_units'), eq(discounts.freeHistory, true)))
+  const out: Record<string, number> = {}
+  for (const d of cards) {
+    const idList = (ids: string[]) => sql.join(ids.map((id) => sql`${id}::uuid`), sql`, `)
+    const scopeSql = d.scope === 'categories'
+      ? (d.categoryIds.length ? sql`AND i.category IN (${idList(d.categoryIds)})` : sql`AND false`)
+      : d.scope === 'items'
+        ? (d.itemIds.length ? sql`AND ci.item_id IN (${idList(d.itemIds)})` : sql`AND false`)
+        : sql``
+    const res: any = await exec.execute(sql`
+      SELECT coalesce(sum(ci.quantity), 0)::int AS n
+      FROM check_items ci
+      JOIN checks c ON c.id = ci.check_id
+      LEFT JOIN inventory i ON i.id = ci.item_id
+      WHERE c.player_id = ${playerId} AND c.status = 'closed' AND c.id <> ${checkId}
+        AND c.created_at >= ${d.createdAt.toISOString()}::timestamptz ${scopeSql}
+    `)
+    out[d.id] = Number((res.rows ?? res)[0]?.n ?? 0)
+  }
+  return out
 }
 
 // Скидка персоналу/владельцу (тумблер в разделе скидок): если включена И плательщик
@@ -2091,57 +2113,13 @@ posRouter.post('/checks/:id/pay', requireRole('owner', 'staff'), zValidator('jso
       // Общий хелпер — тот же вызывают /comp и вебхуки СБП (eventLifecycle.ts).
       const completedEvent = await completeLinkedEvent(tx, { id: checkId, linkedEventId: check.linkedEventId })
 
-      // Начисление бонусов с учётом настроек app_settings (на полную сумму, включая аренду).
-      // Регистрация из приложения, ещё не подтверждённая персоналом, — без бонусов.
-      let bonusAwarded = 0
-      if (body.playerId && player && !isRegistrationPending(player)) {
-        const settingsRows = await tx.select().from(appSettings)
-          .where(inArray(appSettings.key, ['bonus_enabled', 'bonus_accrual_rate', 'bonus_min_purchase', 'bonus_accrual_on_debt', 'bonus_tier_rates', 'bonus_excluded_categories']))
-        const settings = Object.fromEntries(settingsRows.map(r => [r.key, r.value]))
+      // Бонусы по правилам + подарки первого чека (lib/bonusAccrual.ts — одно место для
+      // кассы, QR и вебхука). Неподтверждённая регистрация из приложения — без бонусов.
+      const accrual = await accrueForCheck(tx, { checkId, playerId: body.playerId ?? null, paid: total, debt: debtAmount })
+      const bonusAwarded = accrual.bonusAwarded
+      const gifts = accrual.gifts
 
-        const bonusEnabled = settings['bonus_enabled'] !== 'false'
-        // Процент по статусу клиента (bonus_tier_rates: {"resident": 7}), иначе общий.
-        const tierRates = parseJsonObject(settings['bonus_tier_rates'])
-        const tierRate = Number(tierRates[player.clientTier])
-        const accrualRate = (Number.isFinite(tierRate) && tierRate >= 0 ? tierRate : parseFloat(settings['bonus_accrual_rate'] ?? '5')) / 100
-        const minPurchase = parseFloat(settings['bonus_min_purchase'] ?? '0')
-        const accrualOnDebt = settings['bonus_accrual_on_debt'] === 'true'
-        // Категории без бонусов (например, тарифы или алкоголь): их доля чека не начисляется.
-        const excludedCats = new Set(parseJsonArray(settings['bonus_excluded_categories']))
-        let bonusBase = total
-        if (excludedCats.size && itemRows.length) {
-          const cats = await tx.select({ id: inventory.id, category: inventory.category }).from(inventory)
-            .where(inArray(inventory.id, itemRows.map(i => i.itemId).filter((x): x is string => !!x)))
-          const catOf = new Map(cats.map(r => [r.id, r.category]))
-          const gross = itemRows.reduce((s2, i) => s2 + parseFloat(i.priceAtTime) * i.quantity, 0)
-          const excluded = itemRows.filter(i => i.itemId && excludedCats.has(catOf.get(i.itemId) ?? ''))
-            .reduce((s2, i) => s2 + parseFloat(i.priceAtTime) * i.quantity, 0)
-          if (gross > 0) bonusBase = round2(total * Math.max(0, 1 - excluded / gross))
-        }
-
-        if (bonusEnabled && total >= minPurchase && !(debtAmount > 0 && !accrualOnDebt)) {
-          const bonusEarned = Math.floor(bonusBase * accrualRate)
-          bonusAwarded = bonusEarned
-          if (bonusEarned > 0) {
-            const newBonus = round2(parseFloat(player.bonusPoints) + bonusEarned)
-            await tx.update(profiles).set({ bonusPoints: String(newBonus) }).where(eq(profiles.id, body.playerId))
-            await tx.insert(bonusHistory).values({
-              profileId: body.playerId,
-              amount: String(bonusEarned),
-              balanceAfter: String(newBonus),
-              reason: `${Math.round(accrualRate * 100)}% начисление за чек`,
-            })
-            // Лот для сгорания бонусов: expiresAt = now + bonus_expiry_days (либо null).
-            const expiryDays = await getBonusExpiryDays(tx)
-            await accrueBonusLot(tx, body.playerId, bonusEarned, expiryDays)
-          }
-        }
-      }
-      // Фиксируем фактически начисленное (0 — не начисляли): по нему возврат
-      // откатывает бонусы, а не по текущей ставке (refunds.router.ts).
-      await tx.update(checks).set({ bonusAwarded: String(bonusAwarded) }).where(eq(checks.id, checkId))
-
-      return { closedCheck, certSent, debtAmount, playerId: body.playerId ?? null, completedEvent, bonusAwarded }
+      return { closedCheck, certSent, debtAmount, playerId: body.playerId ?? null, completedEvent, bonusAwarded, gifts }
     })
 
     const closedCheck = closed?.closedCheck
@@ -2178,6 +2156,9 @@ posRouter.post('/checks/:id/pay', requireRole('owner', 'staff'), zValidator('jso
           body: `Начислены за покупку на ${paidTotal.toLocaleString('ru')} ₽`,
           meta: { screen: 'check', checkId },
         }, db)
+      }
+      for (const g of closed.gifts ?? []) {
+        void notifyClient(g.profileId, { kind: 'bonus', title: g.title, body: g.body, meta: { screen: 'bonus' } }, db)
       }
       if ((closed.debtAmount ?? 0) > 0) {
         void notifyClient(pid, {

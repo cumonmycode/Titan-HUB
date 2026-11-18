@@ -3,13 +3,12 @@ import { Hono } from 'hono'
 import { timingSafeEqual } from 'node:crypto'
 import {
   checks, checkItems, checkItemModifiers, checkDiscounts, spaces,
-  checkPayments, transactions, profiles, bonusHistory, appSettings,
+  checkPayments, transactions,
   residentPayments,
   eq, inArray,
 } from '@titan/database'
 import type { Database } from '@titan/database'
-import { accrueBonusLot, getBonusExpiryDays } from '../../lib/bonusLots.js'
-import { isRegistrationPending } from '../../lib/registration.js'
+import { accrueForCheck } from '../../lib/bonusAccrual.js'
 import { round2, computeRental, computeTotals } from '../../lib/money.js'
 import { publishEvent } from '../../lib/realtime.js'
 import { getClubIntegration } from '../../lib/secrets.js'
@@ -407,41 +406,8 @@ plategaRouter.post('/webhook', async (c) => {
       // последний открытый чек участника). Без этого оплаченное по QR «Идёт» навсегда.
       completedEvent = await completeLinkedEvent(tx, { id: checkId, linkedEventId: check.linkedEventId })
 
-      // Начисление бонусов за QR/СБП-оплату (зеркально POS /pay; раньше его делал
-      // фронтовый /pay, теперь чек закрывает webhook — иначе бонусы терялись).
-      let bonusAwarded = 0
-      if (check.playerId) {
-        const settingsRows = await tx.select().from(appSettings)
-          .where(inArray(appSettings.key, ['bonus_enabled', 'bonus_accrual_rate', 'bonus_min_purchase']))
-        const settings = Object.fromEntries(settingsRows.map((r) => [r.key, r.value]))
-        const bonusEnabled = settings['bonus_enabled'] !== 'false'
-        const accrualRate = parseFloat(settings['bonus_accrual_rate'] ?? '5') / 100
-        const minPurchase = parseFloat(settings['bonus_min_purchase'] ?? '0')
-        if (bonusEnabled && total >= minPurchase) {
-          const earned = Math.floor(total * accrualRate)
-          if (earned > 0) {
-            const [p] = await tx.select().from(profiles).where(eq(profiles.id, check.playerId)).for('update')
-            // Неподтверждённая регистрация из приложения — без бонусов (как /pay).
-            if (p && !isRegistrationPending(p)) {
-              const newBonus = round2(parseFloat(p.bonusPoints) + earned)
-              await tx.update(profiles).set({ bonusPoints: String(newBonus) }).where(eq(profiles.id, check.playerId))
-              await tx.insert(bonusHistory).values({
-                profileId: check.playerId,
-                amount: String(earned),
-                balanceAfter: String(newBonus),
-                reason: `${Math.round(accrualRate * 100)}% начисление за чек (СБП)`,
-              })
-              // Лот для сгорания бонусов: expiresAt = now + bonus_expiry_days (либо null).
-              // Зеркало pos.router.ts /pay — иначе СБП-бонусы никогда не сгорают.
-              const expiryDays = await getBonusExpiryDays(tx)
-              await accrueBonusLot(tx, check.playerId, earned, expiryDays)
-              bonusAwarded = earned
-            }
-          }
-        }
-      }
-      // Фактически начисленное (0 — не начисляли) — база отката бонусов при возврате.
-      await tx.update(checks).set({ bonusAwarded: String(bonusAwarded) }).where(eq(checks.id, checkId))
+      // Бонусы за QR/СБП-оплату — тот же расчёт, что у кассы (lib/bonusAccrual.ts).
+      await accrueForCheck(tx, { checkId, playerId: check.playerId, paid: total })
 
       didClose = true
     })

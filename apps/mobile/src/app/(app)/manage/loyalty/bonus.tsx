@@ -1,13 +1,14 @@
-import { ContentUnavailableView, Form, Host, ProgressView, Section, Text, Toggle } from '@expo/ui/swift-ui';
+import { ContentUnavailableView, Form, Host, ProgressView, RNHostView, Section, Text, Toggle } from '@expo/ui/swift-ui';
 import { refreshable } from '@expo/ui/swift-ui/modifiers';
 import { Stack, useRouter } from 'expo-router';
 import { Alert } from 'react-native';
 
-import { LinkRow, TextRow } from '@/components/native-form';
+import { BonusCalculator } from '@/components/loyalty-parts';
+import { ActionRow, LinkRow, TextRow } from '@/components/native-form';
 import { useSettingsEditor } from '@/components/settings-parts';
 import { tierLook, useClientTiers } from '@/lib/clients-api';
 import { useGoods } from '@/lib/goods-api';
-import { usePickDraft } from '@/lib/loyalty-api';
+import { discountSummary, RULE_KIND_LABEL, ruleValueText, useBonusRules, usePickDraft } from '@/lib/loyalty-api';
 
 function parseRates(raw: string): Record<string, number> {
   try {
@@ -34,8 +35,9 @@ function numberIn(raw: string, min: number, max: number, apply: (value: string) 
 }
 
 /**
- * Бонусная программа: начисление (общий процент и свой для каждого статуса, категории без
- * бонусов), списание, срок жизни, подарок на день рождения, видимость у клиентов.
+ * Бонусная программа: калькулятор «что получит гость», базовый процент (общий и по
+ * статусам), правила начисления поверх него, категории без бонусов, списание, срок жизни.
+ * Подарки (день рождения, приветственный, за друга) — на экране «Подарки».
  */
 export default function BonusSettingsScreen() {
   const router = useRouter();
@@ -43,6 +45,7 @@ export default function BonusSettingsScreen() {
   const tiers = useClientTiers();
   const goods = useGoods();
   const startPick = usePickDraft((s) => s.start);
+  const rules = useBonusRules();
 
   if (settings.loading || settings.error) {
     return (
@@ -54,20 +57,29 @@ export default function BonusSettingsScreen() {
 
   // Сервер включает бонусы, пока не записано 'false'.
   const on = settings.flag('bonus_enabled', true);
-  const birthday = settings.flag('birthday_bonus_enabled', false);
+  const names = {
+    tier: (key: string) => tierLook(key, tiers.data).label,
+    category: (id: string) => goods.data?.categories.find((c) => c.id === id)?.name ?? 'категория',
+  };
 
   return (
     <>
       <Stack.Title>Бонусная программа</Stack.Title>
       <Host style={{ flex: 1 }} useViewportSizeMeasurement>
-        <Form modifiers={[refreshable(async () => void (await settings.refetch()))]}>
+        <Form modifiers={[refreshable(async () => void (await Promise.allSettled([settings.refetch(), rules.refetch()])))]}>
           <Section footer={<Text>{on ? 'Бонусы начисляются за покупки и списываются на кассе вместо денег.' : 'Бонусы не начисляются и не списываются.'}</Text>}>
             <Toggle label="Бонусная программа" isOn={on} onIsOnChange={(next) => settings.save({ bonus_enabled: next ? 'true' : 'false' })} />
           </Section>
 
           {on && (
             <>
-              <Section title="Начисление" footer={<Text>Чеки меньше минимальной покупки бонусов не дают.</Text>}>
+              <Section>
+                <RNHostView matchContents>
+                  <BonusCalculator tiers={tiers.data} />
+                </RNHostView>
+              </Section>
+
+              <Section title="Обычное начисление" footer={<Text>Чеки меньше минимальной покупки бонусов не дают.</Text>}>
                 <TextRow label="Процент от покупки, %" value={String(settings.number('bonus_accrual_rate', 5))} keyboard="decimal-pad" onCommit={(v) => numberIn(v, 0, 100, (x) => settings.save({ bonus_accrual_rate: x }))} />
                 <TextRow label="Минимальная покупка, ₽" value={String(settings.number('bonus_min_purchase', 0))} keyboard="decimal-pad" onCommit={(v) => numberIn(v, 0, 1_000_000, (x) => settings.save({ bonus_min_purchase: x }))} />
                 <Toggle label="Начислять при долге" isOn={settings.flag('bonus_accrual_on_debt', false)} onIsOnChange={(next) => settings.save({ bonus_accrual_on_debt: next ? 'true' : 'false' })} />
@@ -98,6 +110,23 @@ export default function BonusSettingsScreen() {
                 })}
               </Section>
 
+              <Section
+                title={`Правила · ${(rules.data ?? []).filter((r) => r.isActive).length} включено`}
+                footer={<Text>Правила меняют начисление: свой процент на бар, ×2 по вторникам, +100 за визит от 1 000 ₽. Множители не складываются — берётся больший.</Text>}>
+                {(rules.data ?? []).map((r) => (
+                  <LinkRow
+                    key={r.id}
+                    icon={r.kind === 'multiplier' ? 'sparkles' : r.kind === 'percent' ? 'percent' : 'plus.circle.fill'}
+                    color={r.isActive ? '#FF9500' : '#8E8E93'}
+                    title={r.name}
+                    subtitle={[r.isActive ? null : 'выключено', RULE_KIND_LABEL[r.kind], discountSummary({ ...r, minQuantity: 1 }, names)].filter(Boolean).join(' · ')}
+                    value={ruleValueText(r)}
+                    onPress={() => router.push({ pathname: '/manage/loyalty/bonus-rule', params: { ruleId: r.id } })}
+                  />
+                ))}
+                <ActionRow title="Новое правило" icon="plus.circle.fill" onPress={() => router.push('/manage/loyalty/bonus-rule')} />
+              </Section>
+
               <Section title="Без бонусов" footer={<Text>За эти категории бонусы не начисляются — например, за тарифы игры или алкоголь.</Text>}>
                 {(() => {
                   const excluded = parseIds(settings.text('bonus_excluded_categories', '[]'));
@@ -122,12 +151,6 @@ export default function BonusSettingsScreen() {
                 <TextRow label="Срок жизни, дней" value={String(settings.number('bonus_expiry_days', 0))} keyboard="numeric" onCommit={(v) => numberIn(v, 0, 3650, (x) => settings.save({ bonus_expiry_days: x }))} />
               </Section>
 
-              <Section title="День рождения">
-                <Toggle label="Подарок на день рождения" isOn={birthday} onIsOnChange={(next) => settings.save({ birthday_bonus_enabled: next ? 'true' : 'false' })} />
-                {birthday && (
-                  <TextRow label="Сколько бонусов" value={String(settings.number('birthday_bonus_amount', 0))} keyboard="decimal-pad" onCommit={(v) => numberIn(v, 0, 1_000_000, (x) => settings.save({ birthday_bonus_amount: x }))} />
-                )}
-              </Section>
             </>
           )}
 

@@ -72,6 +72,10 @@ export const profiles = pgTable('profiles', {
   appRevokedAt: timestamp('app_revoked_at', { withTimezone: true }),
   // Пометка «клиент удалил аккаунт My Titan»: 24 ч запрета входа, снимается при следующем входе.
   appDeletedAt: timestamp('app_deleted_at', { withTimezone: true }),
+  // Приглашения и подарки (миграция 093): кто пригласил, когда наградили, приветственный бонус.
+  referredBy: uuid('referred_by'),
+  referralRewardedAt: timestamp('referral_rewarded_at', { withTimezone: true }),
+  welcomeBonusAt: timestamp('welcome_bonus_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   deletedAt: timestamp('deleted_at', { withTimezone: true }),
 })

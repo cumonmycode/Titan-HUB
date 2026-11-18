@@ -228,6 +228,28 @@ export default function ClientScreen() {
           </Card>
         ) : null}
 
+        {!archived && data.role === 'client' ? (
+          <Card
+            footer={
+              data.referral?.inviter
+                ? data.referral.rewardedAt
+                  ? 'Бонусы за приглашение уже начислены.'
+                  : 'Бонусы обоим — после первого оплаченного чека, если включено в «Лояльность → Подарки».'
+                : undefined
+            }>
+            <InfoRow
+              icon="person.2.wave.2.fill"
+              iconColor="#34C759"
+              label="Пригласил"
+              value={data.referral?.inviter?.nickname ?? 'не указано'}
+              muted={!data.referral?.inviter}
+              chevron
+              onPress={() => router.push({ pathname: '/manage/clients/referrer', params: { clientId: data.id } })}
+            />
+            {data.referral?.invited ? <InfoRow label="Привёл друзей" value={String(data.referral.invited)} /> : null}
+          </Card>
+        ) : null}
+
         <Card title="Контакты" footer={`В клубе с ${new Date(data.createdAt).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' })}`}>
           <InfoRow label="Телефон" value={data.phone || 'не указан'} muted={!data.phone} onPress={phone ? () => open(`tel:+${phone}`) : undefined} />
           <InfoRow

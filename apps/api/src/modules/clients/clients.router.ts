@@ -56,6 +56,8 @@ const UpdateClientSchema = z.object({
   tgId: z.string().nullable().optional(),
   tgUsername: z.string().nullable().optional(),
   deletedAt: z.string().nullable().optional(),
+  // Кто пригласил (миграция 093): награда обоим — после первого оплаченного чека.
+  referredBy: z.string().uuid().nullable().optional(),
 })
 
 export const clientsRouter = new Hono<AppEnv>()
@@ -359,7 +361,12 @@ clientsRouter.get('/:id', async (c) => {
   const [client] = await db.select().from(profiles).where(and(eq(profiles.id, c.req.param('id')), isNull(profiles.deletedAt)))
   if (!client) return c.json({ error: 'Not found' }, 404)
   const { pin, passwordHash, ...safe } = client
-  return c.json({ client: safe })
+  // Приглашения (миграция 093): кто привёл клиента и скольких привёл он сам.
+  const [inviter] = client.referredBy
+    ? await db.select({ id: profiles.id, nickname: profiles.nickname }).from(profiles).where(eq(profiles.id, client.referredBy))
+    : []
+  const [invited] = await db.select({ n: count() }).from(profiles).where(and(eq(profiles.referredBy, client.id), isNull(profiles.deletedAt)))
+  return c.json({ client: { ...safe, referral: { inviter: inviter ?? null, invited: Number(invited?.n ?? 0), rewardedAt: client.referralRewardedAt } } })
 })
 
 clientsRouter.patch('/:id', requireRole('owner', 'staff'), zValidator('json', UpdateClientSchema), async (c) => {
@@ -367,6 +374,7 @@ clientsRouter.patch('/:id', requireRole('owner', 'staff'), zValidator('json', Up
   const body = c.req.valid('json')
   const id = c.req.param('id')
   const update: Record<string, any> = { ...body }
+  if (body.referredBy === id) return c.json({ error: 'Клиент не может пригласить сам себя' }, 400)
   if (body.deletedAt !== undefined) update.deletedAt = body.deletedAt ? new Date(body.deletedAt) : null
 
   // Архивация через PATCH (так архивирует сотрудник) — тот же финансовый инвариант,

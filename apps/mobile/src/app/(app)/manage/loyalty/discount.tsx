@@ -2,11 +2,11 @@ import { DatePicker, Form, Picker, RNHostView, Section, Text, Toggle } from '@ex
 import { pickerStyle, tag } from '@expo/ui/swift-ui/modifiers';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useState } from 'react';
-import { Alert, Pressable, StyleSheet, View } from 'react-native';
+import { Alert } from 'react-native';
 
 import { EditorToolbar } from '@/components/editor-toolbar';
 import { ActionRow, FieldRow, FormHost, InputRow, LinkRow, TimeRow } from '@/components/native-form';
-import { Text as RNText } from '@/components/text';
+import { WeekdayChips } from '@/components/loyalty-parts';
 import { tierLook, useClientTiers } from '@/lib/clients-api';
 import { chooseAction } from '@/lib/dialog';
 import { fromDateTime, toDateString } from '@/lib/events-api';
@@ -15,18 +15,17 @@ import { haptic } from '@/lib/haptics';
 import {
   AUDIENCE_LABEL,
   deleteDiscount,
+  discountTemplate,
   emptyDiscount,
   saveDiscount,
   SCOPE_LABEL,
   toInput,
   useDiscounts,
   usePickDraft,
-  WEEKDAYS,
   type DiscountAudience,
   type DiscountInput,
   type DiscountScope,
 } from '@/lib/loyalty-api';
-import { colors, space, type } from '@/lib/theme';
 
 const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error));
 const num = (text: string) => {
@@ -41,7 +40,7 @@ const today = () => toDateString(new Date());
  * суммы. Время и дни сверяются с моментом открытия чека.
  */
 export default function DiscountEditor() {
-  const { discountId } = useLocalSearchParams<{ discountId?: string }>();
+  const { discountId, template } = useLocalSearchParams<{ discountId?: string; template?: string }>();
   const router = useRouter();
   const discounts = useDiscounts();
   const tiers = useClientTiers();
@@ -51,12 +50,14 @@ export default function DiscountEditor() {
   const [draft, setDraft] = useState<DiscountInput | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const d = draft ?? (existing ? toInput(existing) : emptyDiscount());
+  const d = draft ?? (existing ? toInput(existing) : (template && discountTemplate(template)) || emptyDiscount());
+  const free = d.mechanic === 'free_units';
   const set = (patch: Partial<DiscountInput>) => setDraft({ ...d, ...patch });
   const percentTooBig = d.type === 'percent' && d.value > 100;
   const scopeEmpty = (d.scope === 'categories' && !d.categoryIds.length) || (d.scope === 'items' && !d.itemIds.length);
   const tiersEmpty = d.audience === 'tiers' && !d.tiers.length;
-  const ready = !!d.name.trim() && d.value > 0 && !percentTooBig && !scopeEmpty && !tiersEmpty;
+  const freeInvalid = free && !(d.freeEvery && d.freeEvery >= 2);
+  const ready = !!d.name.trim() && (free ? !freeInvalid : d.value > 0) && !percentTooBig && !scopeEmpty && !tiersEmpty;
 
   const save = async () => {
     if (!ready || busy) return;
@@ -114,12 +115,25 @@ export default function DiscountEditor() {
             <FieldRow value={d.description ?? ''} placeholder="Описание для кассира (необязательно)" maxLength={300} onChange={(description) => set({ description })} />
           </Section>
 
-          <Section title="Размер" footer={percentTooBig ? <Text>Процент — не больше 100.</Text> : undefined}>
-            <Picker selection={d.type} onSelectionChange={(v) => set({ type: v as 'percent' | 'fixed' })} modifiers={[pickerStyle('segmented')]}>
+          <Section title="Что даёт" footer={<Text>{free ? freeHint(d.freeEvery, d.freeHistory) : percentTooBig ? 'Процент — не больше 100.' : 'Процент или сумма от позиций «на что».'}</Text>}>
+            <Picker
+              selection={free ? 'free' : d.type}
+              onSelectionChange={(v) =>
+                set(v === 'free' ? { mechanic: 'free_units', type: 'percent', value: 100, freeEvery: d.freeEvery ?? 2 } : { mechanic: 'simple', type: v as 'percent' | 'fixed' })
+              }
+              modifiers={[pickerStyle('segmented')]}>
               <Text modifiers={[tag('percent')]}>Процент</Text>
               <Text modifiers={[tag('fixed')]}>Сумма, ₽</Text>
+              <Text modifiers={[tag('free')]}>N-й бесплатно</Text>
             </Picker>
-            <InputRow label={d.type === 'percent' ? 'Скидка, %' : 'Скидка, ₽'} value={d.value ? String(d.value) : ''} placeholder="0" keyboard="decimal-pad" onChange={(v) => set({ value: num(v) })} />
+            {free ? (
+              <>
+                <InputRow label="Бесплатно каждый, шт." value={d.freeEvery ? String(d.freeEvery) : ''} placeholder="2" keyboard="numeric" onChange={(v) => set({ freeEvery: Math.min(100, Math.round(num(v))) || null })} />
+                <Toggle label="Копить между визитами" isOn={d.freeHistory} onIsOnChange={(freeHistory) => set({ freeHistory })} />
+              </>
+            ) : (
+              <InputRow label={d.type === 'percent' ? 'Скидка, %' : 'Скидка, ₽'} value={d.value ? String(d.value) : ''} placeholder="0" keyboard="decimal-pad" onChange={(v) => set({ value: num(v) })} />
+            )}
           </Section>
 
           <Section footer={<Text>{d.isAuto ? 'Скидка сама ложится на подходящий чек.' : 'Кассир выбирает скидку в чеке — «Скидка → Скидки клуба».'}</Text>}>
@@ -194,7 +208,7 @@ export default function DiscountEditor() {
 
           <Section title="Условия" footer={<Text>Сумма — позиции чека до скидок. Количество — сколько штук подходящих позиций.</Text>}>
             <InputRow label="От суммы чека, ₽" value={d.minCheckSum ? String(d.minCheckSum) : ''} placeholder="без порога" keyboard="decimal-pad" onChange={(v) => set({ minCheckSum: num(v) })} />
-            <InputRow label="От количества, шт." value={d.minQuantity && d.minQuantity > 1 ? String(d.minQuantity) : ''} placeholder="1" keyboard="numeric" onChange={(v) => set({ minQuantity: Math.max(1, Math.round(num(v))) })} />
+            {!free && <InputRow label="От количества, шт." value={d.minQuantity && d.minQuantity > 1 ? String(d.minQuantity) : ''} placeholder="1" keyboard="numeric" onChange={(v) => set({ minQuantity: Math.max(1, Math.round(num(v))) })} />}
           </Section>
 
           {existing ? (
@@ -208,40 +222,9 @@ export default function DiscountEditor() {
   );
 }
 
-/** Дни недели чипами: ничего не выбрано — любой день. */
-function WeekdayChips({ value, onChange }: { value: number[]; onChange: (next: number[]) => void }) {
-  return (
-    <View style={styles.wrap}>
-      <RNText style={[type.footnote, styles.caption]}>{value.length ? 'Дни недели' : 'Любой день недели'}</RNText>
-      <View style={styles.row}>
-        {WEEKDAYS.map((label, i) => {
-          const day = i + 1;
-          const on = value.includes(day);
-          return (
-            <Pressable
-              key={label}
-              onPress={() => {
-                haptic.selection();
-                onChange(on ? value.filter((x) => x !== day) : [...value, day].sort((a, b) => a - b));
-              }}
-              style={[styles.chip, on && styles.chipOn]}
-              accessibilityRole="checkbox"
-              accessibilityState={{ checked: on }}>
-              <RNText style={[type.subhead, on ? styles.chipTextOn : styles.chipText]}>{label}</RNText>
-            </Pressable>
-          );
-        })}
-      </View>
-    </View>
-  );
+/** Подсказка к «N-й бесплатно»: как это увидит гость. */
+function freeHint(every: number | null, history: boolean): string {
+  if (!every || every < 2) return 'Укажите, какая по счёту позиция бесплатна — от 2.';
+  if (history) return `Штамп-карта: гость копит покупки из разных визитов, каждая ${every}-я — в подарок. Считаются покупки с момента создания скидки.`;
+  return every === 2 ? 'В одном чеке: из двух подходящих позиций дешёвая — бесплатно.' : `В одном чеке: каждая ${every}-я подходящая позиция бесплатна (самая дешёвая).`;
 }
-
-const styles = StyleSheet.create({
-  wrap: { gap: space.sm, paddingHorizontal: space.lg, paddingVertical: space.sm },
-  caption: { color: colors.secondaryLabel },
-  row: { flexDirection: 'row', gap: 6 },
-  chip: { flex: 1, height: 36, borderRadius: 10, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.fill },
-  chipOn: { backgroundColor: colors.accent },
-  chipText: { color: colors.label },
-  chipTextOn: { color: 'white', fontWeight: '600' },
-});

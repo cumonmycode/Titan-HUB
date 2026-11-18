@@ -44,6 +44,8 @@ export const SHEET_ROUTES: Record<string, ReadonlySet<string>> = {
     'expenses/new',
     'clients/edit',
     'clients/adjust',
+    'clients/referrer',
+    'loyalty/bonus-rule',
     'clients/telegram',
     'clients/tg-roster',
     'balances/find',

@@ -1,5 +1,5 @@
 import { db, profiles, eq, and, sql, type Database } from '@titan/database'
-import { getBusinessDayStartHour } from './appSettings.js'
+import { getBusinessDayStartHour, getNumericSetting } from './appSettings.js'
 
 // Пер-клубный db (Фаза 1): опциональный параметр, по умолч. синглтон (переходный
 // режим — см. lib/appSettings.ts). Перед включением тенантности станет обязательным.
@@ -9,7 +9,15 @@ type DbLike = Database
 // (09:00→06:00 МСК), в который у клиента есть хотя бы один закрытый чек (а не
 // каждый чек по отдельности — иначе 10 чеков за один вечер дали бы статус).
 // Плюс ручные («виртуальные») посещения profiles.manual_visits (±, без кассы).
+// Порог по умолчанию; владелец меняет его в «Лояльность → Статусы» (resident_visit_threshold).
+// 0 — автоповышение выключено.
 export const RESIDENT_VISIT_THRESHOLD = 10
+export const RESIDENT_THRESHOLD_KEY = 'resident_visit_threshold'
+
+export async function residentThreshold(database: DbLike): Promise<number> {
+  const n = Math.floor(await getNumericSetting(RESIDENT_THRESHOLD_KEY, RESIDENT_VISIT_THRESHOLD, database))
+  return Number.isFinite(n) && n >= 0 ? Math.min(n, 1000) : RESIDENT_VISIT_THRESHOLD
+}
 // Статус, который автоматически дорастает до «Резидента» по посещениям.
 export const STARTER_TIER = 'newbie'
 
@@ -40,12 +48,13 @@ export async function visitProgress(profileId: string, database: DbLike): Promis
   const [p] = await database.select({ tier: profiles.clientTier }).from(profiles).where(eq(profiles.id, profileId))
   const tier = p?.tier ?? STARTER_TIER
   const visits = await countVisits(profileId, database)
-  const isStarter = tier === STARTER_TIER
+  const threshold = await residentThreshold(database)
+  const isStarter = tier === STARTER_TIER && threshold > 0
   return {
     tier,
     visits,
-    threshold: RESIDENT_VISIT_THRESHOLD,
-    remaining: isStarter ? Math.max(0, RESIDENT_VISIT_THRESHOLD - visits) : 0,
+    threshold,
+    remaining: isStarter ? Math.max(0, threshold - visits) : 0,
     isResident: tier === 'resident',
   }
 }
@@ -56,8 +65,10 @@ export async function visitProgress(profileId: string, database: DbLike): Promis
 export async function maybePromoteToResident(profileId: string, database: DbLike): Promise<{ promoted: boolean }> {
   const [p] = await database.select({ tier: profiles.clientTier }).from(profiles).where(eq(profiles.id, profileId))
   if (!p || p.tier !== STARTER_TIER) return { promoted: false }
+  const threshold = await residentThreshold(database)
+  if (threshold <= 0) return { promoted: false }
   const visits = await countVisits(profileId, database)
-  if (visits < RESIDENT_VISIT_THRESHOLD) return { promoted: false }
+  if (visits < threshold) return { promoted: false }
   // Условие clientTier=STARTER_TIER в WHERE защищает от гонки (двойное повышение).
   const updated = await database
     .update(profiles)

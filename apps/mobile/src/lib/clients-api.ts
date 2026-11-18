@@ -40,6 +40,9 @@ export type Client = {
   deletedAt: string | null;
   /** Клиент сам удалил аккаунт My Titan (сутки без входа; при следующем входе снимается). */
   appDeletedAt?: string | null;
+  /** Приглашения (GET /clients/:id): кто привёл и скольких привёл сам. */
+  referredBy?: string | null;
+  referral?: { inviter: { id: string; nickname: string } | null; invited: number; rewardedAt: string | null };
 };
 
 export type ClientTierRow = { key: string; label: string; color: string; sortOrder: number; isSystem: boolean; price: NumericString };
@@ -405,6 +408,16 @@ export async function createClientProfile(input: ClientInput, gomafia: GomafiaPl
   } catch (error) {
     throw clientErrorMessage(error);
   }
+}
+
+/** Кто пригласил клиента (null — убрать). Бонусы обоим — после первого оплаченного чека. */
+export async function setClientReferrer(clientId: string, referrerId: string | null): Promise<void> {
+  try {
+    await api.patch(`/clients/${clientId}`, { referredBy: referrerId });
+  } catch (error) {
+    throw clientErrorMessage(error);
+  }
+  await queryClient.invalidateQueries({ queryKey: [host(), 'client', clientId] });
 }
 
 export async function updateClient(clientId: string, patch: Partial<Omit<Client, 'id'>>): Promise<Client> {

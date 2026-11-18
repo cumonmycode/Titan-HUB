@@ -35,8 +35,42 @@ export const discounts = pgTable('discounts', {
   minCheckSum: numeric('min_check_sum', { precision: 12, scale: 2 }).notNull().default('0'),
   combinable: boolean('combinable').notNull().default(false),
   sortOrder: integer('sort_order').notNull().default(0),
+  // Механика (миграция 093): simple — процент/сумма; free_units — каждый N-й бесплатно.
+  mechanic: text('mechanic').$type<'simple' | 'free_units'>().notNull().default('simple'),
+  freeEvery: integer('free_every'),
+  /** true — штамп-карта: считаются покупки прошлых визитов (с даты создания скидки). */
+  freeHistory: boolean('free_history').notNull().default(false),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 })
+
+/**
+ * Правила начисления бонусов (миграция 093) поверх базового процента.
+ * percent — свой процент на «на что»; multiplier — базовый × value; fixed — +value за чек.
+ */
+export const bonusRules = pgTable('bonus_rules', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  name: text('name').notNull(),
+  description: text('description'),
+  isActive: boolean('is_active').notNull().default(true),
+  kind: text('kind').$type<'percent' | 'multiplier' | 'fixed'>().notNull().default('percent'),
+  value: numeric('value', { precision: 10, scale: 2 }).notNull(),
+  scope: text('scope').$type<'check' | 'categories' | 'items'>().notNull().default('check'),
+  categoryIds: uuid('category_ids').array().notNull().default([]),
+  itemIds: uuid('item_ids').array().notNull().default([]),
+  audience: text('audience').$type<'all' | 'tiers' | 'clients' | 'staff' | 'first'>().notNull().default('all'),
+  tiers: text('tiers').array().notNull().default([]),
+  clientIds: uuid('client_ids').array().notNull().default([]),
+  birthdayDays: integer('birthday_days'),
+  weekdays: integer('weekdays').array().notNull().default([]),
+  timeFrom: text('time_from'),
+  timeTo: text('time_to'),
+  startsOn: date('starts_on', { mode: 'string' }),
+  endsOn: date('ends_on', { mode: 'string' }),
+  minCheckSum: numeric('min_check_sum', { precision: 12, scale: 2 }).notNull().default('0'),
+  sortOrder: integer('sort_order').notNull().default(0),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+})
+export type BonusRule = typeof bonusRules.$inferSelect
 
 export const clientDiscountRules = pgTable('client_discount_rules', {
   id: uuid('id').primaryKey().defaultRandom(),

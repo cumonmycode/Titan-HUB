@@ -6,6 +6,7 @@
  * оплата — /api/auth/me/payments (общая с веб-кошельком).
  */
 import { Hono } from 'hono'
+import { parseBonusSettings } from '../../lib/bonusRules.js'
 import { zValidator } from '@hono/zod-validator'
 import { z } from 'zod'
 import {
@@ -190,8 +191,11 @@ residentRouter.get('/wallet', async (c) => {
   const tierRow = tariffRow ?? legacyRow
   const s = await settingsMap(db, [
     'bonus_enabled', 'bonus_accrual_rate', 'bonus_min_purchase', 'bonus_max_spend',
-    'bonus_expiry_days', 'bonus_wallet_hidden', 'club_name',
+    'bonus_expiry_days', 'bonus_wallet_hidden', 'club_name', 'bonus_tier_rates',
   ])
+  // Процент клиента — свой у его статуса, если задан (как считает касса).
+  const accrual = parseBonusSettings(s)
+  const myRate = accrual.tierRates[p.clientTier] ?? accrual.baseRate
   const [lot] = await db.select({ remaining: bonusLots.remaining, expiresAt: bonusLots.expiresAt })
     .from(bonusLots)
     .where(and(eq(bonusLots.profileId, me), gt(bonusLots.remaining, '0'), gt(bonusLots.expiresAt, new Date())))
@@ -229,7 +233,7 @@ residentRouter.get('/wallet', async (c) => {
     bonusHidden: s['bonus_wallet_hidden'] === 'true' || !bonusEnabled,
     bonusRules: {
       enabled: bonusEnabled,
-      accrualPercent: num(s['bonus_accrual_rate'] ?? '5'),
+      accrualPercent: myRate,
       minPurchase: num(s['bonus_min_purchase']),
       maxSpendPercent: s['bonus_max_spend'] ? num(s['bonus_max_spend']) : null,
       expiryDays: s['bonus_expiry_days'] ? num(s['bonus_expiry_days']) : null,

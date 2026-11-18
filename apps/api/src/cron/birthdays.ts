@@ -1,6 +1,10 @@
-import { db, profiles, notifications, appSettings, bonusHistory, type Database } from '@titan/database'
+import { randomBytes } from 'node:crypto'
+import { db, profiles, notifications, appSettings, bonusHistory, certificates, type Database } from '@titan/database'
 import { eq, and, isNull, inArray, sql } from 'drizzle-orm'
-import { accrueBonusLot, expireBonuses, getBonusExpiryDays } from '../lib/bonusLots.js'
+import { expireBonuses } from '../lib/bonusLots.js'
+import { creditBonus } from '../lib/bonusAccrual.js'
+import { notifyClient } from '../modules/notifications/client.js'
+import { parseBirthdayGift } from '../lib/birthdayGift.js'
 import { isRegistrationPending } from '../lib/registration.js'
 import { getWhatsAppConfig, sendWhatsAppTemplate } from '../lib/whatsapp.js'
 import { notify } from '../modules/notifications/push.js'
@@ -25,76 +29,72 @@ export async function checkBirthdays(database: Database = db, clubId: string | n
   const mmdd = `${mm}-${dd}`
   const year = msk.getUTCFullYear()
 
-  // Clients with birthday today. birthday — свободный text, поэтому НЕ кастуем в
-  // ::date (битая строка уронила бы весь запрос). Сравниваем MM-DD через substring
-  // только для строк формата YYYY-MM-DD.
-  const birthdayClients = await database
-    .select({ id: profiles.id, nickname: profiles.nickname, birthday: profiles.birthday, phone: profiles.phone, registrationStatus: profiles.registrationStatus })
-    .from(profiles)
-    .where(and(
-      eq(profiles.role, 'client'),
-      isNull(profiles.deletedAt),
-      sql`${profiles.birthday} ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}'`,
-      sql`substring(${profiles.birthday} from 6 for 5) = ${mmdd}`,
-    ))
-
-  if (birthdayClients.length === 0) {
-    console.log(`[birthdays] No birthdays today (${mmdd})`)
-    return
-  }
-
-  // Настройки бонуса ко дню рождения (раздел «Бонусы»).
-  const settingRows = await database.select().from(appSettings)
-    .where(inArray(appSettings.key, ['bonus_enabled', 'birthday_bonus_enabled', 'birthday_bonus_amount']))
-  const settings = Object.fromEntries(settingRows.map(r => [r.key, r.value]))
-  // Требуется и общий тумблер программы, и тумблер бонуса ко дню рождения.
-  const bonusEnabled = settings['bonus_enabled'] !== 'false' && settings['birthday_bonus_enabled'] === 'true'
-  const bonusAmount = Math.max(0, Math.floor(parseFloat(settings['birthday_bonus_amount'] ?? '0')))
-
-  // Начисляем бонус каждому имениннику — идемпотентно (один раз в день).
-  const credited = new Set<string>()
-  if (bonusEnabled && bonusAmount > 0) {
-    // Срок сгорания на момент начисления (null = бессрочно).
-    const expiryDays = await getBonusExpiryDays(database)
-    for (const client of birthdayClients) {
-      // Регистрация ещё не подтверждена персоналом — подарочных бонусов нет.
-      if (isRegistrationPending(client)) continue
-      try {
-        const done = await database.transaction(async (tx) => {
-          const already = await tx.select({ id: bonusHistory.id }).from(bonusHistory)
-            .where(and(
-              eq(bonusHistory.profileId, client.id),
-              eq(bonusHistory.reason, 'Бонус ко дню рождения'),
-              sql`DATE(${bonusHistory.createdAt}) = CURRENT_DATE`,
-            )).limit(1)
-          if (already.length > 0) return false
-          const [p] = await tx.select({ bonusPoints: profiles.bonusPoints })
-            .from(profiles).where(eq(profiles.id, client.id)).for('update')
-          if (!p) return false
-          const newBonus = (parseFloat(p.bonusPoints) || 0) + bonusAmount
-          await tx.update(profiles).set({ bonusPoints: String(newBonus) }).where(eq(profiles.id, client.id))
-          await tx.insert(bonusHistory).values({
-            profileId: client.id,
-            amount: String(bonusAmount),
-            balanceAfter: String(newBonus),
-            reason: 'Бонус ко дню рождения',
-          })
-          // Параллельный лот, чтобы бонус ко дню рождения умел сгорать по сроку.
-          await accrueBonusLot(tx, client.id, bonusAmount, expiryDays)
-          return true
-        })
-        if (done) credited.add(client.id)
-      } catch (e) {
-        console.error('[birthdays] bonus credit failed for', client.id, e)
-      }
-    }
-  }
-
-  // All owners to notify
   const owners = await database
     .select({ id: profiles.id })
     .from(profiles)
     .where(and(eq(profiles.role, 'owner'), isNull(profiles.deletedAt)))
+
+  // Настройки подарка ко дню рождения (раздел «Лояльность → Подарки»).
+  const settingRows = await database.select().from(appSettings).where(inArray(appSettings.key, [...BIRTHDAY_KEYS]))
+  const gift = parseBirthdayGift(Object.fromEntries(settingRows.map(r => [r.key, r.value])))
+
+  // Подарок приходит заранее (за N дней) — именинники «через N дней».
+  const giftDay = mskDate(gift.daysBefore)
+  const credited = new Map<string, string>()
+  if (gift.enabled) {
+    const giftClients = await clientsWithBirthday(database, giftDay.mmdd)
+    for (const client of giftClients) {
+      // Регистрация ещё не подтверждена персоналом — подарка нет.
+      if (isRegistrationPending(client)) continue
+      const amount = gift.tierAmounts[client.clientTier] ?? gift.amount
+      if (!(amount > 0)) continue
+      try {
+        const done = await database.transaction(async (tx) => {
+          // Один подарок в год: отметка в истории бонусов за последние 300 дней.
+          const already = await tx.select({ id: bonusHistory.id }).from(bonusHistory)
+            .where(and(
+              eq(bonusHistory.profileId, client.id),
+              inArray(bonusHistory.reason, [BIRTHDAY_REASON, BIRTHDAY_CERT_REASON]),
+              sql`${bonusHistory.createdAt} > now() - interval '300 days'`,
+            )).limit(1)
+          if (already.length > 0) return null
+          if (gift.kind === 'certificate' && owners[0]) {
+            const code = `BD-${giftDay.year}-${randomBytes(3).toString('hex').toUpperCase()}`
+            await tx.insert(certificates).values({
+              code, nominal: String(amount), balance: String(amount), createdBy: owners[0].id,
+              title: 'Подарок ко дню рождения', recipient: client.nickname,
+              validUntil: mskDate(gift.daysBefore + gift.certificateDays).date,
+              note: `Автоматически к ${giftDay.date.slice(8, 10)}.${giftDay.date.slice(5, 7)}`,
+            })
+            // Отметка без движения баланса — чтобы не выдать второй раз.
+            const [p] = await tx.select({ bonusPoints: profiles.bonusPoints }).from(profiles).where(eq(profiles.id, client.id))
+            await tx.insert(bonusHistory).values({ profileId: client.id, amount: '0', balanceAfter: p?.bonusPoints ?? '0', reason: BIRTHDAY_CERT_REASON })
+            return `сертификат ${code} на ${amount} ₽`
+          }
+          await creditBonus(tx, client.id, amount, BIRTHDAY_REASON)
+          return `+${amount} бонусов`
+        })
+        if (done) {
+          credited.set(client.id, done)
+          void notifyClient(client.id, {
+            kind: 'bonus',
+            title: '🎂 Подарок ко дню рождения',
+            body: gift.kind === 'certificate' ? `Для вас ${done}. Покажите номер на кассе.` : `Вам ${done} — с наступающим!`,
+            meta: { screen: 'bonus' },
+          }, database)
+        }
+      } catch (e) {
+        console.error('[birthdays] gift failed for', client.id, e)
+      }
+    }
+  }
+
+  // Именинники сегодня — владельцам.
+  const birthdayClients = await clientsWithBirthday(database, mmdd)
+  if (birthdayClients.length === 0) {
+    console.log(`[birthdays] No birthdays today (${mmdd})`)
+    return
+  }
 
   for (const client of birthdayClients) {
     const age = client.birthday
@@ -104,7 +104,7 @@ export async function checkBirthdays(database: Database = db, clubId: string | n
     const base = age
       ? `Сегодня ${age} ${pluralAge(age)}: ${client.nickname}`
       : `День рождения: ${client.nickname}`
-    const body = credited.has(client.id) ? `${base} · +${bonusAmount} бонусов` : base
+    const body = credited.has(client.id) ? `${base} · ${credited.get(client.id)}` : base
 
     for (const owner of owners) {
       // Avoid duplicate notifications for the same client+owner today
@@ -178,4 +178,28 @@ function pluralAge(n: number): string {
   if (mod10 === 1) return 'год'
   if (mod10 >= 2 && mod10 <= 4) return 'года'
   return 'лет'
+}
+
+const BIRTHDAY_REASON = 'Бонус ко дню рождения'
+const BIRTHDAY_CERT_REASON = 'Сертификат ко дню рождения'
+const BIRTHDAY_KEYS = ['bonus_enabled', 'birthday_bonus_enabled', 'birthday_bonus_amount', 'birthday_tier_amounts', 'birthday_bonus_days_before', 'birthday_gift_kind', 'birthday_certificate_days'] as const
+
+/** Дата по Москве со сдвигом в днях. */
+function mskDate(offsetDays: number): { date: string; mmdd: string; year: number } {
+  const d = new Date(Date.now() + 3 * 3600_000 + offsetDays * 86_400_000)
+  const date = d.toISOString().slice(0, 10)
+  return { date, mmdd: date.slice(5), year: d.getUTCFullYear() }
+}
+
+/** Клиенты с днём рождения в этот день (MM-DD). birthday — свободный text: без ::date. */
+async function clientsWithBirthday(database: Database, mmdd: string) {
+  return database
+    .select({ id: profiles.id, nickname: profiles.nickname, birthday: profiles.birthday, phone: profiles.phone, registrationStatus: profiles.registrationStatus, clientTier: profiles.clientTier })
+    .from(profiles)
+    .where(and(
+      eq(profiles.role, 'client'),
+      isNull(profiles.deletedAt),
+      sql`${profiles.birthday} ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}'`,
+      sql`substring(${profiles.birthday} from 6 for 5) = ${mmdd}`,
+    ))
 }

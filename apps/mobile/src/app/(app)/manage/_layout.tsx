@@ -62,6 +62,7 @@ export default function ManageLayout() {
       <Stack.Screen name="clients/history" options={formHeader({ title: 'История' })} />
       <Stack.Screen name="clients/edit" options={editorModal} />
       <Stack.Screen name="clients/adjust" options={compactSheet} />
+      <Stack.Screen name="clients/referrer" options={compactSheet} />
       <Stack.Screen name="clients/telegram" options={editorModal} />
       <Stack.Screen name="clients/tg-roster" options={editorModal} />
 
@@ -83,6 +84,10 @@ export default function ManageLayout() {
 
       <Stack.Screen name="loyalty/index" options={formHeader({ title: 'Лояльность' })} />
       <Stack.Screen name="loyalty/bonus" options={formHeader({ title: 'Бонусная программа' })} />
+      <Stack.Screen name="loyalty/bonus-rule" options={editorModal} />
+      <Stack.Screen name="loyalty/discounts" options={formHeader({ title: 'Скидки и акции' })} />
+      <Stack.Screen name="loyalty/gifts" options={formHeader({ title: 'Подарки' })} />
+      <Stack.Screen name="loyalty/status" options={formHeader({ title: 'Рост статуса' })} />
       <Stack.Screen name="loyalty/certificates" options={formHeader({ title: 'Сертификаты' })} />
       <Stack.Screen name="loyalty/discount" options={editorModal} />
       <Stack.Screen name="loyalty/certificate" options={formHeader()} />

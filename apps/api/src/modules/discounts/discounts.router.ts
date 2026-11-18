@@ -27,6 +27,10 @@ const ConditionsSchema = z.object({
   minCheckSum: z.number().min(0).max(10_000_000).optional(),
   combinable: z.boolean().optional(),
   sortOrder: z.number().int().optional(),
+  // «Каждый N-й бесплатно» (миграция 093): N от 2; freeHistory — штамп-карта по визитам.
+  mechanic: z.enum(['simple', 'free_units']).optional(),
+  freeEvery: z.number().int().min(2).max(100).nullable().optional(),
+  freeHistory: z.boolean().optional(),
 })
 type Conditions = z.infer<typeof ConditionsSchema>
 

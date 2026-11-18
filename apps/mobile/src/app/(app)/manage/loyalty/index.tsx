@@ -1,133 +1,118 @@
-import { ContentUnavailableView, Form, Host, Picker, ProgressView, Section, Text } from '@expo/ui/swift-ui';
-import { pickerStyle, refreshable, tag } from '@expo/ui/swift-ui/modifiers';
-import { Stack, useRouter } from 'expo-router';
-import { useMemo, useState } from 'react';
+import { Form, Host, RNHostView, Section, Text } from '@expo/ui/swift-ui';
+import { refreshable } from '@expo/ui/swift-ui/modifiers';
+import { Stack, useRouter, type Href } from 'expo-router';
+import { useState } from 'react';
+import type { SFSymbol } from 'sf-symbols-typescript';
 
-import { ActionRow, LinkRow, SearchRow } from '@/components/native-form';
+import { LoyaltyPulse } from '@/components/loyalty-parts';
+import { LinkRow } from '@/components/native-form';
 import { useSettingsEditor } from '@/components/settings-parts';
-import { ToolbarButton } from '@/components/toolbar';
-import { tierLook, useClientTiers } from '@/lib/clients-api';
-import { useGoods } from '@/lib/goods-api';
-import { haptic } from '@/lib/haptics';
-import { discountSummary, discountValueText, useCertificates, useDiscounts, type Discount } from '@/lib/loyalty-api';
+import { formatMoney } from '@/lib/format';
+import { LOYALTY_TEMPLATES, useBonusRules, useCertificates, useDiscounts, useLoyaltyOverview } from '@/lib/loyalty-api';
 import { useSession } from '@/lib/session';
 
-type Filter = 'all' | 'auto' | 'manual' | 'off';
-const FILTERS: { key: Filter; label: string }[] = [
-  { key: 'all', label: 'Все' },
-  { key: 'auto', label: 'Сами' },
-  { key: 'manual', label: 'Кассир' },
-  { key: 'off', label: 'Выкл.' },
-];
-
-const matchFilter = (d: Discount, f: Filter) =>
-  f === 'all' ? true : f === 'off' ? !d.isActive : d.isActive && (f === 'auto' ? d.isAuto : !d.isAuto);
-
 /**
- * Лояльность: бонусы и сертификаты — отдельными экранами, скидки — здесь списком с
- * фильтром и поиском. У каждой скидки свои условия: на что, кому, когда, от какой суммы.
- * «Сами» — применяются к чеку автоматически, «Кассир» — выбираются в кассе.
+ * Лояльность — один экран про всё, что клуб даёт гостям: пульс программы (бонусы на счетах,
+ * выдано/потрачено, скидки), разделы (бонусы, скидки и акции, подарки, сертификаты, рост
+ * статуса) и готовые акции, которые открывают редактор уже заполненным.
  */
 export default function LoyaltyScreen() {
   const router = useRouter();
   const isOwner = useSession((s) => s.user?.role === 'owner');
+  const [days, setDays] = useState(30);
+  const overview = useLoyaltyOverview(days);
   const discounts = useDiscounts();
-  const tiers = useClientTiers();
-  const goods = useGoods();
+  const rules = useBonusRules();
   const certificates = useCertificates();
   const settings = useSettingsEditor();
-  const [filter, setFilter] = useState<Filter>('all');
-  const [query, setQuery] = useState('');
 
-  const names = useMemo(
-    () => ({
-      tier: (key: string) => tierLook(key, tiers.data).label,
-      category: (id: string) => goods.data?.categories.find((c) => c.id === id)?.name ?? 'категория',
-    }),
-    [tiers.data, goods.data],
-  );
-
-  const all = discounts.data ?? [];
-  const q = query.trim().toLowerCase();
-  const list = all.filter((d) => matchFilter(d, filter) && (!q || d.name.toLowerCase().includes(q)));
-  const activeCount = all.filter((d) => d.isActive).length;
   const bonusOn = settings.flag('bonus_enabled', true);
+  const activeDiscounts = (discounts.data ?? []).filter((d) => d.isActive);
+  const activeRules = (rules.data ?? []).filter((r) => r.isActive).length;
   const activeCertificates = (certificates.data ?? []).filter((c) => c.status === 'active').length;
+  const gifts = [
+    settings.flag('welcome_bonus_enabled', false) ? 'новичкам' : null,
+    settings.flag('referral_enabled', false) ? 'за друга' : null,
+    settings.flag('birthday_bonus_enabled', false) ? 'ко дню рождения' : null,
+  ].filter(Boolean);
+  const threshold = settings.number('resident_visit_threshold', 10);
+  const top = overview.data?.discounts.top[0];
 
   const refresh = async () => {
-    await Promise.allSettled([discounts.refetch(), certificates.refetch(), settings.refetch(), goods.refetch()]);
+    await Promise.allSettled([overview.refetch(), discounts.refetch(), rules.refetch(), certificates.refetch(), settings.refetch()]);
   };
+  const open = (href: Href) => router.push(href);
 
   return (
     <>
       <Stack.Title>Лояльность</Stack.Title>
-      <Stack.Toolbar placement="right">
-        <ToolbarButton
-          icon="plus"
-          accessibilityLabel="Новая скидка"
-          onPress={() => {
-            haptic.light();
-            router.push('/manage/loyalty/discount');
-          }}
-        />
-      </Stack.Toolbar>
       <Host style={{ flex: 1 }} useViewportSizeMeasurement>
         <Form modifiers={[refreshable(refresh)]}>
           <Section>
+            <RNHostView matchContents>
+              <LoyaltyPulse data={overview.data} days={days} onDays={setDays} />
+            </RNHostView>
+          </Section>
+
+          <Section title="Программа">
             {isOwner && (
               <LinkRow
                 icon="star.circle.fill"
                 color="#FF9500"
-                title="Бонусная программа"
-                subtitle={bonusOn ? `${settings.number('bonus_accrual_rate', 5)}% от покупки, по статусам — свой процент` : 'Выключена'}
+                title="Бонусы"
+                subtitle={bonusOn ? `${settings.number('bonus_accrual_rate', 5)}% от покупки${activeRules ? ` · правил: ${activeRules}` : ''}` : 'Программа выключена'}
                 value={bonusOn ? 'Вкл.' : 'Выкл.'}
-                onPress={() => router.push('/manage/loyalty/bonus')}
+                onPress={() => open('/manage/loyalty/bonus')}
+              />
+            )}
+            <LinkRow
+              icon="percent"
+              color="#FF2D55"
+              title="Скидки и акции"
+              subtitle={top ? `Больше всех дала «${top.name}» — ${formatMoney(top.amount)}` : 'Сами по условиям или кассиром в чеке'}
+              value={discounts.data ? `${activeDiscounts.length} вкл.` : undefined}
+              onPress={() => open('/manage/loyalty/discounts')}
+            />
+            {isOwner && (
+              <LinkRow
+                icon="gift.fill"
+                color="#34C759"
+                title="Подарки"
+                subtitle={gifts.length ? `Дарим ${gifts.join(', ')}` : 'Новичкам, за друга, ко дню рождения'}
+                value={overview.data?.gifts ? `${overview.data.gifts} за ${days} дн.` : undefined}
+                onPress={() => open('/manage/loyalty/gifts')}
               />
             )}
             <LinkRow
               icon="giftcard.fill"
               color="#AF52DE"
               title="Сертификаты"
-              subtitle="Свой номер или серия, на что действуют, срок"
+              subtitle={overview.data?.certificates.active ? `Действует на ${formatMoney(overview.data.certificates.balance)}` : 'Свой номер или серия, на что действуют, срок'}
               value={certificates.data ? `${activeCertificates} действ.` : undefined}
-              onPress={() => router.push('/manage/loyalty/certificates')}
+              onPress={() => open('/manage/loyalty/certificates')}
             />
-          </Section>
-
-          <Section title={`Скидки · ${activeCount} включено`}>
-            <Picker selection={filter} onSelectionChange={(v) => setFilter(v as Filter)} modifiers={[pickerStyle('segmented')]}>
-              {FILTERS.map((f) => (
-                <Text key={f.key} modifiers={[tag(f.key)]}>
-                  {f.label}
-                </Text>
-              ))}
-            </Picker>
-            {all.length > 5 && <SearchRow placeholder="Найти скидку" onChange={setQuery} />}
-          </Section>
-
-          <Section footer={<Text>Несколько скидок «одна на чек» не складываются — берётся самая выгодная. Скидки с отметкой «складывается» добавляются друг к другу.</Text>}>
-            {discounts.isLoading ? (
-              <ProgressView />
-            ) : list.length === 0 ? (
-              <ContentUnavailableView
-                title={all.length ? 'Ничего не нашли' : 'Скидок пока нет'}
-                systemImage="percent"
-                description={all.length ? 'Поменяйте фильтр или запрос.' : 'Например: −20% на бар по будням с 17 до 19, или −10% резидентам на весь чек.'}
+            {isOwner && (
+              <LinkRow
+                icon="arrow.up.forward.circle.fill"
+                color="#007AFF"
+                title="Рост статуса"
+                subtitle={threshold > 0 ? `Резидент — после ${threshold} посещений` : 'Только вручную'}
+                onPress={() => open('/manage/loyalty/status')}
               />
-            ) : (
-              list.map((d) => (
-                <LinkRow
-                  key={d.id}
-                  icon={d.isAuto ? 'sparkles' : 'hand.tap.fill'}
-                  color={!d.isActive ? '#8E8E93' : d.isAuto ? '#FF2D55' : '#007AFF'}
-                  title={d.name}
-                  subtitle={[d.isActive ? null : 'выключена', d.isAuto ? null : 'кассир', discountSummary(d, names), d.combinable ? 'складывается' : null].filter(Boolean).join(' · ')}
-                  value={discountValueText(d)}
-                  onPress={() => router.push({ pathname: '/manage/loyalty/discount', params: { discountId: d.id } })}
-                />
-              ))
             )}
-            <ActionRow title="Новая скидка" icon="plus.circle.fill" onPress={() => router.push('/manage/loyalty/discount')} />
+          </Section>
+
+          <Section title="Готовые акции" footer={<Text>Откроется заполненный редактор — поправьте под себя и сохраните.</Text>}>
+            {LOYALTY_TEMPLATES.filter((t) => isOwner || t.kind === 'discount').map((t) => (
+              <LinkRow
+                key={t.key}
+                icon={t.icon as SFSymbol}
+                color={t.color}
+                title={t.title}
+                subtitle={t.subtitle}
+                onPress={() => open({ pathname: t.kind === 'discount' ? '/manage/loyalty/discount' : '/manage/loyalty/bonus-rule', params: { template: t.key } })}
+              />
+            ))}
           </Section>
         </Form>
       </Host>
