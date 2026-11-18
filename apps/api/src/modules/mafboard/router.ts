@@ -25,6 +25,7 @@ import {
 import { openSecrets, sealSecrets, STUDIO_BODY_LIMIT_BYTES, STUDIO_SAVES_PER_HOUR, STUDIO_SECRETS_LIMIT_BYTES, studioPutSchema } from './studio.js'
 import type { MafboardUser, StoredStudioSettings } from './types.js'
 import { authorizeUrl, callbackPage, VkError, VkLogins, type VkGateway, type VkTokens } from './vk.js'
+import { daAuthorizeUrl, type DaGateway } from './donationalerts.js'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // API приложения MafBoard (/api/mafboard). Контракт — docs/MAFBOARD.md; клиент —
@@ -55,6 +56,8 @@ export interface MafboardDeps {
   limiter: RateLimiter
   /** Обмен кода и токенов VK Видео Live с секретом приложения (vk.ts). */
   vk: VkGateway
+  /** Обмен кода и токенов DonationAlerts с секретом приложения (donationalerts.ts). */
+  donationAlerts: DaGateway
   /** Вход в АИМ (admin.gomafia.pro) для турниров GoMafia: хранение пароля и сессии (aim.ts). */
   aimAccounts: AimAccounts
   /** Вход в GoMafia от имени пользователя: сайт отдаёт профили, клубы и турниры только вошедшим. */
@@ -112,6 +115,8 @@ function desktopAllowed(method: string, path: string): boolean {
   if (method === 'GET' && path.endsWith('/v1/me')) return true
   // Вход MBS в VK Видео Live: секрет приложения есть только у сервера.
   if (path.includes('/v1/studio/vk/')) return true
+  // Вход MBS в DonationAlerts — так же, секрет приложения только у сервера.
+  if (path.includes('/v1/studio/donationalerts/')) return true
   return (method === 'GET' || method === 'PUT') && path.endsWith('/v1/studio/settings')
 }
 
@@ -243,6 +248,7 @@ async function issueSession(deps: MafboardDeps, user: MafboardUser, device: { na
 export function createMafboardRouter(resolveDeps: DepsResolver): Hono<Env> {
   const router = new Hono<Env>()
   const vkLogins = new VkLogins()
+  const daLogins = new VkLogins()
 
   // Модуль выключен (нет БД/секрета) — 503, остальной API работает.
   router.use('*', async (c, next) => {
@@ -840,6 +846,70 @@ export function createMafboardRouter(resolveDeps: DepsResolver): Hono<Env> {
       return vkFail(c, error)
     }
   })
+
+  // ─── Вход MafBoard Studio в DonationAlerts (donationalerts.ts) ──────────────
+
+  const daFail = (c: Context, error: unknown) => {
+    if (error instanceof VkError && error.kind === 'revoked') return fail(c, 401, 'da_revoked', 'Вход в DonationAlerts не действует, войдите снова')
+    if (error instanceof VkError) return fail(c, 502, 'da_failed', error.message)
+    throw error
+  }
+  const daDisabled = (c: Context) => fail(c, 503, 'da_disabled', 'Вход в DonationAlerts на сервере не настроен')
+
+  router.post('/v1/studio/donationalerts/begin', requireUser, async (c) => {
+    const deps = c.get('deps')
+    const app = deps.config.donationAlerts
+    if (!app) return daDisabled(c)
+    if (!(await deps.limiter.hit(`mb:da:${c.get('user').id}`, VK_BEGINS_PER_HOUR, 60 * 60))) {
+      return fail(c, 429, 'rate_limited', 'Слишком много попыток входа, подождите немного')
+    }
+    const state = daLogins.begin(c.get('user').id, deps.now().getTime())
+    if (!state) return fail(c, 429, 'rate_limited', 'Сервер занят, попробуйте войти чуть позже')
+    return c.json({ state, url: daAuthorizeUrl(app, state) })
+  })
+
+  /** Сюда DonationAlerts возвращает браузер ведущего. */
+  router.get('/v1/donationalerts/callback', async (c) => {
+    const deps = c.get('deps')
+    const state = c.req.query('state') ?? ''
+    const code = c.req.query('code') ?? ''
+    const app = deps.config.donationAlerts
+    if (!app || !state || !daLogins.waiting(state, deps.now().getTime())) return c.html(callbackPage(false), 400)
+    if (!code) {
+      daLogins.finish(state, { message: 'Доступ не разрешён. Чтобы войти, разрешите его на странице DonationAlerts' })
+      return c.html(callbackPage(false))
+    }
+    try {
+      daLogins.finish(state, { tokens: await deps.donationAlerts.exchange(app, code) })
+      return c.html(callbackPage(true))
+    } catch (error) {
+      daLogins.finish(state, { message: error instanceof VkError ? error.message : 'DonationAlerts не ответил' })
+      return c.html(callbackPage(false))
+    }
+  })
+
+  router.get('/v1/studio/donationalerts/claim', requireUser, async (c) => {
+    const deps = c.get('deps')
+    const result = daLogins.claim(c.req.query('state') ?? '', c.get('user').id, deps.now().getTime())
+    if (!result) return fail(c, 404, 'not_found', 'Вход не найден или устарел, войдите снова')
+    if (result.status === 'waiting') return c.json({ pending: true }, 202)
+    if (result.status === 'failed') return fail(c, 400, 'da_failed', result.message)
+    return c.json(vkTokensJSON(result.tokens))
+  })
+
+  router.post('/v1/studio/donationalerts/refresh', requireUser, body(vkTokenSchema), async (c) => {
+    const deps = c.get('deps')
+    const app = deps.config.donationAlerts
+    if (!app) return daDisabled(c)
+    try {
+      return c.json(vkTokensJSON(await deps.donationAlerts.refresh(app, c.req.valid('json').token)))
+    } catch (error) {
+      return daFail(c, error)
+    }
+  })
+
+  /** Отзыва токенов у DonationAlerts нет: MBS просто забывает их. Ручка есть, чтобы выход был одинаковым. */
+  router.post('/v1/studio/donationalerts/revoke', requireUser, body(vkTokenSchema), (c) => c.json({ ok: true }))
 
   // ─── Идущие игры ────────────────────────────────────────────────────────────
 

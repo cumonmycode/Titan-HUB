@@ -29,6 +29,8 @@ export interface MafboardConfig {
   studioSecretsKey: Uint8Array
   /** Приложение VK Видео Live для входа MBS (vk.ts). null — вход VK выключен. */
   vk: VkAppConfig | null
+  /** Приложение DonationAlerts для входа MBS (donationalerts.ts). null — донаты выключены. */
+  donationAlerts: VkAppConfig | null
   /** Titan Connect для обмена кода клуба (MAFBOARD_TITAN_CONNECT_URL); адреса клубов — только на его домене. */
   titanConnectUrl: string
 }
@@ -110,6 +112,7 @@ export function readMafboardConfig(env: NodeJS.ProcessEnv = process.env): Config
         ? env['MAFBOARD_REVIEW_PASSWORD']!.trim()
         : null,
       vk: readVk(env, appLinkBase),
+      donationAlerts: readDonationAlerts(env, appLinkBase),
       titanConnectUrl: titanConnectUrl(env),
     },
   }
@@ -121,5 +124,14 @@ function readVk(env: NodeJS.ProcessEnv, appLinkBase: string): VkAppConfig | null
   const clientSecret = env['MAFBOARD_VK_CLIENT_SECRET']?.trim()
   if (!clientId || !clientSecret) return null
   const redirectUri = env['MAFBOARD_VK_REDIRECT_URI']?.trim() || `${appLinkBase}/api/mafboard/v1/vk/callback`
+  return { clientId, clientSecret, redirectUri }
+}
+
+/** Приложение DonationAlerts (donationalerts.com/application/clients). Адрес возврата — как в его настройках. */
+function readDonationAlerts(env: NodeJS.ProcessEnv, appLinkBase: string): VkAppConfig | null {
+  const clientId = env['MAFBOARD_DA_CLIENT_ID']?.trim()
+  const clientSecret = env['MAFBOARD_DA_CLIENT_SECRET']?.trim()
+  if (!clientId || !clientSecret) return null
+  const redirectUri = env['MAFBOARD_DA_REDIRECT_URI']?.trim() || `${appLinkBase}/api/mafboard/v1/donationalerts/callback`
   return { clientId, clientSecret, redirectUri }
 }

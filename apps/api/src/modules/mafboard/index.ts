@@ -15,6 +15,7 @@ import { PgMafboardRepo } from './pgRepo.js'
 import { attachStudioRelay, type StudioRelay } from './relay.js'
 import { createMafboardRouter, type MafboardDeps, type RateLimiter } from './router.js'
 import { liveVkGateway } from './vk.js'
+import { liveDaGateway } from './donationalerts.js'
 import { webhookSecret } from './tokens.js'
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -99,6 +100,7 @@ function resolveDeps(): MafboardDeps | { error: string } {
       messenger: messengerFor(config.botToken),
       limiter: redisLimiter,
       vk: liveVkGateway,
+      donationAlerts: liveDaGateway,
       aimAccounts,
       gomafiaSessions: new GoMafiaSessions(repo, liveGoMafia, config.studioSecretsKey, aimAccounts, now),
       tournaments: liveTournaments,

@@ -12,6 +12,7 @@ import { GomafiaTakenError, type MafboardRepo } from '../../src/modules/mafboard
 import { createMafboardRouter, type MafboardDeps } from '../../src/modules/mafboard/router.js'
 import type { DeviceSession, LoginTicket, MafboardUser, QrTicket, RefreshTokenRow, StoredActiveGame, StoredGame, StoredProtocolSubmission, StoredShare, StoredStudioSettings, TicketGuard, TitanLinkState } from '../../src/modules/mafboard/types.js'
 import { VkError, type VkAppConfig, type VkGateway, type VkTokens } from '../../src/modules/mafboard/vk.js'
+import type { DaAppConfig, DaGateway } from '../../src/modules/mafboard/donationalerts.js'
 import { AimError, AimSession } from '../../src/lib/gomafiaAim.js'
 import type { AimGame, AimProtocol, AimTournament } from '../../src/lib/gomafiaAimParse.js'
 import type { TournamentSeating } from '../../src/lib/gomafiaTournament.js'
@@ -33,6 +34,7 @@ export const config: MafboardConfig = {
   termsVersion: '1',
   reviewPassword: 'review-password-0123456789',
   vk: { clientId: 'vk-client', clientSecret: 'vk-secret', redirectUri: 'https://mafboard.test/api/mafboard/v1/vk/callback' },
+  donationAlerts: { clientId: 'da-client', clientSecret: 'da-secret', redirectUri: 'https://mafboard.test/api/mafboard/v1/donationalerts/callback' },
   titanConnectUrl: 'https://titanpos.test/api/connect/v1',
 }
 
@@ -148,6 +150,21 @@ export class FakeTournaments implements TournamentSource {
   seatings = new Map<number, TournamentSeating>()
   async seating(id: number) {
     return this.seatings.get(id) ?? null
+  }
+}
+
+/** DonationAlerts без сети: код `good` меняется на токены, токен обновления `dead-token` отозван. */
+export class FakeDa implements DaGateway {
+  calls: string[] = []
+  async exchange(_app: DaAppConfig, code: string): Promise<VkTokens> {
+    this.calls.push(`exchange:${code}`)
+    if (code !== 'good') throw new VkError('rejected', 'DonationAlerts отказал (400, invalid_request)')
+    return { accessToken: 'da-access', refreshToken: 'da-refresh', expiresIn: 31536000 }
+  }
+  async refresh(_app: DaAppConfig, token: string): Promise<VkTokens> {
+    this.calls.push(`refresh:${token}`)
+    if (token === 'dead-token') throw new VkError('revoked', 'Вход в DonationAlerts не действует')
+    return { accessToken: 'da-access-2', refreshToken: 'da-refresh-2', expiresIn: 31536000 }
   }
 }
 
@@ -656,6 +673,7 @@ export function createTestContext(overrides: Partial<MafboardDeps> = {}): TestCo
     titanRoster: new TitanRosterCache(titan, () => clock.now.getTime()),
     messenger,
     vk: new FakeVk(),
+    donationAlerts: new FakeDa(),
     aimAccounts,
     gomafiaSessions: new GoMafiaSessions(repo, gomafia, config.studioSecretsKey, aimAccounts, () => clock.now),
     tournaments,
