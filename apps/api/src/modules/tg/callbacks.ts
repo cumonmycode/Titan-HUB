@@ -17,6 +17,8 @@ import { acceptSupply, cancelSupply, editSupply, supplyCard, type SupplyCtx } fr
 import { converse, loadChoice } from './dialog/converse.js'
 import { appendMessage, getContact, touchContact } from './dialog/memory.js'
 import { onSmmCallback } from '../smm/tg-handlers.js'
+import { CARD_CALLBACK_PREFIX } from '../../lib/tgWidget.js'
+import { onCardCallback } from './widgets.js'
 
 const REJECTED_TEXT = '🛡 Вход отклонён — доступ никому не выдан. Если это был не ты, ничего делать не нужно.'
 const UUID_RE = /^[0-9a-f-]{36}$/i
@@ -27,6 +29,12 @@ export async function onCallback(club: TgClub, cq: TgCallbackQuery): Promise<voi
   const msg = cq.message
   const edit = async (text: string, markup?: ReplyMarkup) => {
     if (msg) await club.bot.edit(msg.chat.id, msg.message_id, text, { html: true, markup })
+  }
+
+  // Кнопки под текстовой карточкой (games/account/club/shift) — «w:<действие>».
+  if (data.startsWith(CARD_CALLBACK_PREFIX)) {
+    await onCardCallback(club, cq)
+    return
   }
 
   switch (prefix) {

@@ -87,6 +87,12 @@ export class TgBot {
     return r.result as T
   }
 
+  /** Вызов метода с текстом ошибки Telegram (call его только пишет в журнал). */
+  async request<T>(method: string, body: Record<string, unknown>): Promise<{ ok: true; result: T } | { ok: false; code: number; error: string }> {
+    const r = await this.raw(method, { json: body })
+    return r.ok ? { ok: true, result: r.result as T } : { ok: false, code: r.error_code ?? 0, error: r.description ?? 'error' }
+  }
+
   async send(chatId: string | number, text: string, opts: SendOptions = {}): Promise<SendResult> {
     const parts = splitText(text)
     let last: SendResult = { ok: false, code: 0, error: 'empty' }

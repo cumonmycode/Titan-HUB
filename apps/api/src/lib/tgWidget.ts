@@ -5,10 +5,11 @@
  * данные сообщения (chat_data, JSON ≤ 1024 байт). Кнопка шлёт боту запрос
  * (widget_query), бот отвечает подписью для кнопки и меняет chat_data —
  * карточка перерисовывается сама. В продакшене Telegram пока разрешает виджеты
- * только в личке с ботом; где нельзя — отправляем ту же карточку текстом.
+ * только в личке с ботом (а с 13.11.2026 и там запрещает обычным ботам); где
+ * нельзя — отправляем ту же карточку текстом с теми же кнопками под сообщением.
  */
 import { deflateSync } from 'node:zlib'
-import { escapeHtml, type TgBot } from './tgBot.js'
+import { escapeHtml, type InlineButton, type ReplyMarkup, type TgBot } from './tgBot.js'
 
 /** Кнопка карточки: подпись и данные запроса (1–64 байта). o — второстепенная (контурная). */
 export interface CardButton { l: string; d: string; o?: 1 }
@@ -100,13 +101,41 @@ export function cardText(card: Card): string {
 
 export type CardSent = { ok: true; messageId: number; widget: boolean } | { ok: false; error: string }
 
+/** Префикс callback_data кнопок текстовой карточки: «w:» + данные кнопки виджета. */
+export const CARD_CALLBACK_PREFIX = 'w:'
+const MAX_CALLBACK_BYTES = 64
+const BUTTON_CONTEXT_CHARS = 40
+
+/**
+ * Кнопки под текстовой карточкой — те же действия, что в виджете. У кнопки строки
+ * в подписи — к чему она («Иду · Спортивная мафия · сегодня»): строк несколько.
+ */
+export function cardMarkup(card: Card): ReplyMarkup | undefined {
+  const button = (b: CardButton, context?: string): InlineButton | null => {
+    const data = CARD_CALLBACK_PREFIX + b.d
+    if (bytes(data) > MAX_CALLBACK_BYTES) return null
+    const short = context && context.length > BUTTON_CONTEXT_CHARS ? `${context.slice(0, BUTTON_CONTEXT_CHARS - 1)}…` : context
+    return { text: short ? `${b.l} · ${short}` : b.l, callback_data: data }
+  }
+  const rows = (card.r ?? []).map((r) => (r.b ? button(r.b, r.l) : null)).filter((x): x is InlineButton => !!x).map((x) => [x])
+  const bottom = (card.b ?? []).map((b) => button(b)).filter((x): x is InlineButton => !!x)
+  const keyboard = [...rows, ...(bottom.length ? [bottom] : [])]
+  return keyboard.length ? { inline_keyboard: keyboard } : undefined
+}
+
+// Telegram может запретить виджеты (с 13.11.2026 — INPUT_MEDIA_WIDGET_NOT_ALLOWED для
+// обычных ботов). После отказа час не пробуем — сразу текстовая карточка с кнопками.
+const WIDGET_RETRY_MS = 60 * 60 * 1000
+const widgetsOffUntil = new Map<string, number>()
+const widgetsAllowed = (bot: TgBot) => Date.now() >= (widgetsOffUntil.get(bot.token) ?? 0)
+
 /**
  * Отправить карточку виджетом; подпись видна в списке чатов и в старых версиях
- * Telegram. Не вышло (группа, старый клиент API) — отправляем текстом.
+ * Telegram. Не вышло (группа, запрет Telegram) — текстом с кнопками под сообщением.
  */
 export async function sendCard(bot: TgBot, chatId: string | number, card: Card, opts: { caption: string; threadId?: number | null; textOnly?: boolean }): Promise<CardSent> {
-  if (!opts.textOnly && widgetFits(CARD_HTML)) {
-    const sent = await bot.call<{ message_id: number }>('sendWidget', {
+  if (!opts.textOnly && widgetsAllowed(bot) && widgetFits(CARD_HTML)) {
+    const sent = await bot.request<{ message_id: number }>('sendWidget', {
       chat_id: chatId,
       html: CARD_HTML,
       chat_data: cardData(card),
@@ -114,10 +143,17 @@ export async function sendCard(bot: TgBot, chatId: string | number, card: Card, 
       allow_queries: true,
       ...(opts.threadId ? { message_thread_id: opts.threadId } : {}),
     })
-    if (sent) return { ok: true, messageId: sent.message_id, widget: true }
+    if (sent.ok) return { ok: true, messageId: sent.result.message_id, widget: true }
+    console.warn(`[tg] sendWidget: ${sent.code} ${sent.error}`)
+    if (/WIDGET_NOT_ALLOWED/i.test(sent.error)) widgetsOffUntil.set(bot.token, Date.now() + WIDGET_RETRY_MS)
   }
-  const text = await bot.send(chatId, cardText(card), { html: true, threadId: opts.threadId ?? null })
+  const text = await bot.send(chatId, cardText(card), { html: true, threadId: opts.threadId ?? null, markup: cardMarkup(card) })
   return text.ok ? { ok: true, messageId: text.messageId, widget: false } : { ok: false, error: text.error }
+}
+
+/** Обновить текстовую карточку (после нажатия кнопки под ней). */
+export async function updateCardText(bot: TgBot, chatId: string | number, messageId: number, card: Card): Promise<void> {
+  await bot.edit(chatId, messageId, cardText(card), { html: true, markup: cardMarkup(card) ?? { inline_keyboard: [] } })
 }
 
 /** Ответ на нажатие кнопки: короткая подпись под карточкой. Отвечать нужно за 15 с. */

@@ -5,14 +5,15 @@
  *  • club — адрес, часы, цены;
  *  • shift — смена и касса (только сотрудникам).
  * Карточку присылает команда (/games, /me, /club, /shift) или сам Tai (show_card).
- * Нажатия приходят апдейтом widget_query: бот отвечает и обновляет карточку.
+ * Нажатия приходят апдейтом widget_query (виджет) или callback_query «w:…» (кнопки
+ * под текстовой карточкой, пока Telegram не пускает виджеты) — действие одно.
  */
 import { sql, type Database } from '@titan/database'
 import { notify } from '../notifications/push.js'
 import { createApiCaller } from '../ai/tai/internal.js'
 import type { ToolDef, ToolResult } from '../ai/tai/tools/types.js'
 import { voteMapOfPoll } from '../../lib/pollState.js'
-import { answerWidget, sendCard, updateCard, type Card, type CardRow } from '../../lib/tgWidget.js'
+import { answerWidget, CARD_CALLBACK_PREFIX, sendCard, updateCard, updateCardText, type Card, type CardRow } from '../../lib/tgWidget.js'
 import type { TgClub } from './club.js'
 import { gameConfigs, nightLabel, todaysPolls, upcomingNights, type GameNight } from './games.js'
 import { staffHeaders, whoIs, type TgPerson } from './identity.js'
@@ -77,7 +78,7 @@ async function gamesCard(club: TgClub, person: TgPerson): Promise<Card> {
       b: me ? { l: 'Не пойду', d: `no:${night.kind}:${night.date}`, o: 1 } : { l: 'Иду', d: `go:${night.kind}:${night.date}` },
     })
   }
-  return { i: '🎲', t: 'Ближайшие игры', s: 'Нажми «Иду» — запишу и предупрежу администратора', r: rows }
+  return { i: '🎲', t: 'Ближайшие игры', s: 'Нажми «Иду» — запишу и предупрежу администратора', r: rows, b: [{ l: 'Обновить', d: 'r:games', o: 1 }] }
 }
 
 async function cancelSignup(db: Database, tgId: string, night: GameNight): Promise<boolean> {
@@ -195,27 +196,39 @@ export interface WidgetQuery {
   message_id?: number
 }
 
-/** Нажатие кнопки на карточке. Отвечаем за 15 с, затем обновляем карточку. */
+type CardAction = { reply: string; refresh: CardKind | null; show: CardKind | null }
+
+/** Что делает кнопка карточки (данные одинаковы у виджета и у кнопки под текстом). */
+async function runCardAction(club: TgClub, person: TgPerson, data: string): Promise<CardAction> {
+  const [action, kind, date] = data.split(':')
+  if (action === 'show' && kind === 'games') return { reply: 'Присылаю ↓', refresh: null, show: 'games' }
+  if ((action === 'go' || action === 'no') && kind && date) {
+    return { reply: await toggleSignup(club, person, action === 'go', kind, date), refresh: 'games', show: null }
+  }
+  if (action === 'r' && (kind === 'games' || kind === 'account' || kind === 'shift' || kind === 'club')) return { reply: 'Обновлено', refresh: kind, show: null }
+  return { reply: 'Эта кнопка устарела', refresh: null, show: null }
+}
+
+/** Нажатие кнопки в виджете. Отвечаем за 15 с, затем обновляем карточку. */
 export async function onWidgetQuery(club: TgClub, q: WidgetQuery): Promise<void> {
   const person = await whoIs(club.db, q.from)
-  const [action, kind, date] = String(q.data ?? '').split(':')
+  const result = await runCardAction(club, person, String(q.data ?? ''))
+  await answerWidget(club.bot, q.id, result.reply)
   const chatId = q.chat?.id
-  if (action === 'show' && kind === 'games' && chatId) {
-    await answerWidget(club.bot, q.id, 'Присылаю ↓')
-    await showCard(club, person, chatId, 'games')
-    return
-  }
-  let reply = 'Эта кнопка устарела'
-  let refresh: CardKind | null = null
-  if ((action === 'go' || action === 'no') && kind && date) {
-    reply = await toggleSignup(club, person, action === 'go', kind, date)
-    refresh = 'games'
-  } else if (action === 'r' && (kind === 'games' || kind === 'account' || kind === 'shift' || kind === 'club')) {
-    reply = 'Обновлено'
-    refresh = kind
-  }
-  await answerWidget(club.bot, q.id, reply)
-  if (refresh && chatId && q.message_id) await updateCard(club.bot, chatId, q.message_id, await buildCard(club, person, refresh))
+  if (!chatId) return
+  if (result.show) await showCard(club, person, chatId, result.show)
+  if (result.refresh && q.message_id) await updateCard(club.bot, chatId, q.message_id, await buildCard(club, person, result.refresh))
+}
+
+/** Нажатие кнопки под текстовой карточкой (callback_data «w:…»). */
+export async function onCardCallback(club: TgClub, cq: { id: string; from: TgUser; data?: string; message?: { message_id: number; chat: { id: number } } }): Promise<void> {
+  const person = await whoIs(club.db, cq.from)
+  const result = await runCardAction(club, person, String(cq.data ?? '').slice(CARD_CALLBACK_PREFIX.length))
+  await club.bot.answerCallback(cq.id, result.reply)
+  const msg = cq.message
+  if (!msg) return
+  if (result.show) await showCard(club, person, msg.chat.id, result.show)
+  if (result.refresh) await updateCardText(club.bot, msg.chat.id, msg.message_id, await buildCard(club, person, result.refresh))
 }
 
 // ─── Инструмент Tai ──────────────────────────────────────────────────────────
