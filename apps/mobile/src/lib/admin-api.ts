@@ -165,6 +165,30 @@ export type PollConfig = {
   /** HH:MM по Москве. */
   postTime: string;
   lastPostedAt?: string | null;
+  /** Дни выкладки: по дням недели или по датам. */
+  scheduleKind?: 'weekly' | 'dates';
+  /** YYYY-MM-DD — для scheduleKind = 'dates'. */
+  dates?: string[];
+  /** Несколько времён выкладки в день (вместо postTime). */
+  times?: string[];
+  /** Пауза по эту дату включительно. */
+  pausedUntil?: string | null;
+  description?: string;
+  anonymous?: boolean;
+  multipleAnswers?: boolean;
+  allowsRevoting?: boolean;
+  shuffleOptions?: boolean;
+  allowAddingOptions?: boolean;
+  hideResultsUntilClose?: boolean;
+  membersOnly?: boolean;
+  closeMode?: 'none' | 'after' | 'at';
+  closeAfterHours?: number;
+  closeAtTime?: string;
+  remindBeforeMin?: number;
+  summary?: boolean;
+  pin?: boolean;
+  unpinPrevious?: boolean;
+  deletePrevious?: boolean;
 };
 
 /** 1 = Пн … 7 = Вс — как их нумерует сервер. */

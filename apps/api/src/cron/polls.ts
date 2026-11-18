@@ -1,7 +1,8 @@
 import { db, type Database } from '@titan/database'
 import { getClubIntegration } from '../lib/secrets.js'
-import { readPollConfigs, writePollConfigs, isPollDue, postPollConfig } from '../lib/polls.js'
-import { recordPollPosted } from '../lib/pollState.js'
+import { readPollConfigs, writePollConfigs, isPollDue } from '../lib/polls.js'
+import { publishPoll, runPollFollowUps } from '../lib/pollPublish.js'
+import { TgBot } from '../lib/tgBot.js'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Постинг регулярных опросов в Telegram. Вызывается планировщиком (index.ts)
@@ -37,26 +38,19 @@ async function runPolls(database: Database): Promise<void> {
 
   const now = Date.now()
   const due = configs.filter((c) => isPollDue(c, now))
-  if (!due.length) return
-
   const token = await getClubIntegration(database, 'poll_bot_token').catch(() => null)
   if (!token) {
-    console.error('[polls] есть опросы к постингу, но poll_bot_token не задан — пропуск')
+    if (due.length) console.error('[polls] есть опросы к постингу, но poll_bot_token не задан — пропуск')
     return
   }
+  const bot = new TgBot(token)
 
   // id опроса → момент успешной отправки.
   const posted = new Map<string, string>()
   for (const cfg of due) {
-    const r = await postPollConfig(token, cfg)
+    const r = await publishPoll(database, bot, cfg)
     if (r.ok) {
       posted.set(cfg.id, new Date().toISOString())
-      // Запоминаем как «последний опрос» чата (для @tvari).
-      if (r.pollId) {
-        await recordPollPosted(database, cfg.chatId, r.pollId, r.messageId ?? 0, cfg.threadId, cfg.options).catch((e) =>
-          console.error('[polls] recordPollPosted', e),
-        )
-      }
       console.log(`[polls] опрос «${cfg.title}» отправлен в ${cfg.chatId}${cfg.threadId ? `/${cfg.threadId}` : ''}`)
     } else {
       console.error(`[polls] не удалось отправить «${cfg.title}» (${cfg.chatId}): ${r.error}`)
@@ -79,4 +73,6 @@ async function runPolls(database: Database): Promise<void> {
       console.error('[polls] не удалось сохранить lastPostedAt', e)
     }
   }
+  // Напоминания до закрытия и итоги после — для уже выложенных опросов.
+  await runPollFollowUps(database, bot, configs, Date.now()).catch((e) => console.error('[polls] напоминания/итоги', e))
 }

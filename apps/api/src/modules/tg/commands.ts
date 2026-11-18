@@ -42,7 +42,7 @@ const dedup = <T extends { tgId: string }>(arr: T[]): T[] => {
 }
 
 // tgId → ник клиента клуба (основной tg_id, затем доп. аккаунты).
-async function nicknamesByTgId(db: Database, tgIds: string[]): Promise<Map<string, string>> {
+export async function nicknamesByTgId(db: Database, tgIds: string[]): Promise<Map<string, string>> {
   const out = new Map<string, string>()
   const ids = [...new Set(tgIds.filter(Boolean))]
   if (ids.length === 0) return out

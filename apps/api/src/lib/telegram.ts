@@ -17,6 +17,15 @@ export interface SendPollParams {
   options: string[]
   isAnonymous?: boolean
   allowsMultipleAnswers?: boolean
+  /** Bot API 9.6+: переголосование, перемешивание, свои варианты, скрытые итоги, описание. */
+  allowsRevoting?: boolean
+  shuffleOptions?: boolean
+  allowAddingOptions?: boolean
+  hideResultsUntilCloses?: boolean
+  membersOnly?: boolean
+  description?: string
+  /** Unix-время автоматического закрытия (5 с … 2 628 000 с от сейчас). */
+  closeDate?: number
 }
 
 export interface SendPollResult {
@@ -44,6 +53,14 @@ export async function sendTelegramPoll(token: string, p: SendPollParams): Promis
         is_anonymous: p.isAnonymous ?? false,
         allows_multiple_answers: p.allowsMultipleAnswers ?? false,
         type: 'regular',
+        // Новые поля шлём, только когда заданы: старые опросы уходят как раньше.
+        ...(p.allowsRevoting !== undefined ? { allows_revoting: p.allowsRevoting } : {}),
+        ...(p.shuffleOptions ? { shuffle_options: true } : {}),
+        ...(p.allowAddingOptions ? { allow_adding_options: true } : {}),
+        ...(p.hideResultsUntilCloses ? { hide_results_until_closes: true } : {}),
+        ...(p.membersOnly ? { members_only: true } : {}),
+        ...(p.description ? { description: p.description } : {}),
+        ...(p.closeDate ? { close_date: p.closeDate } : {}),
       }),
     })
     const data = (await res.json().catch(() => ({}))) as {

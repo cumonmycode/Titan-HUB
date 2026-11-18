@@ -1,24 +1,27 @@
-import { Button, ContentUnavailableView, Form, HStack, Image, Picker, ProgressView, Section, Spacer, Text, Toggle } from '@expo/ui/swift-ui';
-import { pickerStyle, tag } from '@expo/ui/swift-ui/modifiers';
-import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useState } from 'react';
+import { Form, HStack, Image, ProgressView, Section, Text, Toggle } from '@expo/ui/swift-ui';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
+import { useCallback, useState } from 'react';
 import { Alert } from 'react-native';
 
 import { EditorToolbar } from '@/components/editor-toolbar';
-import { ActionRow, FieldRow, FormHost, primary, TimeRow } from '@/components/native-form';
-import { POLL_DEFAULT_OPTIONS, postPollToday, savePolls, testPoll, usePollChats, usePolls, WEEKDAY_LABELS, type PollConfig } from '@/lib/admin-api';
+import { ActionRow, FieldRow, FormHost } from '@/components/native-form';
+import { ClosingSection, PinSection, TelegramOptionsSection } from '@/components/polls/poll-behaviour';
+import { WhenSection, WhereSection } from '@/components/polls/poll-where-when';
+import { POLL_DEFAULT_OPTIONS, postPollToday, savePolls, testPoll, usePollChats, usePolls, type PollConfig } from '@/lib/admin-api';
 import { haptic } from '@/lib/haptics';
 import { newIdempotencyKey } from '@/lib/shift-api';
 import { colors } from '@/lib/theme';
 
 const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error));
 const TIME_RE = /^([01]?\d|2[0-3]):[0-5]\d$/;
-const WEEKDAY_FULL = ['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота', 'Воскресенье'];
 
 /** Вариант ответа со стабильным ключом: поле в строке помнит свой текст при удалении соседей. */
 type Option = { key: number; text: string };
 
-/** Опрос в Telegram: чат, расписание и варианты ответа. Сервер хранит все опросы одним списком. */
+/**
+ * Опрос в Telegram: куда и когда выкладывать, вопрос и варианты, как голосуют,
+ * когда закрывается, напоминание и итоги, закреп. Сервер хранит все опросы одним списком.
+ */
 export default function PollEditSheet() {
   const { pollId } = useLocalSearchParams<{ pollId?: string }>();
   const polls = usePolls();
@@ -66,8 +69,9 @@ function PollForm({ all, original, tokenConfigured }: { all: PollConfig[]; origi
   const problem = (): string | null => {
     if (!draft.title.trim()) return 'Укажите название опроса';
     if (!draft.chatId.trim()) return 'Выберите чат';
-    if (filled.length < 2) return 'Нужно минимум два варианта ответа';
-    if (!TIME_RE.test(draft.postTime)) return 'Время выкладки в формате ЧЧ:ММ';
+    if (filled.length < 1) return 'Нужен хотя бы один вариант ответа';
+    if (!(draft.times?.length ? draft.times : [draft.postTime]).every((t) => TIME_RE.test(t))) return 'Время выкладки в формате ЧЧ:ММ';
+    if (draft.scheduleKind === 'dates' && !draft.dates?.length) return 'Добавьте хотя бы одну дату выкладки';
     return null;
   };
 
@@ -112,13 +116,13 @@ function PollForm({ all, original, tokenConfigured }: { all: PollConfig[]; origi
       },
     ]);
 
-  const toggleDay = (day: number) => {
-    haptic.selection();
-    patch({ weekdays: draft.weekdays.includes(day) ? draft.weekdays.filter((item) => item !== day) : [...draft.weekdays, day].sort((a, b) => a - b) });
-  };
-
-  const chatTag = (chatId: string | number, threadId: string | number | null) => `${chatId}|${threadId ?? ''}`;
-  const selectedChat = draft.chatId ? chatTag(draft.chatId, draft.threadId) : null;
+  // Вернулись из «Добавить бота в группу» — подтягиваем новые группы и темы.
+  const refetchChats = chats.refetch;
+  useFocusEffect(
+    useCallback(() => {
+      void refetchChats();
+    }, [refetchChats]),
+  );
 
   return (
     <>
@@ -133,45 +137,9 @@ function PollForm({ all, original, tokenConfigured }: { all: PollConfig[]; origi
             <Toggle label="Опрос включён" isOn={draft.enabled} onIsOnChange={(enabled) => patch({ enabled })} />
           </Section>
 
-          <Section title="Куда выкладывать" footer={<Text>Чаты появляются здесь, когда бот добавлен в группу. Темы форума — со стрелкой.</Text>}>
-            {chats.isLoading ? (
-              <ProgressView />
-            ) : (chats.data ?? []).length === 0 ? (
-              <ContentUnavailableView title="Чатов нет" systemImage="bubble.left.and.bubble.right" description="Бот ещё не добавлен ни в один чат." />
-            ) : (
-              <Picker
-                selection={selectedChat}
-                onSelectionChange={(value) => {
-                  const [chatId, threadId] = String(value).split('|');
-                  patch({ chatId, threadId: threadId ? Number(threadId) : null });
-                }}
-                modifiers={[pickerStyle('inline')]}>
-                {(chats.data ?? []).flatMap((chat) => [
-                  <Text key={chatTag(chat.id, null)} modifiers={[tag(chatTag(chat.id, null))]}>
-                    {chat.title ?? `Чат ${chat.id}`}
-                  </Text>,
-                  ...chat.topics.map((topic) => (
-                    <Text key={chatTag(chat.id, topic.threadId)} modifiers={[tag(chatTag(chat.id, topic.threadId))]}>
-                      {`   › ${topic.name ?? `Тема ${topic.threadId}`}`}
-                    </Text>
-                  )),
-                ])}
-              </Picker>
-            )}
-          </Section>
+          <WhereSection draft={draft} patch={patch} chats={chats.data ?? []} loading={chats.isLoading} refetch={chats.refetch} />
 
-          <Section title="Когда" footer={<Text>{draft.weekdays.length ? 'Опрос выкладывается в отмеченные дни в указанное время.' : 'Без выбранных дней опрос выкладывается только кнопкой «Выложить сегодня».'}</Text>}>
-            {WEEKDAY_LABELS.map((label, index) => (
-              <Button key={label} onPress={() => toggleDay(index + 1)}>
-                <HStack spacing={10}>
-                  <Text modifiers={[primary]}>{WEEKDAY_FULL[index]}</Text>
-                  <Spacer />
-                  {draft.weekdays.includes(index + 1) ? <Image systemName="checkmark" size={16} color={colors.accent} /> : null}
-                </HStack>
-              </Button>
-            ))}
-            <TimeRow label="Время выкладки" value={draft.postTime} fallback="10:00" onChange={(postTime) => patch({ postTime })} />
-          </Section>
+          <WhenSection draft={draft} patch={patch} />
 
           <Section title="Подзаголовок" footer={<Text>Строка под заголовком опроса: день и время игры.</Text>}>
             <Toggle label="День недели автоматически" isOn={draft.autoDay !== false} onIsOnChange={(autoDay) => patch({ autoDay })} />
@@ -179,11 +147,11 @@ function PollForm({ all, original, tokenConfigured }: { all: PollConfig[]; origi
             <FieldRow value={draft.subtitleTime} placeholder="Время игры, например «20:00»" onChange={(subtitleTime) => patch({ subtitleTime })} />
           </Section>
 
-          <Section title="Варианты ответа" footer={<Text>От двух до десяти вариантов. Пустые строки не сохраняются.</Text>}>
+          <Section title="Варианты ответа" footer={<Text>От одного до десяти вариантов. Пустые строки не сохраняются.</Text>}>
             {options.map((option, index) => (
               <HStack key={option.key} spacing={10}>
                 <FieldRow value={option.text} placeholder={`Вариант ${index + 1}`} onChange={(text) => setOptions((list) => list.map((o) => (o.key === option.key ? { ...o, text } : o)))} />
-                {options.length > 2 ? (
+                {options.length > 1 ? (
                   <Image
                     systemName="minus.circle.fill"
                     size={20}
@@ -207,6 +175,10 @@ function PollForm({ all, original, tokenConfigured }: { all: PollConfig[]; origi
               />
             )}
           </Section>
+
+          <TelegramOptionsSection draft={draft} patch={patch} />
+          <ClosingSection draft={draft} patch={patch} />
+          <PinSection draft={draft} patch={patch} />
 
           <Section footer={<Text>{tokenConfigured ? 'Перед отправкой опрос сохраняется.' : 'Токен бота опросов не задан — отправить не получится.'}</Text>}>
             <ActionRow

@@ -6,7 +6,7 @@
  */
 import {
   profiles, clientTiers, checks, transactions, eq, and, desc, sql, count, max, gt,
-  type Database, type TaiContact, type TaiGames,
+  type Database, type Profile, type TaiContact, type TaiGames,
 } from '@titan/database'
 import type { ToolDef, ToolResult } from '../../ai/tai/tools/types.js'
 import { createApiCaller } from '../../ai/tai/internal.js'
@@ -42,35 +42,47 @@ function rub(n: number): string {
   return `${Math.round(n).toLocaleString('ru-RU')} ₽`
 }
 
+export interface ClubSummary {
+  name: string
+  address: string | null
+  hours: string | null
+  eveningPrices: string[]
+  eventRental: string[]
+  zones: string[]
+  about: string
+}
+
+/** Адрес, часы, цены вечера и аренды, о клубе — для Tai и карточки «Клуб». */
+export async function clubSummary(club: TgClub): Promise<ClubSummary> {
+  const api = createApiCaller({ host: club.host })
+  type SiteConfig = {
+    venue: { name: string; address: string; hoursOpen: string; hoursClose: string }
+    eveningPrices: { name: string; price: number }[]
+    eventRates: { hours: number; price: number }[]
+    zones: { name: string; hourlyRate: number }[]
+  }
+  const [config, brief] = await Promise.all([
+    api.get<SiteConfig>('/api/site/config').catch(() => null),
+    getStringSetting('tai_club_brief', '', club.db).catch(() => ''),
+  ])
+  return {
+    name: config?.venue.name ?? club.name,
+    address: config?.venue.address || null,
+    hours: config?.venue.hoursOpen ? `${config.venue.hoursOpen}–${config.venue.hoursClose}` : null,
+    eveningPrices: config?.eveningPrices.map((p) => `${p.name}: ${rub(p.price)}`) ?? [],
+    eventRental: config?.eventRates.map((r) => `${r.hours} ч — ${rub(r.price)}`) ?? [],
+    zones: config?.zones.map((z) => `${z.name}: ${rub(z.hourlyRate)}/ч`) ?? [],
+    about: brief.trim() || DEFAULT_CLUB_BRIEF,
+  }
+}
+
 const clubInfo = (s: ClientSession): ToolDef => ({
   name: 'club_info',
   description: 'Информация о клубе: адрес, часы работы, цены входа на вечер, аренда зала и кабинок, форматы игр и мероприятий.',
   parameters: { type: 'object', properties: {} },
   status: () => 'Смотрю информацию о клубе…',
   async run(): Promise<ToolResult> {
-    const api = createApiCaller({ host: s.club.host })
-    type SiteConfig = {
-      venue: { name: string; address: string; hoursOpen: string; hoursClose: string }
-      eveningPrices: { name: string; price: number }[]
-      eventRates: { hours: number; price: number }[]
-      zones: { name: string; hourlyRate: number }[]
-    }
-    const [config, brief] = await Promise.all([
-      api.get<SiteConfig>('/api/site/config').catch(() => null),
-      getStringSetting('tai_club_brief', '', s.club.db).catch(() => ''),
-    ])
-    return {
-      data: {
-        name: config?.venue.name ?? s.club.name,
-        address: config?.venue.address || null,
-        hours: config?.venue.hoursOpen ? `${config.venue.hoursOpen}–${config.venue.hoursClose}` : null,
-        eveningPrices: config?.eveningPrices.map((p) => `${p.name}: ${rub(p.price)}`) ?? [],
-        eventRental: config?.eventRates.map((r) => `${r.hours} ч — ${rub(r.price)}`) ?? [],
-        zones: config?.zones.map((z) => `${z.name}: ${rub(z.hourlyRate)}/ч`) ?? [],
-        about: brief.trim() || DEFAULT_CLUB_BRIEF,
-      },
-      memo: 'рассказал о клубе',
-    }
+    return { data: await clubSummary(s.club), memo: 'рассказал о клубе' }
   },
 })
 
@@ -90,6 +102,46 @@ const gameNights = (s: ClientSession): ToolDef => ({
   },
 })
 
+export interface AccountSummary {
+  nickname: string
+  status: string
+  deposit: string | null
+  debt: string | null
+  bonus: number
+  visitsLastYear: number
+  lastVisit: string | null
+  pendingRegistration: boolean
+  recent: string[]
+  notificationsOn: boolean
+}
+
+/** Профиль клиента: статус, деньги, бонусы, визиты — для Tai и карточки клиента. */
+export async function accountSummary(db: Database, p: Profile): Promise<AccountSummary> {
+  const since = new Date(Date.now() - VISITS_SINCE_DAYS * 86_400_000)
+  const [[tier], [visits], recent] = await Promise.all([
+    db.select({ label: clientTiers.label }).from(clientTiers).where(eq(clientTiers.key, p.clientTier)).limit(1),
+    db.select({ n: count(), last: max(checks.closedAt) }).from(checks)
+      .where(and(eq(checks.playerId, p.id), eq(checks.status, 'closed'), gt(checks.closedAt, since))),
+    db.select({ type: transactions.type, amount: transactions.amount, description: transactions.description, at: transactions.createdAt })
+      .from(transactions).where(eq(transactions.playerId, p.id)).orderBy(desc(transactions.createdAt)).limit(5),
+  ])
+  const balance = Number(p.balance) || 0
+  return {
+    nickname: p.nickname,
+    status: tier?.label ?? p.clientTier,
+    deposit: balance > 0 ? rub(balance) : null,
+    debt: balance < 0 ? rub(-balance) : null,
+    bonus: Math.round(Number(p.bonusPoints) || 0),
+    visitsLastYear: Number(visits?.n ?? 0),
+    lastVisit: visits?.last ? new Date(visits.last).toLocaleDateString('ru-RU', { timeZone: 'Europe/Moscow', day: 'numeric', month: 'long' }) : null,
+    pendingRegistration: p.registrationStatus === 'pending',
+    recent: recent.map((t) => `${t.type}: ${rub(Number(t.amount))}${t.description ? ` — ${t.description}` : ''}`),
+    notificationsOn: p.walletNotifyEnabled !== false,
+  }
+}
+
+export const NO_PROFILE = 'Telegram не привязан к профилю клуба. Привязка — через вход в приложение My Titan или у администратора.'
+
 const myAccount = (s: ClientSession): ToolDef => ({
   name: 'my_account',
   description: 'Свой профиль в клубе: статус, депозит/долг, бонусы, сколько раз был и когда последний раз, последние операции.',
@@ -97,32 +149,8 @@ const myAccount = (s: ClientSession): ToolDef => ({
   status: () => 'Смотрю твой профиль…',
   async run(): Promise<ToolResult> {
     const p = s.person.profile
-    if (!p) return { data: { error: 'Telegram не привязан к профилю клуба. Привязка — через вход в приложение My Titan или у администратора.' } }
-    const db = s.club.db
-    const since = new Date(Date.now() - VISITS_SINCE_DAYS * 86_400_000)
-    const [[tier], [visits], recent] = await Promise.all([
-      db.select({ label: clientTiers.label }).from(clientTiers).where(eq(clientTiers.key, p.clientTier)).limit(1),
-      db.select({ n: count(), last: max(checks.closedAt) }).from(checks)
-        .where(and(eq(checks.playerId, p.id), eq(checks.status, 'closed'), gt(checks.closedAt, since))),
-      db.select({ type: transactions.type, amount: transactions.amount, description: transactions.description, at: transactions.createdAt })
-        .from(transactions).where(eq(transactions.playerId, p.id)).orderBy(desc(transactions.createdAt)).limit(5),
-    ])
-    const balance = Number(p.balance) || 0
-    return {
-      data: {
-        nickname: p.nickname,
-        status: tier?.label ?? p.clientTier,
-        deposit: balance > 0 ? rub(balance) : null,
-        debt: balance < 0 ? rub(-balance) : null,
-        bonus: Math.round(Number(p.bonusPoints) || 0),
-        visitsLastYear: Number(visits?.n ?? 0),
-        lastVisit: visits?.last ? new Date(visits.last).toLocaleDateString('ru-RU', { timeZone: 'Europe/Moscow', day: 'numeric', month: 'long' }) : null,
-        pendingRegistration: p.registrationStatus === 'pending',
-        recent: recent.map((t) => `${t.type}: ${rub(Number(t.amount))}${t.description ? ` — ${t.description}` : ''}`),
-        notificationsOn: p.walletNotifyEnabled !== false,
-      },
-      memo: 'показал профиль клиента',
-    }
+    if (!p) return { data: { error: NO_PROFILE } }
+    return { data: await accountSummary(s.club.db, p), memo: 'показал профиль клиента' }
   },
 })
 
@@ -186,7 +214,7 @@ const sendPoll = (s: ClientSession): ToolDef => ({
   },
 })
 
-async function createSignup(db: Database, s: ClientSession, night: { title: string; kind: string; date: string; time: string }, guests: number, comment: string | null): Promise<'created' | 'duplicate'> {
+export async function createSignup(db: Database, s: Pick<ClientSession, 'person'>, night: { title: string; kind: string; date: string; time: string }, guests: number, comment: string | null): Promise<'created' | 'duplicate'> {
   const startsAt = `${night.date}T${night.time || '20:00'}:00+03:00`
   const name = s.person.profile?.fullName || s.person.profile?.nickname || [s.person.user.first_name, s.person.user.last_name].filter(Boolean).join(' ') || 'Гость из Telegram'
   const meta = { source: 'tai', evening: night.kind, tgId: s.person.tgId, telegram: s.person.user.username ? `@${s.person.user.username}` : null, profileId: s.person.profile?.id ?? null }

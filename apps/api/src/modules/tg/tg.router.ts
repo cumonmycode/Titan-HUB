@@ -9,6 +9,7 @@ import type { TgUpdate } from './types.js'
 import { onPrivateMessage } from './private.js'
 import { onGroupMessage, onBotMembership } from './group.js'
 import { onCallback } from './callbacks.js'
+import { onWidgetQuery } from './widgets.js'
 import { updateContact } from './dialog/memory.js'
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -44,7 +45,7 @@ async function firstDelivery(clubId: string, updateId: number): Promise<boolean>
 }
 
 function chatKeyOf(update: TgUpdate): string {
-  const chat = update.message?.chat ?? update.edited_message?.chat ?? update.callback_query?.message?.chat ?? update.my_chat_member?.chat ?? update.chat_member?.chat
+  const chat = update.message?.chat ?? update.edited_message?.chat ?? update.callback_query?.message?.chat ?? update.my_chat_member?.chat ?? update.chat_member?.chat ?? update.widget_query?.chat
   if (chat) return String(chat.id)
   return update.poll_answer ? 'poll' : 'other'
 }
@@ -59,6 +60,7 @@ async function processUpdate(club: TgClub, update: TgUpdate): Promise<void> {
     }
   }
   if (update.callback_query) await onCallback(club, update.callback_query)
+  if (update.widget_query) await onWidgetQuery(club, update.widget_query)
 
   const member = update.my_chat_member ?? update.chat_member
   if (member) {

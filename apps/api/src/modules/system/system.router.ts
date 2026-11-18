@@ -14,8 +14,9 @@ import { encryptSecret, decryptSecret, maskSecret, getClubIntegration } from '..
 import { getActiveSbpProvider } from '../pay/registry.js'
 import { getActiveFiscalProvider } from '../pay/fiscal/registry.js'
 import { getWhatsAppConfig, sendWhatsAppTemplate } from '../../lib/whatsapp.js'
-import { readPollConfigs, writePollConfigs, postPollConfig, type PollConfig } from '../../lib/polls.js'
-import { recordPollPosted } from '../../lib/pollState.js'
+import { readPollConfigs, writePollConfigs, type PollConfig } from '../../lib/polls.js'
+import { publishPoll } from '../../lib/pollPublish.js'
+import { TgBot } from '../../lib/tgBot.js'
 import { setTelegramWebhook, getTelegramWebhookInfo, getChatAdministrators, getTelegramChat } from '../../lib/telegram.js'
 import { TAI_ALLOWED_UPDATES } from '../tg/club.js'
 import { tgWebhookSecret, tgWebhookUrl } from '../../lib/tgWebhook.js'
@@ -684,6 +685,8 @@ systemRouter.get('/polls/chats', requireAuth, requireRole('owner'), async (c) =>
   return c.json({ chats })
 })
 
+const HHMM = /^([01]?\d|2[0-3]):[0-5]\d$/
+const YMD = /^\d{4}-\d{2}-\d{2}$/
 const PollConfigSchema = z.object({
   id: z.string().min(1).max(64),
   kind: z.string().max(32),
@@ -694,10 +697,31 @@ const PollConfigSchema = z.object({
   subtitleDay: z.string().max(64),
   autoDay: z.boolean().optional(),
   subtitleTime: z.string().max(32),
-  options: z.array(z.string().min(1).max(100)).min(2).max(10),
+  options: z.array(z.string().min(1).max(100)).min(1).max(10),
   weekdays: z.array(z.number().int().min(1).max(7)).max(7),
-  postTime: z.string().regex(/^([01]?\d|2[0-3]):[0-5]\d$/, 'время в формате HH:MM'),
+  postTime: z.string().regex(HHMM, 'время в формате HH:MM'),
   lastPostedAt: z.string().nullable().optional(),
+  // Гибкие настройки (необязательны: веб-касса их не шлёт — тогда берём сохранённые).
+  scheduleKind: z.enum(['weekly', 'dates']).optional(),
+  dates: z.array(z.string().regex(YMD, 'дата в формате ГГГГ-ММ-ДД')).max(60).optional(),
+  times: z.array(z.string().regex(HHMM, 'время в формате HH:MM')).min(1).max(6).optional(),
+  pausedUntil: z.string().regex(YMD).nullable().optional(),
+  description: z.string().max(255).optional(),
+  anonymous: z.boolean().optional(),
+  multipleAnswers: z.boolean().optional(),
+  allowsRevoting: z.boolean().optional(),
+  shuffleOptions: z.boolean().optional(),
+  allowAddingOptions: z.boolean().optional(),
+  hideResultsUntilClose: z.boolean().optional(),
+  membersOnly: z.boolean().optional(),
+  closeMode: z.enum(['none', 'after', 'at']).optional(),
+  closeAfterHours: z.number().min(0.25).max(720).optional(),
+  closeAtTime: z.string().regex(HHMM).optional(),
+  remindBeforeMin: z.number().int().min(0).max(1440).optional(),
+  summary: z.boolean().optional(),
+  pin: z.boolean().optional(),
+  unpinPrevious: z.boolean().optional(),
+  deletePrevious: z.boolean().optional(),
 })
 
 // PUT /system/polls — сохранить конфиги (целиком). lastPostedAt мерджим из текущих
@@ -712,6 +736,7 @@ systemRouter.put(
     const { configs } = c.req.valid('json')
     const existing = await readPollConfigs(db)
     const lastById = new Map(existing.map((e) => [e.id, e.lastPostedAt]))
+    const savedById = new Map(existing.map((e) => [e.id, e]))
     // Берём более позднюю отметку: фронт мог прислать устаревший lastPostedAt из кэша —
     // тогда опрос, уже отправленный сегодня, ушёл бы повторно.
     const later = (a: string | null | undefined, b: string | null | undefined): string | null => {
@@ -719,7 +744,9 @@ systemRouter.put(
       if (!b) return a
       return new Date(a).getTime() >= new Date(b).getTime() ? a : b
     }
+    // Поверх сохранённого: поля, которых клиент не знает (старая веб-касса), не теряются.
     const merged: PollConfig[] = configs.map((cfg) => ({
+      ...savedById.get(cfg.id),
       ...cfg,
       lastPostedAt: later(cfg.lastPostedAt, lastById.get(cfg.id)),
     }))
@@ -742,9 +769,9 @@ systemRouter.post(
     if (!cfg) return c.json({ error: 'Опрос не найден' }, 404)
     const token = await getClubIntegration(db, 'poll_bot_token')
     if (!token) return c.json({ error: 'Не задан токен бота опросов' }, 400)
-    const r = await postPollConfig(token, cfg)
-    if (!r.ok) return c.json({ error: r.error ?? 'Не удалось отправить опрос' }, 502)
-    if (r.pollId) await recordPollPosted(db, cfg.chatId, r.pollId, r.messageId ?? 0, cfg.threadId, cfg.options).catch(() => {})
+    // Проверка: опрос с настройками Telegram, но без закрепа, уборки прошлого и итогов.
+    const r = await publishPoll(db, new TgBot(token), cfg, { test: true })
+    if (!r.ok) return c.json({ error: r.error }, 502)
     return c.json({ ok: true, messageId: r.messageId })
   },
 )
@@ -768,9 +795,8 @@ systemRouter.post(
     const cfg = configs[idx]!
     const token = await getClubIntegration(db, 'poll_bot_token')
     if (!token) return c.json({ error: 'Не задан токен бота опросов' }, 400)
-    const r = await postPollConfig(token, cfg, { forceTodayDay: true })
-    if (!r.ok) return c.json({ error: r.error ?? 'Не удалось отправить опрос' }, 502)
-    if (r.pollId) await recordPollPosted(db, cfg.chatId, r.pollId, r.messageId ?? 0, cfg.threadId, cfg.options).catch(() => {})
+    const r = await publishPoll(db, new TgBot(token), cfg, { forceTodayDay: true })
+    if (!r.ok) return c.json({ error: r.error }, 502)
     // Сегодняшний слот считаем закрытым — плановый постинг не повторит опрос сегодня.
     configs[idx] = { ...cfg, lastPostedAt: new Date().toISOString() }
     await writePollConfigs(db, configs).catch(() => {})

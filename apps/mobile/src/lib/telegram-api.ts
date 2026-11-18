@@ -147,6 +147,11 @@ export const getChat = (id: string) => api.get<ChatDetail>(chatPath(id));
 export const patchChat = (id: string, patch: ChatPatch) => api.patch<{ config: ChatConfig }>(chatPath(id), patch);
 export const testChat = (id: string, threadId: number | null) => api.post(`${chatPath(id)}/test`, { threadId });
 export const pinRules = (id: string) => api.post<{ ok: true; pinned: boolean }>(`${chatPath(id)}/rules`);
+/** Бот создаёт тему в группе-форуме. */
+export const createTopic = (chatId: string, name: string) => api.post<{ threadId: number; name: string }>(`${chatPath(chatId)}/topics`, { name });
+/** Ссылка на сообщение в теме → группа и тема (бот должен быть в группе). */
+export const resolveTopicLink = (url: string, name?: string) =>
+  api.post<{ chatId: string; title: string | null; threadId: number | null; topicName: string | null }>('/telegram/resolve-link', { url, name });
 export const removeChat = (id: string, leave: boolean) => api.delete(`${chatPath(id)}?leave=${leave ? '1' : '0'}`);
 
 const failed = (error: unknown) => Alert.alert('Не сохранилось', error instanceof Error ? error.message : String(error));

@@ -27,14 +27,17 @@ interface Vote {
 interface PollState {
   lastByChat: Record<string, LastPoll> // chatId → последний опрос
   votersByPoll: Record<string, Record<string, Vote>> // pollId → { tgId: голос }
+  /** pollId → когда выложен: голоса недавних опросов храним и после следующего опроса в чате (итоги, напоминания). */
+  postedAt?: Record<string, string>
 }
+const KEEP_VOTES_MS = 3 * 86_400_000
 
 async function read(db: Database): Promise<PollState> {
   try {
     const [row] = await db.select({ value: appSettings.value }).from(appSettings).where(eq(appSettings.key, POLL_STATE_KEY))
     if (!row?.value) return { lastByChat: {}, votersByPoll: {} }
     const p = JSON.parse(row.value)
-    return { lastByChat: p?.lastByChat ?? {}, votersByPoll: p?.votersByPoll ?? {} }
+    return { lastByChat: p?.lastByChat ?? {}, votersByPoll: p?.votersByPoll ?? {}, postedAt: p?.postedAt ?? {} }
   } catch {
     return { lastByChat: {}, votersByPoll: {} }
   }
@@ -66,8 +69,12 @@ export async function recordPollPosted(
     options: options ?? [],
   }
   if (!s.votersByPoll[pollId]) s.votersByPoll[pollId] = {}
-  const keep = new Set(Object.values(s.lastByChat).map((l) => l.pollId))
+  const now = Date.now()
+  const posted = { ...(s.postedAt ?? {}), [pollId]: new Date(now).toISOString() }
+  const recent = (pid: string) => posted[pid] !== undefined && now - Date.parse(posted[pid]!) < KEEP_VOTES_MS
+  const keep = new Set([...Object.values(s.lastByChat).map((l) => l.pollId), ...Object.keys(posted).filter(recent)])
   for (const pid of Object.keys(s.votersByPoll)) if (!keep.has(pid)) delete s.votersByPoll[pid]
+  s.postedAt = Object.fromEntries(Object.entries(posted).filter(([pid]) => keep.has(pid)))
   await write(db, s)
 }
 

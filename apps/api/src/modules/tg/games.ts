@@ -4,7 +4,7 @@
  * poll_state. Отсюда Tai знает, когда звать человека и какой опрос ему переслать.
  */
 import type { Database, TaiGames } from '@titan/database'
-import { readPollConfigs, type PollConfig } from '../../lib/polls.js'
+import { postsOnDay, readPollConfigs, type PollConfig } from '../../lib/polls.js'
 import { listLastPolls } from '../../lib/pollState.js'
 import { readRoster } from '../../lib/roster.js'
 import { getBusinessDayStartHour } from '../../lib/appSettings.js'
@@ -37,13 +37,13 @@ export function kindOf(cfg: Pick<PollConfig, 'kind' | 'title'>): string {
   return cfg.kind || 'other'
 }
 
-/** Дни игры (1=Пн…7=Вс): день выкладки опроса, либо статичный день из подзаголовка. */
-function gameWeekdays(cfg: PollConfig): number[] {
+/** Есть ли игра в этот день: статичный день из подзаголовка, иначе — день выкладки опроса (дни недели или даты). */
+function isGameDay(cfg: PollConfig, date: string, dow: number): boolean {
   if (cfg.autoDay === false && cfg.subtitleDay) {
     const idx = WEEKDAYS.findIndex((w) => cfg.subtitleDay.toLowerCase().startsWith(w.slice(0, 3)))
-    if (idx >= 0) return [idx + 1]
+    if (idx >= 0) return idx + 1 === dow && !(cfg.pausedUntil && date <= cfg.pausedUntil)
   }
-  return Array.isArray(cfg.weekdays) ? cfg.weekdays : []
+  return postsOnDay(cfg, date, dow)
 }
 
 function mskDate(ms: number): { date: string; dow: number } {
@@ -62,7 +62,7 @@ export function upcomingNights(configs: PollConfig[], days = 8, nowMs = Date.now
   for (let i = 0; i < days; i += 1) {
     const { date, dow } = mskDate(nowMs + i * DAY_MS)
     for (const cfg of configs) {
-      if (!gameWeekdays(cfg).includes(dow)) continue
+      if (!isGameDay(cfg, date, dow)) continue
       out.push({ kind: kindOf(cfg), title: cfg.title, date, weekday: i === 0 ? 'сегодня' : i === 1 ? 'завтра' : `в ${WEEKDAYS_ACC[dow - 1]}`, time: cfg.subtitleTime || '', today: i === 0 })
     }
   }

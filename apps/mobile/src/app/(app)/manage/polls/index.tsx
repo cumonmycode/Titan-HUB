@@ -4,15 +4,25 @@ import { Stack, useRouter } from 'expo-router';
 import { Alert } from 'react-native';
 
 import { ActionRow, LinkRow } from '@/components/native-form';
+import { dateLabel } from '@/components/polls/poll-where-when';
 import { setPollCollect, usePollChats, usePollCollect, usePolls, WEEKDAY_LABELS, type PollConfig } from '@/lib/admin-api';
 import { haptic } from '@/lib/haptics';
 
 const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
-/** «Пн, Ср, Пт · 10:00» — когда бот выкладывает опрос. */
+/** «Пн, Ср, Пт · 10:00, 18:00» или «20 нояб., 27 нояб. · 10:00» — когда бот выкладывает опрос. */
 function scheduleText(poll: PollConfig): string {
-  const days = poll.weekdays.length ? poll.weekdays.map((day) => WEEKDAY_LABELS[day - 1]).join(', ') : 'по кнопке';
-  return `${days} · ${poll.postTime}`;
+  const times = (poll.times?.length ? poll.times : [poll.postTime]).join(', ');
+  const dates = poll.dates ?? [];
+  const days =
+    poll.scheduleKind === 'dates'
+      ? dates.length > 2
+        ? `${dates.length} дат`
+        : dates.map((d) => dateLabel(d)).join(', ') || 'даты не выбраны'
+      : poll.weekdays.length
+        ? poll.weekdays.map((day) => WEEKDAY_LABELS[day - 1]).join(', ')
+        : 'по кнопке';
+  return [days, times, poll.pausedUntil ? `пауза до ${dateLabel(poll.pausedUntil)}` : null].filter(Boolean).join(' · ');
 }
 
 /** Опросы в Telegram: бот выкладывает сбор на игру по расписанию. */

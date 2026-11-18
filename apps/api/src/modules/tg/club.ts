@@ -16,8 +16,16 @@ import { tgWebhookSecret, tgWebhookUrl } from '../../lib/tgWebhook.js'
 
 export const TAI_TOKEN_KEY = 'poll_bot_token'
 
+/** Меню «/» в личке с ботом: карточки-виджеты (modules/tg/widgets). */
+const PRIVATE_COMMANDS = [
+  { command: 'games', description: 'Ближайшие игры и запись' },
+  { command: 'me', description: 'Мои бонусы, депозит и визиты' },
+  { command: 'club', description: 'Адрес, часы и цены' },
+  { command: 'shift', description: 'Смена и касса (для сотрудников)' },
+]
+
 /** Какие апдейты нужны Tai: сообщения, кнопки, опросы, вход/выход из групп. */
-export const TAI_ALLOWED_UPDATES = ['message', 'edited_message', 'callback_query', 'poll_answer', 'my_chat_member', 'chat_member']
+export const TAI_ALLOWED_UPDATES = ['message', 'edited_message', 'callback_query', 'poll_answer', 'my_chat_member', 'chat_member', 'widget_query']
 
 export interface TgClub {
   /** id клуба в control-БД (null — основная БД без регистрации). */
@@ -108,6 +116,8 @@ export async function ensureTaiWebhook(db: Database, clubId: string | null): Pro
   if (!clubId) return
   const bot = await taiBot(db)
   if (!bot) return
+  // Меню «/» в личке: карточки игр, клиента, клуба и смены (modules/tg/widgets).
+  await bot.call('setMyCommands', { scope: { type: 'all_private_chats' }, commands: PRIVATE_COMMANDS })
   const info = await bot.call<{ url?: string; allowed_updates?: string[] }>('getWebhookInfo', {})
   if (!info) return
   const url = tgWebhookUrl(clubId)

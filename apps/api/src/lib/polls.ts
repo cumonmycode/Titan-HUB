@@ -39,6 +39,62 @@ export interface PollConfig {
   postTime: string
   /** ISO момента последнего успешного постинга (для идемпотентности). */
   lastPostedAt: string | null
+
+  // ─── Гибкие настройки (2026-11-19); у старых опросов полей нет — умолчания как раньше ───
+  /** Дни выкладки: по дням недели (weekdays, по умолчанию) или по датам (dates). */
+  scheduleKind?: 'weekly' | 'dates'
+  /** Даты выкладки YYYY-MM-DD для scheduleKind='dates' (разовый опрос — одна дата). */
+  dates?: string[]
+  /** Несколько времён выкладки в день; есть — вместо postTime. */
+  times?: string[]
+  /** Пауза: не выкладывать по эту дату включительно (YYYY-MM-DD). */
+  pausedUntil?: string | null
+  /** Описание под вопросом (Bot API 9.6). */
+  description?: string
+  anonymous?: boolean
+  multipleAnswers?: boolean
+  /** Можно передумать и переголосовать. */
+  allowsRevoting?: boolean
+  shuffleOptions?: boolean
+  /** Участники могут добавлять свои варианты. */
+  allowAddingOptions?: boolean
+  /** Итоги видны только после закрытия (нужно закрытие). */
+  hideResultsUntilClose?: boolean
+  /** Голосовать могут только участники чата. */
+  membersOnly?: boolean
+  /** Закрытие: никогда, через closeAfterHours после выкладки, или в closeAtTime (сегодня, иначе завтра). */
+  closeMode?: 'none' | 'after' | 'at'
+  closeAfterHours?: number
+  closeAtTime?: string
+  /** Напомнить неотметившимся за N минут до закрытия (0/нет — не напоминать). */
+  remindBeforeMin?: number
+  /** После закрытия выложить итог «кто идёт». */
+  summary?: boolean
+  /** Закрепить новый опрос. */
+  pin?: boolean
+  /** Открепить прошлый опрос этой серии. */
+  unpinPrevious?: boolean
+  /** Удалить прошлый опрос этой серии. */
+  deletePrevious?: boolean
+}
+
+const TIME_RE = /^(\d{1,2}):(\d{2})$/
+const minutesOf = (t: string): number | null => {
+  const m = TIME_RE.exec(t ?? '')
+  return m ? parseInt(m[1]!, 10) * 60 + parseInt(m[2]!, 10) : null
+}
+
+/** Времена выкладки опроса за день (минуты от полуночи МСК), по возрастанию. */
+export function postMinutes(cfg: PollConfig): number[] {
+  const list = cfg.times?.length ? cfg.times : [cfg.postTime]
+  return [...new Set(list.map(minutesOf).filter((m): m is number => m !== null))].sort((a, b) => a - b)
+}
+
+/** Выкладывается ли опрос в этот день (YYYY-MM-DD по МСК, день недели 1..7). */
+export function postsOnDay(cfg: PollConfig, date: string, dow: number): boolean {
+  if (cfg.pausedUntil && date <= cfg.pausedUntil) return false
+  if (cfg.scheduleKind === 'dates') return (cfg.dates ?? []).includes(date)
+  return Array.isArray(cfg.weekdays) && cfg.weekdays.includes(dow)
 }
 
 export async function readPollConfigs(db: Database): Promise<PollConfig[]> {
@@ -98,15 +154,15 @@ export function buildPollQuestion(
 
 // ── Расписание (МСК = UTC+3) ─────────────────────────────────────────────────
 // Час/день берём в МСК независимо от TZ контейнера (как остальной cron).
-function mskParts(nowMs: number): { dow: number; minutes: number } {
+export function mskParts(nowMs: number): { date: string; dow: number; minutes: number } {
   const d = new Date(nowMs + 3 * 3600 * 1000)
   const jsDow = d.getUTCDay() // 0=Вс..6=Сб
   const dow = jsDow === 0 ? 7 : jsDow // 1=Пн..7=Вс
-  return { dow, minutes: d.getUTCHours() * 60 + d.getUTCMinutes() }
+  return { date: d.toISOString().slice(0, 10), dow, minutes: d.getUTCHours() * 60 + d.getUTCMinutes() }
 }
 
-// UTC-мс момента «сегодня в postTime по МСК».
-function scheduledTodayMs(nowMs: number, schedMin: number): number {
+// UTC-мс момента «сегодня в schedMin минут по МСК».
+export function scheduledTodayMs(nowMs: number, schedMin: number): number {
   const d = new Date(nowMs + 3 * 3600 * 1000)
   const mskMidnightUtcMs = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()) - 3 * 3600 * 1000
   return mskMidnightUtcMs + schedMin * 60_000
@@ -114,24 +170,42 @@ function scheduledTodayMs(nowMs: number, schedMin: number): number {
 
 /**
  * Пора ли постить cfg в момент nowMs. РОБАСТНО к дрейфу тика/рестарту: постим
- * ОДИН раз, как только наступил день недели и время дня (now ≥ запланированного
- * сегодня) и в этот слот ещё не постили (lastPostedAt < запланированного сегодня).
+ * ОДИН раз на слот — последнее наступившее сегодня время выкладки, если в этот
+ * слот ещё не постили (lastPostedAt < слота). Пропущенные ранние слоты дня не
+ * догоняем: выходит один опрос, а не пачка.
  */
 export function isPollDue(cfg: PollConfig, nowMs: number): boolean {
   if (!cfg.enabled) return false
-  if (!cfg.chatId || !cfg.title || !Array.isArray(cfg.options) || cfg.options.length < 2) return false
-  const { dow, minutes } = mskParts(nowMs)
-  if (!Array.isArray(cfg.weekdays) || !cfg.weekdays.includes(dow)) return false
-  const m = /^(\d{1,2}):(\d{2})$/.exec(cfg.postTime ?? '')
-  if (!m) return false
-  const schedMin = parseInt(m[1]!, 10) * 60 + parseInt(m[2]!, 10)
-  if (minutes < schedMin) return false // ещё не наступило время сегодня
-  const schedTodayMs = scheduledTodayMs(nowMs, schedMin)
+  if (!cfg.chatId || !cfg.title || !Array.isArray(cfg.options) || cfg.options.length < 1) return false
+  const { date, dow, minutes } = mskParts(nowMs)
+  if (!postsOnDay(cfg, date, dow)) return false
+  const passed = postMinutes(cfg).filter((m) => m <= minutes)
+  if (!passed.length) return false // ещё не наступило время сегодня
+  const slotMs = scheduledTodayMs(nowMs, passed[passed.length - 1]!)
   if (cfg.lastPostedAt) {
     const last = new Date(cfg.lastPostedAt).getTime()
-    if (!Number.isNaN(last) && last >= schedTodayMs) return false // уже постили этот слот
+    if (!Number.isNaN(last) && last >= slotMs) return false // уже постили этот слот
   }
   return true
+}
+
+const HOUR_MS = 3600_000
+const MIN_CLOSE_SEC = 5
+const MAX_CLOSE_SEC = 2_628_000
+
+/** Когда опрос закроется, если выложить его в nowMs. null — не закрывается. */
+export function closeAtMs(cfg: PollConfig, nowMs: number): number | null {
+  let at: number | null = null
+  if (cfg.closeMode === 'after' && Number(cfg.closeAfterHours) > 0) at = nowMs + Number(cfg.closeAfterHours) * HOUR_MS
+  if (cfg.closeMode === 'at') {
+    const min = minutesOf(cfg.closeAtTime ?? '')
+    if (min !== null) {
+      at = scheduledTodayMs(nowMs, min)
+      if (at <= nowMs + MIN_CLOSE_SEC * 1000) at += 24 * HOUR_MS
+    }
+  }
+  if (at === null) return null
+  return Math.min(at, nowMs + MAX_CLOSE_SEC * 1000)
 }
 
 // Отправить опрос по конфигу (через токен бота опросов).
@@ -140,14 +214,24 @@ export function isPollDue(cfg: PollConfig, nowMs: number): boolean {
 export function postPollConfig(
   token: string,
   cfg: PollConfig,
-  opts?: { forceTodayDay?: boolean },
-): Promise<SendPollResult> {
+  opts?: { forceTodayDay?: boolean; nowMs?: number },
+): Promise<SendPollResult & { closesAt: number | null }> {
+  const nowMs = opts?.nowMs ?? Date.now()
+  const closesAt = closeAtMs(cfg, nowMs)
   return sendTelegramPoll(token, {
     chatId: cfg.chatId,
     messageThreadId: cfg.threadId,
-    question: buildPollQuestion(cfg, Date.now(), opts?.forceTodayDay ?? false),
+    question: buildPollQuestion(cfg, nowMs, opts?.forceTodayDay ?? false),
     options: cfg.options,
-    isAnonymous: false,
-    allowsMultipleAnswers: false,
-  })
+    isAnonymous: cfg.anonymous === true,
+    allowsMultipleAnswers: cfg.multipleAnswers === true,
+    allowsRevoting: cfg.allowsRevoting,
+    shuffleOptions: cfg.shuffleOptions,
+    allowAddingOptions: cfg.allowAddingOptions,
+    // Скрыть итоги до закрытия можно, только если опрос закрывается.
+    hideResultsUntilCloses: closesAt !== null && cfg.hideResultsUntilClose === true,
+    membersOnly: cfg.membersOnly,
+    description: cfg.description?.trim() || undefined,
+    closeDate: closesAt !== null ? Math.floor(closesAt / 1000) : undefined,
+  }).then((r) => ({ ...r, closesAt: r.ok ? closesAt : null }))
 }

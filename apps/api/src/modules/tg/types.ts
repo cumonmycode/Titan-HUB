@@ -63,4 +63,6 @@ export interface TgUpdate {
   poll_answer?: { poll_id?: string; user?: TgUser; voter_chat?: TgChat; option_ids?: number[] }
   my_chat_member?: TgChatMemberUpdate
   chat_member?: TgChatMemberUpdate
+  /** Нажатие кнопки в HTML-виджете бота (Bot API 10.4). */
+  widget_query?: { id: string; from: TgUser; data?: string; chat?: TgChat; message_id?: number }
 }

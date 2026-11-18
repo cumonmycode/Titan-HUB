@@ -10,7 +10,7 @@ import { appSettings, eq, type Database } from '@titan/database'
 import type { AppEnv } from '../../types.js'
 import { requireAuth, requireRole } from '../../middleware/auth.js'
 import { TG_API } from '../../lib/telegram.js'
-import { forgetChat, listChats } from '../../lib/tgChats.js'
+import { forgetChat, listChats, recordChat, recordTopic } from '../../lib/tgChats.js'
 import { readPollConfigs } from '../../lib/polls.js'
 import { TAI_PRESETS } from '../../lib/tai.js'
 import { tgWebhookUrl } from '../../lib/tgWebhook.js'
@@ -301,4 +301,70 @@ tgAdminRouter.delete('/chats/:id', zValidator('query', z.object({ leave: z.enum(
   await forgetChatConfig(db, chatId)
   await forgetChat(db, chatId)
   return c.json({ ok: true })
+})
+
+// ─── Темы форума для опросов и уведомлений ───────────────────────────────────
+
+const TOPIC_COLORS = [0x6fb9f0, 0xffd67e, 0xcb86db, 0x8eee98, 0xff93b2, 0xfb6f5f]
+
+/** Бот создаёт тему в группе-форуме (нужно право «Управление темами»). */
+tgAdminRouter.post('/chats/:id/topics', zValidator('json', z.object({ name: z.string().trim().min(1).max(128) })), async (c) => {
+  const db = c.var.db
+  const chatId = c.req.param('id')
+  const bot = await taiBot(db)
+  if (!bot) return c.json({ error: 'Бот не подключён' }, 400)
+  const { name } = c.req.valid('json')
+  const topic = await bot.call<{ message_thread_id: number; name: string }>('createForumTopic', {
+    chat_id: chatId,
+    name,
+    icon_color: TOPIC_COLORS[Math.floor(Math.random() * TOPIC_COLORS.length)],
+  })
+  if (!topic) return c.json({ error: 'Telegram не создал тему: в группе должны быть включены темы, а у бота — право управлять ими' }, 400)
+  await recordTopic(db, chatId, topic.message_thread_id, topic.name)
+  return c.json({ threadId: topic.message_thread_id, name: topic.name })
+})
+
+/**
+ * Ссылка на сообщение → группа и тема: t.me/c/<id>/<тема>/<сообщение>,
+ * t.me/c/<id>/<сообщение>?thread=<тема>, t.me/<username>/<тема>/<сообщение>.
+ */
+export function parseMessageLink(raw: string): { chat: string; threadId: number | null } | null {
+  let url: URL
+  try {
+    url = new URL(/^https?:\/\//i.test(raw.trim()) ? raw.trim() : `https://${raw.trim()}`)
+  } catch {
+    return null
+  }
+  if (!/^(www\.)?(t\.me|telegram\.me)$/i.test(url.hostname)) return null
+  const parts = url.pathname.split('/').filter(Boolean)
+  const thread = url.searchParams.get('thread') ?? url.searchParams.get('topic')
+  const numbers = (list: string[]) => list.every((p) => /^\d+$/.test(p))
+  if (parts[0] === 'c' && parts.length >= 2 && /^\d+$/.test(parts[1]!)) {
+    const rest = parts.slice(2)
+    if (!numbers(rest)) return null
+    const threadId = thread && /^\d+$/.test(thread) ? Number(thread) : rest.length >= 2 ? Number(rest[0]) : null
+    return { chat: `-100${parts[1]}`, threadId }
+  }
+  if (parts.length >= 1 && /^[A-Za-z][A-Za-z0-9_]{3,31}$/.test(parts[0]!)) {
+    const rest = parts.slice(1)
+    if (!numbers(rest)) return null
+    const threadId = thread && /^\d+$/.test(thread) ? Number(thread) : rest.length >= 2 ? Number(rest[0]) : null
+    return { chat: `@${parts[0]}`, threadId }
+  }
+  return null
+}
+
+tgAdminRouter.post('/resolve-link', zValidator('json', z.object({ url: z.string().trim().min(5).max(300), name: z.string().trim().max(128).optional() })), async (c) => {
+  const db = c.var.db
+  const { url, name } = c.req.valid('json')
+  const parsed = parseMessageLink(url)
+  if (!parsed) return c.json({ error: 'Это не ссылка на сообщение в Telegram. В группе: нажмите на сообщение в теме → «Копировать ссылку».' }, 400)
+  const bot = await taiBot(db)
+  if (!bot) return c.json({ error: 'Бот не подключён' }, 400)
+  const info = await bot.call<{ id: number; title?: string; type?: string }>('getChat', { chat_id: parsed.chat })
+  if (!info) return c.json({ error: 'Бота нет в этой группе — сначала добавьте его' }, 400)
+  const chatId = String(info.id)
+  await recordChat(db, { id: chatId, title: info.title ?? null, type: info.type ?? null })
+  if (parsed.threadId) await recordTopic(db, chatId, parsed.threadId, name?.trim() || null)
+  return c.json({ chatId, title: info.title ?? null, threadId: parsed.threadId, topicName: name?.trim() || null })
 })

@@ -19,6 +19,7 @@ import { requestIntro } from './dialog/request-desk.js'
 import { converse } from './dialog/converse.js'
 import { touchContact, updateContact } from './dialog/memory.js'
 import { onSmmPrivate } from '../smm/tg-handlers.js'
+import { handleCardCommand } from './widgets.js'
 
 const MAX_VOICE_BYTES = 8 * 1024 * 1024
 const START_GREETING = 'Привет! (человек только что открыл бота и нажал «Старт» — поздоровайся и коротко скажи, чем можешь помочь)'
@@ -105,6 +106,8 @@ export async function onPrivateMessage(club: TgClub, msg: TgMessage): Promise<vo
     await club.bot.send(chatId, 'Понял, сам больше писать не буду 🤝 Если что — я здесь, пиши в любой момент.')
     return
   }
+  // Карточки (/games, /me, /club, /shift) — без ИИ, сразу из данных клуба.
+  if (text.startsWith('/') && (await handleCardCommand(club, from, chatId, text))) return
   if (!(await aiEnabled(club))) {
     await club.bot.send(chatId, 'Я пока умею только подтверждать вход в приложения клуба. С вопросами — к администратору 🙂')
     return

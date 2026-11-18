@@ -22,6 +22,7 @@ import { clientPrompt, staffTelegramPrompt } from './prompts.js'
 import { actionMarkup, actionText, blockText, choiceMarkup, linksMarkup, mdToHtml, supplyMarkup, supplyText } from './render.js'
 import { appendMessage, markBlocked, markOutbound, recentTurns } from './memory.js'
 import { activeRequests, requestPrompt, requestTools } from './request-desk.js'
+import { showCardTool } from '../widgets.js'
 
 export interface ChatTarget {
   chatId: string
@@ -100,7 +101,7 @@ async function buildEnv(club: TgClub, person: TgPerson, contact: TaiContact | nu
       clubName: club.name,
       permissions: profile.permissions ?? {},
       headers: await staffHeaders(club, profile),
-      extraTools: [...TELEGRAM_STAFF_TOOLS, ...(session && !target.groupTitle ? selfTools(session) : [])],
+      extraTools: [...TELEGRAM_STAFF_TOOLS, ...(session && !target.groupTitle ? [...selfTools(session), showCardTool(club, person, target.chatId)] : [])],
       extraPrompt: staffTelegramPrompt({ nickname: profile.nickname, group: target.groupTitle, selfTools: !!session && !target.groupTitle, style: target.style?.line ?? null }),
       ...(target.style ? { profanity: target.style.profanity } : {}),
     }
@@ -115,7 +116,7 @@ async function buildEnv(club: TgClub, person: TgPerson, contact: TaiContact | nu
     clubName: club.name,
     permissions: undefined,
     headers: { host: club.host },
-    tools: [...clientTools(session), ...requestTools(session, requests)],
+    tools: [...clientTools(session), ...requestTools(session, requests), ...(target.groupTitle ? [] : [showCardTool(club, person, target.chatId)])],
     prompt: (await clientPrompt(session, voice)) + requestPrompt(requests),
     temperature: CLIENT_TEMPERATURE,
   }
