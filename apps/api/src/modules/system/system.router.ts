@@ -23,6 +23,7 @@ import { upsertRosterUser } from '../../lib/roster.js'
 import { listChats, recordChat } from '../../lib/tgChats.js'
 import { getBoolSetting, getStringSetting } from '../../lib/appSettings.js'
 import { TAI_PRESETS } from '../../lib/tai.js'
+import { patchChatConfig, readAllChatConfigs } from '../../lib/tgChatConfig.js'
 import { siteAdminSettingsRouter } from '../site/admin.router.js'
 // Control-БД: резолв clubId на основном домене (c.var.club=null → ищем по db_name).
 import { getControlDb, clubs as ctrlClubs, eq as ceq } from '../../../../../packages/database/dist/control/index.js'
@@ -587,21 +588,13 @@ systemRouter.get('/tai-chat-config', requireAuth, requireRole('owner'), async (c
   const preset = await getStringSetting('tai_preset', 'roast', db)
   const botToken = await getClubIntegration(db, 'poll_bot_token').catch(() => null)
   const aiKey = (await getClubIntegration(db, 'ai_api_key').catch(() => null)) ?? process.env['POLZA_API_KEY']
-  // Пер-групповые настройки: список «увиденных» ботом чатов + сохранённые опции.
-  let settings: Record<string, { enabled?: boolean; profanity?: boolean; harshness?: string; preset?: string; mode?: string }> = {}
-  try { settings = JSON.parse(await getStringSetting('tai_chat_settings', '', db) || '{}') } catch { /* мусор → {} */ }
-  const chats = (await listChats(db)).map((ch) => {
-    const s = settings[String(ch.id)] ?? {}
-    const work = s.mode === 'work'
-    // Рабочий чат по умолчанию — без мата и мягко; игровой — как раньше.
-    return {
-      id: ch.id, title: ch.title, type: ch.type,
-      mode: work ? 'work' : 'game',
-      enabled: s.enabled !== false,
-      profanity: work ? s.profanity === true : s.profanity !== false,
-      harshness: (TAI_HARSHNESS as readonly string[]).includes(s.harshness ?? '') ? s.harshness : work ? 'soft' : 'savage',
-      preset: TAI_PRESETS.some((p) => p.key === s.preset) ? s.preset : work ? 'friendly' : preset,
-    }
+  // Пер-групповые настройки — те же, что в разделе «Telegram» (lib/tgChatConfig).
+  const seen = await listChats(db)
+  const configs = await readAllChatConfigs(db, seen.map((ch) => ch.id))
+  const chats = seen.map((ch) => {
+    const cfg = configs.get(ch.id)!
+    // Старый экран знает только игровой и рабочий режимы: «уведомления» показываем рабочим.
+    return { id: ch.id, title: ch.title, type: ch.type, mode: cfg.mode === 'game' ? 'game' : 'work', enabled: cfg.tai.on, profanity: cfg.tai.profanity, harshness: cfg.tai.harshness, preset: cfg.tai.preset }
   })
   return c.json({ enabled, preset, presets: TAI_PRESETS, chats, botReady: !!botToken, aiReady: !!aiKey })
 })
@@ -632,21 +625,15 @@ systemRouter.put(
     if (body.enabled !== undefined) await setKey('tai_chat_enabled', String(body.enabled))
     if (body.preset !== undefined) await setKey('tai_preset', body.preset)
     if (body.chats !== undefined) {
-      // Сохраняем поверх текущих: режим и стиль чата, не пришедшие из старого клиента, не теряются.
-      let current: Record<string, Record<string, unknown>> = {}
-      try { current = JSON.parse(await getStringSetting('tai_chat_settings', '', db) || '{}') } catch { /* мусор → {} */ }
-      const map: Record<string, Record<string, unknown>> = { ...current }
       for (const ch of body.chats) {
-        map[String(ch.id)] = {
-          ...current[String(ch.id)],
-          enabled: ch.enabled,
+        await patchChatConfig(db, String(ch.id), {
+          taiOn: ch.enabled,
           profanity: ch.profanity,
           harshness: ch.harshness,
           ...(ch.preset ? { preset: ch.preset } : {}),
           ...(ch.mode ? { mode: ch.mode } : {}),
-        }
+        })
       }
-      await setKey('tai_chat_settings', JSON.stringify(map))
     }
     return c.json({ ok: true })
   },

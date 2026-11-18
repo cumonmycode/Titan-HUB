@@ -7,6 +7,7 @@ import {
 import { notifChannel } from '../../lib/realtime.js'
 import { deliverStaffApns } from './staff-calls.js'
 import { taiBot } from '../tg/club.js'
+import { postNotificationToChats } from '../../lib/tgChatNotify.js'
 
 // Переходный режим: пер-клубный db передаётся параметром, дефолт — модульный синглтон.
 type DbLike = Database
@@ -321,6 +322,9 @@ export async function notify(opts: {
       }
       return notificationId
     }
+
+    // Общее уведомление — ещё и в групповые чаты, подписанные на его категорию.
+    if (!targetUserId) void postNotificationToChats(database, opts)
 
     // Получатели: конкретный user или broadcast → весь персонал.
     let recipientIds: string[]

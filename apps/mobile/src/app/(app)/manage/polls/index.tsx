@@ -4,7 +4,7 @@ import { Stack, useRouter } from 'expo-router';
 import { Alert } from 'react-native';
 
 import { ActionRow, LinkRow } from '@/components/native-form';
-import { setPollCollect, setPollCommandsAdminOnly, usePollChats, usePollCollect, usePolls, WEEKDAY_LABELS, type PollConfig } from '@/lib/admin-api';
+import { setPollCollect, usePollChats, usePollCollect, usePolls, WEEKDAY_LABELS, type PollConfig } from '@/lib/admin-api';
 import { haptic } from '@/lib/haptics';
 
 const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error));
@@ -59,11 +59,14 @@ export default function PollsScreen() {
             <ActionRow title="Новый опрос" icon="plus.circle.fill" onPress={() => router.push('/manage/polls/edit')} />
           </Section>
 
-          <Section title="Бот" footer={<Text>{tokenConfigured ? 'Токен бота опросов задан в веб-кассе.' : 'Без токена бот не сможет выложить опрос. Токен задаётся в веб-кассе.'}</Text>}>
+          <Section footer={<Text>Команды-отметки (@all, @tvari…) и кто может их вызывать — у каждого чата свои.</Text>}>
+            <LinkRow icon="command" color="#5856D6" title="Чаты и команды" subtitle="Раздел «Telegram»" onPress={() => router.push('/manage/telegram')} />
+          </Section>
+
+          <Section title="Бот" footer={<Text>{tokenConfigured ? 'Опросы выкладывает бот клуба.' : 'Без бота опрос не выложится. Подключите его в «Интеграциях».'}</Text>}>
             <LabeledContent label="Токен бота">
               <Text modifiers={[foregroundStyle(tokenConfigured ? '#34C759' : '#FF9500')]}>{tokenConfigured ? (polls.data?.tokenMasked ?? 'задан') : 'не задан'}</Text>
             </LabeledContent>
-            <Toggle label="Команды только админам" isOn={polls.data?.commandsAdminOnly ?? false} onIsOnChange={(on) => saved(setPollCommandsAdminOnly(on))} />
             <Toggle label="Собирать ответы" isOn={collect.data?.enabled ?? false} onIsOnChange={(on) => saved(setPollCollect(on))} />
           </Section>
         </Form>

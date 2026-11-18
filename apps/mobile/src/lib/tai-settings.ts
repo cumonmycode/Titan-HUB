@@ -7,17 +7,14 @@ import { useClubKey } from './queries';
 import {
   getTaiChatConfig,
   getTaiSettings,
-  saveTaiChatConfig,
   saveTaiClubBrief,
   saveTaiSettings,
-  type TaiChat,
-  type TaiChatConfig,
   type TaiSettings,
   type TaiSettingsResponse,
 } from './tai-api';
 
 /**
- * Данные экранов «Меню → Tai»: голос, манера, клиенты в Telegram и групповые чаты.
+ * Данные экранов «Меню → Tai»: голос, манера и клиенты в Telegram.
  * Все экраны правят одно и то же — изменение сразу видно везде, при ошибке откатывается.
  */
 
@@ -55,31 +52,9 @@ export function useTaiSettingsEditor() {
   return { query, save: (patch: Partial<TaiSettings>) => save.mutate(patch), saveBrief: brief.mutateAsync, briefSaving: brief.isPending };
 }
 
+/** Готовность Tai (бот и ИИ) для шапки «Tai». Групповые чаты — в разделе «Telegram». */
 export function useTaiChatsEditor() {
   const club = useClubKey();
-  const key = [club, 'ai', 'chat-config'];
-  const query = useQuery({ queryKey: key, queryFn: getTaiChatConfig });
-
-  const save = useMutation({
-    mutationFn: saveTaiChatConfig,
-    onMutate: async (patch: { enabled?: boolean; chats?: TaiChat[] }) => {
-      const previous = queryClient.getQueryData<TaiChatConfig>(key);
-      if (previous) queryClient.setQueryData<TaiChatConfig>(key, { ...previous, ...patch });
-      return { previous };
-    },
-    onError: (error, _patch, context) => {
-      if (context?.previous) queryClient.setQueryData(key, context.previous);
-      failed(error);
-    },
-    onSuccess: () => haptic.success(),
-  });
-
-  const patchChat = (id: TaiChat['id'], patch: Partial<TaiChat>) => {
-    const data = queryClient.getQueryData<TaiChatConfig>(key);
-    if (!data) return;
-    haptic.selection();
-    save.mutate({ chats: data.chats.map((chat) => (String(chat.id) === String(id) ? { ...chat, ...patch } : chat)) });
-  };
-
-  return { query, setJokes: (enabled: boolean) => save.mutate({ enabled }), patchChat };
+  const query = useQuery({ queryKey: [club, 'ai', 'chat-config'], queryFn: getTaiChatConfig });
+  return { query };
 }

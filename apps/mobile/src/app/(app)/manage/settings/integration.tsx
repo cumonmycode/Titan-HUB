@@ -155,7 +155,8 @@ export default function IntegrationScreen() {
 
           {status.installed && product.id === 'poll_bot' ? (
             <Section>
-              <LinkRow icon="sparkles" color="#8B5CF6" title="Настройки Tai" subtitle="Голос, клиенты в Telegram, групповые чаты" onPress={() => router.push('/manage/tai')} />
+              <LinkRow icon="bubble.left.and.bubble.right.fill" color="#2AABEE" title="Чаты и команды" subtitle="Добавить бота в чат, настроить каждую группу" onPress={() => router.push('/manage/telegram')} />
+              <LinkRow icon="sparkles" color="#8B5CF6" title="Настройки Tai" subtitle="Голос и клиенты в личке" onPress={() => router.push('/manage/tai')} />
             </Section>
           ) : null}
           {status.installed && product.provider && payment.data ? <AcquirerSections provider={product.provider} data={payment.data} save={payment.save} host={host} /> : null}

@@ -80,3 +80,13 @@ export async function listChats(db: Database): Promise<ChatListItem[]> {
     topics: Object.entries(c.topics ?? {}).map(([threadId, t]) => ({ threadId, name: t?.name ?? null })),
   }))
 }
+
+/** Убрать группу из списка «увиденных» (бот вышел или владелец её забыл). */
+export async function forgetChat(db: Database, chatId: number | string): Promise<void> {
+  const map = await read(db)
+  const id = String(chatId)
+  if (!(id in map)) return
+  const rest = { ...map }
+  delete rest[id]
+  await write(db, rest)
+}

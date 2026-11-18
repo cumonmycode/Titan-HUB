@@ -38,6 +38,7 @@ export interface TgMessage {
   message_thread_id?: number
   is_topic_message?: boolean
   new_chat_members?: TgUser[]
+  left_chat_member?: TgUser
   forum_topic_created?: { name?: string }
 }
 

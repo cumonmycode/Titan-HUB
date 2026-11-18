@@ -235,7 +235,6 @@ export type TaiChat = { id: number | string; title: string; type: string; mode: 
 export type TaiChatConfig = { enabled: boolean; presets: TaiChatPreset[]; chats: TaiChat[]; botReady: boolean; aiReady: boolean };
 
 export const getTaiChatConfig = () => api.get<TaiChatConfig>('/system/tai-chat-config');
-export const saveTaiChatConfig = (patch: { enabled?: boolean; chats?: TaiChat[] }) => api.put('/system/tai-chat-config', patch);
 
 export async function dismissTaiAction(id: string): Promise<void> {
   await api.post(`/ai/assistant/actions/${id}/dismiss`).catch(() => undefined);

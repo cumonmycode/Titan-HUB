@@ -6,23 +6,13 @@ import { StyleSheet, View } from 'react-native';
 import { LinkRow } from '@/components/native-form';
 import { TaiMark } from '@/components/tai/mark';
 import { Text as RNText } from '@/components/text';
-import type { TaiChat, TaiChatPreset } from '@/lib/tai-api';
 import { useTaiChatsEditor, useTaiSettingsEditor } from '@/lib/tai-settings';
 import { colors, space, type } from '@/lib/theme';
 
-const MODE_LABEL = { game: 'Игровой', work: 'Рабочий' } as const;
-
-/** Подпись чата в списке: режим, стиль и мат — чтобы не заходить внутрь ради проверки. */
-function chatSubtitle(chat: TaiChat, presets: TaiChatPreset[]): string {
-  const preset = presets.find((p) => p.key === chat.preset)?.label;
-  const jokes = chat.mode === 'game' && !chat.enabled ? 'молчит' : preset;
-  return [MODE_LABEL[chat.mode], jokes, chat.profanity ? 'с матом' : null].filter(Boolean).join(' · ');
-}
-
 /**
  * «Tai» — настройки ассистента клуба короткими разделами: голос (свой экран с
- * примерами), манера с сотрудниками, клиенты в Telegram и групповые чаты (у каждого
- * свой экран). Всё сохраняется сразу; меняет владелец.
+ * примерами), манера с сотрудниками, клиенты в Telegram и групповые чаты — в разделе
+ * «Telegram». Всё сохраняется сразу; меняет владелец.
  */
 export default function TaiSettingsScreen() {
   const router = useRouter();
@@ -81,30 +71,9 @@ export default function TaiSettingsScreen() {
             <LinkRow icon="text.book.closed" color="#FF9500" title="Что Tai рассказывает о клубе" subtitle={brief || 'Форматы игр, школа, мероприятия'} onPress={() => router.push('/manage/tai/brief')} />
           </Section>
 
-          {config ? (
-            <Section
-              title="Групповые чаты"
-              footer={
-                <Text>
-                  {config.chats.length
-                    ? 'У каждой группы свой режим, стиль и мат. Обращаются к Tai «тай …» или ответом на его сообщение.'
-                    : 'Добавьте Tai в группу клуба или чат сотрудников и напишите что-нибудь — группа появится здесь.'}
-                </Text>
-              }
-            >
-              <Toggle label="Шутки в игровых чатах" isOn={config.enabled} onIsOnChange={chats.setJokes} />
-              {config.chats.map((chat) => (
-                <LinkRow
-                  key={String(chat.id)}
-                  icon={chat.mode === 'work' ? 'briefcase.fill' : 'gamecontroller.fill'}
-                  color={chat.mode === 'work' ? '#0A84FF' : '#34C759'}
-                  title={chat.title || `Чат ${chat.id}`}
-                  subtitle={chatSubtitle(chat, config.presets)}
-                  onPress={() => router.push({ pathname: '/manage/tai/chat', params: { id: String(chat.id) } })}
-                />
-              ))}
-            </Section>
-          ) : null}
+          <Section footer={<Text>Режим, стиль и мат Tai настраиваются у каждой группы отдельно.</Text>}>
+            <LinkRow icon="bubble.left.and.bubble.right.fill" color="#2AABEE" title="Групповые чаты" subtitle="Раздел «Telegram»" onPress={() => router.push('/manage/telegram')} />
+          </Section>
         </Form>
       </Host>
     </>

@@ -154,9 +154,18 @@ export default function ManageLayout() {
       <Stack.Screen name="smm/when" options={editorModal} />
       <Stack.Screen name="smm/order" options={editorModal} />
 
+      {/* «Telegram»: бот клуба, добавление в чаты и настройки каждой группы. */}
+      <Stack.Screen name="telegram/index" options={formHeader({ title: 'Telegram' })} />
+      <Stack.Screen name="telegram/add" options={formHeader({ title: 'Добавить в чат' })} />
+      <Stack.Screen name="telegram/chat" options={formHeader()} />
+      <Stack.Screen name="telegram/tai" options={formHeader({ title: 'Tai в чате' })} />
+      <Stack.Screen name="telegram/commands" options={formHeader({ title: 'Команды' })} />
+      <Stack.Screen name="telegram/command" options={editorModal} />
+      <Stack.Screen name="telegram/notify" options={formHeader({ title: 'Уведомления' })} />
+      <Stack.Screen name="telegram/welcome" options={editorModal} />
+
       <Stack.Screen name="tai/index" options={formHeader({ title: 'Tai' })} />
       <Stack.Screen name="tai/voice" options={formHeader({ title: 'Голос' })} />
-      <Stack.Screen name="tai/chat" options={formHeader()} />
       <Stack.Screen name="tai/brief" options={editorModal} />
 
       <Stack.Screen name="about/index" options={formHeader({ title: 'О системе' })} />

@@ -31,6 +31,7 @@ const SECTION_SCREENS: Record<ManageSectionKey, Href> = {
   loyalty: '/manage/loyalty',
   staff: '/manage/staff',
   settings: '/manage/settings',
+  telegram: '/manage/telegram',
   tai: '/manage/tai',
   about: '/manage/about',
 };

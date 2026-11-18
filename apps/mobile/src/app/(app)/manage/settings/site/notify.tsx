@@ -1,25 +1,20 @@
 import { ContentUnavailableView, Form, Host, ProgressView, Section, Text } from '@expo/ui/swift-ui';
 import { refreshable } from '@expo/ui/swift-ui/modifiers';
-import { Stack } from 'expo-router';
-import { useState } from 'react';
-import { Alert } from 'react-native';
+import { Stack, useRouter } from 'expo-router';
 
 import { LinkRow } from '@/components/native-form';
-import { haptic } from '@/lib/haptics';
-import { saveSite, useSiteConfig, type NotifyChat } from '@/lib/site-api';
-
-const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error));
-const keyOf = (c: NotifyChat | null | undefined) => (c ? `${c.chatId}|${c.threadId ?? ''}` : '');
+import { useSiteConfig } from '@/lib/site-api';
 
 /**
  * Кто узнаёт о заявках с сайта. Push — всегда владельцам и администратору открытой
- * смены. Чат персонала в Telegram — по выбору: бот групп клуба присылает заявку с
- * контактами гостя и дописывает итог. Гостю статус и напоминание присылает
- * клиентский бот клуба, если гость нажал «Получать статус в Telegram».
+ * смены. Чат персонала в Telegram выбирается в разделе «Telegram» (уведомления чата →
+ * «Заявки с сайта»): там же все остальные уведомления, без второго места для выбора.
+ * Гостю статус и напоминание присылает клиентский бот, если гость нажал «Получать
+ * статус в Telegram».
  */
 export default function SiteNotifyScreen() {
+  const router = useRouter();
   const config = useSiteConfig();
-  const [picked, setPicked] = useState<string | null>(null);
 
   if (!config.data) {
     return (
@@ -29,33 +24,11 @@ export default function SiteNotifyScreen() {
     );
   }
   const c = config.data;
-  const current = picked ?? keyOf(c.notifyChat);
-  const groups = (c.chats ?? []).filter((chat) => chat.type !== 'private');
-
-  const choose = (value: string) => {
-    if (value === current) return;
-    haptic.selection();
-    setPicked(value);
-    const [chatId, thread] = value.split('|');
-    saveSite({ notifyChat: chatId ? { chatId, threadId: thread ? Number(thread) : null } : null })
-      .then(() => haptic.success())
-      .catch((error: unknown) => {
-        haptic.error();
-        setPicked(null);
-        Alert.alert('Не сохранилось', errorText(error));
-      });
-  };
-  const option = (value: string, title: string, subtitle?: string) => (
-    <LinkRow
-      key={value || 'none'}
-      icon={current === value ? 'checkmark.circle.fill' : 'circle'}
-      color={current === value ? '#7C4DFF' : '#8E8E93'}
-      title={title}
-      subtitle={subtitle}
-      chevron={false}
-      onPress={c.staffBot ? () => choose(value) : undefined}
-    />
-  );
+  const chat = c.notifyChat ? (c.chats ?? []).find((item) => String(item.id) === c.notifyChat!.chatId) : null;
+  const topic = chat && c.notifyChat?.threadId != null ? chat.topics.find((t) => String(t.threadId) === String(c.notifyChat!.threadId)) : null;
+  const chatName = c.notifyChat ? [chat?.title ?? `Чат ${c.notifyChat.chatId}`, topic?.name].filter(Boolean).join(' › ') : null;
+  const openChat = () =>
+    c.notifyChat ? router.push({ pathname: '/manage/telegram/notify', params: { id: c.notifyChat.chatId } }) : router.push('/manage/telegram');
 
   return (
     <>
@@ -70,18 +43,12 @@ export default function SiteNotifyScreen() {
             title="Чат персонала в Telegram"
             footer={
               <Text>
-                {!c.staffBot
-                  ? 'Подключите бота групп клуба в «Опросах» — он пишет заявки в чат.'
-                  : groups.length
-                    ? 'Заявка приходит с кнопками WhatsApp и Telegram гостя, итог бот дописывает в то же сообщение.'
-                    : 'Бот ещё не видел ни одного чата — добавьте его в чат персонала и напишите там сообщение.'}
+                {c.notifyChat
+                  ? 'Заявка приходит с кнопками «Подтвердить» и «Отклонить», итог бот дописывает в то же сообщение. Сменить чат — в разделе «Telegram».'
+                  : 'Выберите чат в разделе «Telegram»: откройте чат персонала → Уведомления → «Заявки с сайта».'}
               </Text>
             }>
-            {option('', 'Не отправлять')}
-            {groups.flatMap((chat) => [
-              option(`${chat.id}|`, chat.title ?? chat.id, chat.topics.length ? 'Весь чат' : undefined),
-              ...chat.topics.map((t) => option(`${chat.id}|${t.threadId}`, t.name ?? `Тема ${t.threadId}`, chat.title ?? undefined)),
-            ])}
+            <LinkRow icon="paperplane.fill" color="#2AABEE" title={chatName ?? 'Не отправлять в чат'} subtitle={c.staffBot ? undefined : 'Бот клуба не подключён'} onPress={openChat} />
           </Section>
 
           <Section title="Гостям" footer={<Text>После заявки на сайте гость может нажать «Получать статус в Telegram» — бот пришлёт подтверждение или отказ и напомнит в день визита.</Text>}>
