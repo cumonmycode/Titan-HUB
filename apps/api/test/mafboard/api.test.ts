@@ -45,7 +45,8 @@ describe('GoMafia', () => {
     const ok = await call(ctx, 'POST', '/v1/me/gomafia', { token: session.accessToken, body: { login: 'host', password: 'secret' } })
     assert.equal(ok.status, 200)
     assert.equal(ok.json.goMafia.player.id, 4242)
-    assert.deepEqual(ok.json.goMafia.club, { id: 77, title: 'TITAN', city: 'Москва' })
+    assert.deepEqual(ok.json.goMafia.club, { id: 77, title: 'TITAN', city: 'Москва', presidentID: 4242 })
+    assert.equal(ok.json.goMafia.source, 'password')
     assert.equal(ok.json.goMafia.linkedAt, NOW.toISOString())
 
     const unlinked = await call(ctx, 'DELETE', '/v1/me/gomafia', { token: session.accessToken })

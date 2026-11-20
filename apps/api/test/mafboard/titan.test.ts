@@ -7,11 +7,29 @@ const CLIENT_A = '00000000-0000-4000-8000-00000000000a'
 const CLIENT_B = '00000000-0000-4000-8000-00000000000b'
 const CLIENT_C = '00000000-0000-4000-8000-00000000000c'
 
-async function titanHost(ctx: TestContext, user = TG_USER) {
+/** Президент клуба GoMafia 77 (логин «host»): клуб Titan HUB подключает только он. */
+async function president(ctx: TestContext, user = TG_USER) {
   const session = await signIn(ctx, user)
+  const linked = await call(ctx, 'POST', '/v1/me/gomafia', { token: session.accessToken, body: { login: 'host', password: 'secret' } })
+  assert.equal(linked.json.goMafia.access, 'president')
+  return session
+}
+
+async function titanHost(ctx: TestContext, user = TG_USER) {
+  const session = await president(ctx, user)
   const linked = await call(ctx, 'POST', '/v1/me/titan', { token: session.accessToken, body: { code: 'good-code' } })
   assert.equal(linked.status, 200)
   return { ...session, account: linked.json }
+}
+
+/** Резидент клуба 77 (игрок 5001), которого президент добавил в пул судей. */
+async function poolJudge(ctx: TestContext, presidentToken: string) {
+  ctx.gomafia.passwords.set('Шерлок', { password: 'pw', userId: '5001', clubId: '77' })
+  const session = await signIn(ctx, { ...TG_USER, id: 1002, username: 'other' })
+  await call(ctx, 'POST', '/v1/me/gomafia', { token: session.accessToken, body: { login: 'Шерлок', password: 'pw' } })
+  const granted = await call(ctx, 'PUT', '/v1/club/hosts/5001', { token: presidentToken })
+  assert.equal(granted.status, 200)
+  return session
 }
 
 function seededContext() {
@@ -43,7 +61,7 @@ function ratingGame(hostId: string, playerIDs: string[], clubID: number | null) 
 describe('Titan Connect: подключение клуба', () => {
   it('код меняется на ключ; ключ не уходит в приложение и хранится шифротекстом', async () => {
     const ctx = createTestContext()
-    const session = await signIn(ctx)
+    const session = await president(ctx)
 
     const bad = await call(ctx, 'POST', '/v1/me/titan', { token: session.accessToken, body: { code: 'WRONG-111' } })
     assert.equal(bad.status, 422)
@@ -53,6 +71,7 @@ describe('Titan Connect: подключение клуба', () => {
     assert.equal(ok.status, 200)
     assert.deepEqual(ok.json.titan.club, { name: 'TITAN Нальчик' })
     assert.deepEqual(ok.json.titan.scopes, ['clients:read', 'clients:photos'])
+    assert.equal(ok.json.titan.isShared, false)
     assert.ok(!JSON.stringify(ok.json).includes('tcn_live'))
 
     const stored = ctx.repo.users.get(session.account.id)!.titan!
@@ -63,7 +82,7 @@ describe('Titan Connect: подключение клуба', () => {
   it('адрес клуба вне домена Titan не принимается', async () => {
     const ctx = createTestContext()
     ctx.titan.apiBase = 'https://evil.example/api/connect/v1'
-    const session = await signIn(ctx)
+    const session = await president(ctx)
     const linked = await call(ctx, 'POST', '/v1/me/titan', { token: session.accessToken, body: { code: 'good-code' } })
     assert.equal(linked.status, 502)
     assert.equal(ctx.repo.users.get(session.account.id)!.titan, null)
@@ -72,7 +91,7 @@ describe('Titan Connect: подключение клуба', () => {
   it('Titan не отвечает — 502, а не «неверный код»', async () => {
     const ctx = createTestContext()
     ctx.titan.down = true
-    const session = await signIn(ctx)
+    const session = await president(ctx)
     const linked = await call(ctx, 'POST', '/v1/me/titan', { token: session.accessToken, body: { code: 'good-code' } })
     assert.equal(linked.status, 502)
     assert.equal(linked.json.error.code, 'titan_unavailable')
@@ -90,6 +109,45 @@ describe('Titan Connect: подключение клуба', () => {
     const players = await call(ctx, 'GET', '/v1/titan/players', { token: host.accessToken })
     assert.equal(players.status, 409)
     assert.equal(players.json.error.code, 'titan_not_linked')
+  })
+
+  it('код вводит только президент клуба: ведущему без клуба и резиденту — 403', async () => {
+    const ctx = seededContext()
+    const guest = await signIn(ctx)
+    const denied = await call(ctx, 'POST', '/v1/me/titan', { token: guest.accessToken, body: { code: 'good-code' } })
+    assert.equal(denied.status, 403)
+    assert.equal(denied.json.error.code, 'president_only')
+    assert.equal(ctx.repo.users.get(guest.account.id)!.titan, null)
+
+    ctx.gomafia.passwords.set('Шерлок', { password: 'pw', userId: '5001', clubId: '77' })
+    const resident = await signIn(ctx, { ...TG_USER, id: 1002, username: 'other' })
+    await call(ctx, 'POST', '/v1/me/gomafia', { token: resident.accessToken, body: { login: 'Шерлок', password: 'pw' } })
+    const alsoDenied = await call(ctx, 'POST', '/v1/me/titan', { token: resident.accessToken, body: { code: 'good-code' } })
+    assert.equal(alsoDenied.status, 403)
+  })
+
+  it('судье пула клуб Titan достаётся от президента: клиенты видны, отключить нельзя', async () => {
+    const ctx = seededContext()
+    const host = await titanHost(ctx)
+    const judge = await poolJudge(ctx, host.accessToken)
+
+    const me = await call(ctx, 'GET', '/v1/me', { token: judge.accessToken })
+    assert.deepEqual(me.json.titan.club, { name: 'TITAN Нальчик' })
+    assert.equal(me.json.titan.isShared, true)
+    assert.equal(ctx.repo.users.get(judge.account.id)!.titan, null)
+
+    const players = await call(ctx, 'GET', '/v1/titan/players', { token: judge.accessToken })
+    assert.equal(players.status, 200)
+    assert.equal(players.json.players.length, 2)
+
+    const unlink = await call(ctx, 'DELETE', '/v1/me/titan', { token: judge.accessToken })
+    assert.equal(unlink.status, 403)
+    assert.equal(unlink.json.error.code, 'president_only')
+    assert.ok(ctx.repo.users.get(host.account.id)!.titan)
+
+    // Президент отключил клуб — у судьи он тоже пропал.
+    await call(ctx, 'DELETE', '/v1/me/titan', { token: host.accessToken })
+    assert.equal((await call(ctx, 'GET', '/v1/me', { token: judge.accessToken })).json.titan, null)
   })
 })
 
@@ -146,7 +204,7 @@ describe('Titan Connect: сопоставление с GoMafia', () => {
   it('ручное сопоставление важнее номера из HUB и общее для ведущих клуба', async () => {
     const ctx = seededContext()
     const host = await titanHost(ctx)
-    const other = await titanHost(ctx, { ...TG_USER, id: 1002, username: 'other' })
+    const other = await poolJudge(ctx, host.accessToken)
 
     const matched = await call(ctx, 'PUT', `/v1/titan/players/${CLIENT_B}/gomafia`, { token: host.accessToken, body: { goMafiaID: 4242 } })
     assert.equal(matched.status, 200)
@@ -184,12 +242,20 @@ describe('Titan Connect: сопоставление с GoMafia', () => {
 describe('Titan Connect: игры', () => {
   const titanSeats = (n: number) => Array.from({ length: n }, (_, i) => titanPlayerID(TITAN_API_BASE, `client-${i}`))
 
-  it('ведущий Titan без GoMafia проводит рейтинговую игру с клиентами клуба', async () => {
+  it('президент и судья его пула проводят рейтинговую игру с клиентами клуба Titan', async () => {
     const ctx = seededContext()
     const host = await titanHost(ctx)
     const seats = [...titanSeats(9), goMafiaPlayerID(5001)]
-    const res = await call(ctx, 'POST', '/v1/games', { token: host.accessToken, body: ratingGame(host.account.id, seats, null) })
+    const res = await call(ctx, 'POST', '/v1/games', { token: host.accessToken, body: ratingGame(host.account.id, seats, 77) })
     assert.equal(res.status, 201)
+
+    const judge = await poolJudge(ctx, host.accessToken)
+    const game = ratingGame(judge.account.id, seats, 77)
+    const byJudge = await call(ctx, 'POST', '/v1/games', {
+      token: judge.accessToken,
+      body: { ...game, setup: { ...game.setup, gameID: 'A1B2C3D4-0000-4000-8000-000000000778' } },
+    })
+    assert.equal(byJudge.status, 201)
   })
 
   it('без подключённого Titan игроки Titan в рейтинге не принимаются', async () => {
@@ -204,7 +270,7 @@ describe('Titan Connect: игры', () => {
     const ctx = seededContext()
     const host = await titanHost(ctx)
     const seats = [...titanSeats(9), '11111111-2222-4333-8444-555555555555']
-    const res = await call(ctx, 'POST', '/v1/games', { token: host.accessToken, body: ratingGame(host.account.id, seats, null) })
+    const res = await call(ctx, 'POST', '/v1/games', { token: host.accessToken, body: ratingGame(host.account.id, seats, 77) })
     assert.equal(res.status, 422)
     assert.equal(res.json.error.code, 'guest_players')
   })

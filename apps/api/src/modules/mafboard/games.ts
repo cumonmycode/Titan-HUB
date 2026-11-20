@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import { SUPPORTED_GAME_SCHEMA_VERSION } from './config.js'
 import { TITAN_PLAYER_ID } from './titan.js'
-import type { MafboardUser, StoredGame } from './types.js'
+import type { HostAccess, MafboardUser, StoredGame } from './types.js'
 
 // Приём завершённой игры (GameRecord приложения). Запись хранится целиком; сервер
 // проверяет только то, от чего зависят права и история клуба.
@@ -53,12 +53,12 @@ const fail = (status: 403 | 422, code: string, message: string): GameUploadResul
 /**
  * Проверить загружаемую игру от имени ведущего:
  *  • ведущий в записи — это владелец токена;
- *  • рейтинг/миникап/турнир — у ведущего с клубом GoMafia или подключённым клубом Titan HUB, с игроками
- *    GoMafia и (при подключённом Titan) клиентами клуба без GoMafia; гостей там нет;
+ *  • рейтинг/миникап/турнир — у президента клуба GoMafia и судей из его пула (`access`), с игроками
+ *    GoMafia и (если президент подключил клуб Titan HUB) клиентами клуба без GoMafia; гостей там нет;
  *  • игра турнира GoMafia — у судьи с привязанным GoMafia, клуб не нужен; игроки — только из GoMafia;
  *  • игры ведущего клуба (включая фанки) идут в историю клуба, остальные — в личную.
  */
-export function validateGameUpload(body: unknown, user: MafboardUser, now: Date): GameUploadResult {
+export function validateGameUpload(body: unknown, user: MafboardUser, access: HostAccess, now: Date): GameUploadResult {
   const parsed = recordSchema.safeParse(body)
   if (!parsed.success) return fail(422, 'invalid_record', 'Запись игры повреждена или неполная')
   const record = parsed.data
@@ -77,7 +77,8 @@ export function validateGameUpload(body: unknown, user: MafboardUser, now: Date)
     return fail(422, 'invalid_dates', 'Некорректные даты игры')
   }
 
-  const userClubId = user.gomafia?.club?.id ?? null
+  // Резидент без доступа от президента игр клуба не ведёт: его фанки идут в личную историю.
+  const userClubId = access.club === 'none' ? null : (user.gomafia?.club?.id ?? null)
   const hostClubId = setup.host.clubID ?? null
   if (setup.tournament) {
     // Судья турнира GoMafia может быть из любого клуба или без клуба: права даёт сам турнир.
@@ -87,8 +88,12 @@ export function validateGameUpload(body: unknown, user: MafboardUser, now: Date)
       return fail(422, 'guest_players', 'В турнире GoMafia все игроки должны быть из GoMafia')
     }
   } else if (setup.format !== 'funky') {
-    const hasTitan = user.titan != null
-    if (userClubId == null && !hasTitan) return fail(403, 'club_required', 'Этот режим доступен ведущему клуба GoMafia или Titan HUB')
+    const hasTitan = access.titan != null
+    if (userClubId == null && !hasTitan) {
+      return user.gomafia?.club
+        ? fail(403, 'host_access_required', 'Рейтинговые игры клуба ведут судьи, которым президент клуба дал доступ в MafBoard')
+        : fail(403, 'club_required', 'Этот режим доступен судьям клуба GoMafia')
+    }
     if (hostClubId !== userClubId) return fail(403, 'club_mismatch', 'Игра проведена от имени другого клуба')
     const known = (id: string) => GOMAFIA_PLAYER_ID.test(id) || (hasTitan && TITAN_PLAYER_ID.test(id))
     if (!setup.seats.every((seat) => known(seat.playerID))) {

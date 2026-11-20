@@ -12,6 +12,8 @@ import { openSecrets, sealSecrets } from './studio.js'
 // турниров и поиск игроков только вошедшим: сервер входит логином и паролем самого ведущего
 // (сохранены шифротекстом при привязке; для привязавших раньше — вход в АИМ, обычно тот же)
 // и держит cookie сессии в памяти. Сайт снова просит войти — один повторный вход.
+// У судьи пула, привязанного по заявке, своего пароля нет: за него сервер ходит входом
+// президента клуба (`delegate`, clubHosts.ts).
 // ─────────────────────────────────────────────────────────────────────────────
 
 const KEY_BYTES = 32
@@ -47,6 +49,8 @@ export class GoMafiaSessions {
     secretsKey: Uint8Array,
     private readonly aim: AimAccounts,
     private readonly now: () => Date,
+    /** Чьим входом ходить, если своего у пользователя нет или он не принят. null — ничьим. */
+    private readonly delegate: (userId: string) => Promise<string | null> = async () => null,
   ) {
     this.key = new Uint8Array(hkdfSync('sha256', secretsKey, 'mafboard-gomafia', 'gomafia-credentials-v1', KEY_BYTES))
   }
@@ -65,9 +69,21 @@ export class GoMafiaSessions {
 
   /**
    * Запрос в GoMafia от имени пользователя. Нет cookie или сайт просит войти — вход сохранённым
-   * паролем и один повтор. Входа нет или он не принят — GoMafiaLoginRequired.
+   * паролем и один повтор. Входа нет или он не принят — тот же запрос входом президента клуба,
+   * если пользователь — судья пула; иначе GoMafiaLoginRequired.
    */
   async run<T>(userId: string, job: (auth: GomafiaAuth) => Promise<T>): Promise<T> {
+    try {
+      return await this.runAs(userId, job)
+    } catch (error) {
+      if (!(error instanceof GoMafiaLoginRequired)) throw error
+      const delegate = await this.delegate(userId)
+      if (!delegate || delegate === userId) throw error
+      return this.runAs(delegate, job)
+    }
+  }
+
+  private async runAs<T>(userId: string, job: (auth: GomafiaAuth) => Promise<T>): Promise<T> {
     const cached = this.cookies.get(userId)
     if (cached) {
       try {

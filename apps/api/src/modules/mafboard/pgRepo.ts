@@ -1,9 +1,9 @@
 import { sql, type Database } from '@titan/database'
 import type { SQL } from 'drizzle-orm'
 import { DELETED_HOST_ID } from './config.js'
-import { GomafiaTakenError, type MafboardRepo } from './repo.js'
+import { GomafiaTakenError, type GomafiaLinkInput, type MafboardRepo } from './repo.js'
 import type {
-  DeviceSession, GoMafiaClubJSON, GoMafiaPlayerJSON, LoginTicket, MafboardUser, QrTicket, QrTicketStatus, RefreshTokenRow, StoredActiveGame, StoredGame, StoredProtocolSubmission, StoredShare, StoredStudioSettings,
+  DeviceSession, GoMafiaClubJSON, GoMafiaPlayerJSON, LoginTicket, MafboardUser, QrTicket, QrTicketStatus, RefreshTokenRow, StoredActiveGame, StoredClubHost, StoredClubRequest, StoredGame, StoredProtocolSubmission, StoredShare, StoredStudioSettings,
   TicketGuard, TicketPatch, TicketStatus, TicketStep, TitanLinkState,
 } from './types.js'
 
@@ -57,12 +57,28 @@ function toUser(r: Row): MafboardUser {
       ? {
           player,
           club: json<GoMafiaClubJSON>(r['gomafia_club']),
+          // Привязки до пула судей сделаны входом в GoMafia.
+          source: r['gomafia_link_source'] === 'club' ? 'club' : 'password',
           linkedAt: date(r['gomafia_linked_at']),
           syncedAt: date(r['gomafia_synced_at']),
         }
       : null,
     titan: toTitanLink(r['titan_link']),
   }
+}
+
+function toClubHost(r: Row): StoredClubHost {
+  return {
+    clubId: Number(r['club_id']),
+    gomafiaId: Number(r['gomafia_id']),
+    nickname: String(r['nickname']),
+    grantedBy: str(r['granted_by']),
+    grantedAt: date(r['granted_at']),
+  }
+}
+
+function toClubRequest(r: Row): StoredClubRequest {
+  return { userId: String(r['user_id']), nickname: String(r['nickname']), createdAt: date(r['created_at']) }
 }
 
 function toTicket(r: Row): LoginTicket {
@@ -272,26 +288,28 @@ export class PgMafboardRepo implements MafboardRepo {
     return deleted.length > 0
   }
 
-  async setGomafiaLink(
-    userId: string,
-    link: { player: GoMafiaPlayerJSON; club: GoMafiaClubJSON | null } | null,
-    at: Date,
-  ): Promise<MafboardUser | null> {
+  async setGomafiaLink(userId: string, link: GomafiaLinkInput | null, at: Date): Promise<MafboardUser | null> {
     if (!UUID.test(userId)) return null
     if (!link) {
       const row = await this.one(sql`
         UPDATE mb_users SET gomafia_id = NULL, gomafia_player = NULL, gomafia_club = NULL,
-          gomafia_linked_at = NULL, gomafia_synced_at = NULL, updated_at = now()
+          gomafia_linked_at = NULL, gomafia_synced_at = NULL, gomafia_link_source = NULL, updated_at = now()
         WHERE id = ${userId}::uuid RETURNING *
       `)
       return row ? toUser(row) : null
     }
     try {
+      // SET читает старые значения строки: способ подтверждения сохраняется, пока аккаунт GoMafia тот же.
       const row = await this.one(sql`
         UPDATE mb_users SET
           gomafia_linked_at = CASE WHEN gomafia_id = ${link.player.id}
                                    THEN COALESCE(gomafia_linked_at, ${iso(at)}::timestamptz)
                                    ELSE ${iso(at)}::timestamptz END,
+          gomafia_link_source = COALESCE(
+            ${link.source ?? null}::text,
+            CASE WHEN gomafia_id = ${link.player.id} THEN gomafia_link_source END,
+            'password'
+          ),
           gomafia_id = ${link.player.id},
           gomafia_player = ${JSON.stringify(link.player)}::jsonb,
           gomafia_club = ${link.club ? JSON.stringify(link.club) : null}::jsonb,
@@ -306,7 +324,78 @@ export class PgMafboardRepo implements MafboardRepo {
     }
   }
 
-  // ─── Билеты входа ──────────────────────────────────────────────────────────
+  // ─── Пул судей клуба и заявки ──────────────────────────────────────────────
+
+  async clubHosts(clubId: number): Promise<StoredClubHost[]> {
+    const found = await this.query(sql`SELECT * FROM mb_club_hosts WHERE club_id = ${clubId} ORDER BY granted_at, gomafia_id`)
+    return found.map(toClubHost)
+  }
+
+  async isClubHost(clubId: number, gomafiaId: number): Promise<boolean> {
+    const row = await this.one(sql`SELECT 1 AS found FROM mb_club_hosts WHERE club_id = ${clubId} AND gomafia_id = ${gomafiaId}`)
+    return row != null
+  }
+
+  async addClubHost(host: StoredClubHost): Promise<void> {
+    await this.query(sql`
+      INSERT INTO mb_club_hosts (club_id, gomafia_id, nickname, granted_by, granted_at)
+      VALUES (${host.clubId}, ${host.gomafiaId}, ${host.nickname}, ${host.grantedBy}::uuid, ${iso(host.grantedAt)}::timestamptz)
+      ON CONFLICT (club_id, gomafia_id) DO UPDATE SET nickname = EXCLUDED.nickname
+    `)
+  }
+
+  async removeClubHost(clubId: number, gomafiaId: number): Promise<boolean> {
+    const deleted = await this.query(sql`DELETE FROM mb_club_hosts WHERE club_id = ${clubId} AND gomafia_id = ${gomafiaId} RETURNING gomafia_id`)
+    return deleted.length > 0
+  }
+
+  async usersByGomafiaIds(gomafiaIds: number[]): Promise<MafboardUser[]> {
+    const ids = [...new Set(gomafiaIds.filter((id) => Number.isInteger(id)))]
+    if (ids.length === 0) return []
+    const found = await this.query(sql`SELECT * FROM mb_users WHERE gomafia_id IN (${sql.join(ids.map((id) => sql`${id}`), sql`, `)})`)
+    return found.map(toUser)
+  }
+
+  async clubPresidents(limit: number): Promise<MafboardUser[]> {
+    const found = await this.query(sql`
+      SELECT * FROM mb_users
+      WHERE gomafia_id IS NOT NULL AND gomafia_club->>'presidentID' = gomafia_id::text
+      ORDER BY created_at LIMIT ${limit}
+    `)
+    return found.map(toUser)
+  }
+
+  async clubRequest(userId: string): Promise<StoredClubRequest | null> {
+    if (!UUID.test(userId)) return null
+    const row = await this.one(sql`SELECT * FROM mb_club_requests WHERE user_id = ${userId}::uuid`)
+    return row ? toClubRequest(row) : null
+  }
+
+  async setClubRequest(userId: string, request: { nickname: string; at: Date } | null): Promise<void> {
+    if (!UUID.test(userId)) return
+    if (!request) {
+      await this.query(sql`DELETE FROM mb_club_requests WHERE user_id = ${userId}::uuid`)
+      return
+    }
+    await this.query(sql`
+      INSERT INTO mb_club_requests (user_id, nickname, created_at)
+      VALUES (${userId}::uuid, ${request.nickname}, ${iso(request.at)}::timestamptz)
+      ON CONFLICT (user_id) DO UPDATE SET nickname = EXCLUDED.nickname, created_at = EXCLUDED.created_at
+    `)
+  }
+
+  async clubRequestsByNicknames(nicknames: string[]): Promise<StoredClubRequest[]> {
+    const names = [...new Set(nicknames.map((name) => name.trim().toLowerCase()).filter(Boolean))]
+    if (names.length === 0) return []
+    const found = await this.query(sql`
+      SELECT * FROM mb_club_requests
+      WHERE lower(nickname) IN (${sql.join(names.map((name) => sql`${name}`), sql`, `)})
+      ORDER BY created_at, user_id
+    `)
+    return found.map(toClubRequest)
+  }
+
+  // ─── Titan Connect ─────────────────────────────────────────────────────────
 
   async setTitanLink(userId: string, link: TitanLinkState | null): Promise<MafboardUser | null> {
     if (!UUID.test(userId)) return null

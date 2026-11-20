@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
 import type { ReplyMarkup } from '../../src/lib/tgBot.js'
 import { GomafiaAuthRequired, type GomafiaAuth, type GomafiaLoginResult, type GomafiaPlayer } from '../../src/lib/gomafia.js'
+import { sessionDelegate } from '../../src/modules/mafboard/clubHosts.js'
 import { GoMafiaSessions } from '../../src/modules/mafboard/gomafiaSessions.js'
 import type { BotMessenger } from '../../src/modules/mafboard/bot.js'
 import type { MafboardConfig } from '../../src/modules/mafboard/config.js'
@@ -10,7 +11,7 @@ import { TitanConnectError, TitanRosterCache, type TitanClient, type TitanConnec
 import { DELETED_HOST_ID } from '../../src/modules/mafboard/config.js'
 import { GomafiaTakenError, type MafboardRepo } from '../../src/modules/mafboard/repo.js'
 import { createMafboardRouter, type MafboardDeps } from '../../src/modules/mafboard/router.js'
-import type { DeviceSession, LoginTicket, MafboardUser, QrTicket, RefreshTokenRow, StoredActiveGame, StoredGame, StoredProtocolSubmission, StoredShare, StoredStudioSettings, TicketGuard, TitanLinkState } from '../../src/modules/mafboard/types.js'
+import type { DeviceSession, LoginTicket, MafboardUser, QrTicket, RefreshTokenRow, StoredActiveGame, StoredClubHost, StoredClubRequest, StoredGame, StoredProtocolSubmission, StoredShare, StoredStudioSettings, TicketGuard, TitanLinkState } from '../../src/modules/mafboard/types.js'
 import { VkError, type VkAppConfig, type VkGateway, type VkTokens } from '../../src/modules/mafboard/vk.js'
 import type { DaAppConfig, DaGateway } from '../../src/modules/mafboard/donationalerts.js'
 import { AimError, AimSession } from '../../src/lib/gomafiaAim.js'
@@ -184,6 +185,8 @@ export class MemoryRepo implements MafboardRepo {
   submissions = new Map<string, StoredProtocolSubmission>()
   shares = new Map<string, StoredShare>()
   titanMatchRows = new Map<string, number | null>()
+  hosts: StoredClubHost[] = []
+  requests = new Map<string, StoredClubRequest>()
   private seq = 0
 
   private uuid(): string {
@@ -239,6 +242,8 @@ export class MemoryRepo implements MafboardRepo {
     for (const [hash, row] of this.refresh) if (row.userId === userId) this.refresh.delete(hash)
     for (const [id, ticket] of this.tickets) if (ticket.userId === userId) this.tickets.delete(id)
     for (const [id, ticket] of this.qrTickets) if (ticket.userId === userId) this.qrTickets.delete(id)
+    this.requests.delete(userId)
+    this.hosts = this.hosts.map((host) => (host.grantedBy === userId ? { ...host, grantedBy: null } : host))
     return true
   }
 
@@ -250,12 +255,62 @@ export class MemoryRepo implements MafboardRepo {
       if (owner && owner.id !== userId) throw new GomafiaTakenError()
     }
     const sameAccount = user.gomafia && link && user.gomafia.player.id === link.player.id
+    const source = link?.source ?? (sameAccount ? user.gomafia!.source : 'password')
     const updated: MafboardUser = {
       ...user,
-      gomafia: link ? { ...link, linkedAt: sameAccount ? user.gomafia!.linkedAt : at, syncedAt: at } : null,
+      gomafia: link
+        ? { player: link.player, club: link.club, source, linkedAt: sameAccount ? user.gomafia!.linkedAt : at, syncedAt: at }
+        : null,
     }
     this.users.set(userId, updated)
     return updated
+  }
+
+  async clubHosts(clubId: number) {
+    return this.hosts.filter((host) => host.clubId === clubId).sort((a, b) => a.grantedAt.getTime() - b.grantedAt.getTime() || a.gomafiaId - b.gomafiaId)
+  }
+
+  async isClubHost(clubId: number, gomafiaId: number) {
+    return this.hosts.some((host) => host.clubId === clubId && host.gomafiaId === gomafiaId)
+  }
+
+  async addClubHost(host: StoredClubHost) {
+    const existing = this.hosts.find((row) => row.clubId === host.clubId && row.gomafiaId === host.gomafiaId)
+    this.hosts = existing
+      ? this.hosts.map((row) => (row === existing ? { ...row, nickname: host.nickname } : row))
+      : [...this.hosts, host]
+  }
+
+  async removeClubHost(clubId: number, gomafiaId: number) {
+    const before = this.hosts.length
+    this.hosts = this.hosts.filter((host) => !(host.clubId === clubId && host.gomafiaId === gomafiaId))
+    return this.hosts.length < before
+  }
+
+  async usersByGomafiaIds(ids: number[]) {
+    return [...this.users.values()].filter((user) => user.gomafia != null && ids.includes(user.gomafia.player.id))
+  }
+
+  async clubPresidents(limit: number) {
+    return [...this.users.values()]
+      .filter((user) => user.gomafia?.club?.presidentID != null && user.gomafia.club.presidentID === user.gomafia.player.id)
+      .slice(0, limit)
+  }
+
+  async clubRequest(userId: string) {
+    return this.requests.get(userId) ?? null
+  }
+
+  async setClubRequest(userId: string, request: { nickname: string; at: Date } | null) {
+    if (request) this.requests.set(userId, { userId, nickname: request.nickname, createdAt: request.at })
+    else this.requests.delete(userId)
+  }
+
+  async clubRequestsByNicknames(nicknames: string[]) {
+    const names = new Set(nicknames.map((name) => name.trim().toLowerCase()))
+    return [...this.requests.values()]
+      .filter((request) => names.has(request.nickname.trim().toLowerCase()))
+      .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
   }
 
   async createTicket(input: Parameters<MafboardRepo['createTicket']>[0]) {
@@ -585,7 +640,7 @@ export function gmPlayer(id: number, login: string, clubId: number | null = 77):
   }
 }
 
-/** GoMafia-заглушка: логин «host»/«secret» → игрок 4242 из клуба 77. */
+/** GoMafia-заглушка: логин «host»/«secret» → игрок 4242, президент клуба 77 (`presidents`). */
 export class FakeGoMafia implements GoMafiaGateway {
   players = new Map<string, GomafiaPlayer>([
     ['4242', gmPlayer(4242, 'host')],
@@ -593,6 +648,10 @@ export class FakeGoMafia implements GoMafiaGateway {
     ['5002', gmPlayer(5002, 'Шериф Ноттингема', 12)],
   ])
   roster: GomafiaPlayer[] = [gmPlayer(4242, 'host'), gmPlayer(5001, 'Шерлок')]
+  /** Президент клуба по его номеру; клуба нет в списке — президента у него нет. */
+  presidents = new Map<string, string>([['77', '4242']])
+  /** Пароли входа по нику; «host» входит всегда паролем «secret». */
+  passwords = new Map<string, { password: string; userId: string; clubId: string | null }>()
   clubCalls = 0
   /** Подменить ответ входа (форма успеха без id, сетевая ошибка). */
   loginOverride: GomafiaLoginResult | null = null
@@ -609,6 +668,10 @@ export class FakeGoMafia implements GoMafiaGateway {
   async login(login: string, password: string): Promise<GomafiaLoginResult> {
     this.logins += 1
     if (this.loginOverride) return this.loginOverride
+    const account = this.passwords.get(login)
+    if (account && account.password === password) {
+      return { ok: true, userId: account.userId, clubId: account.clubId, cookie: `gm=${this.sessionEpoch}` }
+    }
     return login === 'host' && password === 'secret'
       ? { ok: true, userId: '4242', clubId: '77', cookie: `gm=${this.sessionEpoch}` }
       : { ok: false, error: 'Никнейм и пароль введены неверно, проверьте правильность введенных данных' }
@@ -624,7 +687,7 @@ export class FakeGoMafia implements GoMafiaGateway {
     this.clubCalls += 1
     const residents = clubId === '77' && page === 1 ? this.roster : []
     return {
-      club: { id: clubId, title: 'TITAN', city: 'Москва', description: null, rank: null },
+      club: { id: clubId, title: 'TITAN', city: 'Москва', description: null, rank: null, presidentId: this.presidents.get(clubId) ?? null },
       residents,
       total: this.roster.length,
     }
@@ -675,7 +738,7 @@ export function createTestContext(overrides: Partial<MafboardDeps> = {}): TestCo
     vk: new FakeVk(),
     donationAlerts: new FakeDa(),
     aimAccounts,
-    gomafiaSessions: new GoMafiaSessions(repo, gomafia, config.studioSecretsKey, aimAccounts, () => clock.now),
+    gomafiaSessions: new GoMafiaSessions(repo, gomafia, config.studioSecretsKey, aimAccounts, () => clock.now, (userId) => sessionDelegate(repo, userId)),
     tournaments,
     limiter: {
       async hit(key, limit, windowSec) {

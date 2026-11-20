@@ -279,6 +279,29 @@ export const MAFBOARD_MIGRATIONS: readonly { id: string; sql: string }[] = [
       );
     `,
   },
+  {
+    // Пул судей клуба: вести рейтинговые игры клуба GoMafia может его президент и резиденты, которых
+    // он добавил. Судья без пароля GoMafia оставляет заявку с ником — президент её подтверждает, и
+    // аккаунт привязывается к игроку без входа в GoMafia (gomafia_link_source = 'club').
+    id: '011_mafboard_club_hosts',
+    sql: `
+      ALTER TABLE mb_users ADD COLUMN IF NOT EXISTS gomafia_link_source text;
+      CREATE TABLE IF NOT EXISTS mb_club_hosts (
+        club_id    integer NOT NULL,
+        gomafia_id integer NOT NULL,
+        nickname   text NOT NULL,
+        granted_by uuid REFERENCES mb_users(id) ON DELETE SET NULL,
+        granted_at timestamptz NOT NULL,
+        PRIMARY KEY (club_id, gomafia_id)
+      );
+      CREATE TABLE IF NOT EXISTS mb_club_requests (
+        user_id    uuid PRIMARY KEY REFERENCES mb_users(id) ON DELETE CASCADE,
+        nickname   text NOT NULL,
+        created_at timestamptz NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS mb_club_requests_nickname ON mb_club_requests (lower(nickname));
+    `,
+  },
 ]
 
 function rows<T = Record<string, unknown>>(res: unknown): T[] {

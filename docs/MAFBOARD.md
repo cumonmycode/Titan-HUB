@@ -61,8 +61,8 @@ apps/api/test/mafboard/ — тесты (node:test через tsx), хранил�
 | `POST /v1/auth/logout` `{refreshToken}` | — | Завершает сессию устройства: её refresh и access перестают действовать |
 | `GET /v1/me/sessions` | Bearer | `{sessions: [{id, deviceName, platform, createdAt, lastUsedAt, isCurrent}]}` — устройства, где выполнен вход; текущее (по сессии access-токена) первым, остальные по `lastUsedAt` |
 | `DELETE /v1/me/sessions/:id` | Bearer | Завершить сессию другого устройства → `{ok: true}`. 409 `current_session` — это текущее устройство (для него `logout`), 404 — нет такой активной сессии у пользователя |
-| `GET /v1/me` | Bearer | `UserAccount`. Профиль GoMafia старше суток обновляется в фоне |
-| `POST /v1/me/gomafia` `{login, password}` | Bearer | Привязать GoMafia: вход в GoMafia проверяет владение, пароль GoMafia не хранится. Если тем же паролем открывается АИМ (admin.gomafia.pro), сохраняется вход в АИМ — для турниров GoMafia. 422 `bad_credentials`, 409 `gomafia_taken` |
+| `GET /v1/me` | Bearer | `UserAccount`. Профиль GoMafia старше суток (или с неизвестным президентом клуба) обновляется в фоне. `goMafia`: `source: password \| club`, `access: president \| host \| none`, `club.presidentID`; `titan.isShared`; `clubRequest: {nickname, createdAt} \| null` — см. «Судьи клуба» |
+| `POST /v1/me/gomafia` `{login, password}` | Bearer | Привязать GoMafia: вход в GoMafia проверяет владение, пароль GoMafia не хранится. Если тем же паролем открывается АИМ (admin.gomafia.pro), сохраняется вход в АИМ — для турниров GoMafia. 422 `bad_credentials`, 409 `gomafia_taken`. Привязку того же игрока по заявке (без пароля) у другого аккаунта вход паролем снимает |
 | `DELETE /v1/me/gomafia` | Bearer | Отвязать — останутся только фанки; сохранённый вход в АИМ стирается |
 | `GET /v1/me/gomafia/aim` | Bearer | `{connected}` — подключён ли АИМ |
 | `POST /v1/me/gomafia/aim` `{login, password}` | Bearer | Подключить АИМ отдельно (пароль АИМ другой или сменился). 422 `bad_credentials`, 403 `gomafia_required`; 5 попыток за 10 мин |
@@ -81,12 +81,18 @@ apps/api/test/mafboard/ — тесты (node:test через tsx), хранил�
 | `GET /v1/gomafia/players?q=` | Bearer | Поиск (от 2 символов): сначала свой клуб (`isInHostClub`), затем общий, до 30 |
 | `GET /v1/gomafia/players/:id` | Bearer | Игрок GoMafia |
 | `GET /v1/gomafia/clubs/:id/players?page=` | Bearer | Состав клуба |
-| `POST /v1/me/titan` `{code}` | Bearer (10 за 10 мин) | Подключить клуб Titan HUB одноразовым кодом Titan Connect → `UserAccount` с `titan: {club: {name}, scopes, linkedAt}`. 422 `invalid_code`, 502 `titan_unavailable` |
-| `DELETE /v1/me/titan` | Bearer | Отключить клуб: ключ стирается, в HUB отзывается в фоне (`DELETE /connection`) |
+| `POST /v1/me/titan` `{code}` | Bearer, президент клуба (10 за 10 мин) | Подключить клуб Titan HUB одноразовым кодом Titan Connect → `UserAccount` с `titan: {club: {name}, scopes, linkedAt, isShared}`. 403 `president_only`, 422 `invalid_code`, 502 `titan_unavailable` |
+| `DELETE /v1/me/titan` | Bearer | Отключить клуб: ключ стирается, в HUB отзывается в фоне (`DELETE /connection`). Судье пула (клуб достался от президента) — 403 `president_only` |
+| `GET /v1/club/hosts` | Bearer, президент клуба (60 в минуту) | `{club, hosts: [{player: GoMafiaPlayer, isResident, grantedAt, account: {name, username, source} \| null}], requests: [{id, player, account: {name, username}, createdAt}]}` — пул судей клуба и заявки судей без пароля GoMafia. 403 `president_only` |
+| `PUT /v1/club/hosts/:gomafiaId` `{requestID?}` | Bearer, президент клуба (120 изменений в час) | Дать резиденту клуба вести игры; с `requestID` — подтвердить заявку: аккаунт заявителя привязывается к этому игроку (`source: club`). Ответ — как у `GET`. 404 `not_resident`, 404 `request_not_found`, 409 `gomafia_taken` |
+| `DELETE /v1/club/hosts/:gomafiaId` | Bearer, президент клуба | Забрать доступ; привязка по заявке снимается вместе с ним. Ответ — как у `GET` |
+| `DELETE /v1/club/requests/:id` | Bearer, президент клуба | Отклонить заявку. Ответ — как у `GET` |
+| `PUT /v1/me/club-request` `{nickname}` | Bearer (5 в час) | Заявка судьи, который не помнит пароль GoMafia: ник, под которым он играет → `UserAccount` с `clubRequest`. Президент клуба с таким резидентом узнаёт о ней в боте. 409 `gomafia_linked` |
+| `DELETE /v1/me/club-request` | Bearer | Отозвать заявку → `UserAccount` |
 | `GET /v1/titan/players` | Bearer (60 в минуту) | `{club: {name}, players: [TitanPlayer]}` — все клиенты клуба без удалённых, резиденты первыми. 409 `titan_not_linked`, 409 `titan_revoked` — клуб отключил MafBoard в HUB |
 | `PUT /v1/titan/players/:id/gomafia` `{goMafiaID: число \| null}` | Bearer (300 в час) | Ручное сопоставление клиента с GoMafia → `TitanPlayer`. `null` — у клиента нет GoMafia (номер в HUB неверный). 404 — нет такого клиента или игрока GoMafia |
 | `DELETE /v1/titan/players/:id/gomafia` | Bearer | Снять сопоставление: снова действует номер GoMafia из HUB |
-| `POST /v1/games` (GameRecord) | Bearer | 201 — сохранено, 200 — уже было (повтор безопасен), 409 — номер занят чужой игрой |
+| `POST /v1/games` (GameRecord) | Bearer | 201 — сохранено, 200 — уже было (повтор безопасен), 409 — номер занят чужой игрой, 403 `host_access_required` — резиденту клуба президент не дал доступа |
 | `GET /v1/me/games?since=` | Bearer | Все игры ведущего, включая фанки |
 | `GET /v1/clubs/:id/games?since=` | Bearer, участник клуба | История клуба |
 | `POST /tg-webhook` | secret_token | Вебхук бота |
@@ -108,12 +114,14 @@ WebSocket идёт мимо Hono: обработчик `upgrade` на HTTP-се�
 
 ### Titan Connect (`titan.ts`, `titanRoutes.ts`)
 
-Клуб Titan HUB даёт ведущему своих клиентов как игроков через собственный API Titan Connect
-([TITAN_CONNECT.md](TITAN_CONNECT.md)). Владелец клуба выдаёт код в HUB («Интеграции» → «Titan Connect»), ведущий
-вводит его в приложении, сервер меняет код на ключ (`POST <MAFBOARD_TITAN_CONNECT_URL>/exchange`, по умолчанию
+Клуб Titan HUB даёт судьям клуба своих клиентов как игроков через собственный API Titan Connect
+([TITAN_CONNECT.md](TITAN_CONNECT.md)). Владелец клуба выдаёт код в HUB («Интеграции» → «Titan Connect»), президент
+клуба GoMafia вводит его в приложении, сервер меняет код на ключ (`POST <MAFBOARD_TITAN_CONNECT_URL>/exchange`, по умолчанию
 `https://titanpos.ru/api/connect/v1`). `apiBase` из ответа принимается только на домене этого адреса или его
 поддомене. Ключ хранится в `mb_users.titan_link` шифротекстом тем же ключом, что секреты студии, и в приложение
-не уходит. Подключение у каждого ведущего своё: на каждого — свой код.
+не уходит. Код вводит только президент клуба GoMafia (остальным — 403 `president_only`): подключение одно на
+клуб, судьям его пула клиенты клуба достаются без кода (`titan.isShared: true`), отключить клуб они не могут.
+Президент отключил клуб или перестал быть президентом — клуб пропадает и у судей.
 
 Клиенты читаются целиком (`GET /clients`, страницы по 200, до 2000), кэш на 5 минут по `apiBase`. Если Titan не
 ответил, отдаётся последний состав; отозванный ключ — всегда 409 `titan_revoked`.
@@ -124,14 +132,39 @@ WebSocket идёт мимо Hono: обработчик `upgrade` на HTTP-се�
 клиента клуба на всех устройствах. Ручное сопоставление (`mb_titan_matches`, ключ `apiBase + id клиента`) общее
 для всех ведущих клуба и важнее номера из HUB: ник в GoMafia часто другой, а в POS бывает чужой номер.
 
+### Судьи клуба (`clubHosts.ts`)
+
+Рейтинговые игры клуба GoMafia ведут его президент и судьи, которых он добавил в пул (`mb_club_hosts`).
+Президента сервер берёт из GoMafia: `club.president_id` на странице клуба → `goMafia.club.presidentID`;
+президент — тот, чей привязанный паролем игрок совпадает с ним. Клуб перечитывается при каждом обновлении
+профиля, поэтому смена президента в GoMafia доходит за сутки. В пул попадают только резиденты клуба
+(состав — со страницы клуба входом президента). Права считаются на каждый запрос (`hostAccess`):
+
+| `goMafia.access` | Кто | Что может |
+|---|---|---|
+| `president` | игрок — президент своего клуба, привязка паролем | все режимы, пул судей, подключение Titan HUB |
+| `host` | резидент из пула президента | все режимы; клиенты клуба Titan — если президент его подключил |
+| `none` | остальные | только фанка |
+
+**Судья без пароля GoMafia.** Он оставляет заявку с ником (`PUT /v1/me/club-request`); президент клуба, в
+составе которого есть такой ник, получает сообщение в боте и видит заявку с именем и @username из Telegram.
+Подтверждение (`PUT /v1/club/hosts/:id` с `requestID`) привязывает аккаунт MafBoard к игроку без входа в
+GoMafia (`mb_users.gomafia_link_source = 'club'`) и добавляет его в пул: президент ручается, что это он.
+Такая привязка держится на пуле — забрали доступ, и она снята; вход настоящего владельца паролем её тоже
+снимает. Своего пароля у судьи нет, а GoMafia отдаёт данные только вошедшим, поэтому за судью пула сервер
+ходит в GoMafia входом президента (`sessionDelegate` в `GoMafiaSessions`). Турниры GoMafia (АИМ) такому судье
+недоступны: там нужен собственный вход.
+
 ### Права ведущего (проверяет `POST /v1/games`)
 
 | Аккаунт | Режимы | Куда идёт игра |
 |---|---|---|
-| Без клуба | только фанка (игроки — кто угодно) | личная история |
-| GoMafia без клуба | только фанка | личная история |
-| GoMafia + клуб | все режимы; в рейтинг, миникап и турнир — только игроки GoMafia (и клиенты Titan, если клуб Titan подключён) | история клуба |
-| Подключён клуб Titan HUB | все режимы; в рейтинг, миникап и турнир — игроки GoMafia и клиенты клуба Titan (`playerID` с префиксом `mafbtc`), гостей нет | история клуба GoMafia, если он есть, иначе личная |
+| Без GoMafia или без клуба | только фанка (игроки — кто угодно) | личная история |
+| Резидент клуба без доступа от президента (`access: none`) | только фанка; рейтинг — 403 `host_access_required` | личная история |
+| Президент клуба или судья его пула | все режимы; в рейтинг, миникап и турнир — только игроки GoMafia и, если президент подключил клуб Titan HUB, его клиенты (`playerID` с префиксом `mafbtc`), гостей нет | история клуба |
+
+Старые сборки приложения поля `access` не читают и считают права по наличию клуба: резиденту без доступа
+они покажут все режимы, но рейтинговую игру сервер не примет.
 
 Ведущий в записи (`setup.host.userID`) должен совпадать с владельцем токена,
 а клуб игры (`setup.host.clubID`) — с его текущим клубом GoMafia.
@@ -158,8 +191,11 @@ WebSocket идёт мимо Hono: обработчик `upgrade` на HTTP-се�
 | `mb_sessions` | Сессии устройств: имя и платформа из `start`, время входа, последней активности (не чаще раза в 5 минут и при каждом refresh), срок, отзыв |
 | `mb_refresh_tokens` | SHA-256 refresh-токенов, отзыв и ротация; `session_id` — сессия, к которой выдан токен |
 | `mb_studio_settings` | Настройки MafBoard Studio: ревизия, `document jsonb`, `secrets` — шифротекст (миграция `006`) |
-| `mb_users.titan_link` | Клуб Titan HUB ведущего: `apiBase`, название, права, `tokenSealed` — ключ Titan Connect шифротекстом (миграция `007`) |
+| `mb_users.titan_link` | Клуб Titan HUB, подключённый президентом клуба (действует у него и у судей его пула): `apiBase`, название, права, `tokenSealed` — ключ Titan Connect шифротекстом (миграция `007`) |
 | `mb_titan_matches` | Ручные сопоставления клиентов Titan с GoMafia: `api_base`, `client_id`, `gomafia_id` (`NULL` — «нет GoMafia»), кто и когда (миграция `007`) |
+| `mb_club_hosts` | Пул судей клуба: `club_id` и `gomafia_id` (ключ), ник на момент выдачи, кто и когда дал доступ (миграция `011`) |
+| `mb_club_requests` | Заявки судей без пароля GoMafia: одна на пользователя, ник и время (миграция `011`) |
+| `mb_users.gomafia_link_source` | Как подтверждена привязка GoMafia: `password` (или `NULL` у старых) — входом, `club` — заявкой, которую подтвердил президент |
 | `mb_games` | Игры: ведущий, клуб (`NULL` — личная), формат, даты, `record jsonb` — GameRecord приложения целиком |
 
 Истёкшие билеты, сессии и токены удаляются раз в сутки, через 30 дней после истечения.
@@ -168,6 +204,7 @@ WebSocket идёт мимо Hono: обработчик `upgrade` на HTTP-се�
 ## Безопасность
 
 - Токен бота — только в `MAFBOARD_BOT_TOKEN` на сервере, в приложение он не попадает.
+- Привязка GoMafia без пароля (`source: club`) появляется только после подтверждения президентом клуба заявки с тем же ником, что у резидента его клуба. Она не делает пользователя президентом, не даёт входа в АИМ, снимается вместе с доступом и уступает входу настоящего владельца паролем. Пул и заявки видит и меняет только президент, заявки — только своего клуба (по нику в составе).
 - Вебхук проверяет `X-Telegram-Bot-Api-Secret-Token`. Секрет — HMAC от `MAFBOARD_JWT_SECRET` и токена бота, а не от `JWT_SECRET` Titan HUB. При смене любого из них вебхук перерегистрируется (при старте и раз в час).
 - `MAFBOARD_JWT_SECRET`, совпадающий с `JWT_SECRET`, отклоняется при загрузке настроек.
 - Ссылка из Telegram без секрета устройства бесполезна. Секрет уходит на сервер напрямую по TLS, хранится только его SHA-256, `complete` атомарно переводит билет в `claimed`.

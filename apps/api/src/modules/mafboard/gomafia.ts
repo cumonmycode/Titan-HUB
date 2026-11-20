@@ -91,7 +91,10 @@ export async function searchForHost(
   return result
 }
 
-/** Обновить привязанный профиль: тот же клуб — оставляем, вышел — null, сменил — подтягиваем новый. */
+/**
+ * Обновить привязанный профиль: вышел из клуба — null, сменил — подтягиваем новый. Клуб
+ * перечитываем каждый раз: его президент мог смениться, а от него зависят права клуба.
+ */
 export async function refreshLink(
   gateway: GoMafiaGateway,
   current: { player: GoMafiaPlayerJSON; club: GoMafiaClubJSON | null },
@@ -101,9 +104,11 @@ export async function refreshLink(
   const player = detail ? toPlayerJSON(detail, false) : null
   if (!detail || !player) return null
   if (!detail.clubId) return { player, club: null }
-  if (current.club && String(current.club.id) === detail.clubId) return { player, club: current.club }
   const info = await gateway.club(detail.clubId, 1, auth).catch(unlessAuth(null))
-  return { player, club: toClubJSON(info?.club ?? { id: detail.clubId, title: detail.clubTitle, city: null }) }
+  if (info?.club) return { player, club: toClubJSON(info.club) }
+  // Страница клуба не открылась: тот же клуб оставляем как был, новый — без президента.
+  const same = current.club && String(current.club.id) === detail.clubId ? current.club : null
+  return { player, club: same ?? toClubJSON({ id: detail.clubId, title: detail.clubTitle, city: null }) }
 }
 
 /** Вход по нику (а не по почте или телефону) — тогда ник профиля можно сверить. */

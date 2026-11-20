@@ -22,13 +22,60 @@ export interface GoMafiaClubJSON {
   id: number
   title: string
   city: string | null
+  /**
+   * Игрок GoMafia — президент клуба; null — у клуба его нет. Поля нет (привязка сохранена до
+   * пула судей или страница клуба не открылась) — президент неизвестен, клуб нужно перечитать.
+   */
+  presidentID?: number | null
 }
+
+/**
+ * Как подтверждён аккаунт GoMafia: `password` — входом в GoMafia, `club` — президент клуба
+ * подтвердил заявку судьи по нику (судья не помнит пароль). Привязка `club` держится на пуле судей.
+ */
+export type GoMafiaLinkSource = 'password' | 'club'
 
 export interface GoMafiaLinkState {
   player: GoMafiaPlayerJSON
   club: GoMafiaClubJSON | null
+  source: GoMafiaLinkSource
   linkedAt: Date
   syncedAt: Date
+}
+
+/**
+ * Права ведущего в клубе GoMafia: `president` — президент клуба, `host` — судья из пула,
+ * куда его добавил президент, `none` — рейтинговые игры клуба вести нельзя (только фанки).
+ */
+export type ClubAccess = 'president' | 'host' | 'none'
+
+/** Права пользователя на время запроса: считаются из привязки GoMafia и пула судей (clubHosts.ts). */
+export interface HostAccess {
+  club: ClubAccess
+  /** Действующий клуб Titan HUB: свой у президента, клуб президента у судьи пула. */
+  titan: TitanLinkState | null
+  /** Клуб Titan подключил президент, а не сам пользователь: отключить его судья не может. */
+  titanShared: boolean
+  /** Заявка судьи без пароля GoMafia, которая ждёт президента клуба. */
+  request: StoredClubRequest | null
+}
+
+/** Судья в пуле клуба GoMafia: резидент, которому президент дал вести игры клуба в MafBoard. */
+export interface StoredClubHost {
+  clubId: number
+  gomafiaId: number
+  /** Ник на момент выдачи: список судей показывается, даже если GoMafia не отвечает. */
+  nickname: string
+  /** null — президент, выдавший доступ, удалил аккаунт. */
+  grantedBy: string | null
+  grantedAt: Date
+}
+
+/** Заявка судьи, который не помнит пароль GoMafia: ник, под которым он играет. Одна на пользователя. */
+export interface StoredClubRequest {
+  userId: string
+  nickname: string
+  createdAt: Date
 }
 
 /** Пользователь приложения (ведущий). */
@@ -42,7 +89,10 @@ export interface MafboardUser {
   phone: string | null
   termsVersion: string | null
   gomafia: GoMafiaLinkState | null
-  /** Клуб в Titan HUB, подключённый через Titan Connect: его клиенты — игроки для подбора. */
+  /**
+   * Клуб в Titan HUB, который этот пользователь подключил сам (Titan Connect). Действует он
+   * только у президента клуба GoMafia; судьям пула достаётся клуб президента — см. `HostAccess`.
+   */
   titan: TitanLinkState | null
 }
 

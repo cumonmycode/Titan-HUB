@@ -3,6 +3,7 @@ import { zValidator } from '@hono/zod-validator'
 import { z } from 'zod'
 import type { MafboardEnv } from './router.js'
 import { GoMafiaLoginRequired } from './gomafiaSessions.js'
+import { hostAccess } from './clubHosts.js'
 import { errorBody, toAccountJSON } from './serialize.js'
 import { openSecrets, sealSecrets } from './studio.js'
 import { TitanConnectError, toTitanPlayerJSON, trustedApiBase, type TitanClient } from './titan.js'
@@ -10,7 +11,7 @@ import type { MafboardUser, TitanLinkState } from './types.js'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Ручки Titan Connect приложения MafBoard (контракт — docs/MAFBOARD.md, раздел «Titan Connect»):
-//   POST/DELETE /v1/me/titan                — подключить клуб кодом из HUB / отключить;
+//   POST/DELETE /v1/me/titan                — подключить клуб кодом из HUB / отключить (президент клуба);
 //   GET         /v1/titan/players           — клиенты клуба как игроки для подбора;
 //   PUT/DELETE  /v1/titan/players/:id/gomafia — ручное сопоставление с GoMafia.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -23,7 +24,7 @@ const codeSchema = z.object({ code: z.string().trim().min(6).max(20) })
 const matchSchema = z.object({ goMafiaID: z.number().int().positive().max(2 ** 48 - 1).nullable() })
 const CLIENT_ID = /^[0-9a-f-]{8,64}$/i
 
-type Status = 400 | 404 | 409 | 422 | 429 | 502
+type Status = 400 | 403 | 404 | 409 | 422 | 429 | 502
 const fail = (c: Context, status: Status, code: string, message: string) => c.json(errorBody(code, message), status)
 
 function body<T extends z.ZodTypeAny>(schema: T) {
@@ -49,11 +50,14 @@ function tokenOf(c: Context<MafboardEnv>, link: TitanLinkState): string | null {
   return typeof secret?.['token'] === 'string' ? secret['token'] : null
 }
 
-/** Клиенты клуба ведущего и его ручные сопоставления. Ошибку уже превратили в ответ — вернётся Response. */
-async function clubRoster(c: Context<MafboardEnv>, user: MafboardUser) {
+/**
+ * Клиенты клуба ведущего и его ручные сопоставления. Клуб — действующий (`access.titan`): свой у
+ * президента, клуб президента у судьи пула. Ошибку уже превратили в ответ — вернётся Response.
+ */
+async function clubRoster(c: Context<MafboardEnv>) {
   const deps = c.get('deps')
-  const link = user.titan
-  if (!link) return fail(c, 409, 'titan_not_linked', 'Подключите клуб Titan HUB')
+  const link = c.get('access').titan
+  if (!link) return fail(c, 409, 'titan_not_linked', 'Клуб Titan HUB подключает президент клуба')
   const token = tokenOf(c, link)
   if (!token) return fail(c, 409, 'titan_revoked', 'Ключ клуба не читается. Подключите клуб заново')
   try {
@@ -70,10 +74,16 @@ function byClubOrder(a: TitanClient, b: TitanClient): number {
 }
 
 export function registerTitanRoutes(router: Hono<MafboardEnv>, requireUser: MiddlewareHandler<MafboardEnv>): void {
-  /** Подключить клуб: одноразовый код из Titan HUB меняется на постоянный ключ, ключ — шифротекстом в БД. */
+  /**
+   * Подключить клуб: одноразовый код из Titan HUB меняется на постоянный ключ, ключ — шифротекстом в БД.
+   * Подключает президент клуба GoMafia — судьям его пула клиенты клуба достаются без кода.
+   */
   router.post('/v1/me/titan', requireUser, body(codeSchema), async (c) => {
     const deps = c.get('deps')
     const user = c.get('user')
+    if (c.get('access').club !== 'president') {
+      return fail(c, 403, 'president_only', 'Клуб Titan HUB подключает президент клуба GoMafia. Судьям клуба его клиенты доступны без кода')
+    }
     const allowed = await deps.limiter.hit(`mb:titan:link:${user.id}`, LINK_LIMIT.count, LINK_LIMIT.windowSec, { failClosed: true })
     if (!allowed) return fail(c, 429, 'rate_limited', 'Слишком много попыток, попробуйте позже')
 
@@ -98,16 +108,24 @@ export function registerTitanRoutes(router: Hono<MafboardEnv>, requireUser: Midd
     })
     if (previous) releaseLink(c, previous)
     deps.titanRoster.forget(apiBase)
-    return c.json(toAccountJSON(updated ?? user))
+    const linked = updated ?? user
+    return c.json(toAccountJSON(linked, await hostAccess(deps.repo, linked)))
   })
 
-  /** Отключить клуб: ключ удаляется у нас и (по возможности) отзывается в Titan HUB. */
+  /**
+   * Отключить клуб: ключ удаляется у нас и (по возможности) отзывается в Titan HUB. Отключает тот,
+   * кто подключал; судье пула клуб достался от президента — ему отключать нечего.
+   */
   router.delete('/v1/me/titan', requireUser, async (c) => {
     const deps = c.get('deps')
     const user = c.get('user')
+    if (!user.titan && c.get('access').titanShared) {
+      return fail(c, 403, 'president_only', 'Клуб Titan HUB подключил президент клуба — отключить его может только он')
+    }
     const updated = await deps.repo.setTitanLink(user.id, null)
     if (user.titan) releaseLink(c, user.titan)
-    return c.json(toAccountJSON(updated ?? user))
+    const unlinked = updated ?? user
+    return c.json(toAccountJSON(unlinked, await hostAccess(deps.repo, unlinked)))
   })
 
   /** Клиенты клуба целиком (без удалённых): приложение ищет по ним само. */
@@ -117,7 +135,7 @@ export function registerTitanRoutes(router: Hono<MafboardEnv>, requireUser: Midd
     if (!(await deps.limiter.hit(`mb:titan:roster:${user.id}`, ROSTER_LIMIT_PER_MIN, 60))) {
       return fail(c, 429, 'rate_limited', 'Слишком много запросов')
     }
-    const roster = await clubRoster(c, user)
+    const roster = await clubRoster(c)
     if (roster instanceof Response) return roster
     const players = [...roster.clients].sort(byClubOrder).map((client) => toTitanPlayerJSON(roster.link.apiBase, client, roster.matches))
     return c.json({ club: { name: roster.link.clubName }, players })
@@ -155,7 +173,7 @@ async function saveMatch(c: Context<MafboardEnv>, match: { goMafiaId: number | n
   if (!(await deps.limiter.hit(`mb:titan:match:${user.id}`, MATCH_LIMIT_PER_HOUR, 3600))) {
     return fail(c, 429, 'rate_limited', 'Слишком много изменений, попробуйте позже')
   }
-  const roster = await clubRoster(c, user)
+  const roster = await clubRoster(c)
   if (roster instanceof Response) return roster
   const client = roster.clients.find((item) => item.id === clientId)
   if (!client) return fail(c, 404, 'not_found', 'Клиент не найден в клубе')

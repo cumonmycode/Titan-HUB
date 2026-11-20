@@ -7,7 +7,7 @@ import { RosterCache, searchForHost } from '../../src/modules/mafboard/gomafia.j
 import { maskPhone, normalizePhone, toPlayerJSON, toSessionsJSON, toTicketStatusJSON } from '../../src/modules/mafboard/serialize.js'
 import { ipKey, sanitizeDeviceName } from '../../src/modules/mafboard/router.js'
 import { decoyCodes, issueAccessToken, verifyAccessToken, webhookSecret, webhookSecretValid } from '../../src/modules/mafboard/tokens.js'
-import type { DeviceSession, MafboardUser } from '../../src/modules/mafboard/types.js'
+import type { DeviceSession, HostAccess, MafboardUser, TitanLinkState } from '../../src/modules/mafboard/types.js'
 import { config, FakeGoMafia, gmPlayer, NOW } from './helpers.js'
 
 describe('телефон', () => {
@@ -165,13 +165,20 @@ describe('приём игры', () => {
     phone: '+79161234567', termsVersion: '1',
     gomafia: {
       player: { id: 4242, nickname: 'Ведущий', fullName: null, avatarURL: null, elo: null, clubID: 77, clubTitle: 'TITAN', city: null, tournamentsPlayed: null, isInHostClub: false, isVerified: false },
-      club: { id: 77, title: 'TITAN', city: null },
+      club: { id: 77, title: 'TITAN', city: null, presidentID: 4242 },
+      source: 'password',
       linkedAt: NOW,
       syncedAt: NOW,
     },
     titan: null,
   }
   const guest = { ...host, gomafia: null }
+  const president: HostAccess = { club: 'president', titan: null, titanShared: false, request: null }
+  const judge: HostAccess = { ...president, club: 'host' }
+  const noAccess: HostAccess = { ...president, club: 'none' }
+  const titanLink: TitanLinkState = {
+    apiBase: 'https://club.titanpos.test/api/connect/v1', clubName: 'TITAN', connectionId: 'conn-1', scopes: ['clients:read'], tokenSealed: 'sealed', linkedAt: NOW,
+  }
   const goMafiaSeat = (n: number) => `6D616662-676D-8000-8000-${String(1000 + n).padStart(12, '0')}`
 
   function record(format: string, overrides: { clubID?: number | null; userID?: string; seats?: string[] } = {}) {
@@ -193,44 +200,67 @@ describe('приём игры', () => {
   }
 
   it('рейтинговая игра ведущего клуба попадает в историю клуба', () => {
-    const result = validateGameUpload(record('rating'), host, NOW)
+    const result = validateGameUpload(record('rating'), host, president, NOW)
     assert.ok(result.ok)
     assert.equal(result.game.clubId, 77)
     assert.equal(result.game.id, 'a1b2c3d4-0000-4000-8000-000000000123')
   })
 
   it('фанка без GoMafia — личная история, с гостями можно', () => {
-    const result = validateGameUpload(record('funky', { clubID: null, userID: guest.id, seats: Array.from({ length: 10 }, (_, i) => `00000000-0000-4000-8000-${String(i).padStart(12, '0')}`) }), guest, NOW)
+    const result = validateGameUpload(record('funky', { clubID: null, userID: guest.id, seats: Array.from({ length: 10 }, (_, i) => `00000000-0000-4000-8000-${String(i).padStart(12, '0')}`) }), guest, noAccess, NOW)
     assert.ok(result.ok)
     assert.equal(result.game.clubId, null)
   })
 
   it('отклоняет чужую игру, рейтинг без клуба, чужой клуб и гостей в рейтинге', () => {
     const codes = [
-      validateGameUpload(record('rating', { userID: '00000000-0000-4000-8000-000000000999' }), host, NOW),
-      validateGameUpload(record('rating', { userID: guest.id }), guest, NOW),
-      validateGameUpload(record('rating', { clubID: 12 }), host, NOW),
-      validateGameUpload(record('rating', { seats: [goMafiaSeat(1), '00000000-0000-4000-8000-000000000002'] }), host, NOW),
-      validateGameUpload({ ...record('rating'), schemaVersion: 2 }, host, NOW),
-      validateGameUpload({ nonsense: true }, host, NOW),
+      validateGameUpload(record('rating', { userID: '00000000-0000-4000-8000-000000000999' }), host, president, NOW),
+      validateGameUpload(record('rating', { userID: guest.id }), guest, noAccess, NOW),
+      validateGameUpload(record('rating', { clubID: 12 }), host, president, NOW),
+      validateGameUpload(record('rating', { seats: [goMafiaSeat(1), '00000000-0000-4000-8000-000000000002'] }), host, president, NOW),
+      validateGameUpload({ ...record('rating'), schemaVersion: 2 }, host, president, NOW),
+      validateGameUpload({ nonsense: true }, host, president, NOW),
     ].map((r) => (r.ok ? 'ok' : r.code))
     assert.deepEqual(codes, ['host_mismatch', 'club_required', 'club_mismatch', 'guest_players', 'unsupported_schema', 'invalid_record'])
   })
 
+  it('судья из пула президента ведёт рейтинг клуба, резидент без доступа — нет, его фанка идёт в личную историю', () => {
+    const fromPool = validateGameUpload(record('rating'), host, judge, NOW)
+    assert.ok(fromPool.ok)
+    assert.equal(fromPool.game.clubId, 77)
+
+    const denied = validateGameUpload(record('rating'), host, noAccess, NOW)
+    assert.ok(!denied.ok)
+    assert.deepEqual([denied.status, denied.code], [403, 'host_access_required'])
+
+    const funky = validateGameUpload(record('funky'), host, noAccess, NOW)
+    assert.ok(funky.ok)
+    assert.equal(funky.game.clubId, null)
+  })
+
+  it('клиенты клуба Titan садятся в рейтинг, только если клуб Titan действует у ведущего', () => {
+    const titanSeat = '6D616662-7463-8000-8000-000000000001'
+    const game = record('rating', { seats: [goMafiaSeat(1), titanSeat] })
+    assert.ok(validateGameUpload(game, host, { ...judge, titan: titanLink, titanShared: true }, NOW).ok)
+    const withoutTitan = validateGameUpload(game, host, judge, NOW)
+    assert.ok(!withoutTitan.ok)
+    assert.equal(withoutTitan.code, 'guest_players')
+  })
+
   it('игра турнира GoMafia: судья без клуба — личная история; без GoMafia, с гостями или не в режиме турнира — отказ', () => {
     const tournament = { tournamentID: 2920, gameNumber: 3, tableNumber: 1 }
-    const judge = { ...host, gomafia: host.gomafia ? { ...host.gomafia, club: null } : null }
+    const clubless = { ...host, gomafia: host.gomafia ? { ...host.gomafia, club: null } : null }
     const game = (format: 'tournament' | 'rating', overrides: Parameters<typeof record>[1] = {}) => {
       const base = record(format, { clubID: null, ...overrides })
       return { ...base, setup: { ...base.setup, tournament } }
     }
-    const ok = validateGameUpload(game('tournament'), judge, NOW)
+    const ok = validateGameUpload(game('tournament'), clubless, noAccess, NOW)
     assert.ok(ok.ok)
     assert.equal(ok.game.clubId, null)
     const codes = [
-      validateGameUpload(game('tournament', { userID: guest.id }), guest, NOW),
-      validateGameUpload(game('tournament', { seats: [goMafiaSeat(1), '00000000-0000-4000-8000-000000000002'] }), judge, NOW),
-      validateGameUpload(game('rating'), judge, NOW),
+      validateGameUpload(game('tournament', { userID: guest.id }), guest, noAccess, NOW),
+      validateGameUpload(game('tournament', { seats: [goMafiaSeat(1), '00000000-0000-4000-8000-000000000002'] }), clubless, noAccess, NOW),
+      validateGameUpload(game('rating'), clubless, noAccess, NOW),
     ].map((r) => (r.ok ? 'ok' : r.code))
     assert.deepEqual(codes, ['gomafia_required', 'guest_players', 'invalid_record'])
   })

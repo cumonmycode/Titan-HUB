@@ -1,5 +1,5 @@
 import type { GomafiaPlayer } from '../../lib/gomafia.js'
-import type { DeviceSession, ErrorBody, GoMafiaClubJSON, GoMafiaPlayerJSON, LoginTicket, MafboardUser, QrTicket } from './types.js'
+import type { DeviceSession, ErrorBody, GoMafiaClubJSON, GoMafiaPlayerJSON, HostAccess, LoginTicket, MafboardUser, QrTicket } from './types.js'
 
 // Перевод внутренних данных в JSON-контракт приложения (docs/MAFBOARD.md).
 
@@ -66,16 +66,21 @@ export function toPlayerJSON(player: GomafiaPlayer, isInHostClub: boolean): GoMa
   }
 }
 
-export function toClubJSON(club: { id: string; title: string | null; city: string | null }): GoMafiaClubJSON | null {
+/**
+ * Клуб из lib/gomafia → формат приложения. `presidentId` не передан (страница клуба не открылась) —
+ * поля `presidentID` в ответе нет: президент неизвестен, клуб перечитают при следующем обновлении.
+ */
+export function toClubJSON(club: { id: string; title: string | null; city: string | null; presidentId?: string | null }): GoMafiaClubJSON | null {
   const id = intOrNull(club.id)
   if (id == null) return null
-  return { id, title: club.title ?? `Клуб #${id}`, city: club.city }
+  const base = { id, title: club.title ?? `Клуб #${id}`, city: club.city }
+  return club.presidentId === undefined ? base : { ...base, presidentID: intOrNull(club.presidentId) }
 }
 
 // ─── Аккаунт и вход ──────────────────────────────────────────────────────────
 
-/** `UserAccount` приложения. */
-export function toAccountJSON(user: MafboardUser) {
+/** `UserAccount` приложения. `access` — права клуба и клуб Titan с учётом пула судей (clubHosts.ts). */
+export function toAccountJSON(user: MafboardUser, access: HostAccess) {
   return {
     id: user.id,
     telegram: {
@@ -92,11 +97,22 @@ export function toAccountJSON(user: MafboardUser) {
           club: user.gomafia.club,
           linkedAt: user.gomafia.linkedAt.toISOString(),
           syncedAt: user.gomafia.syncedAt.toISOString(),
+          source: user.gomafia.source,
+          // Старые сборки поля не читают и считают права по клубу — сервер всё равно проверит игру.
+          access: access.club,
         }
       : null,
     // Ключ клуба наружу не уходит: приложению хватает названия и времени подключения.
-    titan: user.titan
-      ? { club: { name: user.titan.clubName }, scopes: user.titan.scopes, linkedAt: user.titan.linkedAt.toISOString() }
+    titan: access.titan
+      ? {
+          club: { name: access.titan.clubName },
+          scopes: access.titan.scopes,
+          linkedAt: access.titan.linkedAt.toISOString(),
+          isShared: access.titanShared,
+        }
+      : null,
+    clubRequest: access.request
+      ? { nickname: access.request.nickname, createdAt: access.request.createdAt.toISOString() }
       : null,
   }
 }

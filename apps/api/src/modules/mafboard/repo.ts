@@ -1,7 +1,17 @@
 import type {
-  DeviceSession, GoMafiaClubJSON, GoMafiaPlayerJSON, LoginTicket, MafboardUser, QrTicket, RefreshTokenRow, StoredActiveGame, StoredGame, StoredProtocolSubmission, StoredShare, StoredStudioSettings, TelegramProfile,
+  DeviceSession, GoMafiaClubJSON, GoMafiaLinkSource, GoMafiaPlayerJSON, LoginTicket, MafboardUser, QrTicket, RefreshTokenRow, StoredActiveGame, StoredClubHost, StoredClubRequest, StoredGame, StoredProtocolSubmission, StoredShare, StoredStudioSettings, TelegramProfile,
   TicketGuard, TicketPatch, TicketStep, TitanLinkState,
 } from './types.js'
+
+/**
+ * Привязка GoMafia для записи. `source` не задан — прежний способ подтверждения остаётся
+ * (обновление профиля), у новой привязки — `password`.
+ */
+export interface GomafiaLinkInput {
+  player: GoMafiaPlayerJSON
+  club: GoMafiaClubJSON | null
+  source?: GoMafiaLinkSource
+}
 
 /** Аккаунт GoMafia уже привязан к другому пользователю (уникальность gomafia_id). */
 export class GomafiaTakenError extends Error {
@@ -24,11 +34,7 @@ export interface MafboardRepo {
   /** Создать или обновить пользователя по Telegram (вход подтверждён в боте). */
   upsertUserFromTelegram(profile: TelegramProfile & { phone: string; termsVersion: string }): Promise<MafboardUser>
   /** Привязать (или отвязать — null) аккаунт GoMafia. Бросает GomafiaTakenError при занятом аккаунте. */
-  setGomafiaLink(
-    userId: string,
-    link: { player: GoMafiaPlayerJSON; club: GoMafiaClubJSON | null } | null,
-    at: Date,
-  ): Promise<MafboardUser | null>
+  setGomafiaLink(userId: string, link: GomafiaLinkInput | null, at: Date): Promise<MafboardUser | null>
   /** Подключить (или отключить — null) клуб Titan HUB через Titan Connect. */
   setTitanLink(userId: string, link: TitanLinkState | null): Promise<MafboardUser | null>
   /**
@@ -36,6 +42,26 @@ export interface MafboardRepo {
    * остаются в его истории без ведущего. false — такого пользователя уже нет.
    */
   deleteUser(userId: string): Promise<boolean>
+
+  // ─── Пул судей клуба ───────────────────────────────────────────────────────
+  /** Судьи клуба GoMafia, которым президент дал вести игры, по времени выдачи. */
+  clubHosts(clubId: number): Promise<StoredClubHost[]>
+  isClubHost(clubId: number, gomafiaId: number): Promise<boolean>
+  /** Добавить судью в пул. Повтор не меняет запись: кто и когда выдал доступ, остаётся. */
+  addClubHost(host: StoredClubHost): Promise<void>
+  /** false — такого судьи в пуле не было. */
+  removeClubHost(clubId: number, gomafiaId: number): Promise<boolean>
+  /** Пользователи MafBoard, привязавшие эти аккаунты GoMafia. */
+  usersByGomafiaIds(gomafiaIds: number[]): Promise<MafboardUser[]>
+  /** Пользователи, чей аккаунт GoMafia — президент их клуба, сначала давние. */
+  clubPresidents(limit: number): Promise<MafboardUser[]>
+
+  // ─── Заявки судей без пароля GoMafia ───────────────────────────────────────
+  clubRequest(userId: string): Promise<StoredClubRequest | null>
+  /** Оставить заявку (прежняя заменяется) или снять её — null. */
+  setClubRequest(userId: string, request: { nickname: string; at: Date } | null): Promise<void>
+  /** Заявки с этими никами без учёта регистра, сначала ранние. */
+  clubRequestsByNicknames(nicknames: string[]): Promise<StoredClubRequest[]>
 
   // ─── Вход в АИМ (турниры GoMafia) ──────────────────────────────────────────
   /** Логин и пароль АИМ шифротекстом (aim.ts) или null — АИМ не подключён. */

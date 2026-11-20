@@ -4,6 +4,7 @@ import { getSharedRedis } from '../../lib/redis.js'
 import { setTelegramWebhook } from '../../lib/telegram.js'
 import { TgBot } from '../../lib/tgBot.js'
 import { AimAccounts, liveAim, liveTournaments } from './aim.js'
+import { sessionDelegate } from './clubHosts.js'
 import { GoMafiaSessions } from './gomafiaSessions.js'
 import type { BotMessenger } from './bot.js'
 import { mafboardWebhookUrl, readMafboardConfig, type MafboardConfig } from './config.js'
@@ -102,7 +103,7 @@ function resolveDeps(): MafboardDeps | { error: string } {
       vk: liveVkGateway,
       donationAlerts: liveDaGateway,
       aimAccounts,
-      gomafiaSessions: new GoMafiaSessions(repo, liveGoMafia, config.studioSecretsKey, aimAccounts, now),
+      gomafiaSessions: new GoMafiaSessions(repo, liveGoMafia, config.studioSecretsKey, aimAccounts, now, (userId) => sessionDelegate(repo, userId)),
       tournaments: liveTournaments,
       firstDelivery,
       now,

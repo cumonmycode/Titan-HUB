@@ -13,6 +13,7 @@ import { MIN_QUERY_LENGTH, rankForHost, refreshLink, resolveLink, searchForHost,
 import type { ClubHub } from './hub.js'
 import type { TitanConnectGateway, TitanRosterCache } from './titan.js'
 import { registerTitanRoutes } from './titanRoutes.js'
+import { hostAccess, registerClubHostRoutes } from './clubHosts.js'
 import { GomafiaTakenError, type MafboardRepo } from './repo.js'
 import type { AimAccounts, TournamentSource } from './aim.js'
 import { gomafiaFailure, type GoMafiaSessions } from './gomafiaSessions.js'
@@ -23,7 +24,7 @@ import {
   issueAccessToken, newConfirmCode, newDeepCode, newRefreshToken, passwordMatches, qrChoiceCodes, sha256, verifyAccessToken, webhookSecretValid,
 } from './tokens.js'
 import { openSecrets, sealSecrets, STUDIO_BODY_LIMIT_BYTES, STUDIO_SAVES_PER_HOUR, STUDIO_SECRETS_LIMIT_BYTES, studioPutSchema } from './studio.js'
-import type { MafboardUser, StoredStudioSettings } from './types.js'
+import type { GoMafiaLinkState, HostAccess, MafboardUser, StoredStudioSettings } from './types.js'
 import { authorizeUrl, callbackPage, VkError, VkLogins, type VkGateway, type VkTokens } from './vk.js'
 import { daAuthorizeUrl, type DaGateway } from './donationalerts.js'
 
@@ -73,7 +74,7 @@ export interface MafboardDeps {
 
 export type DepsResolver = () => MafboardDeps | { error: string }
 
-export type MafboardEnv = { Variables: { deps: MafboardDeps; user: MafboardUser; sessionId: string } }
+export type MafboardEnv = { Variables: { deps: MafboardDeps; user: MafboardUser; access: HostAccess; sessionId: string } }
 export type Env = MafboardEnv
 
 const GAMES_PAGE_LIMIT = 50
@@ -212,14 +213,27 @@ function addDays(date: Date, days: number): Date {
 }
 
 /**
- * Пользователь со свежим членством в клубе: если профиль GoMafia старше суток —
+ * Профиль GoMafia пора перечитать: он старше суток или президент клуба неизвестен (привязка
+ * сохранена до пула судей либо страница клуба тогда не открылась) — без него не посчитать права.
+ */
+function needsSync(link: GoMafiaLinkState, now: Date): boolean {
+  return now.getTime() - link.syncedAt.getTime() > GOMAFIA_RESYNC_AFTER_MS || (link.club != null && link.club.presidentID === undefined)
+}
+
+/** Аккаунт для приложения вместе с правами клуба — для ответов, где пользователь только что изменился. */
+async function accountJSON(deps: MafboardDeps, user: MafboardUser) {
+  return toAccountJSON(user, await hostAccess(deps.repo, user))
+}
+
+/**
+ * Пользователь со свежим членством в клубе: если профиль GoMafia пора перечитать —
  * обновляем сразу (до 8 с). Не удалось, а подтверждение старше недели — права клуба снимаются.
  */
 async function withFreshClub(deps: MafboardDeps, user: MafboardUser): Promise<MafboardUser> {
   const link = user.gomafia
   if (!link) return user
   const age = deps.now().getTime() - link.syncedAt.getTime()
-  if (age <= GOMAFIA_RESYNC_AFTER_MS) return user
+  if (!needsSync(link, deps.now())) return user
 
   const fresh = await withTimeout(
     deps.gomafiaSessions.run(user.id, (auth) => refreshLink(deps.gomafia, link, auth)).catch(() => null),
@@ -281,6 +295,7 @@ export function createMafboardRouter(resolveDeps: DepsResolver): Hono<Env> {
     const now = deps.now()
     if (now.getTime() - session.lastUsedAt.getTime() > SESSION_TOUCH_EVERY_MS) await deps.repo.touchSession(session.id, now)
     c.set('user', user)
+    c.set('access', await hostAccess(deps.repo, user))
     c.set('sessionId', session.id)
     await next()
   }
@@ -359,7 +374,7 @@ export function createMafboardRouter(resolveDeps: DepsResolver): Hono<Env> {
     if (!ticket || !user) return fail(c, 422, 'invalid_ticket', 'Вход не подтверждён или устарел — начните заново')
 
     const tokens = await issueSession(deps, user, { name: ticket.deviceName, platform: ticket.platform })
-    return c.json({ tokens, account: toAccountJSON(user) })
+    return c.json({ tokens, account: await accountJSON(deps, user) })
   })
 
   // ─── Вход в MBS по QR ───────────────────────────────────────────────────────
@@ -442,7 +457,7 @@ export function createMafboardRouter(resolveDeps: DepsResolver): Hono<Env> {
     if (!ticket || !user) return fail(c, 422, 'invalid_ticket', 'Вход не подтверждён или устарел, начните заново')
 
     const tokens = await issueSession(deps, user, { name: ticket.deviceName, platform: ticket.platform })
-    return c.json({ tokens, account: toAccountJSON(user) })
+    return c.json({ tokens, account: await accountJSON(deps, user) })
   })
 
   /**
@@ -464,7 +479,7 @@ export function createMafboardRouter(resolveDeps: DepsResolver): Hono<Env> {
       phone: '', termsVersion: deps.config.termsVersion,
     })
     const tokens = await issueSession(deps, user, { name: input.deviceName, platform: input.platform })
-    return c.json({ tokens, account: toAccountJSON(user) })
+    return c.json({ tokens, account: await accountJSON(deps, user) })
   })
 
   /**
@@ -546,13 +561,13 @@ export function createMafboardRouter(resolveDeps: DepsResolver): Hono<Env> {
     const deps = c.get('deps')
     const user = c.get('user')
     const link = user.gomafia
-    if (link && deps.now().getTime() - link.syncedAt.getTime() > GOMAFIA_RESYNC_AFTER_MS) {
+    if (link && needsSync(link, deps.now())) {
       deps.background(`mb:sync:${user.id}`, async () => {
         const fresh = await deps.gomafiaSessions.run(user.id, (auth) => refreshLink(deps.gomafia, link, auth)).catch(() => null)
         if (fresh) await deps.repo.setGomafiaLink(user.id, fresh, deps.now())
       })
     }
-    return c.json(toAccountJSON(user))
+    return c.json(toAccountJSON(user, c.get('access')))
   })
 
   /**
@@ -577,15 +592,21 @@ export function createMafboardRouter(resolveDeps: DepsResolver): Hono<Env> {
     }
     const taken = () => fail(c, 409, 'gomafia_taken', 'Этот аккаунт GoMafia уже привязан к другому пользователю')
     const owner = await deps.repo.userByGomafiaId(link.player.id)
-    if (owner && owner.id !== user.id) return taken()
+    if (owner && owner.id !== user.id) {
+      // Привязку по заявке президент выдал без пароля: вход с паролем сильнее — она снимается.
+      if (owner.gomafia?.source !== 'club') return taken()
+      await deps.repo.setGomafiaLink(owner.id, null, deps.now())
+    }
     try {
-      const updated = await deps.repo.setGomafiaLink(user.id, { player: link.player, club: link.club }, deps.now())
+      const updated = await deps.repo.setGomafiaLink(user.id, { player: link.player, club: link.club, source: 'password' }, deps.now())
+      // Заявка судьи без пароля больше не нужна: аккаунт подтверждён паролем.
+      await deps.repo.setClubRequest(user.id, null)
       // GoMafia отдаёт профили, клубы и турниры только вошедшим — сервер ходит туда этим входом.
       await deps.gomafiaSessions.remember(user.id, login, password, link.cookie)
       // Обычно пароль АИМ тот же, что у GoMafia: сразу подключаем турниры. Не вышло — привязка
       // всё равно состоялась, АИМ подключается отдельно (POST /v1/me/gomafia/aim).
       await withTimeout(deps.aimAccounts.connect(user.id, login, password).catch(() => undefined), GOMAFIA_INLINE_TIMEOUT_MS)
-      return c.json(toAccountJSON(updated ?? user))
+      return c.json(await accountJSON(deps, updated ?? user))
     } catch (error) {
       if (error instanceof GomafiaTakenError) return taken()
       throw error
@@ -609,7 +630,7 @@ export function createMafboardRouter(resolveDeps: DepsResolver): Hono<Env> {
     const updated = await deps.repo.setGomafiaLink(user.id, null, deps.now())
     await deps.aimAccounts.disconnect(user.id)
     await deps.gomafiaSessions.forget(user.id)
-    return c.json(toAccountJSON(updated ?? user))
+    return c.json(await accountJSON(deps, updated ?? user))
   })
 
   /** Подбор игроков одним списком: клиенты Titan HUB клуба (если он есть), свой клуб GoMafia, затем общий поиск. */
@@ -675,6 +696,7 @@ export function createMafboardRouter(resolveDeps: DepsResolver): Hono<Env> {
   })
 
   registerTitanRoutes(router, requireUser)
+  registerClubHostRoutes(router, requireUser)
 
   // ─── История игр ────────────────────────────────────────────────────────────
 
@@ -691,7 +713,9 @@ export function createMafboardRouter(resolveDeps: DepsResolver): Hono<Env> {
       return fail(c, 429, 'rate_limited', 'Слишком много игр за сутки')
     }
     const payload = await c.req.json().catch(() => null)
-    const result = validateGameUpload(payload, await withFreshClub(deps, user), deps.now())
+    // Права считаем по свежему клубу: за сутки ведущий мог выйти из клуба или потерять доступ.
+    const host = await withFreshClub(deps, user)
+    const result = validateGameUpload(payload, host, await hostAccess(deps.repo, host), deps.now())
     if (!result.ok) return fail(c, result.status, result.code, result.message)
 
     const outcome = await deps.repo.insertGame(result.game)
