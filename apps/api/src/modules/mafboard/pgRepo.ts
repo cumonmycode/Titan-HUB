@@ -3,7 +3,7 @@ import type { SQL } from 'drizzle-orm'
 import { DELETED_HOST_ID } from './config.js'
 import { GomafiaTakenError, type GomafiaLinkInput, type MafboardRepo } from './repo.js'
 import type {
-  DeviceSession, GoMafiaClubJSON, GoMafiaPlayerJSON, LoginTicket, MafboardUser, QrTicket, QrTicketStatus, RefreshTokenRow, StoredActiveGame, StoredClubHost, StoredClubRequest, StoredGame, StoredProtocolSubmission, StoredShare, StoredStudioSettings,
+  DeviceSession, GoMafiaClubJSON, GoMafiaPlayerJSON, LoginTicket, MafboardUser, QrTicket, QrTicketStatus, RefreshTokenRow, StoredActiveGame, StoredClub, StoredClubHost, StoredClubRequest, StoredGame, StoredProtocolSubmission, StoredShare, StoredStudioSettings,
   TicketGuard, TicketPatch, TicketStatus, TicketStep, TitanLinkState,
 } from './types.js'
 
@@ -77,6 +77,17 @@ function toClubHost(r: Row): StoredClubHost {
   }
 }
 
+function toClub(r: Row): StoredClub {
+  return {
+    id: String(r['id']),
+    name: String(r['name']),
+    city: str(r['city']),
+    gomafiaClubId: num(r['gomafia_club_id']),
+    titan: toTitanLink(r['titan_link']),
+    titanLinkedBy: str(r['titan_linked_by']),
+  }
+}
+
 function toClubRequest(r: Row): StoredClubRequest {
   return { userId: String(r['user_id']), nickname: String(r['nickname']), createdAt: date(r['created_at']) }
 }
@@ -138,6 +149,7 @@ function toGame(r: Row): StoredGame {
     id: String(r['id']),
     hostUserId: r['host_user_id'] == null ? null : String(r['host_user_id']),
     clubId: num(r['club_id']),
+    clubRef: str(r['club_ref']),
     format: String(r['format']),
     variant: String(r['variant']),
     startedAt: date(r['started_at']),
@@ -317,11 +329,78 @@ export class PgMafboardRepo implements MafboardRepo {
           updated_at = now()
         WHERE id = ${userId}::uuid RETURNING *
       `)
+      if (row) await this.syncClub(userId, link)
       return row ? toUser(row) : null
     } catch (error) {
       if ((error as { code?: string }).code === '23505') throw new GomafiaTakenError()
       throw error
     }
+  }
+
+  /**
+   * Запись клуба MafBoard для клуба GoMafia из привязки. Неполный снимок (без президента: страница
+   * клуба не открылась) клуб только заводит — название и город из заглушки не берём. Личное
+   * подключение Titan президента переезжает в клуб, если у клуба подключения ещё нет.
+   * Права пока считаются по привязке, поэтому сбой здесь привязку не отменяет: запись клуба
+   * восстановит сверка при старте (`reconcileMafboardClubs`).
+   */
+  private async syncClub(userId: string, link: GomafiaLinkInput): Promise<void> {
+    const club = link.club
+    if (!club) return
+    const isFull = club.presidentID !== undefined
+    try {
+      await this.query(sql`
+        INSERT INTO mb_clubs (name, city, gomafia_club_id) VALUES (${club.title}, ${club.city}, ${club.id})
+        ON CONFLICT (gomafia_club_id) DO UPDATE
+          SET name = EXCLUDED.name, city = COALESCE(EXCLUDED.city, mb_clubs.city), updated_at = now()
+          WHERE ${isFull}::boolean
+            AND (mb_clubs.name, mb_clubs.city) IS DISTINCT FROM (EXCLUDED.name, COALESCE(EXCLUDED.city, mb_clubs.city))
+      `)
+      if (club.presidentID == null || club.presidentID !== link.player.id) return
+      await this.query(sql`
+        UPDATE mb_clubs SET titan_link = holder.titan_link, titan_linked_by = holder.id, updated_at = now()
+        FROM mb_users holder
+        WHERE holder.id = ${userId}::uuid
+          AND holder.gomafia_link_source IS DISTINCT FROM 'club'
+          AND jsonb_typeof(holder.titan_link) = 'object'
+          AND holder.titan_link->>'tokenSealed' IS NOT NULL
+          AND mb_clubs.gomafia_club_id = ${club.id}
+          AND mb_clubs.titan_link IS NULL
+      `)
+    } catch (error) {
+      console.warn(`[mafboard] запись клуба GoMafia ${club.id} не обновлена — её восстановит сверка при старте:`, error)
+    }
+  }
+
+  // ─── Клубы ─────────────────────────────────────────────────────────────────
+
+  async clubByGomafiaId(gomafiaClubId: number): Promise<StoredClub | null> {
+    if (!Number.isInteger(gomafiaClubId)) return null
+    const row = await this.one(sql`SELECT * FROM mb_clubs WHERE gomafia_club_id = ${gomafiaClubId}`)
+    return row ? toClub(row) : null
+  }
+
+  async setClubTitanLink(clubId: string, link: TitanLinkState | null, linkedBy: string | null): Promise<TitanLinkState | null> {
+    if (!UUID.test(clubId)) return null
+    // Прежнее подключение читается под блокировкой строки: два подключения подряд не потеряют ключ для отзыва.
+    const row = await this.one(sql`
+      WITH previous AS (SELECT id, titan_link FROM mb_clubs WHERE id = ${clubId}::uuid FOR UPDATE)
+      UPDATE mb_clubs SET
+        titan_link = ${link ? JSON.stringify(link) : null}::jsonb,
+        titan_linked_by = ${link ? linkedBy : null}::uuid,
+        updated_at = now()
+      FROM previous
+      WHERE mb_clubs.id = previous.id
+      RETURNING previous.titan_link AS previous_link
+    `)
+    return row ? toTitanLink(row['previous_link']) : null
+  }
+
+  async clearClubTitanConnection(connectionId: string): Promise<void> {
+    await this.query(sql`
+      UPDATE mb_clubs SET titan_link = NULL, titan_linked_by = NULL, updated_at = now()
+      WHERE titan_link->>'connectionId' = ${connectionId}
+    `)
   }
 
   // ─── Пул судей клуба и заявки ──────────────────────────────────────────────
@@ -658,12 +737,14 @@ export class PgMafboardRepo implements MafboardRepo {
   async insertGame(game: StoredGame): Promise<'inserted' | 'exists' | 'conflict'> {
     // Та же игра того же ведущего — обновляем запись (ведущий мог отменить конец игры и доиграть иначе).
     const saved = await this.query(sql`
-      INSERT INTO mb_games (id, host_user_id, club_id, format, variant, started_at, finished_at, schema_version, record)
-      VALUES (${game.id}::uuid, ${game.hostUserId}::uuid, ${game.clubId}, ${game.format}, ${game.variant},
+      INSERT INTO mb_games (id, host_user_id, club_id, club_ref, format, variant, started_at, finished_at, schema_version, record)
+      VALUES (${game.id}::uuid, ${game.hostUserId}::uuid, ${game.clubId},
+              (SELECT id FROM mb_clubs WHERE gomafia_club_id = ${game.clubId}::integer),
+              ${game.format}, ${game.variant},
               ${iso(game.startedAt)}::timestamptz, ${iso(game.finishedAt)}::timestamptz, ${game.schemaVersion},
               ${JSON.stringify(game.record)}::jsonb)
       ON CONFLICT (id) DO UPDATE
-        SET club_id = EXCLUDED.club_id, format = EXCLUDED.format, variant = EXCLUDED.variant,
+        SET club_id = EXCLUDED.club_id, club_ref = EXCLUDED.club_ref, format = EXCLUDED.format, variant = EXCLUDED.variant,
             started_at = EXCLUDED.started_at, finished_at = EXCLUDED.finished_at,
             schema_version = EXCLUDED.schema_version, record = EXCLUDED.record
         WHERE mb_games.host_user_id = EXCLUDED.host_user_id

@@ -11,7 +11,7 @@ import { TitanConnectError, TitanRosterCache, type TitanClient, type TitanConnec
 import { DELETED_HOST_ID } from '../../src/modules/mafboard/config.js'
 import { GomafiaTakenError, type MafboardRepo } from '../../src/modules/mafboard/repo.js'
 import { createMafboardRouter, type MafboardDeps } from '../../src/modules/mafboard/router.js'
-import type { DeviceSession, LoginTicket, MafboardUser, QrTicket, RefreshTokenRow, StoredActiveGame, StoredClubHost, StoredClubRequest, StoredGame, StoredProtocolSubmission, StoredShare, StoredStudioSettings, TicketGuard, TitanLinkState } from '../../src/modules/mafboard/types.js'
+import type { DeviceSession, LoginTicket, MafboardUser, QrTicket, RefreshTokenRow, StoredActiveGame, StoredClub, StoredClubHost, StoredClubRequest, StoredGame, StoredProtocolSubmission, StoredShare, StoredStudioSettings, TicketGuard, TitanLinkState } from '../../src/modules/mafboard/types.js'
 import { VkError, type VkAppConfig, type VkGateway, type VkTokens } from '../../src/modules/mafboard/vk.js'
 import type { DaAppConfig, DaGateway } from '../../src/modules/mafboard/donationalerts.js'
 import { AimError, AimSession } from '../../src/lib/gomafiaAim.js'
@@ -186,6 +186,7 @@ export class MemoryRepo implements MafboardRepo {
   shares = new Map<string, StoredShare>()
   titanMatchRows = new Map<string, number | null>()
   hosts: StoredClubHost[] = []
+  clubs = new Map<string, StoredClub>()
   requests = new Map<string, StoredClubRequest>()
   private seq = 0
 
@@ -244,6 +245,7 @@ export class MemoryRepo implements MafboardRepo {
     for (const [id, ticket] of this.qrTickets) if (ticket.userId === userId) this.qrTickets.delete(id)
     this.requests.delete(userId)
     this.hosts = this.hosts.map((host) => (host.grantedBy === userId ? { ...host, grantedBy: null } : host))
+    for (const [id, club] of this.clubs) if (club.titanLinkedBy === userId) this.clubs.set(id, { ...club, titanLinkedBy: null })
     return true
   }
 
@@ -263,7 +265,40 @@ export class MemoryRepo implements MafboardRepo {
         : null,
     }
     this.users.set(userId, updated)
+    this.syncClub(updated)
     return updated
+  }
+
+  /** Как `syncClub` в pgRepo: клуб заводится по привязке, неполный снимок название и город не трогает. */
+  private syncClub(user: MafboardUser) {
+    const link = user.gomafia
+    const snapshot = link?.club
+    if (!link || !snapshot) return
+    const isFull = snapshot.presidentID !== undefined
+    const existing = [...this.clubs.values()].find((club) => club.gomafiaClubId === snapshot.id)
+    const fresh = existing
+      ? (isFull ? { ...existing, name: snapshot.title, city: snapshot.city ?? existing.city } : existing)
+      : { id: this.uuid(), name: snapshot.title, city: snapshot.city, gomafiaClubId: snapshot.id, titan: null, titanLinkedBy: null }
+    const isPresident = link.source === 'password' && snapshot.presidentID != null && snapshot.presidentID === link.player.id
+    const moved = isPresident && fresh.titan == null && user.titan != null
+    this.clubs.set(fresh.id, moved ? { ...fresh, titan: user.titan, titanLinkedBy: user.id } : fresh)
+  }
+
+  async clubByGomafiaId(gomafiaClubId: number): Promise<StoredClub | null> {
+    return [...this.clubs.values()].find((club) => club.gomafiaClubId === gomafiaClubId) ?? null
+  }
+
+  async setClubTitanLink(clubId: string, link: TitanLinkState | null, linkedBy: string | null) {
+    const club = this.clubs.get(clubId)
+    if (!club) return null
+    this.clubs.set(clubId, { ...club, titan: link, titanLinkedBy: link ? linkedBy : null })
+    return club.titan
+  }
+
+  async clearClubTitanConnection(connectionId: string) {
+    for (const [id, club] of this.clubs) {
+      if (club.titan?.connectionId === connectionId) this.clubs.set(id, { ...club, titan: null, titanLinkedBy: null })
+    }
   }
 
   async clubHosts(clubId: number) {
@@ -461,7 +496,9 @@ export class MemoryRepo implements MafboardRepo {
   async insertGame(game: StoredGame) {
     const existing = this.games.get(game.id)
     if (existing && existing.hostUserId !== game.hostUserId) return 'conflict'
-    this.games.set(game.id, game)
+    // Как подзапрос в Postgres: ссылка на клуб MafBoard выводится из клуба GoMafia игры.
+    const club = game.clubId == null ? null : await this.clubByGomafiaId(game.clubId)
+    this.games.set(game.id, { ...game, clubRef: club?.id ?? null })
     return existing ? 'exists' : 'inserted'
   }
 

@@ -1,5 +1,5 @@
 import type {
-  DeviceSession, GoMafiaClubJSON, GoMafiaLinkSource, GoMafiaPlayerJSON, LoginTicket, MafboardUser, QrTicket, RefreshTokenRow, StoredActiveGame, StoredClubHost, StoredClubRequest, StoredGame, StoredProtocolSubmission, StoredShare, StoredStudioSettings, TelegramProfile,
+  DeviceSession, GoMafiaClubJSON, GoMafiaLinkSource, GoMafiaPlayerJSON, LoginTicket, MafboardUser, QrTicket, RefreshTokenRow, StoredActiveGame, StoredClub, StoredClubHost, StoredClubRequest, StoredGame, StoredProtocolSubmission, StoredShare, StoredStudioSettings, TelegramProfile,
   TicketGuard, TicketPatch, TicketStep, TitanLinkState,
 } from './types.js'
 
@@ -33,7 +33,12 @@ export interface MafboardRepo {
   verifiedGomafiaIds(gomafiaIds: number[]): Promise<Set<number>>
   /** Создать или обновить пользователя по Telegram (вход подтверждён в боте). */
   upsertUserFromTelegram(profile: TelegramProfile & { phone: string; termsVersion: string }): Promise<MafboardUser>
-  /** Привязать (или отвязать — null) аккаунт GoMafia. Бросает GomafiaTakenError при занятом аккаунте. */
+  /**
+   * Привязать (или отвязать — null) аккаунт GoMafia. Бросает GomafiaTakenError при занятом аккаунте.
+   * Заодно заводит запись клуба MafBoard для клуба из привязки: полный снимок (с президентом)
+   * обновляет название и город, неполный их не трогает. Личное подключение Titan президента
+   * переезжает в клуб, если у клуба подключения ещё нет.
+   */
   setGomafiaLink(userId: string, link: GomafiaLinkInput | null, at: Date): Promise<MafboardUser | null>
   /** Подключить (или отключить — null) клуб Titan HUB через Titan Connect. */
   setTitanLink(userId: string, link: TitanLinkState | null): Promise<MafboardUser | null>
@@ -42,6 +47,19 @@ export interface MafboardRepo {
    * остаются в его истории без ведущего. false — такого пользователя уже нет.
    */
   deleteUser(userId: string): Promise<boolean>
+
+  // ─── Клубы ─────────────────────────────────────────────────────────────────
+  /** Клуб MafBoard, к которому подключён этот клуб GoMafia. Запись заводит `setGomafiaLink`. */
+  clubByGomafiaId(gomafiaClubId: number): Promise<StoredClub | null>
+  /**
+   * Подключить (или отключить — null) Titan HUB клуба. Возвращает заменённое подключение; null —
+   * подключения не было или клуба нет. Пока запись клуба — копия записи президента, и ключ в HUB
+   * отзывается по записи президента; когда Titan начнёт читаться из клуба, отзывать нужно будет
+   * возвращённое отсюда, а не прочитанное заранее.
+   */
+  setClubTitanLink(clubId: string, link: TitanLinkState | null, linkedBy: string | null): Promise<TitanLinkState | null>
+  /** Снять с клубов подключение Titan с этим номером: личную запись, которую оно дублировало, стёрли. */
+  clearClubTitanConnection(connectionId: string): Promise<void>
 
   // ─── Пул судей клуба ───────────────────────────────────────────────────────
   /** Судьи клуба GoMafia, которым президент дал вести игры, по времени выдачи. */

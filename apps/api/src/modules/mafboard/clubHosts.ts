@@ -5,7 +5,7 @@ import { GoMafiaLoginRequired, GoMafiaUnavailable } from './gomafiaSessions.js'
 import { GomafiaTakenError, type MafboardRepo } from './repo.js'
 import type { MafboardDeps, MafboardEnv } from './router.js'
 import { errorBody, toAccountJSON, toPlayerJSON } from './serialize.js'
-import type { GoMafiaClubJSON, GoMafiaPlayerJSON, HostAccess, MafboardUser } from './types.js'
+import type { GoMafiaClubJSON, GoMafiaPlayerJSON, HostAccess, MafboardUser, StoredClub, TitanLinkState } from './types.js'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Пул судей клуба GoMafia (контракт — docs/MAFBOARD.md, раздел «Судьи клуба»).
@@ -45,15 +45,55 @@ export function isClubPresident(user: MafboardUser): boolean {
 /** Права пользователя в клубе и действующий клуб Titan HUB — с учётом пула судей. */
 export async function hostAccess(repo: MafboardRepo, user: MafboardUser): Promise<HostAccess> {
   const link = user.gomafia
-  if (!link) return { club: 'none', titan: null, titanShared: false, request: await repo.clubRequest(user.id) }
-  const none: HostAccess = { club: 'none', titan: null, titanShared: false, request: null }
+  if (!link) return { club: 'none', titan: null, titanShared: false, request: await repo.clubRequest(user.id), mafboardClub: null }
+  const none: HostAccess = { club: 'none', titan: null, titanShared: false, request: null, mafboardClub: null }
   const club = link.club
   if (!club) return none
-  if (isClubPresident(user)) return { club: 'president', titan: user.titan, titanShared: false, request: null }
+  if (isClubPresident(user)) {
+    return { club: 'president', titan: user.titan, titanShared: false, request: null, mafboardClub: await mafboardClub(repo, club, user.titan) }
+  }
   if (!(await repo.isClubHost(club.id, link.player.id))) return none
   const president = await clubPresident(repo, club)
   const titan = president?.titan ?? null
-  return { club: 'host', titan, titanShared: titan != null, request: null }
+  return { club: 'host', titan, titanShared: titan != null, request: null, mafboardClub: await mafboardClub(repo, club, titan) }
+}
+
+/** Что уже записано в лог: права считаются на каждый запрос, одно и то же повторять незачем. */
+const reported = new Set<string>()
+
+function warnOnce(key: string, message: string, error?: unknown): void {
+  if (reported.has(key)) return
+  reported.add(key)
+  if (error === undefined) console.warn(message)
+  else console.warn(message, error)
+}
+
+/**
+ * Запись клуба MafBoard президента или судьи пула. Права и Titan пока считаются по-старому (привязка
+ * GoMafia и запись президента), поэтому сбой чтения ручки не роняет: клуб просто не попадёт в
+ * `clubs` аккаунта. Расхождение подключения Titan клуба с действующим пишется в лог — по нему видно,
+ * у каких клубов поведение изменится, когда Titan станет читаться из клуба.
+ */
+async function mafboardClub(repo: MafboardRepo, club: GoMafiaClubJSON, effective: TitanLinkState | null): Promise<StoredClub | null> {
+  try {
+    const record = await repo.clubByGomafiaId(club.id)
+    if (!record) {
+      warnOnce(`missing:${club.id}`, `[mafboard] у клуба GoMafia ${club.id} нет записи клуба — её заведёт сверка при старте`)
+      return null
+    }
+    const stored = record.titan?.connectionId ?? null
+    const current = effective?.connectionId ?? null
+    if (stored !== current) {
+      warnOnce(
+        `titan:${record.id}:${stored}:${current}`,
+        `[mafboard] Titan клуба «${record.name}» (${record.id}) расходится с записью президента: у клуба ${stored ?? 'нет'}, действует ${current ?? 'нет'}`,
+      )
+    }
+    return record
+  } catch (error) {
+    warnOnce(`unreadable:${club.id}`, `[mafboard] запись клуба GoMafia ${club.id} не прочитана:`, error)
+    return null
+  }
 }
 
 /** Пользователь MafBoard — действующий президент этого клуба. Сменился в GoMafia — прежний уже не он. */

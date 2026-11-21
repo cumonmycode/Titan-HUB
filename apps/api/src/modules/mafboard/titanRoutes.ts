@@ -4,6 +4,7 @@ import { z } from 'zod'
 import type { MafboardEnv } from './router.js'
 import { GoMafiaLoginRequired } from './gomafiaSessions.js'
 import { hostAccess } from './clubHosts.js'
+import type { MafboardRepo } from './repo.js'
 import { errorBody, toAccountJSON } from './serialize.js'
 import { openSecrets, sealSecrets } from './studio.js'
 import { TitanConnectError, toTitanPlayerJSON, trustedApiBase, type TitanClient } from './titan.js'
@@ -106,6 +107,10 @@ export function registerTitanRoutes(router: Hono<MafboardEnv>, requireUser: Midd
       tokenSealed: sealSecrets(deps.config.studioSecretsKey, { token: exchange.accessToken }),
       linkedAt: deps.now(),
     })
+    const club = c.get('access').mafboardClub
+    const linkedTitan = updated?.titan
+    if (!club) console.warn(`[mafboard] Titan клуба не записан: у клуба президента ${user.id} нет записи клуба`)
+    else if (linkedTitan) await mirrorToClub(c, 'подключение', (repo) => repo.setClubTitanLink(club.id, linkedTitan, user.id))
     if (previous) releaseLink(c, previous)
     deps.titanRoster.forget(apiBase)
     const linked = updated ?? user
@@ -123,7 +128,11 @@ export function registerTitanRoutes(router: Hono<MafboardEnv>, requireUser: Midd
       return fail(c, 403, 'president_only', 'Клуб Titan HUB подключил президент клуба — отключить его может только он')
     }
     const updated = await deps.repo.setTitanLink(user.id, null)
-    if (user.titan) releaseLink(c, user.titan)
+    const removed = user.titan
+    if (removed) {
+      await mirrorToClub(c, 'отключение', (repo) => repo.clearClubTitanConnection(removed.connectionId))
+      releaseLink(c, removed)
+    }
     const unlinked = updated ?? user
     return c.json(toAccountJSON(unlinked, await hostAccess(deps.repo, unlinked)))
   })
@@ -184,6 +193,19 @@ async function saveMatch(c: Context<MafboardEnv>, match: { goMafiaId: number | n
   if (match) matches.set(clientId, match.goMafiaId)
   else matches.delete(clientId)
   return c.json(toTitanPlayerJSON(apiBase, client, matches))
+}
+
+/**
+ * Двойная запись: подключение Titan принадлежит клубу MafBoard, но читается пока из записи
+ * президента. Запись в клуб — копия, поэтому её сбой ручку не роняет: расхождение покажет лог
+ * `hostAccess`, а клуб без подключения дозаполнит сверка при старте.
+ */
+async function mirrorToClub(c: Context<MafboardEnv>, what: string, write: (repo: MafboardRepo) => Promise<unknown>): Promise<void> {
+  try {
+    await write(c.get('deps').repo)
+  } catch (error) {
+    console.warn(`[mafboard] Titan клуба не обновлён (${what}) — запись президента сохранена:`, error)
+  }
 }
 
 /** Отозвать ключ в Titan в фоне: отключение у нас не должно зависеть от доступности HUB. */

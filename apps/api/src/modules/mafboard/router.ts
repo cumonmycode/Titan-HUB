@@ -619,7 +619,14 @@ export function createMafboardRouter(resolveDeps: DepsResolver): Hono<Env> {
    */
   router.delete('/v1/me', requireUser, async (c) => {
     const deps = c.get('deps')
-    await deps.repo.deleteUser(c.get('user').id)
+    const user = c.get('user')
+    // Подключение Titan клуба дублирует личную запись этого пользователя: без неё оно ничьё.
+    if (user.titan) {
+      await deps.repo.clearClubTitanConnection(user.titan.connectionId).catch((error: unknown) => {
+        console.warn('[mafboard] подключение Titan клуба не снято при удалении аккаунта:', error)
+      })
+    }
+    await deps.repo.deleteUser(user.id)
     return c.json({ ok: true })
   })
 

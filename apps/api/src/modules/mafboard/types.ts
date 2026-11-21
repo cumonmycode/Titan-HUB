@@ -58,6 +58,24 @@ export interface HostAccess {
   titanShared: boolean
   /** Заявка судьи без пароля GoMafia, которая ждёт президента клуба. */
   request: StoredClubRequest | null
+  /** Запись клуба MafBoard у президента и судьи пула. null — доступа к клубу нет или запись не прочиталась. */
+  mafboardClub: StoredClub | null
+}
+
+/**
+ * Клуб MafBoard: своя запись, на которую ссылаются игры и подключение Titan HUB. Клуб GoMafia —
+ * одно из его подключений; клубы без GoMafia появятся позже.
+ */
+export interface StoredClub {
+  id: string
+  name: string
+  city: string | null
+  /** Клуб GoMafia, подключённый к этому клубу. null — клуб без GoMafia. */
+  gomafiaClubId: number | null
+  /** Подключение Titan Connect клуба. Пока оно дублирует запись президента (`MafboardUser.titan`). */
+  titan: TitanLinkState | null
+  /** Кто подключил Titan. null — подключения нет или подключивший удалил аккаунт. */
+  titanLinkedBy: string | null
 }
 
 /** Судья в пуле клуба GoMafia: резидент, которому президент дал вести игры клуба в MafBoard. */
@@ -255,6 +273,8 @@ export interface StoredGame {
   hostUserId: string | null
   /** Клуб GoMafia; null — личная история ведущего. */
   clubId: number | null
+  /** Клуб MafBoard этой игры. Заполняет хранилище по `clubId`; null — личная история. */
+  clubRef?: string | null
   format: string
   variant: string
   startedAt: Date

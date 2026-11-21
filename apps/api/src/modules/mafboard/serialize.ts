@@ -1,5 +1,5 @@
 import type { GomafiaPlayer } from '../../lib/gomafia.js'
-import type { DeviceSession, ErrorBody, GoMafiaClubJSON, GoMafiaPlayerJSON, HostAccess, LoginTicket, MafboardUser, QrTicket } from './types.js'
+import type { DeviceSession, ErrorBody, GoMafiaClubJSON, GoMafiaPlayerJSON, HostAccess, LoginTicket, MafboardUser, QrTicket, TitanLinkState } from './types.js'
 
 // Перевод внутренних данных в JSON-контракт приложения (docs/MAFBOARD.md).
 
@@ -102,19 +102,36 @@ export function toAccountJSON(user: MafboardUser, access: HostAccess) {
           access: access.club,
         }
       : null,
-    // Ключ клуба наружу не уходит: приложению хватает названия и времени подключения.
-    titan: access.titan
-      ? {
-          club: { name: access.titan.clubName },
-          scopes: access.titan.scopes,
-          linkedAt: access.titan.linkedAt.toISOString(),
-          isShared: access.titanShared,
-        }
-      : null,
+    titan: access.titan ? { ...titanJSON(access.titan), isShared: access.titanShared } : null,
     clubRequest: access.request
       ? { nickname: access.request.nickname, createdAt: access.request.createdAt.toISOString() }
       : null,
+    clubs: clubsJSON(access),
   }
+}
+
+/** Ключ клуба наружу не уходит: приложению хватает названия, прав и времени подключения. */
+function titanJSON(link: TitanLinkState) {
+  return { club: { name: link.clubName }, scopes: link.scopes, linkedAt: link.linkedAt.toISOString() }
+}
+
+/**
+ * Клубы MafBoard пользователя с его ролью. Пока не больше одного — клуб GoMafia, где он президент
+ * (`owner`) или судья пула (`judge`). `titan` — действующее подключение, то же, что в `titan` аккаунта.
+ */
+function clubsJSON(access: HostAccess) {
+  const club = access.mafboardClub
+  if (!club || access.club === 'none') return []
+  return [
+    {
+      id: club.id,
+      name: club.name,
+      city: club.city,
+      role: access.club === 'president' ? 'owner' : 'judge',
+      goMafiaClubID: club.gomafiaClubId,
+      titan: access.titan ? titanJSON(access.titan) : null,
+    },
+  ]
 }
 
 /** Сессии для блока «Сессии» в профиле: текущая первой, остальные — по свежести. */

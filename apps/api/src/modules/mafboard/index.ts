@@ -11,7 +11,7 @@ import { mafboardWebhookUrl, readMafboardConfig, type MafboardConfig } from './c
 import { liveGoMafia, RosterCache } from './gomafia.js'
 import { TitanHubDirectory } from './hubLive.js'
 import { liveTitanConnect, TitanRosterCache } from './titan.js'
-import { ensureMafboardDatabase, runMafboardMigrations } from './migrations.js'
+import { ensureMafboardDatabase, reconcileMafboardClubs, runMafboardMigrations } from './migrations.js'
 import { PgMafboardRepo } from './pgRepo.js'
 import { attachStudioRelay, type StudioRelay } from './relay.js'
 import { createMafboardRouter, type MafboardDeps, type RateLimiter } from './router.js'
@@ -151,6 +151,9 @@ export async function startMafboard(): Promise<void> {
     const database = getClubDb(config.databaseUrl)
     await ensureMafboardDatabase(config.databaseUrl, database)
     await runMafboardMigrations(database)
+    // Клубы дозаполняются при каждом старте: первый раз — из данных до миграции 012, дальше — то,
+    // что могло появиться мимо записи клуба. Права от неё пока не зависят: сбой сверки старту не мешает.
+    await reconcileMafboardClubs(database).catch((error) => console.error('[mafboard] сверка клубов не удалась', error))
     await ensureWebhook(config)
     console.log('🎭 MafBoard: БД и бот готовы')
   } catch (error) {

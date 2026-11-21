@@ -8,6 +8,76 @@ import { databaseName } from './config.js'
 // учёта `_mafboard_migrations`. Миграции только добавляются; применённые не правим.
 // ─────────────────────────────────────────────────────────────────────────────
 
+/** Номер клуба GoMafia из снимка привязки; кривой jsonb даёт NULL, а не ошибку приведения. */
+const SNAPSHOT_CLUB_ID = `CASE WHEN gomafia_club->>'id' ~ '^[1-9][0-9]{0,8}$' THEN (gomafia_club->>'id')::integer END`
+
+/**
+ * Сверка клубов с тем, что уже лежит в базе. Повторяемая: выполняется при каждом старте после
+ * миграций. Она только дозаполняет пустое — существующие название клуба и подключение Titan не
+ * трогает:
+ *  1. Клуб на каждый клуб GoMafia из привязок, пула судей и игр; название и город — из самого
+ *     свежего полного снимка (с президентом), иначе заглушка.
+ *  2. Подключение Titan президента — клубу, у которого подключения ещё нет. Президент — тот, чей
+ *     игрок записан президентом в его же снимке клуба, с привязкой не по заявке (у привязок до пула
+ *     судей способ не записан). Двое считают себя президентами — верим более свежему снимку.
+ *  3. Игры клуба получают ссылку на его запись.
+ * После отката на прежний код она вернёт клубы и ссылки игр, но подключение Titan, которое прежний
+ * код сменил или снял, у клуба останется старым: такое расхождение видно в логе `hostAccess` и
+ * разбирается до того, как Titan начнёт читаться из клуба.
+ */
+export const CLUBS_RECONCILE_SQL = `
+      WITH snap AS (
+        SELECT ${SNAPSHOT_CLUB_ID} AS club_id,
+               NULLIF(btrim(gomafia_club->>'title'), '') AS name,
+               NULLIF(btrim(gomafia_club->>'city'), '') AS city,
+               gomafia_club ? 'presidentID' AS is_full,
+               gomafia_synced_at
+        FROM mb_users
+        WHERE jsonb_typeof(gomafia_club) = 'object'
+      ), linked AS (
+        SELECT DISTINCT ON (club_id) club_id, name, city
+        FROM snap
+        WHERE club_id IS NOT NULL
+        ORDER BY club_id, is_full DESC, gomafia_synced_at DESC NULLS LAST
+      ), ids AS (
+        SELECT club_id FROM linked
+        UNION SELECT club_id FROM mb_club_hosts
+        UNION SELECT club_id FROM mb_games WHERE club_id IS NOT NULL
+      )
+      INSERT INTO mb_clubs (name, city, gomafia_club_id)
+      SELECT COALESCE(linked.name, 'Клуб #' || ids.club_id), linked.city, ids.club_id
+      FROM ids LEFT JOIN linked USING (club_id)
+      ON CONFLICT (gomafia_club_id) DO NOTHING;
+
+      WITH president AS (
+        SELECT DISTINCT ON (club_id) club_id, user_id, titan_link
+        FROM (
+          SELECT ${SNAPSHOT_CLUB_ID} AS club_id, id AS user_id, titan_link, gomafia_synced_at
+          FROM mb_users
+          WHERE gomafia_id IS NOT NULL
+            AND jsonb_typeof(gomafia_club) = 'object'
+            AND gomafia_club->>'presidentID' = gomafia_id::text
+            AND gomafia_link_source IS DISTINCT FROM 'club'
+        ) claimed
+        WHERE club_id IS NOT NULL
+        ORDER BY club_id, gomafia_synced_at DESC NULLS LAST
+      )
+      UPDATE mb_clubs
+      SET titan_link = president.titan_link, titan_linked_by = president.user_id, updated_at = now()
+      FROM president
+      WHERE mb_clubs.gomafia_club_id = president.club_id
+        AND mb_clubs.titan_link IS NULL
+        AND jsonb_typeof(president.titan_link) = 'object'
+        AND president.titan_link ? 'tokenSealed';
+
+      UPDATE mb_games
+      SET club_ref = mb_clubs.id
+      FROM mb_clubs
+      WHERE mb_games.club_id IS NOT NULL
+        AND mb_clubs.gomafia_club_id = mb_games.club_id
+        AND mb_games.club_ref IS DISTINCT FROM mb_clubs.id;
+`
+
 export const MAFBOARD_MIGRATIONS: readonly { id: string; sql: string }[] = [
   {
     id: '001_mafboard_init',
@@ -302,6 +372,29 @@ export const MAFBOARD_MIGRATIONS: readonly { id: string; sql: string }[] = [
       CREATE INDEX IF NOT EXISTS mb_club_requests_nickname ON mb_club_requests (lower(nickname));
     `,
   },
+  {
+    // Клуб — своя запись MafBoard: на неё ссылаются игры и подключение Titan HUB, а клуб GoMafia —
+    // одно из её подключений (клубы без GoMafia появятся позже). Миграция только добавляет:
+    // mb_games.club_id и mb_users.titan_link остаются, прежний код поверх этой схемы работает.
+    // Здесь только схема: данные заполняет сверка (reconcileMafboardClubs) отдельным шагом, чтобы
+    // её сбой на кривых данных не откатил таблицу, от которой зависит приём игр.
+    id: '012_mafboard_clubs',
+    sql: `
+      CREATE TABLE IF NOT EXISTS mb_clubs (
+        id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        name            text NOT NULL,
+        city            text,
+        gomafia_club_id integer UNIQUE,
+        titan_link      jsonb,
+        titan_linked_by uuid REFERENCES mb_users(id) ON DELETE SET NULL,
+        owner_user_id   uuid REFERENCES mb_users(id) ON DELETE SET NULL,
+        created_at      timestamptz NOT NULL DEFAULT now(),
+        updated_at      timestamptz NOT NULL DEFAULT now()
+      );
+      ALTER TABLE mb_games ADD COLUMN IF NOT EXISTS club_ref uuid REFERENCES mb_clubs(id) ON DELETE SET NULL;
+      CREATE INDEX IF NOT EXISTS mb_games_club_ref_idx ON mb_games (club_ref, finished_at) WHERE club_ref IS NOT NULL;
+    `,
+  },
 ]
 
 function rows<T = Record<string, unknown>>(res: unknown): T[] {
@@ -342,4 +435,11 @@ export async function runMafboardMigrations(target: Database): Promise<void> {
       await tx.execute(sql`INSERT INTO _mafboard_migrations (id) VALUES (${migration.id})`)
     })
   }
+}
+
+/** Сверить клубы с привязками, пулом судей и играми (`CLUBS_RECONCILE_SQL`). Повтор ничего не меняет. */
+export async function reconcileMafboardClubs(target: Database): Promise<void> {
+  await target.transaction(async (tx) => {
+    await tx.execute(sql.raw(CLUBS_RECONCILE_SQL))
+  })
 }
