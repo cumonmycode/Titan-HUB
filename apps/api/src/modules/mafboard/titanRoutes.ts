@@ -49,7 +49,7 @@ function titanFailure(c: Context, error: unknown) {
   return fail(c, 502, 'titan_unavailable', 'Titan HUB не отвечает, попробуйте позже')
 }
 
-function tokenOf(c: Context<MafboardEnv>, link: TitanLinkState): string | null {
+export function tokenOf(c: Context<MafboardEnv>, link: TitanLinkState): string | null {
   const secret = openSecrets(c.get('deps').config.studioSecretsKey, link.tokenSealed)
   return typeof secret?.['token'] === 'string' ? secret['token'] : null
 }
@@ -71,7 +71,7 @@ async function freshAccess(c: Context<MafboardEnv>): Promise<{ user: MafboardUse
  * Права здесь — из `requireUser`, без освежения клуба: чтение клиентов ведёт себя как раньше, снимок
  * GoMafia освежается раз в сутки. Освежается только то, что меняет общее подключение (`freshAccess`).
  */
-async function clubRoster(c: Context<MafboardEnv>) {
+export async function clubRoster(c: Context<MafboardEnv>) {
   const deps = c.get('deps')
   const link = c.get('access').titan
   if (!link) return fail(c, 409, 'titan_not_linked', 'Клуб Titan HUB подключает президент клуба')
@@ -86,7 +86,7 @@ async function clubRoster(c: Context<MafboardEnv>) {
 }
 
 /** Сначала резиденты, затем по нику — так ведущему проще найти своих. */
-function byClubOrder(a: TitanClient, b: TitanClient): number {
+export function byClubOrder(a: TitanClient, b: TitanClient): number {
   return Number(b.isResident) - Number(a.isResident) || a.nickname.localeCompare(b.nickname, 'ru')
 }
 

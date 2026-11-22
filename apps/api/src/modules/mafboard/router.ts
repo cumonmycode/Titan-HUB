@@ -14,6 +14,7 @@ import type { ClubHub } from './hub.js'
 import type { TitanConnectGateway, TitanRosterCache } from './titan.js'
 import { registerTitanRoutes, releaseTitanOnAccountDeletion } from './titanRoutes.js'
 import { hostAccess, registerClubHostRoutes } from './clubHosts.js'
+import { accountPhotoURL, registerClubPlayerRoutes } from './clubPlayers.js'
 import { GomafiaTakenError, type MafboardRepo } from './repo.js'
 import type { AimAccounts, TournamentSource } from './aim.js'
 import { gomafiaFailure, type GoMafiaSessions } from './gomafiaSessions.js'
@@ -567,7 +568,8 @@ export function createMafboardRouter(resolveDeps: DepsResolver): Hono<Env> {
         if (fresh) await deps.repo.setGomafiaLink(user.id, fresh, deps.now())
       })
     }
-    return c.json(toAccountJSON(user, c.get('access')))
+    const access = c.get('access')
+    return c.json(toAccountJSON(user, access, accountPhotoURL(c, user, access)))
   })
 
   /**
@@ -698,6 +700,7 @@ export function createMafboardRouter(resolveDeps: DepsResolver): Hono<Env> {
 
   registerTitanRoutes(router, requireUser)
   registerClubHostRoutes(router, requireUser)
+  registerClubPlayerRoutes(router, requireUser)
 
   // ─── История игр ────────────────────────────────────────────────────────────
 

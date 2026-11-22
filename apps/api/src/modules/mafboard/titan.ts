@@ -176,6 +176,11 @@ export class TitanRosterCache {
     }
   }
 
+  /** Последний прочитанный состав клуба без запроса в Titan, сколько бы ему ни было лет; null — ещё не читали. */
+  peek(apiBase: string): TitanClient[] | null {
+    return this.entries.get(apiBase)?.clients ?? null
+  }
+
   forget(apiBase: string): void {
     this.entries.delete(apiBase)
   }
@@ -212,7 +217,7 @@ export function titanPlayerID(apiBase: string, clientId: string): string {
 
 export const TITAN_PLAYER_ID = /^6d616662-7463-8000-8000-[0-9a-f]{12}$/i
 
-function goMafiaNumber(raw: string | null): number | null {
+export function goMafiaNumber(raw: string | null): number | null {
   return raw != null && /^\d{1,12}$/.test(raw) ? Number(raw) : null
 }
 

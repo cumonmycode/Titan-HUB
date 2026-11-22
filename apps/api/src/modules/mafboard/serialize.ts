@@ -79,10 +79,14 @@ export function toClubJSON(club: { id: string; title: string | null; city: strin
 
 // ─── Аккаунт и вход ──────────────────────────────────────────────────────────
 
-/** `UserAccount` приложения. `access` — права клуба и клуб Titan с учётом пула судей (clubHosts.ts). */
-export function toAccountJSON(user: MafboardUser, access: HostAccess) {
+/**
+ * `UserAccount` приложения. `access` — права клуба и клуб Titan с учётом пула судей (clubHosts.ts).
+ * `photoURL` — фото пользователя по правилу игроков клуба (clubPlayers.ts); не передано — аватар GoMafia.
+ */
+export function toAccountJSON(user: MafboardUser, access: HostAccess, photoURL?: string | null) {
   return {
     id: user.id,
+    photoURL: photoURL === undefined ? (user.gomafia?.player.avatarURL ?? null) : photoURL,
     telegram: {
       id: user.tgId,
       username: user.tgUsername,

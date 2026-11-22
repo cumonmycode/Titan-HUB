@@ -61,7 +61,7 @@ apps/api/test/mafboard/ — тесты (node:test через tsx), хранил�
 | `POST /v1/auth/logout` `{refreshToken}` | — | Завершает сессию устройства: её refresh и access перестают действовать |
 | `GET /v1/me/sessions` | Bearer | `{sessions: [{id, deviceName, platform, createdAt, lastUsedAt, isCurrent}]}` — устройства, где выполнен вход; текущее (по сессии access-токена) первым, остальные по `lastUsedAt` |
 | `DELETE /v1/me/sessions/:id` | Bearer | Завершить сессию другого устройства → `{ok: true}`. 409 `current_session` — это текущее устройство (для него `logout`), 404 — нет такой активной сессии у пользователя |
-| `GET /v1/me` | Bearer | `UserAccount`. Профиль GoMafia старше суток (или с неизвестным президентом клуба) обновляется в фоне. `goMafia`: `source: password \| club`, `access: president \| host \| none`, `club.presidentID`; `titan.isShared`; `clubRequest: {nickname, createdAt} \| null` — см. «Судьи клуба»; `clubs` — см. «Клубы» |
+| `GET /v1/me` | Bearer | `UserAccount`. Профиль GoMafia старше суток (или с неизвестным президентом клуба) обновляется в фоне. `goMafia`: `source: password \| club`, `access: president \| host \| none`, `club.presidentID`; `titan.isShared`; `clubRequest: {nickname, createdAt} \| null` — см. «Судьи клуба»; `clubs` — см. «Клубы»; `photoURL` — см. «Игроки клуба» |
 | `POST /v1/me/gomafia` `{login, password}` | Bearer | Привязать GoMafia: вход в GoMafia проверяет владение, пароль GoMafia не хранится. Если тем же паролем открывается АИМ (admin.gomafia.pro), сохраняется вход в АИМ — для турниров GoMafia. 422 `bad_credentials`, 409 `gomafia_taken`. Привязку того же игрока по заявке (без пароля) у другого аккаунта вход паролем снимает |
 | `DELETE /v1/me/gomafia` | Bearer | Отвязать — останутся только фанки; сохранённый вход в АИМ стирается |
 | `GET /v1/me/gomafia/aim` | Bearer | `{connected}` — подключён ли АИМ |
@@ -89,6 +89,7 @@ apps/api/test/mafboard/ — тесты (node:test через tsx), хранил�
 | `DELETE /v1/club/requests/:id` | Bearer, президент клуба | Отклонить заявку. Ответ — как у `GET` |
 | `PUT /v1/me/club-request` `{nickname}` | Bearer (5 в час) | Заявка судьи, который не помнит пароль GoMafia: ник, под которым он играет → `UserAccount` с `clubRequest`. Президент клуба с таким резидентом узнаёт о ней в боте. 409 `gomafia_linked` |
 | `DELETE /v1/me/club-request` | Bearer | Отозвать заявку → `UserAccount` |
+| `GET /v1/club/players` | Bearer, президент клуба или судья пула (60 в минуту) | `{club: {id, name}, players: [ClubPlayer], partial}` — состав клуба одним списком, см. «Игроки клуба». 403 `club_required` / `host_access_required` |
 | `GET /v1/titan/players` | Bearer (60 в минуту) | `{club: {name}, players: [TitanPlayer]}` — все клиенты клуба без удалённых, резиденты первыми. 409 `titan_not_linked`, 409 `titan_revoked` — клуб отключил MafBoard в HUB |
 | `PUT /v1/titan/players/:id/gomafia` `{goMafiaID: число \| null}` | Bearer (300 в час) | Ручное сопоставление клиента с GoMafia → `TitanPlayer`. `null` — у клиента нет GoMafia (номер в HUB неверный). 404 — нет такого клиента или игрока GoMafia |
 | `DELETE /v1/titan/players/:id/gomafia` | Bearer | Снять сопоставление: снова действует номер GoMafia из HUB |
@@ -163,6 +164,26 @@ WebSocket идёт мимо Hono: обработчик `upgrade` на HTTP-се�
 в GoMafia); без GoMafia — `6d616662-7463-8000-8000-` + первые 12 hex SHA-256(`apiBase|id`): постоянный для
 клиента клуба на всех устройствах. Ручное сопоставление (`mb_titan_matches`, ключ `apiBase + id клиента`) общее
 для всех ведущих клуба и важнее номера из HUB: ник в GoMafia часто другой, а в POS бывает чужой номер.
+
+### Игроки клуба (`clubPlayers.ts`)
+
+`GET /v1/club/players` — клиенты клуба Titan HUB (если клуб подключён) и резиденты клуба GoMafia одним списком,
+без повторов: клиент с номером GoMafia (из HUB или ручного сопоставления) и резидент с тем же номером — один игрок.
+Сначала клиенты Titan (резиденты, затем по нику), потом резиденты GoMafia, которых среди клиентов нет (по ELO).
+
+`ClubPlayer`: `playerID` (те же правила, что у `TitanPlayer`), `nickname`, `fullName`, `photoURL`, `titanClientID`,
+`goMafiaID`, `isResident`, `statusLabel`, `isVerified` (у игрока есть аккаунт MafBoard), `elo` (из GoMafia).
+
+Фото у игрока одно: своё фото клиента в HUB, иначе аватар его игрока GoMafia (Titan отдаёт `photoUrl` уже в порядке
+HUB → Telegram → GoMafia из HUB). Фото HUB при замене получает новый адрес, у аватара GoMafia адрес постоянный —
+поэтому MafBoard Studio перепроверяет фото с диска условным запросом раз за запуск.
+
+Один источник не ответил — отдаётся второй и `partial: true`; оба (или GoMafia, когда Titan не подключён) — ошибка,
+как у прежних ручек. Кэш — кэши составов Titan и GoMafia (5 минут).
+
+`UserAccount.photoURL` — фото самого пользователя по тому же правилу: клиент Titan его клуба с его номером GoMafia
+и своим фото, иначе аватар GoMafia, без GoMafia — `null`. В `GET /v1/me` состав Titan берётся только из кэша: его
+нет — читается в фоне, а в ответе пока аватар GoMafia. В остальных ответах с аккаунтом — аватар GoMafia.
 
 ### Судьи клуба (`clubHosts.ts`)
 
