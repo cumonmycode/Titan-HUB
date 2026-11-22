@@ -15,6 +15,8 @@ import type { StoredClubApplication } from './types.js'
 // ─────────────────────────────────────────────────────────────────────────────
 
 const APPLICATIONS_PER_DAY = 3
+/** Через три дня без ответа заявку можно подать заново. */
+const STALE_AFTER_MS = 3 * 24 * 60 * 60_000
 
 const applicationSchema = z.object({
   name: z.string().trim().min(2).max(60),
@@ -44,17 +46,28 @@ export function registerClubApplicationRoutes(router: Hono<MafboardEnv>, require
       return fail(c, 429, 'rate_limited', 'Слишком много заявок, попробуйте завтра')
     }
     const input = c.req.valid('json')
-    const created = await deps.repo.createClubApplication({
+    const application = () => ({
       id: randomUUID(),
       userId: user.id,
       name: input.name,
       city: input.city || null,
-      status: 'pending',
+      status: 'pending' as const,
       createdAt: deps.now(),
       decidedAt: null,
       clubId: null,
     })
-    if (created === 'pending_exists') return fail(c, 409, 'application_pending', 'Ваша заявка на клуб уже на рассмотрении')
+    let created = await deps.repo.createClubApplication(application())
+    if (created === 'pending_exists') {
+      // Заявка без ответа дольше STALE_AFTER_MS (сообщение владельцу не дошло, его не увидели) не держит человека:
+      // она закрывается, и уходит новая.
+      const stale = await deps.repo.latestClubApplication(user.id)
+      if (!stale || stale.status !== 'pending' || deps.now().getTime() - stale.createdAt.getTime() < STALE_AFTER_MS) {
+        return fail(c, 409, 'application_pending', 'Ваша заявка на клуб уже на рассмотрении')
+      }
+      await deps.repo.rejectClubApplication(stale.id, deps.now())
+      created = await deps.repo.createClubApplication(application())
+      if (created === 'pending_exists') return fail(c, 409, 'application_pending', 'Ваша заявка на клуб уже на рассмотрении')
+    }
 
     const place = created.city ? `, ${created.city}` : ''
     const text = `🆕 Заявка на клуб «${created.name}»${place}\nОт: ${telegramName(user) || 'без имени'}`

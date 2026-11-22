@@ -543,7 +543,12 @@ describe('PgMafboardRepo: клубы', { skip: url ? false : 'нет MAFBOARD_TE
     await repo.createPlayerLinkToken(token)
     await repo.createPlayerLinkToken({ ...token, tokenHash: 'q'.repeat(64), playerId: tiger.playerId })
     assert.equal(await repo.usePlayerLinkToken('z'.repeat(64), 96001, NOW), null)
-    assert.deepEqual(await repo.usePlayerLinkToken('p'.repeat(64), 96001, NOW), { clubId: club.id, playerId: raven.playerId, tgId: 96001, linkedAt: NOW })
+    assert.deepEqual(await repo.usePlayerLinkToken('p'.repeat(64), 96001, NOW), { clubId: club.id, playerId: raven.playerId, tgId: 96001, linkedAt: NOW, previousTgId: null })
+    // Тот же игрок по новой ссылке у другого Telegram — прежний возвращается, чтобы его предупредить.
+    await repo.createPlayerLinkToken({ ...token, tokenHash: 'r'.repeat(64) })
+    assert.equal((await repo.usePlayerLinkToken('r'.repeat(64), 96003, NOW) as { previousTgId: number | null }).previousTgId, 96001)
+    await repo.createPlayerLinkToken({ ...token, tokenHash: 's'.repeat(64) })
+    assert.equal((await repo.usePlayerLinkToken('s'.repeat(64), 96001, NOW) as { previousTgId: number | null }).previousTgId, 96003)
     assert.equal(await repo.usePlayerLinkToken('p'.repeat(64), 96002, NOW), 'expired')
     // Тот же Telegram по другой ссылке того же клуба — прежняя привязка снимается.
     assert.equal((await repo.usePlayerLinkToken('q'.repeat(64), 96001, NOW)) !== null, true)

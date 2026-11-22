@@ -115,8 +115,9 @@ export interface MafboardRepo {
   /**
    * Использовать ссылку игрока: токен гасится, игрок клуба привязывается к Telegram (прежняя привязка
    * этого Telegram в том же клубе снимается). 'expired' — ссылка использована или истекла, null — нет такой.
+   * `previousTgId` — другой Telegram, у которого игрок был привязан до этого (его стоит предупредить).
    */
-  usePlayerLinkToken(tokenHash: string, tgId: number, at: Date): Promise<StoredPlayerLink | 'expired' | null>
+  usePlayerLinkToken(tokenHash: string, tgId: number, at: Date): Promise<(StoredPlayerLink & { previousTgId: number | null }) | 'expired' | null>
   playerLinksByTg(tgId: number): Promise<StoredPlayerLink[]>
 
   // ─── Пул судей клуба ───────────────────────────────────────────────────────

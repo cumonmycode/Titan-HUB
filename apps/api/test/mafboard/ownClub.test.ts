@@ -128,6 +128,18 @@ describe('Заявка на клуб без подключений', () => {
     assert.equal((await apply(ctx, session.accessToken, 'Новый клуб')).status, 201)
   })
 
+  it('заявка без ответа дольше трёх дней не держит: новая закрывает её', async () => {
+    const ctx = createTestContext()
+    const session = await signIn(ctx, OWNER_TG)
+    const first = await apply(ctx, session.accessToken)
+    ctx.clock.now = new Date(ctx.clock.now.getTime() + 2 * 24 * 3600_000)
+    assert.equal((await apply(ctx, session.accessToken, 'Снова')).status, 409)
+    ctx.clock.now = new Date(ctx.clock.now.getTime() + 2 * 24 * 3600_000)
+    const again = await apply(ctx, session.accessToken, 'Снова')
+    assert.equal(again.status, 201)
+    assert.equal(ctx.repo.applications.get(first.json.application.id)?.status, 'rejected')
+  })
+
   it('без MAFBOARD_ADMIN_TG_ID заявки не принимаются', async () => {
     const ctx = createTestContext({ config: { ...config, adminTgId: null } })
     const session = await signIn(ctx, OWNER_TG)
@@ -252,6 +264,19 @@ describe('Фото игроков в MafBoard', () => {
     const list = await call(ctx, 'GET', `/v1/clubs/${owner.clubId}/players`, { token: owner.accessToken })
     assert.equal(list.json.players[0].photoURL, `https://media.mafboard.test/photo-${ctx.images.stored.length}.jpg`)
     assert.equal(ctx.repo.photos[0]?.setByTg, PLAYER_TG.id)
+
+    // Новую ссылку на того же игрока открыл другой Telegram — прежний узнаёт об этом.
+    const second = await call(ctx, 'POST', `/v1/clubs/${owner.clubId}/players/${id}/link`, { token: judge.accessToken })
+    await handleBotUpdate(message(STRANGER_TG, { text: `/start ${new URL(second.json.url).searchParams.get('start')}` }) as any, bot(ctx))
+    assert.ok(ctx.messenger.sent.some((sent) => sent.chatId === PLAYER_TG.id && sent.text.includes('открыл другой аккаунт')))
+
+    // Убранный в архив игрок фото из бота больше не получает.
+    await call(ctx, 'DELETE', `/v1/clubs/${owner.clubId}/players/${id}`, { token: owner.accessToken })
+    const before = ctx.repo.photos.length
+    ctx.messenger.files.set('later', JPEG_BYTES)
+    await handleBotUpdate(message(STRANGER_TG, { photo: [{ file_id: 'later', width: 800, height: 800 }] }) as any, bot(ctx))
+    assert.ok(ctx.messenger.last?.text.includes('ссылку'))
+    assert.equal(ctx.repo.photos.length, before)
   })
 
   it('Titan HUB по клубу из адреса: состав и сопоставление клиента; у клуба без Titan — 409', async () => {

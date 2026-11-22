@@ -474,11 +474,12 @@ export class MemoryRepo implements MafboardRepo {
     if (token.usedAt || token.expiresAt <= at) return 'expired' as const
     this.linkTokens.set(tokenHash, { ...token, usedAt: at })
     const link: StoredPlayerLink = { clubId: token.clubId, playerId: token.playerId, tgId, linkedAt: at }
+    const previous = this.playerLinks.find((row) => row.clubId === token.clubId && row.playerId === token.playerId)?.tgId ?? null
     this.playerLinks = [
       ...this.playerLinks.filter((row) => !(row.clubId === token.clubId && (row.playerId === token.playerId || row.tgId === tgId))),
       link,
     ]
-    return link
+    return { ...link, previousTgId: previous != null && previous !== tgId ? previous : null }
   }
 
   async playerLinksByTg(tgId: number) {

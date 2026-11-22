@@ -701,12 +701,15 @@ export class PgMafboardRepo implements MafboardRepo {
     `)
   }
 
-  async usePlayerLinkToken(tokenHash: string, tgId: number, at: Date): Promise<StoredPlayerLink | 'expired' | null> {
+  async usePlayerLinkToken(tokenHash: string, tgId: number, at: Date): Promise<(StoredPlayerLink & { previousTgId: number | null }) | 'expired' | null> {
+    // Все части запроса видят одни и те же данные до изменений: `prev` — привязка игрока до этой ссылки.
     const row = await this.one(sql`
       WITH tok AS (
         UPDATE mb_player_link_tokens SET used_at = ${iso(at)}::timestamptz
         WHERE token_hash = ${tokenHash} AND used_at IS NULL AND expires_at > ${iso(at)}::timestamptz
         RETURNING club_id, player_id
+      ), prev AS (
+        SELECT l.tg_id FROM mb_player_links l JOIN tok ON l.club_id = tok.club_id AND l.player_id = tok.player_id
       ), dropped AS (
         DELETE FROM mb_player_links l USING tok
         WHERE l.club_id = tok.club_id AND l.tg_id = ${tgId} AND l.player_id <> tok.player_id
@@ -715,9 +718,15 @@ export class PgMafboardRepo implements MafboardRepo {
         SELECT club_id, player_id, ${tgId}, ${iso(at)}::timestamptz FROM tok
         ON CONFLICT (club_id, player_id) DO UPDATE SET tg_id = EXCLUDED.tg_id, linked_at = EXCLUDED.linked_at
       )
-      SELECT club_id, player_id FROM tok
+      SELECT club_id, player_id, (SELECT tg_id FROM prev) AS previous_tg FROM tok
     `)
-    if (row) return { clubId: String(row['club_id']), playerId: String(row['player_id']), tgId, linkedAt: at }
+    if (row) {
+      const previous = num(row['previous_tg'])
+      return {
+        clubId: String(row['club_id']), playerId: String(row['player_id']), tgId, linkedAt: at,
+        previousTgId: previous != null && previous !== tgId ? previous : null,
+      }
+    }
     const known = await this.one(sql`SELECT 1 AS found FROM mb_player_link_tokens WHERE token_hash = ${tokenHash}`)
     return known ? 'expired' : null
   }

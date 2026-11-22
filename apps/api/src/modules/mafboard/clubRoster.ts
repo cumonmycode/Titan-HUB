@@ -94,7 +94,8 @@ export function registerClubRosterRoutes(router: Hono<MafboardEnv>, requireUser:
     return c.json({ ok: true })
   })
 
-  router.put('/v1/clubs/:id/players/:playerID/photo', photoBodyLimit, requireUser, async (c) => {
+  // Сначала вход, потом тело: без токена 8 МБ даже не читаются.
+  router.put('/v1/clubs/:id/players/:playerID/photo', requireUser, photoBodyLimit, async (c) => {
     const membership = membershipOf(c)
     if (membership instanceof Response) return membership
     const deps = c.get('deps')

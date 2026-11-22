@@ -2,6 +2,7 @@ import type { ReplyMarkup } from '../../lib/tgBot.js'
 import type { TgCallbackQuery, TgMessage, TgUser } from '../tg/types.js'
 import type { BotMessenger } from './bot.js'
 import type { PhotoStore } from './photos.js'
+import { CLUB_PLAYER_ID } from './playerIds.js'
 import type { MafboardRepo } from './repo.js'
 import type { RateLimiter } from './router.js'
 import { sha256 } from './tokens.js'
@@ -43,6 +44,10 @@ const TEXT = {
     `Готово! Вы — ${nickname ? `игрок «${nickname}»` : 'игрок'} клуба «${club}».\n\n` +
     'Пришлите сюда своё фото — оно появится в MafBoard и в эфире клуба. Сменить фото можно в любой момент: просто пришлите новое.',
   noPlayer: 'Фото сюда присылают игроки клуба. Попросите судью клуба ссылку «для игрока» и откройте её.',
+  playerArchived: 'Этого игрока убрали из клуба. Если это ошибка — напишите судье клуба.',
+  relinked: (club: string, nickname: string | null) =>
+    `Ссылку на ${nickname ? `игрока «${nickname}»` : 'вашего игрока'} клуба «${club}» открыл другой аккаунт Telegram — фото этого игрока теперь присылает он. ` +
+    'Если это не вы, попросите судью клуба новую ссылку.',
   photoHint: 'Пришлите фото одним сообщением — оно станет вашим фото в клубе.',
   tooMany: 'Слишком много попыток, попробуйте через час.',
   photoFailed: 'Не удалось получить фото. Попробуйте прислать его ещё раз.',
@@ -97,13 +102,25 @@ export async function onPlayerLinkStart(from: TgUser, token: string, deps: ClubB
   if (link === null) return deps.messenger.send(from.id, TEXT.linkMissing)
   if (link === 'expired') return deps.messenger.send(from.id, TEXT.linkExpired)
   const [club, own] = await Promise.all([deps.repo.clubById(link.clubId), deps.repo.clubPlayers(link.clubId, true)])
-  const nickname = own.find((player) => player.playerId === link.playerId)?.nickname ?? null
-  await deps.messenger.send(from.id, TEXT.linked(club?.name ?? 'клуба', nickname))
+  const player = own.find((row) => row.playerId === link.playerId)
+  if (player?.archivedAt) return deps.messenger.send(from.id, TEXT.playerArchived)
+  const clubName = club?.name ?? 'клуба'
+  await deps.messenger.send(from.id, TEXT.linked(clubName, player?.nickname ?? null))
+  // Ссылку на уже привязанного игрока открыл другой Telegram — прежнего предупреждаем, тихо привязку не забираем.
+  if (link.previousTgId != null) await deps.messenger.send(link.previousTgId, TEXT.relinked(clubName, player?.nickname ?? null))
+}
+
+/** Привязки к действующим игрокам: свой игрок клуба, убранный в архив, фото больше не получает. */
+async function activeLinks(deps: ClubBotDeps, tgId: number) {
+  const links = await deps.repo.playerLinksByTg(tgId)
+  const clubIds = [...new Set(links.filter((link) => CLUB_PLAYER_ID.test(link.playerId)).map((link) => link.clubId))]
+  const active = new Set((await Promise.all(clubIds.map((id) => deps.repo.clubPlayers(id, false)))).flat().map((p) => `${p.clubId}|${p.playerId}`))
+  return links.filter((link) => !CLUB_PLAYER_ID.test(link.playerId) || active.has(`${link.clubId}|${link.playerId}`))
 }
 
 /** `/photo` — подсказка привязанному игроку, остальным — как получить ссылку. */
 export async function onPhotoCommand(from: TgUser, deps: ClubBotDeps): Promise<void> {
-  const links = await deps.repo.playerLinksByTg(from.id)
+  const links = await activeLinks(deps, from.id)
   await deps.messenger.send(from.id, links.length > 0 ? TEXT.photoHint : TEXT.noPlayer)
 }
 
@@ -118,7 +135,7 @@ export function pickPhotoSize<T extends { file_id: string; width?: number; heigh
 
 /** Фото от игрока: ставится ему во всех клубах, где этот Telegram привязан. */
 export async function onPlayerPhoto(message: TgMessage, from: TgUser, deps: ClubBotDeps): Promise<void> {
-  const links = await deps.repo.playerLinksByTg(from.id)
+  const links = await activeLinks(deps, from.id)
   if (links.length === 0) return deps.messenger.send(from.id, TEXT.noPlayer)
   if (!(await deps.limiter.hit(`mb:player:photo:${from.id}`, PHOTOS_PER_HOUR, 3600))) {
     return deps.messenger.send(from.id, TEXT.tooMany)
