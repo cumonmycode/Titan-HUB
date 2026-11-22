@@ -2,6 +2,7 @@ import type { Context, Hono, MiddlewareHandler } from 'hono'
 import { z } from 'zod'
 import type { GomafiaPlayer } from '../../lib/gomafia.js'
 import { GoMafiaLoginRequired, GoMafiaUnavailable } from './gomafiaSessions.js'
+import { memberClubs } from './clubAccess.js'
 import { GomafiaTakenError, type MafboardRepo } from './repo.js'
 import type { MafboardDeps, MafboardEnv } from './router.js'
 import { errorBody, toAccountJSON, toPlayerJSON } from './serialize.js'
@@ -48,9 +49,15 @@ export function isClubPresident(user: MafboardUser): boolean {
  * Запись клуба не прочиталась — действует копия подключения в записи президента, как до клубов.
  */
 export async function hostAccess(repo: MafboardRepo, user: MafboardUser): Promise<HostAccess> {
+  const base = await goMafiaAccess(repo, user)
+  return { ...base, clubs: await memberClubs(repo, user.id, base) }
+}
+
+/** Права в клубе GoMafia — без записей членства (их добавляет `hostAccess`). */
+async function goMafiaAccess(repo: MafboardRepo, user: MafboardUser): Promise<Omit<HostAccess, 'clubs'>> {
   const link = user.gomafia
   if (!link) return { club: 'none', titan: null, titanShared: false, request: await repo.clubRequest(user.id), mafboardClub: null }
-  const none: HostAccess = { club: 'none', titan: null, titanShared: false, request: null, mafboardClub: null }
+  const none = { club: 'none', titan: null, titanShared: false, request: null, mafboardClub: null } as const
   const club = link.club
   if (!club) return none
   if (isClubPresident(user)) {

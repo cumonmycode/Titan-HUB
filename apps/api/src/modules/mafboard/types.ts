@@ -60,6 +60,8 @@ export interface HostAccess {
   request: StoredClubRequest | null
   /** Запись клуба MafBoard у президента и судьи пула. null — доступа к клубу нет или запись не прочиталась. */
   mafboardClub: StoredClub | null
+  /** Все клубы пользователя с ролью: клуб GoMafia первым, затем клубы по записям членства (clubAccess.ts). */
+  clubs: { club: StoredClub; role: ClubRole; titan: TitanLinkState | null }[]
 }
 
 /**
@@ -76,6 +78,31 @@ export interface StoredClub {
   titan: TitanLinkState | null
   /** Кто подключил Titan. null — подключения нет или подключивший удалил аккаунт. */
   titanLinkedBy: string | null
+  /** Владелец клуба без GoMafia (создал его кодом Titan Connect). У клуба GoMafia владелец — его президент. */
+  ownerUserId?: string | null
+}
+
+/** Роль в клубе MafBoard: владелец управляет клубом и приглашает судей, судья ведёт игры клуба. */
+export type ClubRole = 'owner' | 'judge'
+
+/** Запись членства в клубе: владелец клуба без GoMafia или судья, вступивший по приглашению. */
+export interface StoredClubMember {
+  clubId: string
+  userId: string
+  role: ClubRole
+  addedBy: string | null
+  addedAt: Date
+}
+
+/** Ссылка-приглашение в клуб. Хранится только хэш токена: сама ссылка есть только у владельца. */
+export interface StoredClubInvite {
+  id: string
+  clubId: string
+  tokenHash: string
+  createdBy: string | null
+  createdAt: Date
+  expiresAt: Date
+  revokedAt: Date | null
 }
 
 /** Судья в пуле клуба GoMafia: резидент, которому президент дал вести игры клуба в MafBoard. */

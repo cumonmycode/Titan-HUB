@@ -226,8 +226,9 @@ describe('PgMafboardRepo: клубы', { skip: url ? false : 'нет MAFBOARD_TE
     id, nickname: `игрок-${id}`, fullName: null, avatarURL: null, elo: null, clubID, clubTitle: null, city: null,
     tournamentsPlayed: null, isInHostClub: false, isVerified: false,
   })
+  // Один клуб Titan HUB — один клуб MafBoard (уникальный apiBase): у каждого подключения свой адрес.
   const titan = (connectionId: string) => ({
-    apiBase: 'https://club.titanpos.test/api/connect/v1', clubName: 'TITAN', connectionId, scopes: ['clients:read'],
+    apiBase: `https://${connectionId}.titanpos.test/api/connect/v1`, clubName: 'TITAN', connectionId, scopes: ['clients:read'],
     tokenSealed: `sealed-${connectionId}`, linkedAt: NOW,
   })
   const newUser = async () => {
@@ -422,5 +423,67 @@ describe('PgMafboardRepo: клубы', { skip: url ? false : 'нет MAFBOARD_TE
     assert.equal(await clubRef(game.id), null)
     assert.equal(await repo.insertGame({ ...game, id: '00000000-0000-4000-8000-000000000852', clubId: null }), 'inserted')
     assert.equal(await clubRef('00000000-0000-4000-8000-000000000852'), null)
+  })
+
+  // ─── Клубы без GoMafia, члены и приглашения (миграция 013) ─────────────────
+
+  it('клуб по Titan: владелец — член клуба; второй клуб на тот же HUB не создаётся', async () => {
+    const boss = await newUser()
+    const link = { ...titan('conn-club-91'), apiBase: 'https://club91.titanpos.test/api/connect/v1' }
+    const club = await repo.createTitanClub({ name: 'Клуб 91', titan: link, ownerUserId: boss.id, at: NOW })
+    assert.notEqual(club, 'exists')
+    if (club === 'exists') return
+    assert.equal(club.ownerUserId, boss.id)
+    assert.equal(club.gomafiaClubId, null)
+    assert.deepEqual((await repo.membershipsOf(boss.id)).map((m) => [m.clubId, m.role]), [[club.id, 'owner']])
+    assert.equal((await repo.clubById(club.id))?.titan?.connectionId, 'conn-club-91')
+
+    const other = await newUser()
+    assert.equal(await repo.createTitanClub({ name: 'Дубль', titan: { ...link, connectionId: 'conn-club-91b' }, ownerUserId: other.id, at: NOW }), 'exists')
+    assert.deepEqual(await repo.membershipsOf(other.id), [])
+  })
+
+  it('члены клуба: добавление без повтора, удаление, уходят вместе с аккаунтом', async () => {
+    const boss = await newUser()
+    const club = await repo.createTitanClub({ name: 'Клуб 92', titan: { ...titan('conn-92'), apiBase: 'https://club92.titanpos.test/api/connect/v1' }, ownerUserId: boss.id, at: NOW })
+    if (club === 'exists') throw new Error('клуб не создан')
+    const judge = await newUser()
+    await repo.addClubMember({ clubId: club.id, userId: judge.id, role: 'judge', addedBy: boss.id, addedAt: SOON })
+    await repo.addClubMember({ clubId: club.id, userId: judge.id, role: 'owner', addedBy: null, addedAt: SOON })
+    assert.deepEqual((await repo.clubMembers(club.id)).map((m) => m.role), ['owner', 'judge'])
+    assert.equal(await repo.removeClubMember(club.id, judge.id), true)
+    assert.equal(await repo.removeClubMember(club.id, judge.id), false)
+    await repo.addClubMember({ clubId: club.id, userId: judge.id, role: 'judge', addedBy: boss.id, addedAt: SOON })
+    assert.equal(await repo.deleteUser(judge.id), true)
+    assert.deepEqual((await repo.clubMembers(club.id)).map((m) => m.userId), [boss.id])
+  })
+
+  it('приглашения: поиск по хэшу, отзыв, истёкшие не в списке', async () => {
+    const boss = await newUser()
+    const club = await repo.createTitanClub({ name: 'Клуб 93', titan: { ...titan('conn-93'), apiBase: 'https://club93.titanpos.test/api/connect/v1' }, ownerUserId: boss.id, at: NOW })
+    if (club === 'exists') throw new Error('клуб не создан')
+    const live = { id: '00000000-0000-4000-8000-0000000093a1', clubId: club.id, tokenHash: 'h'.repeat(64), createdBy: boss.id, createdAt: NOW, expiresAt: new Date(NOW.getTime() + 86_400_000), revokedAt: null }
+    const old = { ...live, id: '00000000-0000-4000-8000-0000000093a2', tokenHash: 'o'.repeat(64), expiresAt: SOON }
+    await repo.createClubInvite(live)
+    await repo.createClubInvite(old)
+    assert.deepEqual((await repo.clubInvites(club.id, new Date(SOON.getTime() + 1000))).map((i) => i.id), [live.id])
+    assert.equal((await repo.clubInviteByTokenHash('h'.repeat(64)))?.id, live.id)
+    assert.equal(await repo.revokeClubInvite(club.id, live.id, NOW), true)
+    assert.equal(await repo.revokeClubInvite(club.id, live.id, NOW), false)
+    assert.ok((await repo.clubInviteByTokenHash('h'.repeat(64)))?.revokedAt)
+    assert.deepEqual(await repo.clubInvites(club.id, new Date(SOON.getTime() + 1000)), [])
+  })
+
+  it('игра клуба без GoMafia: ссылка на клуб из записи и история по ней', async () => {
+    const boss = await newUser()
+    const club = await repo.createTitanClub({ name: 'Клуб 94', titan: { ...titan('conn-94'), apiBase: 'https://club94.titanpos.test/api/connect/v1' }, ownerUserId: boss.id, at: NOW })
+    if (club === 'exists') throw new Error('клуб не создан')
+    const game = {
+      id: '00000000-0000-4000-8000-000000000941', hostUserId: boss.id, clubId: null, clubRef: club.id, format: 'rating', variant: 'sport',
+      startedAt: NOW, finishedAt: SOON, schemaVersion: 1, record: { setup: { host: { userID: boss.id } } },
+    }
+    assert.equal(await repo.insertGame(game), 'inserted')
+    assert.deepEqual((await repo.gamesByClubRef(club.id, null, 10)).map((g) => g.id), [game.id])
+    assert.deepEqual(await repo.gamesByClubRef(club.id, SOON, 10), [])
   })
 })

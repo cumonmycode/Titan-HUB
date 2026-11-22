@@ -5,7 +5,8 @@ import type { MafboardEnv } from './router.js'
 import { errorBody, toPlayerJSON } from './serialize.js'
 import { goMafiaNumber, goMafiaPlayerID, toTitanPlayerJSON, type TitanClient } from './titan.js'
 import { byClubOrder, clubRoster, tokenOf } from './titanRoutes.js'
-import type { GoMafiaPlayerJSON, HostAccess, MafboardUser } from './types.js'
+import type { ClubMembership } from './clubAccess.js'
+import type { GoMafiaPlayerJSON, HostAccess, MafboardUser, TitanLinkState } from './types.js'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Игроки клуба одним списком (docs/MAFBOARD.md, раздел «Игроки клуба»):
@@ -169,24 +170,50 @@ export function registerClubPlayerRoutes(router: Hono<MafboardEnv>, requireUser:
     }
     const club = user.gomafia?.club
     if (access.club === 'none' || !club) return forbidden(c, user)
-
-    const [titan, residents] = await Promise.all([access.titan ? clubRoster(c) : Promise.resolve(null), goMafiaResidents(c, club.id)])
-    const titanFailed = titan instanceof Response
-    const goMafiaFailed = residents instanceof Response
-    // Оба не ответили (или GoMafia — единственный источник) — ошибка первого, как у прежних ручек.
-    if (titanFailed && goMafiaFailed) return titan
-    if (goMafiaFailed && titan == null) return residents
-
-    const players = goMafiaFailed ? [] : residents
-    const source: TitanSource | null = titan && !titanFailed ? { apiBase: titan.link.apiBase, clients: titan.clients, matches: titan.matches } : null
-    const clientNumbers = source ? [...source.matches.values(), ...source.clients.map((client) => goMafiaNumber(client.gomafiaId))] : []
-    const numbers = [...players.map((player) => player.id), ...clientNumbers].filter((id): id is number => id != null)
-    const verified = await deps.repo.verifiedGomafiaIds(numbers).catch(() => new Set<number>())
-
-    return c.json({
-      club: { id: access.mafboardClub?.id ?? null, name: access.mafboardClub?.name ?? club.title },
-      players: mergeClubPlayers(source, players, verified),
-      partial: titanFailed || goMafiaFailed,
+    return clubPlayersJSON(c, {
+      id: access.mafboardClub?.id ?? null,
+      name: access.mafboardClub?.name ?? club.title,
+      titan: access.titan,
+      gomafiaClubId: club.id,
     })
+  })
+}
+
+/** Состав клуба MafBoard, где пользователь — владелец или судья (`GET /v1/clubs/:id/players`, clubs.ts). */
+export async function respondClubPlayers(c: Context<MafboardEnv>, membership: ClubMembership): Promise<Response> {
+  const deps = c.get('deps')
+  if (!(await deps.limiter.hit(`mb:club:players:${c.get('user').id}`, LIST_LIMIT_PER_MIN, 60))) {
+    return c.json(errorBody('rate_limited', 'Слишком много запросов'), 429)
+  }
+  const { club, titan } = membership
+  return clubPlayersJSON(c, { id: club.id, name: club.name, titan, gomafiaClubId: club.gomafiaClubId })
+}
+
+/** Склейка состава клуба из его источников: клиенты Titan (если подключён) и резиденты клуба GoMafia (если он есть). */
+async function clubPlayersJSON(
+  c: Context<MafboardEnv>,
+  club: { id: string | null; name: string; titan: TitanLinkState | null; gomafiaClubId: number | null },
+): Promise<Response> {
+  const deps = c.get('deps')
+  const [titan, residents] = await Promise.all([
+    club.titan ? clubRoster(c, club.titan) : Promise.resolve(null),
+    club.gomafiaClubId != null ? goMafiaResidents(c, club.gomafiaClubId) : Promise.resolve([] as GoMafiaPlayerJSON[]),
+  ])
+  const titanFailed = titan instanceof Response
+  const goMafiaFailed = residents instanceof Response
+  // Оба не ответили (или единственный источник) — ошибка первого, как у прежних ручек.
+  if (titanFailed && (goMafiaFailed || club.gomafiaClubId == null)) return titan
+  if (goMafiaFailed && titan == null) return residents
+
+  const players = goMafiaFailed ? [] : residents
+  const source: TitanSource | null = titan && !titanFailed ? { apiBase: titan.link.apiBase, clients: titan.clients, matches: titan.matches } : null
+  const clientNumbers = source ? [...source.matches.values(), ...source.clients.map((client) => goMafiaNumber(client.gomafiaId))] : []
+  const numbers = [...players.map((player) => player.id), ...clientNumbers].filter((id): id is number => id != null)
+  const verified = await deps.repo.verifiedGomafiaIds(numbers).catch(() => new Set<number>())
+
+  return c.json({
+    club: { id: club.id, name: club.name },
+    players: mergeClubPlayers(source, players, verified),
+    partial: titanFailed || goMafiaFailed,
   })
 }

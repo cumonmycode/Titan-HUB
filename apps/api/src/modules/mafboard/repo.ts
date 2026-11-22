@@ -1,5 +1,5 @@
 import type {
-  DeviceSession, GoMafiaClubJSON, GoMafiaLinkSource, GoMafiaPlayerJSON, LoginTicket, MafboardUser, QrTicket, RefreshTokenRow, StoredActiveGame, StoredClub, StoredClubHost, StoredClubRequest, StoredGame, StoredProtocolSubmission, StoredShare, StoredStudioSettings, TelegramProfile,
+  DeviceSession, GoMafiaClubJSON, GoMafiaLinkSource, GoMafiaPlayerJSON, LoginTicket, MafboardUser, QrTicket, RefreshTokenRow, StoredActiveGame, StoredClub, StoredClubHost, StoredClubInvite, StoredClubMember, StoredClubRequest, StoredGame, StoredProtocolSubmission, StoredShare, StoredStudioSettings, TelegramProfile,
   TicketGuard, TicketPatch, TicketStep, TitanLinkState,
 } from './types.js'
 
@@ -65,6 +65,26 @@ export interface MafboardRepo {
   setClubTitanLink(clubId: string, link: TitanLinkState | null, linkedBy: string | null): Promise<TitanLinkState | null>
   /** Стереть копии подключения с этим номером в личных записях пользователей. */
   clearTitanMirrors(connectionId: string): Promise<void>
+  clubById(id: string): Promise<StoredClub | null>
+  /**
+   * Клуб без GoMafia по подключению Titan; создатель — его владелец (и запись членства `owner`).
+   * `exists` — этот клуб Titan HUB уже подключён к другому клубу MafBoard.
+   */
+  createTitanClub(input: { name: string; titan: TitanLinkState; ownerUserId: string; at: Date }): Promise<StoredClub | 'exists'>
+
+  // ─── Члены клуба и приглашения ─────────────────────────────────────────────
+  clubMembers(clubId: string): Promise<StoredClubMember[]>
+  membershipsOf(userId: string): Promise<StoredClubMember[]>
+  /** Добавить в клуб. Уже состоит — запись (и роль) не меняется. */
+  addClubMember(member: StoredClubMember): Promise<void>
+  removeClubMember(clubId: string, userId: string): Promise<boolean>
+  createClubInvite(invite: StoredClubInvite): Promise<void>
+  /** Действующие (не отозванные и не истёкшие) приглашения клуба, сначала новые. */
+  clubInvites(clubId: string, now: Date): Promise<StoredClubInvite[]>
+  clubInviteByTokenHash(tokenHash: string): Promise<StoredClubInvite | null>
+  revokeClubInvite(clubId: string, inviteId: string, at: Date): Promise<boolean>
+  /** История клуба MafBoard (по `club_ref`), по времени окончания. */
+  gamesByClubRef(clubRef: string, since: Date | null, limit: number): Promise<StoredGame[]>
 
   // ─── Пул судей клуба ───────────────────────────────────────────────────────
   /** Судьи клуба GoMafia, которым президент дал вести игры, по времени выдачи. */

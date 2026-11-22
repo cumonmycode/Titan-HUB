@@ -11,7 +11,7 @@ import { TitanConnectError, TitanRosterCache, type TitanClient, type TitanConnec
 import { DELETED_HOST_ID } from '../../src/modules/mafboard/config.js'
 import { GomafiaTakenError, type MafboardRepo } from '../../src/modules/mafboard/repo.js'
 import { createMafboardRouter, type MafboardDeps } from '../../src/modules/mafboard/router.js'
-import type { DeviceSession, LoginTicket, MafboardUser, QrTicket, RefreshTokenRow, StoredActiveGame, StoredClub, StoredClubHost, StoredClubRequest, StoredGame, StoredProtocolSubmission, StoredShare, StoredStudioSettings, TicketGuard, TitanLinkState } from '../../src/modules/mafboard/types.js'
+import type { DeviceSession, LoginTicket, MafboardUser, QrTicket, RefreshTokenRow, StoredActiveGame, StoredClub, StoredClubHost, StoredClubInvite, StoredClubMember, StoredClubRequest, StoredGame, StoredProtocolSubmission, StoredShare, StoredStudioSettings, TicketGuard, TitanLinkState } from '../../src/modules/mafboard/types.js'
 import { VkError, type VkAppConfig, type VkGateway, type VkTokens } from '../../src/modules/mafboard/vk.js'
 import type { DaAppConfig, DaGateway } from '../../src/modules/mafboard/donationalerts.js'
 import { AimError, AimSession } from '../../src/lib/gomafiaAim.js'
@@ -189,6 +189,8 @@ export class MemoryRepo implements MafboardRepo {
   titanMatchRows = new Map<string, number | null>()
   hosts: StoredClubHost[] = []
   clubs = new Map<string, StoredClub>()
+  members: StoredClubMember[] = []
+  invites = new Map<string, StoredClubInvite>()
   requests = new Map<string, StoredClubRequest>()
   private seq = 0
 
@@ -247,7 +249,11 @@ export class MemoryRepo implements MafboardRepo {
     for (const [id, ticket] of this.qrTickets) if (ticket.userId === userId) this.qrTickets.delete(id)
     this.requests.delete(userId)
     this.hosts = this.hosts.map((host) => (host.grantedBy === userId ? { ...host, grantedBy: null } : host))
-    for (const [id, club] of this.clubs) if (club.titanLinkedBy === userId) this.clubs.set(id, { ...club, titanLinkedBy: null })
+    for (const [id, club] of this.clubs) {
+      if (club.titanLinkedBy === userId) this.clubs.set(id, { ...club, titanLinkedBy: null })
+      if (club.ownerUserId === userId) this.clubs.set(id, { ...this.clubs.get(id)!, ownerUserId: null })
+    }
+    this.members = this.members.filter((member) => member.userId !== userId)
     return true
   }
 
@@ -291,6 +297,10 @@ export class MemoryRepo implements MafboardRepo {
   async setClubTitanLink(clubId: string, link: TitanLinkState | null, linkedBy: string | null) {
     const club = this.clubs.get(clubId)
     if (!club) return null
+    // Как уникальный индекс в Postgres: один клуб Titan HUB — один клуб MafBoard.
+    if (link && [...this.clubs.values()].some((other) => other.id !== clubId && other.titan?.apiBase === link.apiBase)) {
+      throw Object.assign(new Error('duplicate key value violates unique constraint "mb_clubs_titan_api_base_idx"'), { code: '23505' })
+    }
     this.clubs.set(clubId, { ...club, titan: link, titanLinkedBy: link ? linkedBy : null })
     return club.titan
   }
@@ -301,6 +311,64 @@ export class MemoryRepo implements MafboardRepo {
 
   async clubByTitanConnection(connectionId: string) {
     return [...this.clubs.values()].find((club) => club.titan?.connectionId === connectionId) ?? null
+  }
+
+  async clubById(id: string) {
+    return this.clubs.get(id) ?? null
+  }
+
+  async createTitanClub(input: { name: string; titan: TitanLinkState; ownerUserId: string; at: Date }) {
+    if ([...this.clubs.values()].some((club) => club.titan?.apiBase === input.titan.apiBase)) return 'exists' as const
+    const club: StoredClub = {
+      id: this.uuid(), name: input.name, city: null, gomafiaClubId: null,
+      titan: input.titan, titanLinkedBy: input.ownerUserId, ownerUserId: input.ownerUserId,
+    }
+    this.clubs.set(club.id, club)
+    this.members.push({ clubId: club.id, userId: input.ownerUserId, role: 'owner', addedBy: input.ownerUserId, addedAt: input.at })
+    return club
+  }
+
+  async clubMembers(clubId: string) {
+    return this.members.filter((member) => member.clubId === clubId)
+  }
+
+  async membershipsOf(userId: string) {
+    return this.members.filter((member) => member.userId === userId)
+  }
+
+  async addClubMember(member: StoredClubMember) {
+    if (!this.members.some((row) => row.clubId === member.clubId && row.userId === member.userId)) this.members.push(member)
+  }
+
+  async removeClubMember(clubId: string, userId: string) {
+    const before = this.members.length
+    this.members = this.members.filter((row) => !(row.clubId === clubId && row.userId === userId))
+    return this.members.length < before
+  }
+
+  async createClubInvite(invite: StoredClubInvite) {
+    this.invites.set(invite.id, invite)
+  }
+
+  async clubInvites(clubId: string, now: Date) {
+    return [...this.invites.values()]
+      .filter((invite) => invite.clubId === clubId && !invite.revokedAt && invite.expiresAt > now)
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+  }
+
+  async clubInviteByTokenHash(tokenHash: string) {
+    return [...this.invites.values()].find((invite) => invite.tokenHash === tokenHash) ?? null
+  }
+
+  async revokeClubInvite(clubId: string, inviteId: string, at: Date) {
+    const invite = this.invites.get(inviteId)
+    if (!invite || invite.clubId !== clubId || invite.revokedAt) return false
+    this.invites.set(inviteId, { ...invite, revokedAt: at })
+    return true
+  }
+
+  async gamesByClubRef(clubRef: string, since: Date | null, limit: number) {
+    return [...this.games.values()].filter((g) => g.clubRef === clubRef && (!since || g.finishedAt > since)).slice(0, limit)
   }
 
   async clearTitanMirrors(connectionId: string) {
@@ -506,7 +574,7 @@ export class MemoryRepo implements MafboardRepo {
     if (existing && existing.hostUserId !== game.hostUserId) return 'conflict'
     // Как подзапрос в Postgres: ссылка на клуб MafBoard выводится из клуба GoMafia игры.
     const club = game.clubId == null ? null : await this.clubByGomafiaId(game.clubId)
-    this.games.set(game.id, { ...game, clubRef: club?.id ?? null })
+    this.games.set(game.id, { ...game, clubRef: game.clubRef ?? club?.id ?? null })
     return existing ? 'exists' : 'inserted'
   }
 

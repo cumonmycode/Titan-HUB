@@ -370,6 +370,34 @@ export const MAFBOARD_MIGRATIONS: readonly { id: string; sql: string }[] = [
       CREATE INDEX IF NOT EXISTS mb_games_club_ref_idx ON mb_games (club_ref, finished_at) WHERE club_ref IS NOT NULL;
     `,
   },
+  {
+    // Члены клуба и приглашения: клуб без GoMafia (создан кодом Titan Connect) и судьи, вступившие по
+    // ссылке. Права в клубе GoMafia по-прежнему считаются и из GoMafia (президент, пул судей) — записи
+    // членства к ним добавляются. Один клуб Titan HUB (`apiBase`) — один клуб MafBoard.
+    id: '013_mafboard_club_members',
+    sql: `
+      CREATE TABLE IF NOT EXISTS mb_club_members (
+        club_id  uuid NOT NULL REFERENCES mb_clubs(id) ON DELETE CASCADE,
+        user_id  uuid NOT NULL REFERENCES mb_users(id) ON DELETE CASCADE,
+        role     text NOT NULL CHECK (role IN ('owner', 'judge')),
+        added_by uuid REFERENCES mb_users(id) ON DELETE SET NULL,
+        added_at timestamptz NOT NULL,
+        PRIMARY KEY (club_id, user_id)
+      );
+      CREATE INDEX IF NOT EXISTS mb_club_members_user_idx ON mb_club_members (user_id);
+      CREATE TABLE IF NOT EXISTS mb_club_invites (
+        id         uuid PRIMARY KEY,
+        club_id    uuid NOT NULL REFERENCES mb_clubs(id) ON DELETE CASCADE,
+        token_hash text NOT NULL UNIQUE,
+        created_by uuid REFERENCES mb_users(id) ON DELETE SET NULL,
+        created_at timestamptz NOT NULL,
+        expires_at timestamptz NOT NULL,
+        revoked_at timestamptz
+      );
+      CREATE INDEX IF NOT EXISTS mb_club_invites_club_idx ON mb_club_invites (club_id, created_at DESC);
+      CREATE UNIQUE INDEX IF NOT EXISTS mb_clubs_titan_api_base_idx ON mb_clubs ((titan_link->>'apiBase')) WHERE titan_link IS NOT NULL;
+    `,
+  },
 ]
 
 function rows<T = Record<string, unknown>>(res: unknown): T[] {

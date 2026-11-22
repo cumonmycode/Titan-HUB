@@ -136,6 +136,34 @@ WebSocket идёт мимо Hono: обработчик `upgrade` на HTTP-се�
 записи президента; тогда же его подключения перенесены в клубы. Со второго Titan читается из клуба. В базе, не
 прошедшей первый выпуск, клуб Titan нужно подключить заново: из личных записей в клуб он больше не переезжает.
 
+### Клубы без GoMafia, участники и приглашения (`clubs.ts`, `clubAccess.ts`)
+
+Клуб MafBoard создаётся и без GoMafia: `POST /v1/clubs {code}` — кодом Titan Connect, который выдаёт владелец клуба в
+HUB; тот, кто ввёл код, — владелец клуба (`mb_clubs.owner_user_id` и запись `owner` в `mb_club_members`). Один клуб
+Titan HUB (`apiBase`) — один клуб MafBoard: повтор — 409 `club_exists`, выданный ключ сразу отзывается; так же
+отвечает `POST /v1/me/titan`, если этот HUB уже подключён к другому клубу.
+
+Клубы пользователя (`UserAccount.clubs`, `HostAccess.clubs`) — клуб GoMafia (президент → `owner`, судья пула →
+`judge`, как раньше) плюс записи `mb_club_members`. Судья вступает по ссылке-приглашению владельца:
+`https://api.mafboard.com/club/join?t=<токен>` (Universal Link, путь `/club/join*` в `apple-app-site-association`;
+без приложения — страница с кнопкой `mafboard://club/join`). Ссылка действует 7 дней, многоразовая, отзывается;
+на сервере — только SHA-256 токена. Пригласивший получает сообщение в боте. По приглашению можно вступить и в клуб
+GoMafia — судьёй без своего GoMafia.
+
+| Метод и путь | Кому | Что делает |
+|---|---|---|
+| `POST /v1/clubs {code}` | любой (10 за 10 мин) | Клуб по коду Titan Connect → 201 `{club: {id, name}, account}`. 409 `club_exists`, 422 `invalid_code` |
+| `GET /v1/clubs/:id/members`, `DELETE …/members/:userId` | владелец | Участники `{members: [{userId, name, username, role, addedAt}]}`; себя убрать нельзя — 422 |
+| `POST /v1/clubs/:id/invites`, `GET`, `DELETE …/invites/:inviteId` | владелец (30 в час) | Ссылка-приглашение → 201 `{id, url, expiresAt}`; список действующих (без ссылок) |
+| `POST /v1/clubs/join {token}` | любой (20 в час) | Вступить судьёй → `UserAccount`. 404 `invite_not_found`, 410 `invite_expired` |
+| `GET /v1/clubs/:id/players` | член клуба | Состав клуба, как `GET /v1/club/players` (см. «Игроки клуба») |
+| `GET /v1/clubs/:id/games?since=` | член клуба | История клуба по `mb_games.club_ref` (числовой `:id` — прежняя история клуба GoMafia) |
+| `PUT /v1/clubs/:id/titan {code}`, `DELETE` | владелец | Подключить Titan заново (прежний ключ отзывается) или отключить |
+
+Игра с `setup.host.clubRef` (uuid клуба MafBoard) принимается от члена этого клуба (иначе 403
+`club_access_required`) и идёт в его историю, включая фанки; в рейтинг, миникап и турнир — игроки GoMafia и, если к
+клубу подключён Titan, клиенты клуба. Без `clubRef` — прежние правила (клуб GoMafia ведущего или личная история).
+
 ### Titan Connect (`titan.ts`, `titanRoutes.ts`)
 
 Клуб Titan HUB даёт судьям клуба своих клиентов как игроков через собственный API Titan Connect
@@ -252,6 +280,8 @@ GoMafia (`mb_users.gomafia_link_source = 'club'`) и добавляет его �
 | `mb_games` | Игры: ведущий, клуб (`NULL` — личная), формат, даты, `record jsonb` — GameRecord приложения целиком |
 | `mb_clubs` | Клубы MafBoard: название, город, `gomafia_club_id` (уникален; `NULL` — клуб без GoMafia, пока таких нет), `titan_link` — подключение Titan Connect клуба (действует у президента и судей пула), `titan_linked_by` — кто подключил, `owner_user_id` — владелец клуба без GoMafia (пока не используется) (миграция `012`) |
 | `mb_games.club_ref` | Клуб MafBoard игры; заполняется по `club_id` (миграция `012`) |
+| `mb_club_members` | Члены клуба: владелец клуба без GoMafia и судьи по приглашению, роль `owner` / `judge` (миграция `013`) |
+| `mb_club_invites` | Приглашения в клуб: SHA-256 токена, кто и когда создал, срок, отзыв (миграция `013`) |
 
 Истёкшие билеты, сессии и токены удаляются раз в сутки, через 30 дней после истечения.
 Миграция `002_mafboard_sessions` превратила существующие цепочки refresh-токенов в сессии (id — `md5` хэша первого токена цепочки, устройство — из него же).

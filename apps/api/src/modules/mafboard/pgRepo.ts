@@ -3,7 +3,7 @@ import type { SQL } from 'drizzle-orm'
 import { DELETED_HOST_ID } from './config.js'
 import { GomafiaTakenError, type GomafiaLinkInput, type MafboardRepo } from './repo.js'
 import type {
-  DeviceSession, GoMafiaClubJSON, GoMafiaPlayerJSON, LoginTicket, MafboardUser, QrTicket, QrTicketStatus, RefreshTokenRow, StoredActiveGame, StoredClub, StoredClubHost, StoredClubRequest, StoredGame, StoredProtocolSubmission, StoredShare, StoredStudioSettings,
+  DeviceSession, GoMafiaClubJSON, GoMafiaPlayerJSON, LoginTicket, MafboardUser, QrTicket, QrTicketStatus, RefreshTokenRow, StoredActiveGame, StoredClub, StoredClubHost, StoredClubInvite, StoredClubMember, StoredClubRequest, StoredGame, StoredProtocolSubmission, StoredShare, StoredStudioSettings,
   TicketGuard, TicketPatch, TicketStatus, TicketStep, TitanLinkState,
 } from './types.js'
 
@@ -85,6 +85,29 @@ function toClub(r: Row): StoredClub {
     gomafiaClubId: num(r['gomafia_club_id']),
     titan: toTitanLink(r['titan_link']),
     titanLinkedBy: str(r['titan_linked_by']),
+    ownerUserId: str(r['owner_user_id']),
+  }
+}
+
+function toClubMember(r: Row): StoredClubMember {
+  return {
+    clubId: String(r['club_id']),
+    userId: String(r['user_id']),
+    role: r['role'] === 'owner' ? 'owner' : 'judge',
+    addedBy: str(r['added_by']),
+    addedAt: date(r['added_at']),
+  }
+}
+
+function toClubInvite(r: Row): StoredClubInvite {
+  return {
+    id: String(r['id']),
+    clubId: String(r['club_id']),
+    tokenHash: String(r['token_hash']),
+    createdBy: str(r['created_by']),
+    createdAt: date(r['created_at']),
+    expiresAt: date(r['expires_at']),
+    revokedAt: dateOrNull(r['revoked_at']),
   }
 }
 
@@ -395,6 +418,103 @@ export class PgMafboardRepo implements MafboardRepo {
   async clubByTitanConnection(connectionId: string): Promise<StoredClub | null> {
     const row = await this.one(sql`SELECT * FROM mb_clubs WHERE titan_link->>'connectionId' = ${connectionId} LIMIT 1`)
     return row ? toClub(row) : null
+  }
+
+  async clubById(id: string): Promise<StoredClub | null> {
+    if (!UUID.test(id)) return null
+    const row = await this.one(sql`SELECT * FROM mb_clubs WHERE id = ${id}::uuid`)
+    return row ? toClub(row) : null
+  }
+
+  async createTitanClub(input: { name: string; titan: TitanLinkState; ownerUserId: string; at: Date }): Promise<StoredClub | 'exists'> {
+    try {
+      const row = await this.one(sql`
+        WITH club AS (
+          INSERT INTO mb_clubs (name, titan_link, titan_linked_by, owner_user_id)
+          VALUES (${input.name}, ${JSON.stringify(input.titan)}::jsonb, ${input.ownerUserId}::uuid, ${input.ownerUserId}::uuid)
+          RETURNING *
+        ), owner AS (
+          INSERT INTO mb_club_members (club_id, user_id, role, added_by, added_at)
+          SELECT id, ${input.ownerUserId}::uuid, 'owner', ${input.ownerUserId}::uuid, ${iso(input.at)}::timestamptz FROM club
+        )
+        SELECT * FROM club
+      `)
+      if (!row) throw new Error('клуб не создан')
+      return toClub(row)
+    } catch (error) {
+      if ((error as { code?: string }).code === '23505') return 'exists'
+      throw error
+    }
+  }
+
+  async clubMembers(clubId: string): Promise<StoredClubMember[]> {
+    if (!UUID.test(clubId)) return []
+    const found = await this.query(sql`SELECT * FROM mb_club_members WHERE club_id = ${clubId}::uuid ORDER BY added_at, user_id`)
+    return found.map(toClubMember)
+  }
+
+  async membershipsOf(userId: string): Promise<StoredClubMember[]> {
+    if (!UUID.test(userId)) return []
+    const found = await this.query(sql`SELECT * FROM mb_club_members WHERE user_id = ${userId}::uuid ORDER BY added_at, club_id`)
+    return found.map(toClubMember)
+  }
+
+  async addClubMember(member: StoredClubMember): Promise<void> {
+    await this.query(sql`
+      INSERT INTO mb_club_members (club_id, user_id, role, added_by, added_at)
+      VALUES (${member.clubId}::uuid, ${member.userId}::uuid, ${member.role}, ${member.addedBy}::uuid, ${iso(member.addedAt)}::timestamptz)
+      ON CONFLICT (club_id, user_id) DO NOTHING
+    `)
+  }
+
+  async removeClubMember(clubId: string, userId: string): Promise<boolean> {
+    if (!UUID.test(clubId) || !UUID.test(userId)) return false
+    const removed = await this.query(sql`
+      DELETE FROM mb_club_members WHERE club_id = ${clubId}::uuid AND user_id = ${userId}::uuid RETURNING user_id
+    `)
+    return removed.length > 0
+  }
+
+  async createClubInvite(invite: StoredClubInvite): Promise<void> {
+    await this.query(sql`
+      INSERT INTO mb_club_invites (id, club_id, token_hash, created_by, created_at, expires_at)
+      VALUES (${invite.id}::uuid, ${invite.clubId}::uuid, ${invite.tokenHash}, ${invite.createdBy}::uuid,
+              ${iso(invite.createdAt)}::timestamptz, ${iso(invite.expiresAt)}::timestamptz)
+    `)
+  }
+
+  async clubInvites(clubId: string, now: Date): Promise<StoredClubInvite[]> {
+    if (!UUID.test(clubId)) return []
+    const found = await this.query(sql`
+      SELECT * FROM mb_club_invites
+      WHERE club_id = ${clubId}::uuid AND revoked_at IS NULL AND expires_at > ${iso(now)}::timestamptz
+      ORDER BY created_at DESC
+    `)
+    return found.map(toClubInvite)
+  }
+
+  async clubInviteByTokenHash(tokenHash: string): Promise<StoredClubInvite | null> {
+    const row = await this.one(sql`SELECT * FROM mb_club_invites WHERE token_hash = ${tokenHash}`)
+    return row ? toClubInvite(row) : null
+  }
+
+  async revokeClubInvite(clubId: string, inviteId: string, at: Date): Promise<boolean> {
+    if (!UUID.test(clubId) || !UUID.test(inviteId)) return false
+    const revoked = await this.query(sql`
+      UPDATE mb_club_invites SET revoked_at = ${iso(at)}::timestamptz
+      WHERE id = ${inviteId}::uuid AND club_id = ${clubId}::uuid AND revoked_at IS NULL RETURNING id
+    `)
+    return revoked.length > 0
+  }
+
+  async gamesByClubRef(clubRef: string, since: Date | null, limit: number): Promise<StoredGame[]> {
+    if (!UUID.test(clubRef)) return []
+    const found = await this.query(sql`
+      SELECT * FROM mb_games
+      WHERE club_ref = ${clubRef}::uuid AND (${since ? iso(since) : null}::timestamptz IS NULL OR finished_at > ${since ? iso(since) : null}::timestamptz)
+      ORDER BY finished_at ASC LIMIT ${limit}
+    `)
+    return found.map(toGame)
   }
 
   async clearTitanMirrors(connectionId: string): Promise<void> {
@@ -739,7 +859,7 @@ export class PgMafboardRepo implements MafboardRepo {
     const saved = await this.query(sql`
       INSERT INTO mb_games (id, host_user_id, club_id, club_ref, format, variant, started_at, finished_at, schema_version, record)
       VALUES (${game.id}::uuid, ${game.hostUserId}::uuid, ${game.clubId},
-              (SELECT id FROM mb_clubs WHERE gomafia_club_id = ${game.clubId}::integer),
+              COALESCE(${game.clubRef ?? null}::uuid, (SELECT id FROM mb_clubs WHERE gomafia_club_id = ${game.clubId}::integer)),
               ${game.format}, ${game.variant},
               ${iso(game.startedAt)}::timestamptz, ${iso(game.finishedAt)}::timestamptz, ${game.schemaVersion},
               ${JSON.stringify(game.record)}::jsonb)

@@ -23,6 +23,8 @@ const recordSchema = z
             userID: z.string().uuid(),
             goMafiaPlayerID: z.number().int().nullish(),
             clubID: z.number().int().nullish(),
+            /** Клуб MafBoard игры: у клуба без GoMafia — единственная привязка к клубу. */
+            clubRef: z.string().uuid().nullish(),
           })
           .nullish(),
         /** Игра турнира GoMafia (режим «Турнир GoMafia»): турнир, номер игры и стол. */
@@ -75,6 +77,36 @@ export function validateGameUpload(body: unknown, user: MafboardUser, access: Ho
   const finishedAt = parseDate(record.finishedAt)
   if (!startedAt || !finishedAt || finishedAt.getTime() > now.getTime() + MAX_FUTURE_MS) {
     return fail(422, 'invalid_dates', 'Некорректные даты игры')
+  }
+
+  // Игра клуба MafBoard: её ведёт член этого клуба — владелец или судья (из GoMafia или по приглашению).
+  // Все игры клуба, включая фанки, идут в его историю. Турнир GoMafia — по своим правилам ниже.
+  const clubRef = setup.host.clubRef?.toLowerCase() ?? null
+  if (clubRef && !setup.tournament) {
+    const membership = access.clubs.find((entry) => entry.club.id === clubRef)
+    if (!membership) return fail(403, 'club_access_required', 'Игры клуба ведут его владелец и судьи')
+    if (setup.format !== 'funky') {
+      const clubTitan = membership.titan != null
+      const allowed = (id: string) => GOMAFIA_PLAYER_ID.test(id) || (clubTitan && TITAN_PLAYER_ID.test(id))
+      if (!setup.seats.every((seat) => allowed(seat.playerID))) {
+        return fail(422, 'guest_players', 'В рейтинговых играх все игроки должны быть из GoMafia или клуба Titan HUB')
+      }
+    }
+    return {
+      ok: true,
+      game: {
+        id: setup.gameID.toLowerCase(),
+        hostUserId: user.id,
+        clubId: membership.club.gomafiaClubId,
+        clubRef,
+        format: setup.format,
+        variant: setup.ruleset.variant,
+        startedAt,
+        finishedAt,
+        schemaVersion: record.schemaVersion,
+        record: body,
+      },
+    }
   }
 
   // Резидент без доступа от президента игр клуба не ведёт: его фанки идут в личную историю.

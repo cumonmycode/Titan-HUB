@@ -71,9 +71,35 @@ async function freshAccess(c: Context<MafboardEnv>): Promise<{ user: MafboardUse
  * Права здесь — из `requireUser`, без освежения клуба: чтение клиентов ведёт себя как раньше, снимок
  * GoMafia освежается раз в сутки. Освежается только то, что меняет общее подключение (`freshAccess`).
  */
-export async function clubRoster(c: Context<MafboardEnv>) {
+/**
+ * Одноразовый код Titan Connect → подключение (ключ — шифротекстом). Лимит попыток — на пользователя.
+ * Ошибку уже превратили в ответ — вернётся Response.
+ */
+export async function exchangeTitanCode(c: Context<MafboardEnv>, code: string): Promise<TitanLinkState | Response> {
   const deps = c.get('deps')
-  const link = c.get('access').titan
+  const allowed = await deps.limiter.hit(`mb:titan:link:${c.get('user').id}`, LINK_LIMIT.count, LINK_LIMIT.windowSec, { failClosed: true })
+  if (!allowed) return fail(c, 429, 'rate_limited', 'Слишком много попыток, попробуйте позже')
+  let exchange
+  try {
+    exchange = await deps.titan.exchange(code)
+  } catch (error) {
+    return titanFailure(c, error)
+  }
+  const apiBase = trustedApiBase(exchange.apiBase, deps.config.titanConnectUrl)
+  if (!apiBase) return fail(c, 502, 'titan_unavailable', 'Titan HUB вернул адрес клуба вне домена Titan — подключение отменено')
+  const clubName = await deps.titan.clubName(apiBase, exchange.accessToken).catch(() => null)
+  return {
+    apiBase,
+    clubName,
+    connectionId: exchange.connectionId,
+    scopes: exchange.scopes,
+    tokenSealed: sealSecrets(deps.config.studioSecretsKey, { token: exchange.accessToken }),
+    linkedAt: deps.now(),
+  }
+}
+
+export async function clubRoster(c: Context<MafboardEnv>, link: TitanLinkState | null = c.get('access').titan) {
+  const deps = c.get('deps')
   if (!link) return fail(c, 409, 'titan_not_linked', 'Клуб Titan HUB подключает президент клуба')
   const token = tokenOf(c, link)
   if (!token) return fail(c, 409, 'titan_revoked', 'Ключ клуба не читается. Подключите клуб заново')
@@ -101,36 +127,26 @@ export function registerTitanRoutes(router: Hono<MafboardEnv>, requireUser: Midd
     if (access.club !== 'president') {
       return fail(c, 403, 'president_only', 'Клуб Titan HUB подключает президент клуба GoMafia. Судьям клуба его клиенты доступны без кода')
     }
-    const allowed = await deps.limiter.hit(`mb:titan:link:${user.id}`, LINK_LIMIT.count, LINK_LIMIT.windowSec, { failClosed: true })
-    if (!allowed) return fail(c, 429, 'rate_limited', 'Слишком много попыток, попробуйте позже')
-
-    let exchange
-    try {
-      exchange = await deps.titan.exchange(c.req.valid('json').code)
-    } catch (error) {
-      return titanFailure(c, error)
-    }
-    const apiBase = trustedApiBase(exchange.apiBase, deps.config.titanConnectUrl)
-    if (!apiBase) return fail(c, 502, 'titan_unavailable', 'Titan HUB вернул адрес клуба вне домена Titan — подключение отменено')
-    const clubName = await deps.titan.clubName(apiBase, exchange.accessToken).catch(() => null)
-
-    const link: TitanLinkState = {
-      apiBase,
-      clubName,
-      connectionId: exchange.connectionId,
-      scopes: exchange.scopes,
-      tokenSealed: sealSecrets(deps.config.studioSecretsKey, { token: exchange.accessToken }),
-      linkedAt: deps.now(),
-    }
+    const link = await exchangeTitanCode(c, c.req.valid('json').code)
+    if (link instanceof Response) return link
+    const apiBase = link.apiBase
     const club = access.mafboardClub
     // Запись клуба не прочиталась — подключение действует по копии в записи президента (`hostAccess`).
     if (!club) console.warn(`[mafboard] Titan записан только президенту ${user.id}: у его клуба нет записи клуба`)
-    const replaced = club ? await deps.repo.setClubTitanLink(club.id, link, user.id) : null
+    let replaced: TitanLinkState | null = null
+    try {
+      replaced = club ? await deps.repo.setClubTitanLink(club.id, link, user.id) : null
+    } catch (error) {
+      // Один клуб Titan HUB — один клуб MafBoard: этот HUB уже подключён к другому клубу.
+      if ((error as { code?: string }).code !== '23505') throw error
+      releaseLink(c, link)
+      return fail(c, 409, 'club_exists', 'Этот клуб Titan HUB уже подключён к другому клубу MafBoard')
+    }
     // Заменённое подключение клуба отзывается сразу, до остальных записей: их сбой не оставит ключ в HUB.
-    const isReplaced = replaced != null && replaced.connectionId !== link.connectionId
-    if (isReplaced) releaseLink(c, replaced)
+    const superseded = replaced != null && replaced.connectionId !== link.connectionId ? replaced : null
+    if (superseded) releaseLink(c, superseded)
     const updated = await deps.repo.setTitanLink(user.id, link)
-    if (isReplaced) await clearMirrors(c, replaced.connectionId)
+    if (superseded) await clearMirrors(c, superseded.connectionId)
 
     // Прежняя личная запись самого президента — только если ею не пользуется другой клуб.
     const stale = user.titan
@@ -225,7 +241,7 @@ async function saveMatch(c: Context<MafboardEnv>, match: { goMafiaId: number | n
 }
 
 /** Снять подключение Titan с клуба: отозвать ключ в HUB и стереть его копии в личных записях. */
-async function disconnectClub(c: Context<MafboardEnv>, club: StoredClub): Promise<TitanLinkState | null> {
+export async function disconnectClub(c: Context<MafboardEnv>, club: StoredClub): Promise<TitanLinkState | null> {
   const removed = await c.get('deps').repo.setClubTitanLink(club.id, null, null)
   if (!removed) return null
   releaseLink(c, removed)
@@ -237,7 +253,7 @@ async function disconnectClub(c: Context<MafboardEnv>, club: StoredClub): Promis
  * Стереть копии снятого подключения. Ключ к этому моменту уже отзывается, поэтому сбой здесь только
  * пишется в лог: копия отозванного ключа ни на что не влияет — действует подключение клуба.
  */
-async function clearMirrors(c: Context<MafboardEnv>, connectionId: string): Promise<void> {
+export async function clearMirrors(c: Context<MafboardEnv>, connectionId: string): Promise<void> {
   try {
     await c.get('deps').repo.clearTitanMirrors(connectionId)
   } catch (error) {
@@ -284,7 +300,7 @@ export async function releaseTitanOnAccountDeletion(c: Context<MafboardEnv>): Pr
 }
 
 /** Отозвать ключ в Titan в фоне: отключение у нас не должно зависеть от доступности HUB. */
-function releaseLink(c: Context<MafboardEnv>, link: TitanLinkState): void {
+export function releaseLink(c: Context<MafboardEnv>, link: TitanLinkState): void {
   const deps = c.get('deps')
   deps.titanRoster.forget(link.apiBase)
   const token = tokenOf(c, link)

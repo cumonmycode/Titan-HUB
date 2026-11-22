@@ -120,22 +120,18 @@ function titanJSON(link: TitanLinkState) {
 }
 
 /**
- * Клубы MafBoard пользователя с его ролью. Пока не больше одного — клуб GoMafia, где он президент
- * (`owner`) или судья пула (`judge`). `titan` — действующее подключение, то же, что в `titan` аккаунта.
+ * Клубы MafBoard пользователя с его ролью: клуб GoMafia первым (президент — `owner`, судья пула — `judge`),
+ * затем клубы по записям членства (владелец клуба без GoMafia, судьи по приглашению). `titan` — подключение клуба.
  */
 function clubsJSON(access: HostAccess) {
-  const club = access.mafboardClub
-  if (!club || access.club === 'none') return []
-  return [
-    {
-      id: club.id,
-      name: club.name,
-      city: club.city,
-      role: access.club === 'president' ? 'owner' : 'judge',
-      goMafiaClubID: club.gomafiaClubId,
-      titan: access.titan ? titanJSON(access.titan) : null,
-    },
-  ]
+  return access.clubs.map(({ club, role, titan }) => ({
+    id: club.id,
+    name: club.name,
+    city: club.city,
+    role,
+    goMafiaClubID: club.gomafiaClubId,
+    titan: titan ? titanJSON(titan) : null,
+  }))
 }
 
 /** Сессии для блока «Сессии» в профиле: текущая первой, остальные — по свежести. */

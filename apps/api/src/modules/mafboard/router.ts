@@ -15,6 +15,7 @@ import type { TitanConnectGateway, TitanRosterCache } from './titan.js'
 import { registerTitanRoutes, releaseTitanOnAccountDeletion } from './titanRoutes.js'
 import { hostAccess, registerClubHostRoutes } from './clubHosts.js'
 import { accountPhotoURL, registerClubPlayerRoutes } from './clubPlayers.js'
+import { registerClubRoutes } from './clubs.js'
 import { GomafiaTakenError, type MafboardRepo } from './repo.js'
 import type { AimAccounts, TournamentSource } from './aim.js'
 import { gomafiaFailure, type GoMafiaSessions } from './gomafiaSessions.js'
@@ -701,6 +702,7 @@ export function createMafboardRouter(resolveDeps: DepsResolver): Hono<Env> {
   registerTitanRoutes(router, requireUser)
   registerClubHostRoutes(router, requireUser)
   registerClubPlayerRoutes(router, requireUser)
+  registerClubRoutes(router, requireUser)
 
   // ─── История игр ────────────────────────────────────────────────────────────
 
@@ -741,7 +743,18 @@ export function createMafboardRouter(resolveDeps: DepsResolver): Hono<Env> {
   /** История игр клуба — только для участников клуба. */
   router.get('/v1/clubs/:id/games', requireUser, async (c) => {
     const deps = c.get('deps')
-    const clubId = Number(c.req.param('id'))
+    const raw = (c.req.param('id') ?? '').toLowerCase()
+    // Клуб MafBoard (uuid): история по `club_ref` — владельцу и судьям клуба, общая для всех них.
+    if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(raw)) {
+      if (!c.get('access').clubs.some((entry) => entry.club.id === raw)) {
+        return fail(c, 403, 'club_access_required', 'История клуба доступна его владельцу и судьям')
+      }
+      const since = parseSince(c.req.query('since'))
+      if (since === 'invalid') return fail(c, 422, 'validation', 'Некорректная дата since')
+      const games = await deps.repo.gamesByClubRef(raw, since, GAMES_PAGE_LIMIT)
+      return c.json({ games: games.map((g) => g.record) })
+    }
+    const clubId = Number(raw)
     if (!Number.isInteger(clubId)) return fail(c, 422, 'validation', 'Некорректный клуб')
     const member = await withFreshClub(deps, c.get('user'))
     if (member.gomafia?.club?.id !== clubId) return fail(c, 403, 'not_club_member', 'История доступна только участникам клуба')

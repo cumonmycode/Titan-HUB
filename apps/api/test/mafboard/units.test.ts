@@ -173,7 +173,7 @@ describe('приём игры', () => {
     titan: null,
   }
   const guest = { ...host, gomafia: null }
-  const president: HostAccess = { club: 'president', titan: null, titanShared: false, request: null, mafboardClub: null }
+  const president: HostAccess = { club: 'president', titan: null, titanShared: false, request: null, mafboardClub: null, clubs: [] }
   const judge: HostAccess = { ...president, club: 'host' }
   const noAccess: HostAccess = { ...president, club: 'none' }
   const titanLink: TitanLinkState = {

@@ -296,6 +296,20 @@ describe('Клубы: подключение Titan принадлежит клу
     assert.deepEqual(ctx.titan.calls.disconnect, ['tcn_live'])
   })
 
+  it('клуб HUB, уже подключённый к другому клубу MafBoard, второй раз не подключается — 409, ключ отозван', async () => {
+    const ctx = createTestContext()
+    const other = await signIn(ctx, GUEST_TG)
+    assert.equal((await call(ctx, 'POST', '/v1/clubs', { token: other.accessToken, body: { code: 'good-code' } })).status, 201)
+    ctx.titan.issued = { accessToken: 'tcn_second', connectionId: 'conn-2' }
+
+    const host = await president(ctx)
+    const linked = await call(ctx, 'POST', '/v1/me/titan', { token: host.accessToken, body: { code: 'good-code' } })
+    assert.equal(linked.status, 409)
+    assert.equal(linked.json.error.code, 'club_exists')
+    await ctx.flush()
+    assert.deepEqual(ctx.titan.calls.disconnect, ['tcn_second'])
+  })
+
   it('бывший президент с устаревшим снимком подключить клуб не может', async () => {
     const ctx = createTestContext()
     const former = await titanPresident(ctx)
