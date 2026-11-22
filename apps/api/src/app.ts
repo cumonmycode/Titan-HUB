@@ -126,8 +126,11 @@ app.use('*', prettyJSON())
 const defaultBodyLimit = bodyLimit({ maxSize: 1 * 1024 * 1024 })
 // Файлы СММ (видео для рилс до 60 МБ, фото клуба, скриншоты статистики) — лимит в smm.router.
 const SMM_UPLOAD_RE = /^\/api\/smm\/(?:posts\/[0-9a-f-]{36}\/media|assets|analytics\/screenshot)$/i
+// Фото игрока MafBoard (до 8 МБ) — лимит в modules/mafboard/clubRoster.ts, после проверки входа.
+const MAFBOARD_PHOTO_RE = /^\/api\/mafboard\/v1\/clubs\/[0-9a-f-]{36}\/players\/[0-9a-f-]{36}\/photo$/i
 const hasOwnBodyLimit = (path: string): boolean =>
-  path.startsWith('/api/upload/') || path === '/api/auth/app/photo' || path === '/api/system/restore-upload' || path === '/api/ai/assistant/transcribe' || SMM_UPLOAD_RE.test(path)
+  path.startsWith('/api/upload/') || path === '/api/auth/app/photo' || path === '/api/system/restore-upload' || path === '/api/ai/assistant/transcribe' ||
+  SMM_UPLOAD_RE.test(path) || MAFBOARD_PHOTO_RE.test(path)
 app.use('/api/*', (c, next) => (hasOwnBodyLimit(c.req.path) ? next() : defaultBodyLimit(c, next)))
 app.use('/api/*', rateLimit)
 // Инжект БД клуба в контекст (Фаза 1). Wave 0: дефолтная БД = синглтон.
