@@ -101,6 +101,16 @@ describe('Игроки клуба: один список', () => {
     assert.equal(players.get('Шерлок')!.photoURL, gomafiaAvatar(5001))
   })
 
+  it('два клиента с одним номером GoMafia — один игрок, первый по порядку клуба', async () => {
+    const ctx = seeded()
+    ctx.titan.members.push(titanClient('00000000-0000-4000-8000-00000000000e', 'Тигр-дубль', { gomafiaId: '5001' }))
+    const host = await president(ctx)
+    const res = await call(ctx, 'GET', '/v1/club/players', { token: host.accessToken })
+    const ids = res.json.players.map((p: Player) => p.playerID)
+    assert.equal(new Set(ids).size, ids.length)
+    assert.deepEqual(res.json.players.map((p: Player) => p.nickname), ['Тигр', 'Ворон', 'host'])
+  })
+
   it('клуб без Titan HUB — только резиденты GoMafia', async () => {
     const ctx = seeded()
     const host = await president(ctx, { titan: false })
@@ -172,6 +182,16 @@ describe('Фото самого судьи', () => {
     await ctx.flush()
     const warm = await call(ctx, 'GET', '/v1/me', { token: host.accessToken })
     assert.equal(warm.json.photoURL, 'https://titanpos.test/media/host-1.jpg')
+  })
+
+  it('Titan не отвечает — запросы аккаунта не множат чтения состава', async () => {
+    const ctx = seeded()
+    const host = await president(ctx)
+    ctx.titan.down = true
+    const before = ctx.titan.calls.clients
+    for (let i = 0; i < 5; i++) await call(ctx, 'GET', '/v1/me', { token: host.accessToken })
+    await ctx.flush()
+    assert.equal(ctx.titan.calls.clients - before, 1)
   })
 
   it('без GoMafia фото нет, без Titan — аватар GoMafia', async () => {

@@ -69,8 +69,16 @@ function forbidden(c: Context<MafboardEnv>, user: MafboardUser) {
  */
 export function mergeClubPlayers(titan: TitanSource | null, residents: GoMafiaPlayerJSON[], verified: Set<number>): ClubPlayerJSON[] {
   const byGoMafia = new Map(residents.map((player) => [player.id, player]))
-  const clients = titan ? [...titan.clients].sort(byClubOrder).map((client) => toTitanPlayerJSON(titan.apiBase, client, titan.matches)) : []
-  const taken = new Set(clients.flatMap((client) => (client.goMafiaID == null ? [] : [client.goMafiaID])))
+  const all = titan ? [...titan.clients].sort(byClubOrder).map((client) => toTitanPlayerJSON(titan.apiBase, client, titan.matches)) : []
+  // Два клиента с одним номером GoMafia (дубль в HUB или ручное сопоставление) — один игрок за столом:
+  // остаётся первый по порядку клуба, иначе в подборе один игрок сел бы на два места.
+  const taken = new Set<number>()
+  const clients = all.filter((client) => {
+    if (client.goMafiaID == null) return true
+    if (taken.has(client.goMafiaID)) return false
+    taken.add(client.goMafiaID)
+    return true
+  })
 
   const fromTitan = clients.map((client): ClubPlayerJSON => {
     const linked = client.goMafiaID == null ? undefined : byGoMafia.get(client.goMafiaID)
@@ -106,29 +114,47 @@ export function mergeClubPlayers(titan: TitanSource | null, residents: GoMafiaPl
   return [...fromTitan, ...fromGoMafia]
 }
 
+/** Составы Titan, которые сейчас читаются в фоне: на каждый клуб — не больше одного чтения. */
+const warming = new Set<string>()
+/** Клуб → когда снова можно читать: Titan не ответил, и каждый `/v1/me` не должен бить его заново. */
+const warmPausedUntil = new Map<string, number>()
+const WARM_RETRY_MS = 60_000
+
+/** Прочитать состав клуба Titan в фоне, если его не читают сейчас и Titan не отказал только что. */
+function warmTitanRoster(c: Context<MafboardEnv>, link: NonNullable<HostAccess['titan']>): void {
+  const deps = c.get('deps')
+  const key = link.apiBase
+  const token = tokenOf(c, link)
+  if (!token || warming.has(key) || (warmPausedUntil.get(key) ?? 0) > deps.now().getTime()) return
+  warming.add(key)
+  deps.background(`mb:titan:warm:${key}`, async () => {
+    try {
+      await deps.titanRoster.roster(key, token)
+      warmPausedUntil.delete(key)
+    } catch {
+      // Фото в шапке подождёт: нужен только кэш, ошибку покажет подбор игроков.
+      warmPausedUntil.set(key, deps.now().getTime() + WARM_RETRY_MS)
+    } finally {
+      warming.delete(key)
+    }
+  })
+}
+
 /**
  * Фото самого пользователя: клиент Titan его клуба с его номером GoMafia и своим фото, иначе аватар
- * GoMafia. Состав Titan берётся только из кэша: `/v1/me` зовут часто, ждать Titan незачем. Кэша нет —
- * он читается в фоне, и со следующего запроса фото уже из клуба.
+ * GoMafia. Состав Titan берётся только из кэша: `/v1/me` зовут часто, ждать Titan незачем. Кэша нет или он
+ * устарел — состав читается в фоне, и со следующего запроса фото уже свежее.
  */
 export function accountPhotoURL(c: Context<MafboardEnv>, user: MafboardUser, access: HostAccess): string | null {
   const own = user.gomafia?.player
   const fallback = own?.avatarURL ?? null
   const link = access.titan
   if (!own || !link) return fallback
-  const deps = c.get('deps')
-  const clients = deps.titanRoster.peek(link.apiBase)
-  if (!clients) {
-    const token = tokenOf(c, link)
-    if (token) {
-      deps.background(`mb:titan:warm:${link.apiBase}`, async () => {
-        await deps.titanRoster.roster(link.apiBase, token).catch(() => undefined)
-      })
-    }
-    return fallback
-  }
+  const cached = c.get('deps').titanRoster.peek(link.apiBase)
+  if (!cached || cached.stale) warmTitanRoster(c, link)
+  if (!cached) return fallback
   // Ручные сопоставления здесь не учитываются: ради фото в шапке лишний запрос к базе на каждый `/v1/me` не нужен.
-  const client = clients.find((item) => goMafiaNumber(item.gomafiaId) === own.id && item.photoUrl)
+  const client = cached.clients.find((item) => goMafiaNumber(item.gomafiaId) === own.id && item.photoUrl)
   return client?.photoUrl ?? fallback
 }
 

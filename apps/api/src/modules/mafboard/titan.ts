@@ -176,9 +176,10 @@ export class TitanRosterCache {
     }
   }
 
-  /** Последний прочитанный состав клуба без запроса в Titan, сколько бы ему ни было лет; null — ещё не читали. */
-  peek(apiBase: string): TitanClient[] | null {
-    return this.entries.get(apiBase)?.clients ?? null
+  /** Последний прочитанный состав клуба без запроса в Titan; `stale` — старше срока кэша. null — ещё не читали. */
+  peek(apiBase: string): { clients: TitanClient[]; stale: boolean } | null {
+    const cached = this.entries.get(apiBase)
+    return cached ? { clients: cached.clients, stale: this.now() - cached.at >= this.ttlMs } : null
   }
 
   forget(apiBase: string): void {
