@@ -13,6 +13,7 @@ import { TitanHubDirectory } from './hubLive.js'
 import { liveTitanConnect, TitanRosterCache } from './titan.js'
 import { ensureMafboardDatabase, reconcileMafboardClubs, runMafboardMigrations } from './migrations.js'
 import { PgMafboardRepo } from './pgRepo.js'
+import { minioPhotos } from './photos.js'
 import { attachStudioRelay, type StudioRelay } from './relay.js'
 import { createMafboardRouter, type MafboardDeps, type RateLimiter } from './router.js'
 import { liveVkGateway } from './vk.js'
@@ -75,6 +76,7 @@ function messengerFor(token: string | null): BotMessenger | null {
     },
     answerCallback: (id, text) => bot.answerCallback(id, text),
     username: () => bot.username(),
+    download: async (fileId) => (await bot.download(fileId))?.data ?? null,
   }
 }
 
@@ -99,6 +101,7 @@ function resolveDeps(): MafboardDeps | { error: string } {
       titan: titanGateway,
       titanRoster: new TitanRosterCache(titanGateway),
       messenger: messengerFor(config.botToken),
+      images: minioPhotos,
       limiter: redisLimiter,
       vk: liveVkGateway,
       donationAlerts: liveDaGateway,

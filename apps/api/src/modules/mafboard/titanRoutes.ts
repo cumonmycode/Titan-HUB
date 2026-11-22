@@ -4,6 +4,7 @@ import { z } from 'zod'
 import { withFreshClub, type MafboardEnv } from './router.js'
 import { GoMafiaLoginRequired } from './gomafiaSessions.js'
 import { hostAccess } from './clubHosts.js'
+import { membershipOf } from './clubs.js'
 import { errorBody, toAccountJSON } from './serialize.js'
 import { openSecrets, sealSecrets } from './studio.js'
 import { TitanConnectError, toTitanPlayerJSON, trustedApiBase, type TitanClient } from './titan.js'
@@ -183,51 +184,73 @@ export function registerTitanRoutes(router: Hono<MafboardEnv>, requireUser: Midd
   })
 
   /** Клиенты клуба целиком (без удалённых): приложение ищет по ним само. */
-  router.get('/v1/titan/players', requireUser, async (c) => {
-    const deps = c.get('deps')
-    const user = c.get('user')
-    if (!(await deps.limiter.hit(`mb:titan:roster:${user.id}`, ROSTER_LIMIT_PER_MIN, 60))) {
-      return fail(c, 429, 'rate_limited', 'Слишком много запросов')
-    }
-    const roster = await clubRoster(c)
-    if (roster instanceof Response) return roster
-    const players = [...roster.clients].sort(byClubOrder).map((client) => toTitanPlayerJSON(roster.link.apiBase, client, roster.matches))
-    return c.json({ club: { name: roster.link.clubName }, players })
-  })
+  router.get('/v1/titan/players', requireUser, async (c) => respondRoster(c, c.get('access').titan))
 
   /** Сопоставить клиента с игроком GoMafia (`goMafiaID: null` — у клиента нет GoMafia, номер из HUB неверный). */
-  router.put('/v1/titan/players/:id/gomafia', requireUser, body(matchSchema), async (c) => {
-    const deps = c.get('deps')
-    const { goMafiaID } = c.req.valid('json')
-    // lib/gomafia отвечает null и на «нет игрока», и на сбой GoMafia — различить их нельзя.
-    const userId = c.get('user').id
-    // С 2026-11-17 GoMafia показывает профили только вошедшим: без входа ведущего номер не проверить —
-    // принимаем его как есть; с входом — проверяем, что игрок существует.
-    const exists = goMafiaID == null
-      ? true
-      : await deps.gomafiaSessions
-          .run(userId, (auth) => deps.gomafia.player(String(goMafiaID), auth))
-          .then((player) => player != null)
-          .catch((error: unknown) => error instanceof GoMafiaLoginRequired)
-    if (!exists) {
-      return fail(c, 404, 'not_found', 'Игрок не найден в GoMafia или GoMafia не отвечает')
-    }
-    return saveMatch(c, { goMafiaId: goMafiaID })
-  })
+  router.put('/v1/titan/players/:id/gomafia', requireUser, body(matchSchema), async (c) =>
+    matchGoMafia(c, c.get('access').titan, c.req.param('id') ?? '', c.req.valid('json').goMafiaID))
 
   /** Снять ручное сопоставление: снова действует номер GoMafia из профиля в HUB. */
-  router.delete('/v1/titan/players/:id/gomafia', requireUser, async (c) => saveMatch(c, null))
+  router.delete('/v1/titan/players/:id/gomafia', requireUser, async (c) => saveMatch(c, c.get('access').titan, c.req.param('id') ?? '', null))
+
+  // То же по клубу MafBoard из адреса — для любого клуба пользователя, не только клуба GoMafia.
+  router.get('/v1/clubs/:id/titan/players', requireUser, async (c) => {
+    const link = clubTitanLink(c)
+    return link instanceof Response ? link : respondRoster(c, link)
+  })
+  router.put('/v1/clubs/:id/titan/players/:clientId/gomafia', requireUser, body(matchSchema), async (c) => {
+    const link = clubTitanLink(c)
+    return link instanceof Response ? link : matchGoMafia(c, link, c.req.param('clientId') ?? '', c.req.valid('json').goMafiaID)
+  })
+  router.delete('/v1/clubs/:id/titan/players/:clientId/gomafia', requireUser, async (c) => {
+    const link = clubTitanLink(c)
+    return link instanceof Response ? link : saveMatch(c, link, c.req.param('clientId') ?? '', null)
+  })
 }
 
-async function saveMatch(c: Context<MafboardEnv>, match: { goMafiaId: number | null } | null) {
+/** Подключение Titan клуба из адреса: член клуба, и к клубу подключён Titan HUB. */
+function clubTitanLink(c: Context<MafboardEnv>): TitanLinkState | Response {
+  const membership = membershipOf(c)
+  if (membership instanceof Response) return membership
+  return membership.titan ?? fail(c, 409, 'titan_not_linked', 'К клубу не подключён Titan HUB')
+}
+
+async function respondRoster(c: Context<MafboardEnv>, link: TitanLinkState | null): Promise<Response> {
+  const deps = c.get('deps')
+  if (!(await deps.limiter.hit(`mb:titan:roster:${c.get('user').id}`, ROSTER_LIMIT_PER_MIN, 60))) {
+    return fail(c, 429, 'rate_limited', 'Слишком много запросов')
+  }
+  const roster = await clubRoster(c, link)
+  if (roster instanceof Response) return roster
+  const players = [...roster.clients].sort(byClubOrder).map((client) => toTitanPlayerJSON(roster.link.apiBase, client, roster.matches))
+  return c.json({ club: { name: roster.link.clubName }, players })
+}
+
+async function matchGoMafia(c: Context<MafboardEnv>, link: TitanLinkState | null, clientId: string, goMafiaID: number | null): Promise<Response> {
+  const deps = c.get('deps')
+  // lib/gomafia отвечает null и на «нет игрока», и на сбой GoMafia — различить их нельзя.
+  // С 2026-11-17 GoMafia показывает профили только вошедшим: без входа ведущего номер не проверить —
+  // принимаем его как есть; с входом — проверяем, что игрок существует.
+  const exists = goMafiaID == null
+    ? true
+    : await deps.gomafiaSessions
+        .run(c.get('user').id, (auth) => deps.gomafia.player(String(goMafiaID), auth))
+        .then((player) => player != null)
+        .catch((error: unknown) => error instanceof GoMafiaLoginRequired)
+  if (!exists) {
+    return fail(c, 404, 'not_found', 'Игрок не найден в GoMafia или GoMafia не отвечает')
+  }
+  return saveMatch(c, link, clientId, { goMafiaId: goMafiaID })
+}
+
+async function saveMatch(c: Context<MafboardEnv>, link: TitanLinkState | null, clientId: string, match: { goMafiaId: number | null } | null) {
   const deps = c.get('deps')
   const user = c.get('user')
-  const clientId = c.req.param('id') ?? ''
   if (!CLIENT_ID.test(clientId)) return fail(c, 422, 'validation', 'Некорректный клиент')
   if (!(await deps.limiter.hit(`mb:titan:match:${user.id}`, MATCH_LIMIT_PER_HOUR, 3600))) {
     return fail(c, 429, 'rate_limited', 'Слишком много изменений, попробуйте позже')
   }
-  const roster = await clubRoster(c)
+  const roster = await clubRoster(c, link)
   if (roster instanceof Response) return roster
   const client = roster.clients.find((item) => item.id === clientId)
   if (!client) return fail(c, 404, 'not_found', 'Клиент не найден в клубе')

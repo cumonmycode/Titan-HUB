@@ -1,5 +1,5 @@
 import type {
-  DeviceSession, GoMafiaClubJSON, GoMafiaLinkSource, GoMafiaPlayerJSON, LoginTicket, MafboardUser, QrTicket, RefreshTokenRow, StoredActiveGame, StoredClub, StoredClubHost, StoredClubInvite, StoredClubMember, StoredClubRequest, StoredGame, StoredProtocolSubmission, StoredShare, StoredStudioSettings, TelegramProfile,
+  DeviceSession, GoMafiaClubJSON, GoMafiaLinkSource, GoMafiaPlayerJSON, LoginTicket, MafboardUser, QrTicket, RefreshTokenRow, StoredActiveGame, StoredClub, StoredClubApplication, StoredClubHost, StoredClubInvite, StoredClubMember, StoredClubPlayer, StoredClubRequest, StoredGame, StoredPlayerLink, StoredPlayerLinkToken, StoredPlayerPhoto, StoredProtocolSubmission, StoredShare, StoredStudioSettings, TelegramProfile,
   TicketGuard, TicketPatch, TicketStep, TitanLinkState,
 } from './types.js'
 
@@ -85,6 +85,39 @@ export interface MafboardRepo {
   revokeClubInvite(clubId: string, inviteId: string, at: Date): Promise<boolean>
   /** История клуба MafBoard (по `club_ref`), по времени окончания. */
   gamesByClubRef(clubRef: string, since: Date | null, limit: number): Promise<StoredGame[]>
+
+  // ─── Заявки на клуб без подключений ───────────────────────────────────────
+  /** Новая заявка. 'pending_exists' — у пользователя уже есть заявка на рассмотрении. */
+  createClubApplication(application: StoredClubApplication): Promise<StoredClubApplication | 'pending_exists'>
+  clubApplicationById(id: string): Promise<StoredClubApplication | null>
+  /** Последняя заявка пользователя (любого статуса). */
+  latestClubApplication(userId: string): Promise<StoredClubApplication | null>
+  /**
+   * Одобрить заявку: клуб без подключений, заявитель — владелец (запись `owner`), заявка ссылается на клуб.
+   * Одной операцией; null — заявка уже решена или её нет (повторное нажатие, гонка двух решений).
+   */
+  approveClubApplication(id: string, at: Date): Promise<{ application: StoredClubApplication; club: StoredClub } | null>
+  /** Отклонить заявку. null — уже решена или её нет. */
+  rejectClubApplication(id: string, at: Date): Promise<StoredClubApplication | null>
+
+  // ─── Свои игроки клуба, фото, игрок в боте ─────────────────────────────────
+  /** Свои игроки клуба; `withArchived` — вместе с убранными (для проверки старых игр). */
+  clubPlayers(clubId: string, withArchived: boolean): Promise<StoredClubPlayer[]>
+  /** 'nickname_taken' — у действующего игрока клуба уже такой ник (без учёта регистра). */
+  addClubPlayer(player: StoredClubPlayer): Promise<StoredClubPlayer | 'nickname_taken'>
+  /** null — игрока нет или он убран. */
+  renameClubPlayer(clubId: string, playerId: string, nickname: string): Promise<StoredClubPlayer | 'nickname_taken' | null>
+  archiveClubPlayer(clubId: string, playerId: string, at: Date): Promise<boolean>
+  playerPhotos(clubId: string): Promise<StoredPlayerPhoto[]>
+  setPlayerPhoto(photo: StoredPlayerPhoto): Promise<void>
+  clearPlayerPhoto(clubId: string, playerId: string): Promise<boolean>
+  createPlayerLinkToken(token: StoredPlayerLinkToken): Promise<void>
+  /**
+   * Использовать ссылку игрока: токен гасится, игрок клуба привязывается к Telegram (прежняя привязка
+   * этого Telegram в том же клубе снимается). 'expired' — ссылка использована или истекла, null — нет такой.
+   */
+  usePlayerLinkToken(tokenHash: string, tgId: number, at: Date): Promise<StoredPlayerLink | 'expired' | null>
+  playerLinksByTg(tgId: number): Promise<StoredPlayerLink[]>
 
   // ─── Пул судей клуба ───────────────────────────────────────────────────────
   /** Судьи клуба GoMafia, которым президент дал вести игры, по времени выдачи. */

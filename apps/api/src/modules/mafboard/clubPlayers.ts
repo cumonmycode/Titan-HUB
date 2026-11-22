@@ -6,7 +6,7 @@ import { errorBody, toPlayerJSON } from './serialize.js'
 import { goMafiaNumber, goMafiaPlayerID, toTitanPlayerJSON, type TitanClient } from './titan.js'
 import { byClubOrder, clubRoster, tokenOf } from './titanRoutes.js'
 import type { ClubMembership } from './clubAccess.js'
-import type { GoMafiaPlayerJSON, HostAccess, MafboardUser, TitanLinkState } from './types.js'
+import type { GoMafiaPlayerJSON, HostAccess, MafboardUser, StoredClubPlayer, StoredPlayerPhoto, TitanLinkState } from './types.js'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Игроки клуба одним списком (docs/MAFBOARD.md, раздел «Игроки клуба»):
@@ -29,6 +29,8 @@ export interface ClubPlayerJSON {
   statusLabel: string | null
   isVerified: boolean
   elo: number | null
+  /** Откуда игрок: клиент Titan HUB, резидент GoMafia или свой игрок клуба MafBoard. */
+  source: 'titan' | 'gomafia' | 'club'
 }
 
 interface TitanSource {
@@ -65,10 +67,16 @@ function forbidden(c: Context<MafboardEnv>, user: MafboardUser) {
 }
 
 /**
- * Склейка: клиенты Titan (по порядку клуба), затем резиденты GoMafia, которых среди клиентов нет (по ELO).
- * Клиент с номером GoMafia — один игрок: фото — своё из HUB, иначе аватар его игрока GoMafia; ELO — из GoMafia.
+ * Склейка: клиенты Titan (по порядку клуба), свои игроки клуба (по нику), затем резиденты GoMafia, которых
+ * среди клиентов нет (по ELO). Клиент с номером GoMafia — один игрок: фото — своё из HUB, иначе аватар его
+ * игрока GoMafia; ELO — из GoMafia. Фото, загруженные в MafBoard, накладываются потом (`withPhotos`).
  */
-export function mergeClubPlayers(titan: TitanSource | null, residents: GoMafiaPlayerJSON[], verified: Set<number>): ClubPlayerJSON[] {
+export function mergeClubPlayers(
+  titan: TitanSource | null,
+  residents: GoMafiaPlayerJSON[],
+  verified: Set<number>,
+  own: StoredClubPlayer[] = [],
+): ClubPlayerJSON[] {
   const byGoMafia = new Map(residents.map((player) => [player.id, player]))
   const all = titan ? [...titan.clients].sort(byClubOrder).map((client) => toTitanPlayerJSON(titan.apiBase, client, titan.matches)) : []
   // Два клиента с одним номером GoMafia (дубль в HUB или ручное сопоставление) — один игрок за столом:
@@ -94,8 +102,22 @@ export function mergeClubPlayers(titan: TitanSource | null, residents: GoMafiaPl
       statusLabel: client.statusLabel,
       isVerified: client.goMafiaID != null && verified.has(client.goMafiaID),
       elo: linked?.elo ?? null,
+      source: 'titan',
     }
   })
+  const fromClub = own.map((player): ClubPlayerJSON => ({
+    playerID: player.playerId,
+    nickname: player.nickname,
+    fullName: null,
+    photoURL: null,
+    titanClientID: null,
+    goMafiaID: null,
+    isResident: true,
+    statusLabel: null,
+    isVerified: false,
+    elo: null,
+    source: 'club',
+  }))
   const fromGoMafia = residents
     .filter((player) => !taken.has(player.id))
     .map((player, index) => ({ player, index }))
@@ -111,8 +133,19 @@ export function mergeClubPlayers(titan: TitanSource | null, residents: GoMafiaPl
       statusLabel: null,
       isVerified: verified.has(player.id),
       elo: player.elo,
+      source: 'gomafia',
     }))
-  return [...fromTitan, ...fromGoMafia]
+  return [...fromTitan, ...fromClub, ...fromGoMafia]
+}
+
+/** Фото, загруженные в MafBoard (судьёй, владельцем или самим игроком), главнее фото из Titan HUB и GoMafia. */
+export function withPhotos(players: ClubPlayerJSON[], photos: StoredPlayerPhoto[]): ClubPlayerJSON[] {
+  if (photos.length === 0) return players
+  const byPlayer = new Map(photos.map((photo) => [photo.playerId.toLowerCase(), photo.url]))
+  return players.map((player) => {
+    const url = byPlayer.get(player.playerID.toLowerCase())
+    return url ? { ...player, photoURL: url } : player
+  })
 }
 
 /** Составы Titan, которые сейчас читаются в фоне: на каждый клуб — не больше одного чтения. */
@@ -195,9 +228,12 @@ async function clubPlayersJSON(
   club: { id: string | null; name: string; titan: TitanLinkState | null; gomafiaClubId: number | null },
 ): Promise<Response> {
   const deps = c.get('deps')
-  const [titan, residents] = await Promise.all([
+  const clubId = club.id
+  const [titan, residents, own, photos] = await Promise.all([
     club.titan ? clubRoster(c, club.titan) : Promise.resolve(null),
     club.gomafiaClubId != null ? goMafiaResidents(c, club.gomafiaClubId) : Promise.resolve([] as GoMafiaPlayerJSON[]),
+    clubId ? deps.repo.clubPlayers(clubId, false) : Promise.resolve([] as StoredClubPlayer[]),
+    clubId ? deps.repo.playerPhotos(clubId) : Promise.resolve([] as StoredPlayerPhoto[]),
   ])
   const titanFailed = titan instanceof Response
   const goMafiaFailed = residents instanceof Response
@@ -213,7 +249,7 @@ async function clubPlayersJSON(
 
   return c.json({
     club: { id: club.id, name: club.name },
-    players: mergeClubPlayers(source, players, verified),
+    players: withPhotos(mergeClubPlayers(source, players, verified, own), photos),
     partial: titanFailed || goMafiaFailed,
   })
 }

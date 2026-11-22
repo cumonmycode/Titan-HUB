@@ -30,13 +30,13 @@ const codeSchema = z.object({ code: z.string().trim().min(6).max(20) })
 const joinSchema = z.object({ token: z.string().trim().min(16).max(128) })
 
 /** Клуб пользователя по id из адреса; не член клуба — ответ 403 (клуба нет — тоже 403: не выдаём, что он есть). */
-function membershipOf(c: Context<MafboardEnv>): ClubMembership | Response {
+export function membershipOf(c: Context<MafboardEnv>): ClubMembership | Response {
   const id = (c.req.param('id') ?? '').toLowerCase()
   const membership = UUID.test(id) ? c.get('access').clubs.find((entry) => entry.club.id === id) : undefined
   return membership ?? fail(c, 403, 'club_access_required', 'Клуб доступен его владельцу и судьям')
 }
 
-function ownedClub(c: Context<MafboardEnv>): ClubMembership | Response {
+export function ownedClub(c: Context<MafboardEnv>): ClubMembership | Response {
   const membership = membershipOf(c)
   if (membership instanceof Response) return membership
   return membership.role === 'owner' ? membership : fail(c, 403, 'owner_only', 'Это может только владелец клуба')
@@ -46,7 +46,7 @@ async function accountJSON(c: Context<MafboardEnv>, user: MafboardUser) {
   return toAccountJSON(user, await hostAccess(c.get('deps').repo, user))
 }
 
-function telegramName(user: MafboardUser): string {
+export function telegramName(user: MafboardUser): string {
   return [[user.tgFirstName, user.tgLastName].filter(Boolean).join(' '), user.tgUsername ? `@${user.tgUsername}` : null].filter(Boolean).join(', ')
 }
 

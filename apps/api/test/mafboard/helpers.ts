@@ -4,6 +4,7 @@ import { GomafiaAuthRequired, type GomafiaAuth, type GomafiaLoginResult, type Go
 import { sessionDelegate } from '../../src/modules/mafboard/clubHosts.js'
 import { GoMafiaSessions } from '../../src/modules/mafboard/gomafiaSessions.js'
 import type { BotMessenger } from '../../src/modules/mafboard/bot.js'
+import type { PhotoStore } from '../../src/modules/mafboard/photos.js'
 import type { MafboardConfig } from '../../src/modules/mafboard/config.js'
 import { RosterCache, type GoMafiaGateway } from '../../src/modules/mafboard/gomafia.js'
 import { noHub } from '../../src/modules/mafboard/hub.js'
@@ -11,7 +12,7 @@ import { TitanConnectError, TitanRosterCache, type TitanClient, type TitanConnec
 import { DELETED_HOST_ID } from '../../src/modules/mafboard/config.js'
 import { GomafiaTakenError, type MafboardRepo } from '../../src/modules/mafboard/repo.js'
 import { createMafboardRouter, type MafboardDeps } from '../../src/modules/mafboard/router.js'
-import type { DeviceSession, LoginTicket, MafboardUser, QrTicket, RefreshTokenRow, StoredActiveGame, StoredClub, StoredClubHost, StoredClubInvite, StoredClubMember, StoredClubRequest, StoredGame, StoredProtocolSubmission, StoredShare, StoredStudioSettings, TicketGuard, TitanLinkState } from '../../src/modules/mafboard/types.js'
+import type { DeviceSession, LoginTicket, MafboardUser, QrTicket, RefreshTokenRow, StoredActiveGame, StoredClub, StoredClubApplication, StoredClubHost, StoredClubInvite, StoredClubMember, StoredClubPlayer, StoredClubRequest, StoredGame, StoredPlayerLink, StoredPlayerLinkToken, StoredPlayerPhoto, StoredProtocolSubmission, StoredShare, StoredStudioSettings, TicketGuard, TitanLinkState } from '../../src/modules/mafboard/types.js'
 import { VkError, type VkAppConfig, type VkGateway, type VkTokens } from '../../src/modules/mafboard/vk.js'
 import type { DaAppConfig, DaGateway } from '../../src/modules/mafboard/donationalerts.js'
 import { AimError, AimSession } from '../../src/lib/gomafiaAim.js'
@@ -37,7 +38,11 @@ export const config: MafboardConfig = {
   vk: { clientId: 'vk-client', clientSecret: 'vk-secret', redirectUri: 'https://mafboard.test/api/mafboard/v1/vk/callback' },
   donationAlerts: { clientId: 'da-client', clientSecret: 'da-secret', redirectUri: 'https://mafboard.test/api/mafboard/v1/donationalerts/callback' },
   titanConnectUrl: 'https://titanpos.test/api/connect/v1',
+  adminTgId: 9000,
 }
+
+/** Telegram владельца платформы в тестах (config.adminTgId). */
+export const ADMIN_TG = { id: 9000, is_bot: false, first_name: 'Владелец', username: 'owner' }
 
 export const TITAN_API_BASE = 'https://club.titanpos.test/api/connect/v1'
 
@@ -192,6 +197,11 @@ export class MemoryRepo implements MafboardRepo {
   members: StoredClubMember[] = []
   invites = new Map<string, StoredClubInvite>()
   requests = new Map<string, StoredClubRequest>()
+  applications = new Map<string, StoredClubApplication>()
+  clubPlayerRows: StoredClubPlayer[] = []
+  photos: StoredPlayerPhoto[] = []
+  linkTokens = new Map<string, StoredPlayerLinkToken>()
+  playerLinks: StoredPlayerLink[] = []
   private seq = 0
 
   private uuid(): string {
@@ -369,6 +379,110 @@ export class MemoryRepo implements MafboardRepo {
 
   async gamesByClubRef(clubRef: string, since: Date | null, limit: number) {
     return [...this.games.values()].filter((g) => g.clubRef === clubRef && (!since || g.finishedAt > since)).slice(0, limit)
+  }
+
+  async createClubApplication(application: StoredClubApplication) {
+    const pending = [...this.applications.values()].some((row) => row.userId === application.userId && row.status === 'pending')
+    if (pending) return 'pending_exists' as const
+    this.applications.set(application.id, application)
+    return application
+  }
+
+  async clubApplicationById(id: string) {
+    return this.applications.get(id) ?? null
+  }
+
+  async latestClubApplication(userId: string) {
+    return [...this.applications.values()].filter((row) => row.userId === userId).sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())[0] ?? null
+  }
+
+  async approveClubApplication(id: string, at: Date) {
+    const application = this.applications.get(id)
+    if (!application || application.status !== 'pending') return null
+    const club: StoredClub = {
+      id: this.uuid(), name: application.name, city: application.city, gomafiaClubId: null,
+      titan: null, titanLinkedBy: null, ownerUserId: application.userId,
+    }
+    this.clubs.set(club.id, club)
+    this.members.push({ clubId: club.id, userId: application.userId, role: 'owner', addedBy: application.userId, addedAt: at })
+    const decided: StoredClubApplication = { ...application, status: 'approved', decidedAt: at, clubId: club.id }
+    this.applications.set(id, decided)
+    return { application: decided, club }
+  }
+
+  async rejectClubApplication(id: string, at: Date) {
+    const application = this.applications.get(id)
+    if (!application || application.status !== 'pending') return null
+    const decided: StoredClubApplication = { ...application, status: 'rejected', decidedAt: at }
+    this.applications.set(id, decided)
+    return decided
+  }
+
+  async clubPlayers(clubId: string, withArchived: boolean) {
+    return this.clubPlayerRows
+      .filter((row) => row.clubId === clubId && (withArchived || !row.archivedAt))
+      .sort((a, b) => a.nickname.toLowerCase().localeCompare(b.nickname.toLowerCase()))
+  }
+
+  private nicknameTaken(clubId: string, nickname: string, except: string | null) {
+    return this.clubPlayerRows.some((row) => row.clubId === clubId && !row.archivedAt && row.playerId !== except && row.nickname.toLowerCase() === nickname.toLowerCase())
+  }
+
+  async addClubPlayer(player: StoredClubPlayer) {
+    if (this.nicknameTaken(player.clubId, player.nickname, null)) return 'nickname_taken' as const
+    this.clubPlayerRows.push(player)
+    return player
+  }
+
+  async renameClubPlayer(clubId: string, playerId: string, nickname: string) {
+    const index = this.clubPlayerRows.findIndex((row) => row.clubId === clubId && row.playerId === playerId && !row.archivedAt)
+    if (index < 0) return null
+    if (this.nicknameTaken(clubId, nickname, playerId)) return 'nickname_taken' as const
+    const renamed = { ...this.clubPlayerRows[index]!, nickname }
+    this.clubPlayerRows[index] = renamed
+    return renamed
+  }
+
+  async archiveClubPlayer(clubId: string, playerId: string, at: Date) {
+    const index = this.clubPlayerRows.findIndex((row) => row.clubId === clubId && row.playerId === playerId && !row.archivedAt)
+    if (index < 0) return false
+    this.clubPlayerRows[index] = { ...this.clubPlayerRows[index]!, archivedAt: at }
+    return true
+  }
+
+  async playerPhotos(clubId: string) {
+    return this.photos.filter((row) => row.clubId === clubId)
+  }
+
+  async setPlayerPhoto(photo: StoredPlayerPhoto) {
+    this.photos = [...this.photos.filter((row) => !(row.clubId === photo.clubId && row.playerId === photo.playerId)), photo]
+  }
+
+  async clearPlayerPhoto(clubId: string, playerId: string) {
+    const before = this.photos.length
+    this.photos = this.photos.filter((row) => !(row.clubId === clubId && row.playerId === playerId))
+    return this.photos.length < before
+  }
+
+  async createPlayerLinkToken(token: StoredPlayerLinkToken) {
+    this.linkTokens.set(token.tokenHash, token)
+  }
+
+  async usePlayerLinkToken(tokenHash: string, tgId: number, at: Date) {
+    const token = this.linkTokens.get(tokenHash)
+    if (!token) return null
+    if (token.usedAt || token.expiresAt <= at) return 'expired' as const
+    this.linkTokens.set(tokenHash, { ...token, usedAt: at })
+    const link: StoredPlayerLink = { clubId: token.clubId, playerId: token.playerId, tgId, linkedAt: at }
+    this.playerLinks = [
+      ...this.playerLinks.filter((row) => !(row.clubId === token.clubId && (row.playerId === token.playerId || row.tgId === tgId))),
+      link,
+    ]
+    return link
+  }
+
+  async playerLinksByTg(tgId: number) {
+    return this.playerLinks.filter((row) => row.tgId === tgId)
   }
 
   async clearTitanMirrors(connectionId: string) {
@@ -721,6 +835,11 @@ export class FakeMessenger implements BotMessenger {
 
   async username() { return 'mafboard_test_bot' }
 
+  /** Файлы Telegram по file_id: тест кладёт сюда фото, которое «прислал» игрок. */
+  files = new Map<string, Buffer>()
+
+  async download(fileId: string) { return this.files.get(fileId) ?? null }
+
   get last(): SentMessage | undefined { return this.sent.at(-1) }
 
   /** callback_data кнопки с этим текстом в последнем сообщении с inline-клавиатурой. */
@@ -742,6 +861,22 @@ export class FakeMessenger implements BotMessenger {
       }
     }
     throw new Error(`кнопка-ссылка «${label}» не найдена`)
+  }
+}
+
+/** Начало JPEG: проверки по байтам (как в imageStore) принимают его за фото. */
+export const JPEG_BYTES = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46])
+
+/** Хранилище фото в памяти: JPEG принимает, остальное отклоняет, каждому файлу — свой адрес. */
+export class FakeImages implements PhotoStore {
+  stored: Buffer[] = []
+
+  async store(buffer: Buffer) {
+    if (buffer.length < 3 || buffer[0] !== 0xff || buffer[1] !== 0xd8 || buffer[2] !== 0xff) {
+      return { ok: false as const, status: 400 as const, error: 'Допустимы только фото: JPEG, PNG, WebP' }
+    }
+    this.stored.push(buffer)
+    return { ok: true as const, url: `https://media.mafboard.test/photo-${this.stored.length}.jpg` }
   }
 }
 
@@ -821,6 +956,7 @@ export interface TestContext {
   aim: FakeAim
   tournaments: FakeTournaments
   titan: FakeTitan
+  images: FakeImages
   /** Дождаться фоновых задач (обработка апдейтов бота). */
   flush(): Promise<void>
   clock: { now: Date }
@@ -831,6 +967,7 @@ export function createTestContext(overrides: Partial<MafboardDeps> = {}): TestCo
   const messenger = new FakeMessenger()
   const gomafia = new FakeGoMafia()
   const titan = new FakeTitan()
+  const images = new FakeImages()
   const clock = { now: NOW }
   const aim = new FakeAim()
   const aimAccounts = new AimAccounts(repo, aim, config.studioSecretsKey, () => clock.now)
@@ -848,6 +985,7 @@ export function createTestContext(overrides: Partial<MafboardDeps> = {}): TestCo
     titan,
     titanRoster: new TitanRosterCache(titan, () => clock.now.getTime()),
     messenger,
+    images,
     vk: new FakeVk(),
     donationAlerts: new FakeDa(),
     aimAccounts,
@@ -877,7 +1015,7 @@ export function createTestContext(overrides: Partial<MafboardDeps> = {}): TestCo
 
   const app = new Hono().route('/api/mafboard', createMafboardRouter(() => deps))
   return {
-    app, deps, repo, messenger, gomafia, titan, clock, aim, tournaments,
+    app, deps, repo, messenger, gomafia, titan, clock, aim, tournaments, images,
     async flush() {
       while (pending.length > 0) await pending.shift()
     },

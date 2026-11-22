@@ -1,13 +1,11 @@
 import { z } from 'zod'
 import { SUPPORTED_GAME_SCHEMA_VERSION } from './config.js'
-import { TITAN_PLAYER_ID } from './titan.js'
+import { CLUB_PLAYER_ID, GOMAFIA_PLAYER_ID, TITAN_PLAYER_ID } from './playerIds.js'
 import type { HostAccess, MafboardUser, StoredGame } from './types.js'
 
 // Приём завершённой игры (GameRecord приложения). Запись хранится целиком; сервер
 // проверяет только то, от чего зависят права и история клуба.
 
-/** PlayerID игрока GoMafia в приложении: UUID с префиксом «mafbgm» (PlayerID.goMafia). */
-const GOMAFIA_PLAYER_ID = /^6d616662-676d-8000-8000-[0-9a-f]{12}$/i
 const MAX_FUTURE_MS = 24 * 60 * 60_000
 
 const recordSchema = z
@@ -60,7 +58,14 @@ const fail = (status: 403 | 422, code: string, message: string): GameUploadResul
  *  • игра турнира GoMafia — у судьи с привязанным GoMafia, клуб не нужен; игроки — только из GoMafia;
  *  • игры ведущего клуба (включая фанки) идут в историю клуба, остальные — в личную.
  */
-export function validateGameUpload(body: unknown, user: MafboardUser, access: HostAccess, now: Date): GameUploadResult {
+export function validateGameUpload(
+  body: unknown,
+  user: MafboardUser,
+  access: HostAccess,
+  now: Date,
+  /** Свои игроки клуба `setup.host.clubRef` (вместе с убранными: игру могли начать до того). */
+  clubPlayerIds: ReadonlySet<string> = new Set(),
+): GameUploadResult {
   const parsed = recordSchema.safeParse(body)
   if (!parsed.success) return fail(422, 'invalid_record', 'Запись игры повреждена или неполная')
   const record = parsed.data
@@ -87,9 +92,12 @@ export function validateGameUpload(body: unknown, user: MafboardUser, access: Ho
     if (!membership) return fail(403, 'club_access_required', 'Игры клуба ведут его владелец и судьи')
     if (setup.format !== 'funky') {
       const clubTitan = membership.titan != null
-      const allowed = (id: string) => GOMAFIA_PLAYER_ID.test(id) || (clubTitan && TITAN_PLAYER_ID.test(id))
+      const allowed = (id: string) =>
+        GOMAFIA_PLAYER_ID.test(id) ||
+        (clubTitan && TITAN_PLAYER_ID.test(id)) ||
+        (CLUB_PLAYER_ID.test(id) && clubPlayerIds.has(id.toLowerCase()))
       if (!setup.seats.every((seat) => allowed(seat.playerID))) {
-        return fail(422, 'guest_players', 'В рейтинговых играх все игроки должны быть из GoMafia или клуба Titan HUB')
+        return fail(422, 'guest_players', 'В рейтинговых играх все игроки должны быть игроками клуба: свои, из GoMafia или из Titan HUB')
       }
     }
     return {

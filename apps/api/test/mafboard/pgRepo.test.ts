@@ -486,4 +486,67 @@ describe('PgMafboardRepo: клубы', { skip: url ? false : 'нет MAFBOARD_TE
     assert.deepEqual((await repo.gamesByClubRef(club.id, null, 10)).map((g) => g.id), [game.id])
     assert.deepEqual(await repo.gamesByClubRef(club.id, SOON, 10), [])
   })
+
+  it('заявка на клуб: одна на рассмотрении; одобрение одной операцией создаёт клуб и владельца; повтор — null', async () => {
+    const applicant = await newUser()
+    const application = {
+      id: '00000000-0000-4000-8000-000000000a51', userId: applicant.id, name: 'Клуб 95', city: 'Сочи',
+      status: 'pending' as const, createdAt: NOW, decidedAt: null, clubId: null,
+    }
+    assert.equal((await repo.createClubApplication(application)) !== 'pending_exists', true)
+    assert.equal(await repo.createClubApplication({ ...application, id: '00000000-0000-4000-8000-000000000a52' }), 'pending_exists')
+
+    const [first, second] = await Promise.all([repo.approveClubApplication(application.id, SOON), repo.approveClubApplication(application.id, SOON)])
+    const approved = first ?? second
+    assert.ok(approved)
+    assert.equal(first === null || second === null, true)
+    assert.deepEqual(
+      { name: approved.club.name, city: approved.club.city, owner: approved.club.ownerUserId, gomafia: approved.club.gomafiaClubId, titan: approved.club.titan },
+      { name: 'Клуб 95', city: 'Сочи', owner: applicant.id, gomafia: null, titan: null },
+    )
+    assert.equal(approved.application.status, 'approved')
+    assert.equal(approved.application.clubId, approved.club.id)
+    assert.deepEqual((await repo.membershipsOf(applicant.id)).map((m) => [m.clubId, m.role]), [[approved.club.id, 'owner']])
+    assert.equal(await repo.rejectClubApplication(application.id, SOON), null)
+    assert.equal((await repo.latestClubApplication(applicant.id))?.status, 'approved')
+
+    const next = { ...application, id: '00000000-0000-4000-8000-000000000a53', createdAt: SOON }
+    assert.notEqual(await repo.createClubApplication(next), 'pending_exists')
+    assert.equal((await repo.rejectClubApplication(next.id, SOON))?.status, 'rejected')
+  })
+
+  it('свои игроки, фото и ссылка игрока: ник без учёта регистра, архив, одноразовая привязка Telegram', async () => {
+    const boss = await newUser()
+    const club = await repo.createTitanClub({ name: 'Клуб 96', titan: { ...titan('conn-96'), apiBase: 'https://club96.titanpos.test/api/connect/v1' }, ownerUserId: boss.id, at: NOW })
+    if (club === 'exists') throw new Error('клуб не создан')
+    const tiger = { clubId: club.id, playerId: '6d616662-6370-8000-8000-000000000961', nickname: 'Тигр', createdBy: boss.id, createdAt: NOW, archivedAt: null }
+    const raven = { ...tiger, playerId: '6d616662-6370-8000-8000-000000000962', nickname: 'Ворон' }
+    assert.equal((await repo.addClubPlayer(tiger)) !== 'nickname_taken', true)
+    assert.equal(await repo.addClubPlayer({ ...raven, nickname: 'ТИГР' }), 'nickname_taken')
+    assert.notEqual(await repo.addClubPlayer(raven), 'nickname_taken')
+    assert.equal(await repo.renameClubPlayer(club.id, raven.playerId, 'тигр'), 'nickname_taken')
+    assert.equal((await repo.renameClubPlayer(club.id, raven.playerId, 'Ворона')) !== null, true)
+    assert.equal(await repo.archiveClubPlayer(club.id, tiger.playerId, SOON), true)
+    assert.equal(await repo.archiveClubPlayer(club.id, tiger.playerId, SOON), false)
+    assert.deepEqual((await repo.clubPlayers(club.id, false)).map((p) => p.nickname), ['Ворона'])
+    assert.deepEqual((await repo.clubPlayers(club.id, true)).map((p) => p.nickname), ['Ворона', 'Тигр'])
+    // Ник убранного игрока снова свободен.
+    assert.notEqual(await repo.addClubPlayer({ ...tiger, playerId: '6d616662-6370-8000-8000-000000000963' }), 'nickname_taken')
+
+    await repo.setPlayerPhoto({ clubId: club.id, playerId: raven.playerId, url: 'https://media.test/1.jpg', setByUser: boss.id, setByTg: null, setAt: NOW })
+    await repo.setPlayerPhoto({ clubId: club.id, playerId: raven.playerId, url: 'https://media.test/2.jpg', setByUser: null, setByTg: 96001, setAt: SOON })
+    assert.deepEqual((await repo.playerPhotos(club.id)).map((p) => [p.url, p.setByTg, p.setByUser]), [['https://media.test/2.jpg', 96001, null]])
+    assert.equal(await repo.clearPlayerPhoto(club.id, raven.playerId), true)
+    assert.deepEqual(await repo.playerPhotos(club.id), [])
+
+    const token = { tokenHash: 'p'.repeat(64), clubId: club.id, playerId: raven.playerId, createdBy: boss.id, createdAt: NOW, expiresAt: SOON, usedAt: null }
+    await repo.createPlayerLinkToken(token)
+    await repo.createPlayerLinkToken({ ...token, tokenHash: 'q'.repeat(64), playerId: tiger.playerId })
+    assert.equal(await repo.usePlayerLinkToken('z'.repeat(64), 96001, NOW), null)
+    assert.deepEqual(await repo.usePlayerLinkToken('p'.repeat(64), 96001, NOW), { clubId: club.id, playerId: raven.playerId, tgId: 96001, linkedAt: NOW })
+    assert.equal(await repo.usePlayerLinkToken('p'.repeat(64), 96002, NOW), 'expired')
+    // Тот же Telegram по другой ссылке того же клуба — прежняя привязка снимается.
+    assert.equal((await repo.usePlayerLinkToken('q'.repeat(64), 96001, NOW)) !== null, true)
+    assert.deepEqual((await repo.playerLinksByTg(96001)).map((l) => l.playerId), [tiger.playerId])
+  })
 })

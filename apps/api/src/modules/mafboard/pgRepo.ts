@@ -3,7 +3,7 @@ import type { SQL } from 'drizzle-orm'
 import { DELETED_HOST_ID } from './config.js'
 import { GomafiaTakenError, type GomafiaLinkInput, type MafboardRepo } from './repo.js'
 import type {
-  DeviceSession, GoMafiaClubJSON, GoMafiaPlayerJSON, LoginTicket, MafboardUser, QrTicket, QrTicketStatus, RefreshTokenRow, StoredActiveGame, StoredClub, StoredClubHost, StoredClubInvite, StoredClubMember, StoredClubRequest, StoredGame, StoredProtocolSubmission, StoredShare, StoredStudioSettings,
+  DeviceSession, GoMafiaClubJSON, GoMafiaPlayerJSON, LoginTicket, MafboardUser, QrTicket, QrTicketStatus, RefreshTokenRow, StoredActiveGame, StoredClub, StoredClubApplication, StoredClubHost, StoredClubInvite, StoredClubMember, StoredClubPlayer, StoredClubRequest, StoredGame, StoredPlayerLink, StoredPlayerLinkToken, StoredPlayerPhoto, StoredProtocolSubmission, StoredShare, StoredStudioSettings,
   TicketGuard, TicketPatch, TicketStatus, TicketStep, TitanLinkState,
 } from './types.js'
 
@@ -114,6 +114,48 @@ function toClubInvite(r: Row): StoredClubInvite {
 function toClubRequest(r: Row): StoredClubRequest {
   return { userId: String(r['user_id']), nickname: String(r['nickname']), createdAt: date(r['created_at']) }
 }
+
+function toClubApplication(r: Row): StoredClubApplication {
+  const status = r['status']
+  return {
+    id: String(r['id']),
+    userId: String(r['user_id']),
+    name: String(r['name']),
+    city: str(r['city']),
+    status: status === 'approved' || status === 'rejected' ? status : 'pending',
+    createdAt: date(r['created_at']),
+    decidedAt: dateOrNull(r['decided_at']),
+    clubId: str(r['club_id']),
+  }
+}
+
+function toClubPlayer(r: Row): StoredClubPlayer {
+  return {
+    clubId: String(r['club_id']),
+    playerId: String(r['player_id']),
+    nickname: String(r['nickname']),
+    createdBy: str(r['created_by']),
+    createdAt: date(r['created_at']),
+    archivedAt: dateOrNull(r['archived_at']),
+  }
+}
+
+function toPlayerPhoto(r: Row): StoredPlayerPhoto {
+  return {
+    clubId: String(r['club_id']),
+    playerId: String(r['player_id']),
+    url: String(r['url']),
+    setByUser: str(r['set_by_user']),
+    setByTg: num(r['set_by_tg']),
+    setAt: date(r['set_at']),
+  }
+}
+
+function toPlayerLink(r: Row): StoredPlayerLink {
+  return { clubId: String(r['club_id']), playerId: String(r['player_id']), tgId: Number(r['tg_id']), linkedAt: date(r['linked_at']) }
+}
+
+const isUniqueViolation = (error: unknown) => (error as { code?: string }).code === '23505'
 
 function toTicket(r: Row): LoginTicket {
   return {
@@ -515,6 +557,173 @@ export class PgMafboardRepo implements MafboardRepo {
       ORDER BY finished_at ASC LIMIT ${limit}
     `)
     return found.map(toGame)
+  }
+
+  // ─── Заявки на клуб ────────────────────────────────────────────────────────
+
+  async createClubApplication(application: StoredClubApplication): Promise<StoredClubApplication | 'pending_exists'> {
+    try {
+      const row = await this.one(sql`
+        INSERT INTO mb_club_applications (id, user_id, name, city, status, created_at)
+        VALUES (${application.id}::uuid, ${application.userId}::uuid, ${application.name}, ${application.city}, 'pending', ${iso(application.createdAt)}::timestamptz)
+        RETURNING *
+      `)
+      if (!row) throw new Error('заявка не сохранена')
+      return toClubApplication(row)
+    } catch (error) {
+      if (isUniqueViolation(error)) return 'pending_exists'
+      throw error
+    }
+  }
+
+  async clubApplicationById(id: string): Promise<StoredClubApplication | null> {
+    if (!UUID.test(id)) return null
+    const row = await this.one(sql`SELECT * FROM mb_club_applications WHERE id = ${id}::uuid`)
+    return row ? toClubApplication(row) : null
+  }
+
+  async latestClubApplication(userId: string): Promise<StoredClubApplication | null> {
+    if (!UUID.test(userId)) return null
+    const row = await this.one(sql`SELECT * FROM mb_club_applications WHERE user_id = ${userId}::uuid ORDER BY created_at DESC LIMIT 1`)
+    return row ? toClubApplication(row) : null
+  }
+
+  async approveClubApplication(id: string, at: Date): Promise<{ application: StoredClubApplication; club: StoredClub } | null> {
+    if (!UUID.test(id)) return null
+    // FOR UPDATE: второе одновременное решение ждёт первое и после него заявку уже не видит.
+    const row = await this.one(sql`
+      WITH app AS (
+        SELECT * FROM mb_club_applications WHERE id = ${id}::uuid AND status = 'pending' FOR UPDATE
+      ), club AS (
+        INSERT INTO mb_clubs (name, city, owner_user_id) SELECT name, city, user_id FROM app RETURNING *
+      ), owner AS (
+        INSERT INTO mb_club_members (club_id, user_id, role, added_by, added_at)
+        SELECT id, owner_user_id, 'owner', owner_user_id, ${iso(at)}::timestamptz FROM club
+      ), decided AS (
+        UPDATE mb_club_applications a SET status = 'approved', decided_at = ${iso(at)}::timestamptz, club_id = club.id
+        FROM club WHERE a.id = ${id}::uuid RETURNING a.*
+      )
+      SELECT row_to_json(club.*) AS club, row_to_json(decided.*) AS application FROM club, decided
+    `)
+    if (!row) return null
+    const club = json<Row>(row['club'])
+    const application = json<Row>(row['application'])
+    if (!club || !application) return null
+    return { club: toClub(club), application: toClubApplication(application) }
+  }
+
+  async rejectClubApplication(id: string, at: Date): Promise<StoredClubApplication | null> {
+    if (!UUID.test(id)) return null
+    const row = await this.one(sql`
+      UPDATE mb_club_applications SET status = 'rejected', decided_at = ${iso(at)}::timestamptz
+      WHERE id = ${id}::uuid AND status = 'pending' RETURNING *
+    `)
+    return row ? toClubApplication(row) : null
+  }
+
+  // ─── Свои игроки клуба, фото, игрок в боте ─────────────────────────────────
+
+  async clubPlayers(clubId: string, withArchived: boolean): Promise<StoredClubPlayer[]> {
+    if (!UUID.test(clubId)) return []
+    const found = await this.query(sql`
+      SELECT * FROM mb_club_players
+      WHERE club_id = ${clubId}::uuid AND (${withArchived} OR archived_at IS NULL)
+      ORDER BY lower(nickname), player_id
+    `)
+    return found.map(toClubPlayer)
+  }
+
+  async addClubPlayer(player: StoredClubPlayer): Promise<StoredClubPlayer | 'nickname_taken'> {
+    try {
+      const row = await this.one(sql`
+        INSERT INTO mb_club_players (club_id, player_id, nickname, created_by, created_at)
+        VALUES (${player.clubId}::uuid, ${player.playerId}::uuid, ${player.nickname}, ${player.createdBy}::uuid, ${iso(player.createdAt)}::timestamptz)
+        RETURNING *
+      `)
+      if (!row) throw new Error('игрок не сохранён')
+      return toClubPlayer(row)
+    } catch (error) {
+      if (isUniqueViolation(error)) return 'nickname_taken'
+      throw error
+    }
+  }
+
+  async renameClubPlayer(clubId: string, playerId: string, nickname: string): Promise<StoredClubPlayer | 'nickname_taken' | null> {
+    if (!UUID.test(clubId) || !UUID.test(playerId)) return null
+    try {
+      const row = await this.one(sql`
+        UPDATE mb_club_players SET nickname = ${nickname}
+        WHERE club_id = ${clubId}::uuid AND player_id = ${playerId}::uuid AND archived_at IS NULL RETURNING *
+      `)
+      return row ? toClubPlayer(row) : null
+    } catch (error) {
+      if (isUniqueViolation(error)) return 'nickname_taken'
+      throw error
+    }
+  }
+
+  async archiveClubPlayer(clubId: string, playerId: string, at: Date): Promise<boolean> {
+    if (!UUID.test(clubId) || !UUID.test(playerId)) return false
+    const archived = await this.query(sql`
+      UPDATE mb_club_players SET archived_at = ${iso(at)}::timestamptz
+      WHERE club_id = ${clubId}::uuid AND player_id = ${playerId}::uuid AND archived_at IS NULL RETURNING player_id
+    `)
+    return archived.length > 0
+  }
+
+  async playerPhotos(clubId: string): Promise<StoredPlayerPhoto[]> {
+    if (!UUID.test(clubId)) return []
+    return (await this.query(sql`SELECT * FROM mb_player_photos WHERE club_id = ${clubId}::uuid`)).map(toPlayerPhoto)
+  }
+
+  async setPlayerPhoto(photo: StoredPlayerPhoto): Promise<void> {
+    await this.query(sql`
+      INSERT INTO mb_player_photos (club_id, player_id, url, set_by_user, set_by_tg, set_at)
+      VALUES (${photo.clubId}::uuid, ${photo.playerId}::uuid, ${photo.url}, ${photo.setByUser}::uuid, ${photo.setByTg}, ${iso(photo.setAt)}::timestamptz)
+      ON CONFLICT (club_id, player_id) DO UPDATE
+        SET url = EXCLUDED.url, set_by_user = EXCLUDED.set_by_user, set_by_tg = EXCLUDED.set_by_tg, set_at = EXCLUDED.set_at
+    `)
+  }
+
+  async clearPlayerPhoto(clubId: string, playerId: string): Promise<boolean> {
+    if (!UUID.test(clubId) || !UUID.test(playerId)) return false
+    const removed = await this.query(sql`
+      DELETE FROM mb_player_photos WHERE club_id = ${clubId}::uuid AND player_id = ${playerId}::uuid RETURNING player_id
+    `)
+    return removed.length > 0
+  }
+
+  async createPlayerLinkToken(token: StoredPlayerLinkToken): Promise<void> {
+    await this.query(sql`
+      INSERT INTO mb_player_link_tokens (token_hash, club_id, player_id, created_by, created_at, expires_at)
+      VALUES (${token.tokenHash}, ${token.clubId}::uuid, ${token.playerId}::uuid, ${token.createdBy}::uuid,
+              ${iso(token.createdAt)}::timestamptz, ${iso(token.expiresAt)}::timestamptz)
+    `)
+  }
+
+  async usePlayerLinkToken(tokenHash: string, tgId: number, at: Date): Promise<StoredPlayerLink | 'expired' | null> {
+    const row = await this.one(sql`
+      WITH tok AS (
+        UPDATE mb_player_link_tokens SET used_at = ${iso(at)}::timestamptz
+        WHERE token_hash = ${tokenHash} AND used_at IS NULL AND expires_at > ${iso(at)}::timestamptz
+        RETURNING club_id, player_id
+      ), dropped AS (
+        DELETE FROM mb_player_links l USING tok
+        WHERE l.club_id = tok.club_id AND l.tg_id = ${tgId} AND l.player_id <> tok.player_id
+      ), linked AS (
+        INSERT INTO mb_player_links (club_id, player_id, tg_id, linked_at)
+        SELECT club_id, player_id, ${tgId}, ${iso(at)}::timestamptz FROM tok
+        ON CONFLICT (club_id, player_id) DO UPDATE SET tg_id = EXCLUDED.tg_id, linked_at = EXCLUDED.linked_at
+      )
+      SELECT club_id, player_id FROM tok
+    `)
+    if (row) return { clubId: String(row['club_id']), playerId: String(row['player_id']), tgId, linkedAt: at }
+    const known = await this.one(sql`SELECT 1 AS found FROM mb_player_link_tokens WHERE token_hash = ${tokenHash}`)
+    return known ? 'expired' : null
+  }
+
+  async playerLinksByTg(tgId: number): Promise<StoredPlayerLink[]> {
+    return (await this.query(sql`SELECT * FROM mb_player_links WHERE tg_id = ${tgId} ORDER BY linked_at`)).map(toPlayerLink)
   }
 
   async clearTitanMirrors(connectionId: string): Promise<void> {

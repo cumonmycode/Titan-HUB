@@ -153,6 +153,31 @@ export async function storeMediaBuffer(buffer: Buffer): Promise<StoreImageResult
   }
 }
 
+/** Фото игроков MafBoard: без GIF — анимация в эфире студии не нужна. */
+const PHOTO_TYPES: Record<string, string> = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' }
+
+/**
+ * Положить картинку из буфера (фото из приложения или из Telegram) в MinIO. Тип — по байтам.
+ * У каждого файла новое имя: адрес фото меняется вместе с содержимым, и кэш студии его не держит.
+ */
+export async function storeImageBuffer(buffer: Buffer, prefix: string): Promise<StoreImageResult> {
+  if (buffer.length === 0) return { ok: false, status: 400, error: 'Пустой файл' }
+  if (buffer.length > MAX_UPLOAD_BYTES) return { ok: false, status: 400, error: 'Файл больше 8 МБ' }
+  const mime = sniffImageType(buffer)
+  const ext = mime ? PHOTO_TYPES[mime] : undefined
+  if (!mime || !ext) return { ok: false, status: 400, error: 'Допустимы только фото: JPEG, PNG, WebP' }
+  const objectName = `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
+  try {
+    const client = getMinioClient()
+    await ensureBucket(client)
+    await client.putObject(BUCKET, objectName, buffer, buffer.length, { 'Content-Type': mime })
+    return { ok: true, url: `${process.env['MINIO_PUBLIC_URL'] ?? 'http://localhost:9000'}/${objectName}` }
+  } catch (e: any) {
+    console.error('[upload] не удалось сохранить фото в MinIO:', e?.code ?? '', e?.message ?? e)
+    return { ok: false, status: 500, error: 'Не удалось сохранить фото' }
+  }
+}
+
 /** Скачать файл по ссылке (результат нейросети) и сохранить у себя. */
 export async function storeRemoteMedia(url: string, timeoutMs = 120_000): Promise<StoreImageResult & { mime?: string }> {
   try {

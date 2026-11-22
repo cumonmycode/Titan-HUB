@@ -16,6 +16,9 @@ import { registerTitanRoutes, releaseTitanOnAccountDeletion } from './titanRoute
 import { hostAccess, registerClubHostRoutes } from './clubHosts.js'
 import { accountPhotoURL, registerClubPlayerRoutes } from './clubPlayers.js'
 import { registerClubRoutes } from './clubs.js'
+import { registerClubApplicationRoutes } from './clubApplications.js'
+import { registerClubRosterRoutes } from './clubRoster.js'
+import type { PhotoStore } from './photos.js'
 import { GomafiaTakenError, type MafboardRepo } from './repo.js'
 import type { AimAccounts, TournamentSource } from './aim.js'
 import { gomafiaFailure, type GoMafiaSessions } from './gomafiaSessions.js'
@@ -56,6 +59,8 @@ export interface MafboardDeps {
   titanRoster: TitanRosterCache
   /** null — бот не настроен (нет MAFBOARD_BOT_TOKEN). */
   messenger: BotMessenger | null
+  /** Фото игроков клуба, загруженные в MafBoard (photos.ts). */
+  images: PhotoStore
   limiter: RateLimiter
   /** Обмен кода и токенов VK Видео Live с секретом приложения (vk.ts). */
   vk: VkGateway
@@ -141,6 +146,12 @@ export function ipKey(ip: string): string {
 export function sanitizeDeviceName(raw: string): string {
   const clean = raw.replace(/[^\p{L}\p{N} _'’()-]/gu, '').replace(/\s+/g, ' ').trim().slice(0, 40)
   return clean || 'Устройство'
+}
+
+/** Клуб MafBoard из записи игры (`setup.host.clubRef`) до её проверки: по нему подгружаются свои игроки клуба. */
+function clubRefOf(payload: unknown): string | null {
+  const value = (payload as { setup?: { host?: { clubRef?: unknown } } } | null)?.setup?.host?.clubRef
+  return typeof value === 'string' && UUID_PATTERN.test(value) ? value.toLowerCase() : null
 }
 
 function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | null> {
@@ -317,7 +328,13 @@ export function createMafboardRouter(resolveDeps: DepsResolver): Hono<Env> {
 
     const chat = update.message?.chat.id ?? update.callback_query?.from.id ?? 'other'
     deps.background(`mb:chat:${chat}`, () =>
-      handleBotUpdate(update, { repo: deps.repo, messenger, config: deps.config, now: () => deps.now() }),
+      handleBotUpdate(update, {
+        repo: deps.repo,
+        messenger,
+        config: deps.config,
+        now: () => deps.now(),
+        club: { images: deps.images, limiter: deps.limiter, adminTgId: deps.config.adminTgId ?? null },
+      }),
     )
     return c.json({ ok: true })
   })
@@ -702,7 +719,10 @@ export function createMafboardRouter(resolveDeps: DepsResolver): Hono<Env> {
   registerTitanRoutes(router, requireUser)
   registerClubHostRoutes(router, requireUser)
   registerClubPlayerRoutes(router, requireUser)
+  // Заявки — раньше клубных путей с `:id`, чтобы «applications» не читался как номер клуба.
+  registerClubApplicationRoutes(router, requireUser)
   registerClubRoutes(router, requireUser)
+  registerClubRosterRoutes(router, requireUser)
 
   // ─── История игр ────────────────────────────────────────────────────────────
 
@@ -721,7 +741,11 @@ export function createMafboardRouter(resolveDeps: DepsResolver): Hono<Env> {
     const payload = await c.req.json().catch(() => null)
     // Права считаем по свежему клубу: за сутки ведущий мог выйти из клуба или потерять доступ.
     const host = await withFreshClub(deps, user)
-    const result = validateGameUpload(payload, host, await hostAccess(deps.repo, host), deps.now())
+    const clubRef = clubRefOf(payload)
+    const ownPlayers = clubRef
+      ? new Set((await deps.repo.clubPlayers(clubRef, true)).map((player) => player.playerId.toLowerCase()))
+      : undefined
+    const result = validateGameUpload(payload, host, await hostAccess(deps.repo, host), deps.now(), ownPlayers)
     if (!result.ok) return fail(c, result.status, result.code, result.message)
 
     const outcome = await deps.repo.insertGame(result.game)

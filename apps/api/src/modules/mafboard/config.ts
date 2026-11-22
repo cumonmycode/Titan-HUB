@@ -33,6 +33,11 @@ export interface MafboardConfig {
   donationAlerts: VkAppConfig | null
   /** Titan Connect для обмена кода клуба (MAFBOARD_TITAN_CONNECT_URL); адреса клубов — только на его домене. */
   titanConnectUrl: string
+  /**
+   * Telegram владельца платформы (MAFBOARD_ADMIN_TG_ID): ему бот присылает заявки на клубы без подключений
+   * с кнопками «Одобрить» / «Отклонить». null — заявки не принимаются.
+   */
+  adminTgId?: number | null
 }
 
 /** Логин проверяющего App Store — пароль к нему только в MAFBOARD_REVIEW_PASSWORD. */
@@ -104,6 +109,7 @@ export function readMafboardConfig(env: NodeJS.ProcessEnv = process.env): Config
       studioSecretsKey: studioKey,
       botToken: env['MAFBOARD_BOT_TOKEN']?.trim() || null,
       botUsername: env['MAFBOARD_BOT_USERNAME']?.trim().replace(/^@/, '') || null,
+      adminTgId: readTgId(env['MAFBOARD_ADMIN_TG_ID']),
       appLinkBase,
       termsUrl: env['MAFBOARD_TERMS_URL']?.trim() || `${appLinkBase}/terms`,
       termsVersion: env['MAFBOARD_TERMS_VERSION']?.trim() || '1',
@@ -119,6 +125,12 @@ export function readMafboardConfig(env: NodeJS.ProcessEnv = process.env): Config
 }
 
 /** Приложение VK Видео Live. Адрес возврата — тот, что указан в кабинете VK, до символа. */
+/** Telegram id — положительное целое; иначе null (заявки на клубы выключены). */
+function readTgId(raw: string | undefined): number | null {
+  const value = Number(raw?.trim())
+  return Number.isSafeInteger(value) && value > 0 ? value : null
+}
+
 function readVk(env: NodeJS.ProcessEnv, appLinkBase: string): VkAppConfig | null {
   const clientId = env['MAFBOARD_VK_CLIENT_ID']?.trim()
   const clientSecret = env['MAFBOARD_VK_CLIENT_SECRET']?.trim()

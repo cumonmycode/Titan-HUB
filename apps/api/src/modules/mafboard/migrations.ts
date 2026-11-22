@@ -398,6 +398,60 @@ export const MAFBOARD_MIGRATIONS: readonly { id: string; sql: string }[] = [
       CREATE UNIQUE INDEX IF NOT EXISTS mb_clubs_titan_api_base_idx ON mb_clubs ((titan_link->>'apiBase')) WHERE titan_link IS NOT NULL;
     `,
   },
+  {
+    // Клуб без подключений: заявка на клуб, свои игроки клуба, фото игроков в MafBoard, игрок в боте.
+    id: '014_mafboard_club_players',
+    sql: `
+      CREATE TABLE IF NOT EXISTS mb_club_applications (
+        id         uuid PRIMARY KEY,
+        user_id    uuid NOT NULL REFERENCES mb_users(id) ON DELETE CASCADE,
+        name       text NOT NULL,
+        city       text,
+        status     text NOT NULL CHECK (status IN ('pending', 'approved', 'rejected')),
+        created_at timestamptz NOT NULL,
+        decided_at timestamptz,
+        club_id    uuid REFERENCES mb_clubs(id) ON DELETE SET NULL
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS mb_club_applications_pending_idx ON mb_club_applications (user_id) WHERE status = 'pending';
+      CREATE INDEX IF NOT EXISTS mb_club_applications_user_idx ON mb_club_applications (user_id, created_at DESC);
+      CREATE TABLE IF NOT EXISTS mb_club_players (
+        club_id     uuid NOT NULL REFERENCES mb_clubs(id) ON DELETE CASCADE,
+        player_id   uuid NOT NULL,
+        nickname    text NOT NULL,
+        created_by  uuid REFERENCES mb_users(id) ON DELETE SET NULL,
+        created_at  timestamptz NOT NULL,
+        archived_at timestamptz,
+        PRIMARY KEY (club_id, player_id)
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS mb_club_players_nickname_idx ON mb_club_players (club_id, lower(nickname)) WHERE archived_at IS NULL;
+      CREATE TABLE IF NOT EXISTS mb_player_photos (
+        club_id     uuid NOT NULL REFERENCES mb_clubs(id) ON DELETE CASCADE,
+        player_id   uuid NOT NULL,
+        url         text NOT NULL,
+        set_by_user uuid REFERENCES mb_users(id) ON DELETE SET NULL,
+        set_by_tg   bigint,
+        set_at      timestamptz NOT NULL,
+        PRIMARY KEY (club_id, player_id)
+      );
+      CREATE TABLE IF NOT EXISTS mb_player_link_tokens (
+        token_hash text PRIMARY KEY,
+        club_id    uuid NOT NULL REFERENCES mb_clubs(id) ON DELETE CASCADE,
+        player_id  uuid NOT NULL,
+        created_by uuid REFERENCES mb_users(id) ON DELETE SET NULL,
+        created_at timestamptz NOT NULL,
+        expires_at timestamptz NOT NULL,
+        used_at    timestamptz
+      );
+      CREATE TABLE IF NOT EXISTS mb_player_links (
+        club_id   uuid NOT NULL REFERENCES mb_clubs(id) ON DELETE CASCADE,
+        player_id uuid NOT NULL,
+        tg_id     bigint NOT NULL,
+        linked_at timestamptz NOT NULL,
+        PRIMARY KEY (club_id, player_id)
+      );
+      CREATE INDEX IF NOT EXISTS mb_player_links_tg_idx ON mb_player_links (tg_id);
+    `,
+  },
 ]
 
 function rows<T = Record<string, unknown>>(res: unknown): T[] {

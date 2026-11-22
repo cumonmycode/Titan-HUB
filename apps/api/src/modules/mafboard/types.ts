@@ -94,6 +94,60 @@ export interface StoredClubMember {
   addedAt: Date
 }
 
+/** Заявка на клуб без подключений: клуб появляется, когда её одобрит владелец платформы в боте. */
+export interface StoredClubApplication {
+  id: string
+  userId: string
+  name: string
+  city: string | null
+  status: 'pending' | 'approved' | 'rejected'
+  createdAt: Date
+  decidedAt: Date | null
+  /** Клуб, созданный по одобренной заявке. */
+  clubId: string | null
+}
+
+/** Свой игрок клуба (без GoMafia и Titan HUB). Его заводит владелец клуба; убранный остаётся в архиве. */
+export interface StoredClubPlayer {
+  clubId: string
+  /** PlayerID приложения: UUID с префиксом «mafbcp» (`CLUB_PLAYER_ID`). */
+  playerId: string
+  nickname: string
+  createdBy: string | null
+  createdAt: Date
+  archivedAt: Date | null
+}
+
+/** Фото игрока клуба, загруженное в MafBoard. Главнее фото из Titan HUB и GoMafia. */
+export interface StoredPlayerPhoto {
+  clubId: string
+  playerId: string
+  url: string
+  /** Кто поставил: судья или владелец (аккаунт MafBoard) либо сам игрок через бота (Telegram). */
+  setByUser: string | null
+  setByTg: number | null
+  setAt: Date
+}
+
+/** Одноразовая ссылка игрока на бота: открыв её, игрок может сам менять своё фото. Хранится хэш. */
+export interface StoredPlayerLinkToken {
+  tokenHash: string
+  clubId: string
+  playerId: string
+  createdBy: string | null
+  createdAt: Date
+  expiresAt: Date
+  usedAt: Date | null
+}
+
+/** Игрок клуба, привязанный к Telegram (через ссылку игрока). */
+export interface StoredPlayerLink {
+  clubId: string
+  playerId: string
+  tgId: number
+  linkedAt: Date
+}
+
 /** Ссылка-приглашение в клуб. Хранится только хэш токена: сама ссылка есть только у владельца. */
 export interface StoredClubInvite {
   id: string

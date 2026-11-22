@@ -193,6 +193,7 @@ Platega-реквизиты могут быть заданы на уровне п
 | `MAFBOARD_BOT_TOKEN` | Для входа | — | Токен бота входа MafBoard. Без него вход через Telegram недоступен. |
 | `MAFBOARD_BOT_USERNAME` | Нет | из `getMe` | Username бота без «@» (для ссылки `t.me/<бот>?start=login_…`). |
 | `MAFBOARD_REVIEW_PASSWORD` | Нет | — | Пароль входа проверяющего App Store (логин `appreview`, `POST /v1/auth/review`), не короче 16 символов. Без него такой вход выключен. |
+| `MAFBOARD_ADMIN_TG_ID` | Нет | — | Telegram id владельца платформы: ему бот присылает заявки на клубы без GoMafia и Titan HUB с кнопками «Одобрить» / «Отклонить». Без него заявки не принимаются (503). |
 | `MAFBOARD_TITAN_CONNECT_URL` | Нет | `https://titanpos.ru/api/connect/v1` | Titan Connect для подключения клубов Titan HUB кодом. Адреса клубов (`apiBase`) принимаются только на этом домене и его поддоменах. |
 | `MAFBOARD_TERMS_URL` | Нет | `<APP_LINK_BASE>/terms` | Пользовательское соглашение, которое бот показывает при входе. |
 | `MAFBOARD_TERMS_VERSION` | Нет | `1` | Версия соглашения: при смене бот попросит принять его заново. |

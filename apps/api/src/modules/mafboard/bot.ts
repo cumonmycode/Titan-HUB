@@ -1,6 +1,9 @@
 import { randomInt } from 'node:crypto'
 import type { ReplyMarkup } from '../../lib/tgBot.js'
 import type { TgCallbackQuery, TgMessage, TgUpdate, TgUser } from '../tg/types.js'
+import {
+  isClubCallback, onClubCallback, onPhotoCommand, onPlayerLinkStart, onPlayerPhoto, PLAYER_LINK_PREFIX, type ClubBotDeps,
+} from './clubBot.js'
 import type { MafboardConfig } from './config.js'
 import type { MafboardRepo } from './repo.js'
 import { normalizePhone, returnLink } from './serialize.js'
@@ -24,6 +27,8 @@ export interface BotMessenger {
   send(chatId: number, text: string, markup?: ReplyMarkup): Promise<void>
   answerCallback(callbackId: string, text?: string): Promise<void>
   username(): Promise<string | null>
+  /** Файл из Telegram (фото игрока) по file_id. null — не скачался. */
+  download(fileId: string): Promise<Buffer | null>
 }
 
 export interface BotDeps {
@@ -31,6 +36,8 @@ export interface BotDeps {
   messenger: BotMessenger
   config: Pick<MafboardConfig, 'appLinkBase' | 'termsUrl' | 'termsVersion'>
   now: () => Date
+  /** Клубы в боте (clubBot.ts): заявки, ссылка игрока, фото. Нет — бот только входит. */
+  club?: Pick<ClubBotDeps, 'images' | 'limiter' | 'adminTgId'>
 }
 
 const LOGIN_PREFIX = 'login_'
@@ -95,15 +102,28 @@ export async function handleBotUpdate(update: TgUpdate, deps: BotDeps): Promise<
   if (message?.chat.type === 'private' && message.from) {
     await onMessage(message, message.from, deps)
   }
-  if (update.callback_query) await onCallback(update.callback_query, deps)
+  const query = update.callback_query
+  if (!query) return
+  const club = clubDeps(deps)
+  if (isClubCallback(query.data)) return club ? onClubCallback(query, club) : deps.messenger.answerCallback(query.id)
+  await onCallback(query, deps)
+}
+
+function clubDeps(deps: BotDeps): ClubBotDeps | null {
+  if (!deps.club) return null
+  return { ...deps.club, repo: deps.repo, messenger: deps.messenger, now: deps.now }
 }
 
 async function onMessage(message: TgMessage, from: TgUser, deps: BotDeps): Promise<void> {
   if (message.contact) return onContact(message, from, deps)
+  const club = clubDeps(deps)
+  if (message.photo?.length && club) return onPlayerPhoto(message, from, club)
   const text = message.text?.trim() ?? ''
+  if (text === '/photo' && club) return onPhotoCommand(from, club)
   if (!text.startsWith('/start')) return
   const payload = text.split(/\s+/)[1] ?? ''
   if (payload.startsWith(LOGIN_PREFIX)) return onLoginStart(from, payload.slice(LOGIN_PREFIX.length), deps)
+  if (payload.startsWith(PLAYER_LINK_PREFIX) && club) return onPlayerLinkStart(from, payload.slice(PLAYER_LINK_PREFIX.length), club)
   await deps.messenger.send(from.id, TEXT.welcome)
 }
 
