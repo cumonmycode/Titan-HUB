@@ -36,11 +36,14 @@ export interface MafboardRepo {
   /**
    * Привязать (или отвязать — null) аккаунт GoMafia. Бросает GomafiaTakenError при занятом аккаунте.
    * Заодно заводит запись клуба MafBoard для клуба из привязки: полный снимок (с президентом)
-   * обновляет название и город, неполный их не трогает. Личное подключение Titan президента
-   * переезжает в клуб, если у клуба подключения ещё нет.
+   * обновляет название и город, неполный их не трогает. Подключение Titan клуба привязка не меняет.
    */
   setGomafiaLink(userId: string, link: GomafiaLinkInput | null, at: Date): Promise<MafboardUser | null>
-  /** Подключить (или отключить — null) клуб Titan HUB через Titan Connect. */
+  /**
+   * Личная запись пользователя о клубе Titan HUB (или её удаление — null). Действует подключение
+   * клуба (`setClubTitanLink`); сюда пишется его копия — на случай отката к коду, который читал
+   * Titan из записи президента.
+   */
   setTitanLink(userId: string, link: TitanLinkState | null): Promise<MafboardUser | null>
   /**
    * Удалить аккаунт: сессии, билеты, идущие и личные игры уходят вместе с ним, игры клуба
@@ -51,15 +54,17 @@ export interface MafboardRepo {
   // ─── Клубы ─────────────────────────────────────────────────────────────────
   /** Клуб MafBoard, к которому подключён этот клуб GoMafia. Запись заводит `setGomafiaLink`. */
   clubByGomafiaId(gomafiaClubId: number): Promise<StoredClub | null>
+  /** Клубы, чьё действующее подключение Titan сделал этот пользователь. */
+  clubsLinkedBy(userId: string): Promise<StoredClub[]>
+  /** Клуб, у которого действует подключение Titan с этим номером. */
+  clubByTitanConnection(connectionId: string): Promise<StoredClub | null>
   /**
-   * Подключить (или отключить — null) Titan HUB клуба. Возвращает заменённое подключение; null —
-   * подключения не было или клуба нет. Пока запись клуба — копия записи президента, и ключ в HUB
-   * отзывается по записи президента; когда Titan начнёт читаться из клуба, отзывать нужно будет
-   * возвращённое отсюда, а не прочитанное заранее.
+   * Подключить (или отключить — null) Titan HUB клуба. Возвращает заменённое подключение: отзывать в
+   * HUB нужно именно его, а не прочитанное заранее. null — подключения не было или клуба нет.
    */
   setClubTitanLink(clubId: string, link: TitanLinkState | null, linkedBy: string | null): Promise<TitanLinkState | null>
-  /** Снять с клубов подключение Titan с этим номером: личную запись, которую оно дублировало, стёрли. */
-  clearClubTitanConnection(connectionId: string): Promise<void>
+  /** Стереть копии подключения с этим номером в личных записях пользователей. */
+  clearTitanMirrors(connectionId: string): Promise<void>
 
   // ─── Пул судей клуба ───────────────────────────────────────────────────────
   /** Судьи клуба GoMafia, которым президент дал вести игры, по времени выдачи. */

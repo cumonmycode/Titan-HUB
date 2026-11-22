@@ -329,7 +329,7 @@ export class PgMafboardRepo implements MafboardRepo {
           updated_at = now()
         WHERE id = ${userId}::uuid RETURNING *
       `)
-      if (row) await this.syncClub(userId, link)
+      if (row) await this.syncClub(link)
       return row ? toUser(row) : null
     } catch (error) {
       if ((error as { code?: string }).code === '23505') throw new GomafiaTakenError()
@@ -339,12 +339,11 @@ export class PgMafboardRepo implements MafboardRepo {
 
   /**
    * Запись клуба MafBoard для клуба GoMafia из привязки. Неполный снимок (без президента: страница
-   * клуба не открылась) клуб только заводит — название и город из заглушки не берём. Личное
-   * подключение Titan президента переезжает в клуб, если у клуба подключения ещё нет.
-   * Права пока считаются по привязке, поэтому сбой здесь привязку не отменяет: запись клуба
-   * восстановит сверка при старте (`reconcileMafboardClubs`).
+   * клуба не открылась) клуб только заводит — название и город из заглушки не берём. Подключение
+   * Titan клуба здесь не меняется. Права считаются по привязке, поэтому сбой здесь привязку не
+   * отменяет: запись клуба восстановит сверка при старте (`reconcileMafboardClubs`).
    */
-  private async syncClub(userId: string, link: GomafiaLinkInput): Promise<void> {
+  private async syncClub(link: GomafiaLinkInput): Promise<void> {
     const club = link.club
     if (!club) return
     const isFull = club.presidentID !== undefined
@@ -355,17 +354,6 @@ export class PgMafboardRepo implements MafboardRepo {
           SET name = EXCLUDED.name, city = COALESCE(EXCLUDED.city, mb_clubs.city), updated_at = now()
           WHERE ${isFull}::boolean
             AND (mb_clubs.name, mb_clubs.city) IS DISTINCT FROM (EXCLUDED.name, COALESCE(EXCLUDED.city, mb_clubs.city))
-      `)
-      if (club.presidentID == null || club.presidentID !== link.player.id) return
-      await this.query(sql`
-        UPDATE mb_clubs SET titan_link = holder.titan_link, titan_linked_by = holder.id, updated_at = now()
-        FROM mb_users holder
-        WHERE holder.id = ${userId}::uuid
-          AND holder.gomafia_link_source IS DISTINCT FROM 'club'
-          AND jsonb_typeof(holder.titan_link) = 'object'
-          AND holder.titan_link->>'tokenSealed' IS NOT NULL
-          AND mb_clubs.gomafia_club_id = ${club.id}
-          AND mb_clubs.titan_link IS NULL
       `)
     } catch (error) {
       console.warn(`[mafboard] запись клуба GoMafia ${club.id} не обновлена — её восстановит сверка при старте:`, error)
@@ -396,10 +384,22 @@ export class PgMafboardRepo implements MafboardRepo {
     return row ? toTitanLink(row['previous_link']) : null
   }
 
-  async clearClubTitanConnection(connectionId: string): Promise<void> {
+  async clubsLinkedBy(userId: string): Promise<StoredClub[]> {
+    if (!UUID.test(userId)) return []
+    const found = await this.query(sql`
+      SELECT * FROM mb_clubs WHERE titan_linked_by = ${userId}::uuid AND titan_link IS NOT NULL ORDER BY created_at, id
+    `)
+    return found.map(toClub)
+  }
+
+  async clubByTitanConnection(connectionId: string): Promise<StoredClub | null> {
+    const row = await this.one(sql`SELECT * FROM mb_clubs WHERE titan_link->>'connectionId' = ${connectionId} LIMIT 1`)
+    return row ? toClub(row) : null
+  }
+
+  async clearTitanMirrors(connectionId: string): Promise<void> {
     await this.query(sql`
-      UPDATE mb_clubs SET titan_link = NULL, titan_linked_by = NULL, updated_at = now()
-      WHERE titan_link->>'connectionId' = ${connectionId}
+      UPDATE mb_users SET titan_link = NULL, updated_at = now() WHERE titan_link->>'connectionId' = ${connectionId}
     `)
   }
 

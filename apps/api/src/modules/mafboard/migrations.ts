@@ -13,17 +13,13 @@ const SNAPSHOT_CLUB_ID = `CASE WHEN gomafia_club->>'id' ~ '^[1-9][0-9]{0,8}$' TH
 
 /**
  * Сверка клубов с тем, что уже лежит в базе. Повторяемая: выполняется при каждом старте после
- * миграций. Она только дозаполняет пустое — существующие название клуба и подключение Titan не
- * трогает:
+ * миграций и только дозаполняет пустое:
  *  1. Клуб на каждый клуб GoMafia из привязок, пула судей и игр; название и город — из самого
  *     свежего полного снимка (с президентом), иначе заглушка.
- *  2. Подключение Titan президента — клубу, у которого подключения ещё нет. Президент — тот, чей
- *     игрок записан президентом в его же снимке клуба, с привязкой не по заявке (у привязок до пула
- *     судей способ не записан). Двое считают себя президентами — верим более свежему снимку.
- *  3. Игры клуба получают ссылку на его запись.
- * После отката на прежний код она вернёт клубы и ссылки игр, но подключение Titan, которое прежний
- * код сменил или снял, у клуба останется старым: такое расхождение видно в логе `hostAccess` и
- * разбирается до того, как Titan начнёт читаться из клуба.
+ *  2. Игры клуба получают ссылку на его запись.
+ * Подключение Titan сверка не трогает: оно принадлежит клубу и меняется только подключением и
+ * отключением (titanRoutes.ts). Подключения из личных записей президентов перенесла первая
+ * выкладка клубов (2026-11-22); базе, которая её не проходила, клуб Titan нужно подключить заново.
  */
 export const CLUBS_RECONCILE_SQL = `
       WITH snap AS (
@@ -48,27 +44,6 @@ export const CLUBS_RECONCILE_SQL = `
       SELECT COALESCE(linked.name, 'Клуб #' || ids.club_id), linked.city, ids.club_id
       FROM ids LEFT JOIN linked USING (club_id)
       ON CONFLICT (gomafia_club_id) DO NOTHING;
-
-      WITH president AS (
-        SELECT DISTINCT ON (club_id) club_id, user_id, titan_link
-        FROM (
-          SELECT ${SNAPSHOT_CLUB_ID} AS club_id, id AS user_id, titan_link, gomafia_synced_at
-          FROM mb_users
-          WHERE gomafia_id IS NOT NULL
-            AND jsonb_typeof(gomafia_club) = 'object'
-            AND gomafia_club->>'presidentID' = gomafia_id::text
-            AND gomafia_link_source IS DISTINCT FROM 'club'
-        ) claimed
-        WHERE club_id IS NOT NULL
-        ORDER BY club_id, gomafia_synced_at DESC NULLS LAST
-      )
-      UPDATE mb_clubs
-      SET titan_link = president.titan_link, titan_linked_by = president.user_id, updated_at = now()
-      FROM president
-      WHERE mb_clubs.gomafia_club_id = president.club_id
-        AND mb_clubs.titan_link IS NULL
-        AND jsonb_typeof(president.titan_link) = 'object'
-        AND president.titan_link ? 'tokenSealed';
 
       UPDATE mb_games
       SET club_ref = mb_clubs.id

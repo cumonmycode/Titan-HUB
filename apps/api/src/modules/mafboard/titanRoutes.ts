@@ -1,20 +1,23 @@
 import type { Context, Hono, MiddlewareHandler } from 'hono'
 import { zValidator } from '@hono/zod-validator'
 import { z } from 'zod'
-import type { MafboardEnv } from './router.js'
+import { withFreshClub, type MafboardEnv } from './router.js'
 import { GoMafiaLoginRequired } from './gomafiaSessions.js'
 import { hostAccess } from './clubHosts.js'
-import type { MafboardRepo } from './repo.js'
 import { errorBody, toAccountJSON } from './serialize.js'
 import { openSecrets, sealSecrets } from './studio.js'
 import { TitanConnectError, toTitanPlayerJSON, trustedApiBase, type TitanClient } from './titan.js'
-import type { MafboardUser, TitanLinkState } from './types.js'
+import type { HostAccess, MafboardUser, StoredClub, TitanLinkState } from './types.js'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Ручки Titan Connect приложения MafBoard (контракт — docs/MAFBOARD.md, раздел «Titan Connect»):
-//   POST/DELETE /v1/me/titan                — подключить клуб кодом из HUB / отключить (президент клуба);
+//   POST/DELETE /v1/me/titan                — подключить клуб кодом из HUB (президент клуба) / отключить
+//                                             (президент или тот, кто подключал);
 //   GET         /v1/titan/players           — клиенты клуба как игроки для подбора;
 //   PUT/DELETE  /v1/titan/players/:id/gomafia — ручное сопоставление с GoMafia.
+// Подключение принадлежит клубу MafBoard (`mb_clubs.titan_link`) и переживает смену президента.
+// Его копия пишется в личную запись подключившего (`mb_users.titan_link`) — для отката на код,
+// который читал Titan оттуда.
 // ─────────────────────────────────────────────────────────────────────────────
 
 const LINK_LIMIT = { count: 10, windowSec: 600 }
@@ -52,8 +55,21 @@ function tokenOf(c: Context<MafboardEnv>, link: TitanLinkState): string | null {
 }
 
 /**
- * Клиенты клуба ведущего и его ручные сопоставления. Клуб — действующий (`access.titan`): свой у
- * президента, клуб президента у судьи пула. Ошибку уже превратили в ответ — вернётся Response.
+ * Права на общее подключение клуба — по свежему клубу: `requireUser` снимок GoMafia не освежает, и
+ * бывший президент с устаревшим снимком распоряжался бы подключением клуба.
+ */
+async function freshAccess(c: Context<MafboardEnv>): Promise<{ user: MafboardUser; access: HostAccess }> {
+  const deps = c.get('deps')
+  const user = c.get('user')
+  const fresh = await withFreshClub(deps, user)
+  return fresh === user ? { user, access: c.get('access') } : { user: fresh, access: await hostAccess(deps.repo, fresh) }
+}
+
+/**
+ * Клиенты клуба ведущего и его ручные сопоставления. Клуб — действующий (`access.titan`): подключение
+ * клуба MafBoard у президента и судей пула. Ошибку уже превратили в ответ — вернётся Response.
+ * Права здесь — из `requireUser`, без освежения клуба: чтение клиентов ведёт себя как раньше, снимок
+ * GoMafia освежается раз в сутки. Освежается только то, что меняет общее подключение (`freshAccess`).
  */
 async function clubRoster(c: Context<MafboardEnv>) {
   const deps = c.get('deps')
@@ -81,8 +97,8 @@ export function registerTitanRoutes(router: Hono<MafboardEnv>, requireUser: Midd
    */
   router.post('/v1/me/titan', requireUser, body(codeSchema), async (c) => {
     const deps = c.get('deps')
-    const user = c.get('user')
-    if (c.get('access').club !== 'president') {
+    const { user, access } = await freshAccess(c)
+    if (access.club !== 'president') {
       return fail(c, 403, 'president_only', 'Клуб Titan HUB подключает президент клуба GoMafia. Судьям клуба его клиенты доступны без кода')
     }
     const allowed = await deps.limiter.hit(`mb:titan:link:${user.id}`, LINK_LIMIT.count, LINK_LIMIT.windowSec, { failClosed: true })
@@ -98,42 +114,55 @@ export function registerTitanRoutes(router: Hono<MafboardEnv>, requireUser: Midd
     if (!apiBase) return fail(c, 502, 'titan_unavailable', 'Titan HUB вернул адрес клуба вне домена Titan — подключение отменено')
     const clubName = await deps.titan.clubName(apiBase, exchange.accessToken).catch(() => null)
 
-    const previous = user.titan
-    const updated = await deps.repo.setTitanLink(user.id, {
+    const link: TitanLinkState = {
       apiBase,
       clubName,
       connectionId: exchange.connectionId,
       scopes: exchange.scopes,
       tokenSealed: sealSecrets(deps.config.studioSecretsKey, { token: exchange.accessToken }),
       linkedAt: deps.now(),
-    })
-    const club = c.get('access').mafboardClub
-    const linkedTitan = updated?.titan
-    if (!club) console.warn(`[mafboard] Titan клуба не записан: у клуба президента ${user.id} нет записи клуба`)
-    else if (linkedTitan) await mirrorToClub(c, 'подключение', (repo) => repo.setClubTitanLink(club.id, linkedTitan, user.id))
-    if (previous) releaseLink(c, previous)
+    }
+    const club = access.mafboardClub
+    // Запись клуба не прочиталась — подключение действует по копии в записи президента (`hostAccess`).
+    if (!club) console.warn(`[mafboard] Titan записан только президенту ${user.id}: у его клуба нет записи клуба`)
+    const replaced = club ? await deps.repo.setClubTitanLink(club.id, link, user.id) : null
+    // Заменённое подключение клуба отзывается сразу, до остальных записей: их сбой не оставит ключ в HUB.
+    const isReplaced = replaced != null && replaced.connectionId !== link.connectionId
+    if (isReplaced) releaseLink(c, replaced)
+    const updated = await deps.repo.setTitanLink(user.id, link)
+    if (isReplaced) await clearMirrors(c, replaced.connectionId)
+
+    // Прежняя личная запись самого президента — только если ею не пользуется другой клуб.
+    const stale = user.titan
+    const isStale = stale != null && stale.connectionId !== link.connectionId && stale.connectionId !== replaced?.connectionId
+    if (isStale && !(await deps.repo.clubByTitanConnection(stale.connectionId))) releaseLink(c, stale)
+
     deps.titanRoster.forget(apiBase)
     const linked = updated ?? user
     return c.json(toAccountJSON(linked, await hostAccess(deps.repo, linked)))
   })
 
   /**
-   * Отключить клуб: ключ удаляется у нас и (по возможности) отзывается в Titan HUB. Отключает тот,
-   * кто подключал; судье пула клуб достался от президента — ему отключать нечего.
+   * Отключить клуб: подключение снимается с клуба, ключ (по возможности) отзывается в Titan HUB.
+   * Отключают президент клуба и тот, кто подключал. У остальных стирается только своя личная запись
+   * прежних времён; судье пула клуб достался от клуба — ему отключать нечего.
    */
   router.delete('/v1/me/titan', requireUser, async (c) => {
     const deps = c.get('deps')
-    const user = c.get('user')
-    if (!user.titan && c.get('access').titanShared) {
-      return fail(c, 403, 'president_only', 'Клуб Titan HUB подключил президент клуба — отключить его может только он')
+    const { user, access } = await freshAccess(c)
+    const presided = access.club === 'president' && access.mafboardClub?.titan ? [access.mafboardClub] : []
+    // Судья пула общий клуб не отключает, даже если сам подключал его, когда был президентом.
+    const linked = access.club === 'host' ? [] : await deps.repo.clubsLinkedBy(user.id)
+    const clubs = presided.length > 0 ? presided : linked
+    if (clubs.length === 0 && !user.titan && access.titanShared) {
+      return fail(c, 403, 'president_only', 'Клуб Titan HUB отключает президент клуба или тот, кто его подключал')
     }
-    const updated = await deps.repo.setTitanLink(user.id, null)
-    const removed = user.titan
-    if (removed) {
-      await mirrorToClub(c, 'отключение', (repo) => repo.clearClubTitanConnection(removed.connectionId))
-      releaseLink(c, removed)
+    const removed: string[] = []
+    for (const club of clubs) {
+      const link = await disconnectClub(c, club)
+      if (link) removed.push(link.connectionId)
     }
-    const unlinked = updated ?? user
+    const unlinked = await dropPersonalLink(c, user, removed)
     return c.json(toAccountJSON(unlinked, await hostAccess(deps.repo, unlinked)))
   })
 
@@ -195,16 +224,62 @@ async function saveMatch(c: Context<MafboardEnv>, match: { goMafiaId: number | n
   return c.json(toTitanPlayerJSON(apiBase, client, matches))
 }
 
+/** Снять подключение Titan с клуба: отозвать ключ в HUB и стереть его копии в личных записях. */
+async function disconnectClub(c: Context<MafboardEnv>, club: StoredClub): Promise<TitanLinkState | null> {
+  const removed = await c.get('deps').repo.setClubTitanLink(club.id, null, null)
+  if (!removed) return null
+  releaseLink(c, removed)
+  await clearMirrors(c, removed.connectionId)
+  return removed
+}
+
 /**
- * Двойная запись: подключение Titan принадлежит клубу MafBoard, но читается пока из записи
- * президента. Запись в клуб — копия, поэтому её сбой ручку не роняет: расхождение покажет лог
- * `hostAccess`, а клуб без подключения дозаполнит сверка при старте.
+ * Стереть копии снятого подключения. Ключ к этому моменту уже отзывается, поэтому сбой здесь только
+ * пишется в лог: копия отозванного ключа ни на что не влияет — действует подключение клуба.
  */
-async function mirrorToClub(c: Context<MafboardEnv>, what: string, write: (repo: MafboardRepo) => Promise<unknown>): Promise<void> {
+async function clearMirrors(c: Context<MafboardEnv>, connectionId: string): Promise<void> {
   try {
-    await write(c.get('deps').repo)
+    await c.get('deps').repo.clearTitanMirrors(connectionId)
   } catch (error) {
-    console.warn(`[mafboard] Titan клуба не обновлён (${what}) — запись президента сохранена:`, error)
+    console.warn(`[mafboard] копии подключения Titan ${connectionId} не стёрты:`, error)
+  }
+}
+
+/**
+ * Стереть личную запись пользователя о Titan. Если это не копия только что снятого подключения
+ * (`removed`) и ею не пользуется ни один клуб, то это ключ прежних времён, когда клуб Titan
+ * подключал любой ведущий: он отзывается в HUB.
+ */
+async function dropPersonalLink(c: Context<MafboardEnv>, user: MafboardUser, removed: string[]): Promise<MafboardUser> {
+  const personal = user.titan
+  if (!personal) return user
+  const repo = c.get('deps').repo
+  const updated = await repo.setTitanLink(user.id, null)
+  const isCopy = removed.includes(personal.connectionId) || (await repo.clubByTitanConnection(personal.connectionId)) != null
+  if (!isCopy) releaseLink(c, personal)
+  return updated ?? { ...user, titan: null }
+}
+
+/**
+ * Перед удалением аккаунта. Удаляется действующий президент, который сам подключал клуб, — подключение
+ * снимается и ключ отзывается, как было до клубов. Подключение, сделанное другим, и подключение
+ * бывшего президента клуб сохраняет: им пользуются действующий президент и судьи. Удаление аккаунта
+ * от этого не зависит: сбой только пишется в лог.
+ */
+export async function releaseTitanOnAccountDeletion(c: Context<MafboardEnv>): Promise<void> {
+  const user = c.get('user')
+  try {
+    const { access } = await freshAccess(c)
+    const own = access.club === 'president' ? access.mafboardClub : null
+    const club = own?.titanLinkedBy === user.id ? own : null
+    const removed: string[] = []
+    if (club?.titan) {
+      const link = await disconnectClub(c, club)
+      if (link) removed.push(link.connectionId)
+    }
+    await dropPersonalLink(c, user, removed)
+  } catch (error) {
+    console.warn(`[mafboard] Titan не отключён при удалении аккаунта ${user.id}:`, error)
   }
 }
 

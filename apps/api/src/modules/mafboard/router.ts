@@ -12,7 +12,7 @@ import { validateGameUpload } from './games.js'
 import { MIN_QUERY_LENGTH, rankForHost, refreshLink, resolveLink, searchForHost, type GoMafiaGateway, type RosterCache } from './gomafia.js'
 import type { ClubHub } from './hub.js'
 import type { TitanConnectGateway, TitanRosterCache } from './titan.js'
-import { registerTitanRoutes } from './titanRoutes.js'
+import { registerTitanRoutes, releaseTitanOnAccountDeletion } from './titanRoutes.js'
 import { hostAccess, registerClubHostRoutes } from './clubHosts.js'
 import { GomafiaTakenError, type MafboardRepo } from './repo.js'
 import type { AimAccounts, TournamentSource } from './aim.js'
@@ -229,7 +229,7 @@ async function accountJSON(deps: MafboardDeps, user: MafboardUser) {
  * Пользователь со свежим членством в клубе: если профиль GoMafia пора перечитать —
  * обновляем сразу (до 8 с). Не удалось, а подтверждение старше недели — права клуба снимаются.
  */
-async function withFreshClub(deps: MafboardDeps, user: MafboardUser): Promise<MafboardUser> {
+export async function withFreshClub(deps: MafboardDeps, user: MafboardUser): Promise<MafboardUser> {
   const link = user.gomafia
   if (!link) return user
   const age = deps.now().getTime() - link.syncedAt.getTime()
@@ -619,14 +619,8 @@ export function createMafboardRouter(resolveDeps: DepsResolver): Hono<Env> {
    */
   router.delete('/v1/me', requireUser, async (c) => {
     const deps = c.get('deps')
-    const user = c.get('user')
-    // Подключение Titan клуба дублирует личную запись этого пользователя: без неё оно ничьё.
-    if (user.titan) {
-      await deps.repo.clearClubTitanConnection(user.titan.connectionId).catch((error: unknown) => {
-        console.warn('[mafboard] подключение Titan клуба не снято при удалении аккаунта:', error)
-      })
-    }
-    await deps.repo.deleteUser(user.id)
+    await releaseTitanOnAccountDeletion(c)
+    await deps.repo.deleteUser(c.get('user').id)
     return c.json({ ok: true })
   })
 

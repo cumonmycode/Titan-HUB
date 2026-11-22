@@ -273,15 +273,14 @@ describe('PgMafboardRepo: клубы', { skip: url ? false : 'нет MAFBOARD_TE
     reconcile = () => reconcileMafboardClubs(db)
   })
 
-  it('сверка поверх данных до миграции 012: клубы, Titan президента и ссылки игр; повтор ничего не меняет', async () => {
-    // Президент со старой привязкой (способ не записан) и подключённым Titan.
-    const alpha = await legacyUser({ gomafiaId: 201, club: { id: 61, title: 'Альфа', city: 'Казань', presidentID: 201 }, titanLink: titan('conn-61') })
-    // Снимок без президента (страница клуба тогда не открылась): клуб заводится, Titan не переносится.
+  it('сверка поверх данных до миграции 012: клубы и ссылки игр, Titan не трогает; повтор ничего не меняет', async () => {
+    // Президент с личной записью о Titan: клуб заводится, но подключение в него само не переезжает.
+    await legacyUser({ gomafiaId: 201, club: { id: 61, title: 'Альфа', city: 'Казань', presidentID: 201 }, titanLink: titan('conn-61') })
+    // Снимок без президента (страница клуба тогда не открылась): клуб заводится с его названием.
     await legacyUser({ gomafiaId: 202, club: { id: 62, title: 'Бета', city: null }, titanLink: titan('conn-62') })
-    // Двое считают себя президентами: верим свежему снимку — у него Titan нет, и название его.
+    // Два снимка одного клуба: название берётся из более свежего.
     await legacyUser({ gomafiaId: 203, club: { id: 63, title: 'Гамма', city: 'Уфа', presidentID: 203 }, titanLink: titan('conn-63-old') })
     await legacyUser({ gomafiaId: 204, club: { id: 63, title: 'Гамма Новая', city: 'Уфа', presidentID: 204 }, syncedAt: SOON })
-    // Привязка по заявке президентом не делает, даже если номер совпал.
     await legacyUser({ gomafiaId: 205, club: { id: 64, title: 'Дельта', city: null, presidentID: 205 }, source: 'club', titanLink: titan('conn-64') })
     // Кривые снимки миграцию не роняют и клубов не заводят.
     await legacyUser({ gomafiaId: 206, club: { id: 'abc', title: 'Кривой' } })
@@ -300,9 +299,8 @@ describe('PgMafboardRepo: клубы', { skip: url ? false : 'нет MAFBOARD_TE
     const byId = async (id: number) => repo.clubByGomafiaId(id)
     const club61 = await byId(61)
     assert.deepEqual({ name: club61?.name, city: club61?.city }, { name: 'Альфа', city: 'Казань' })
-    assert.equal(club61?.titan?.connectionId, 'conn-61')
-    assert.equal(club61?.titan?.linkedAt.toISOString(), NOW.toISOString())
-    assert.equal(club61?.titanLinkedBy, alpha.id)
+    assert.equal(club61?.titan, null)
+    assert.equal(club61?.titanLinkedBy, null)
 
     const club62 = await byId(62)
     assert.equal(club62?.name, 'Бета')
@@ -327,14 +325,15 @@ describe('PgMafboardRepo: клубы', { skip: url ? false : 'нет MAFBOARD_TE
     assert.deepEqual(await clubsState(), before)
   })
 
-  it('сверка дочищает то, что записал прежний код после отката', async () => {
+  it('сверка дозаполняет клуб и ссылку игры, которые записал прежний код после отката', async () => {
     await legacyUser({ gomafiaId: 211, club: { id: 71, title: 'Эпсилон', city: null, presidentID: 211 }, titanLink: titan('conn-71') })
     await legacyGame('00000000-0000-4000-8000-000000000711', 71)
     assert.equal(await repo.clubByGomafiaId(71), null)
 
     await reconcile()
     const club = await repo.clubByGomafiaId(71)
-    assert.equal(club?.titan?.connectionId, 'conn-71')
+    assert.equal(club?.name, 'Эпсилон')
+    assert.equal(club?.titan, null)
     assert.equal(await clubRef('00000000-0000-4000-8000-000000000711'), club?.id)
   })
 
@@ -358,35 +357,23 @@ describe('PgMafboardRepo: клубы', { skip: url ? false : 'нет MAFBOARD_TE
     assert.equal(await repo.clubByGomafiaId(999_999), null)
   })
 
-  it('личный ключ президента переезжает в клуб без подключения; занятый клуб и не-президент — нет', async () => {
+  it('личная запись президента в клуб сама не переезжает; удалился подключивший — подключение остаётся без него', async () => {
     const boss = await newUser()
-    await repo.setGomafiaLink(boss.id, { player: player(231, 82), club: { id: 82, title: 'Эта', city: null } }, NOW)
     await repo.setTitanLink(boss.id, titan('conn-82'))
-    assert.equal((await repo.clubByGomafiaId(82))?.titan, null)
     await repo.setGomafiaLink(boss.id, { player: player(231, 82), club: { id: 82, title: 'Эта', city: null, presidentID: 231 } }, NOW)
-    const moved = await repo.clubByGomafiaId(82)
-    assert.equal(moved?.titan?.connectionId, 'conn-82')
-    assert.equal(moved?.titanLinkedBy, boss.id)
+    const club = (await repo.clubByGomafiaId(82))!
+    assert.equal(club.titan, null)
 
-    // У клуба подключение уже есть — личный ключ его не заменяет.
-    await repo.setTitanLink(boss.id, titan('conn-82-new'))
-    await repo.setGomafiaLink(boss.id, { player: player(231, 82), club: { id: 82, title: 'Эта', city: null, presidentID: 231 } }, NOW)
-    assert.equal((await repo.clubByGomafiaId(82))?.titan?.connectionId, 'conn-82')
-
-    const resident = await newUser()
-    await repo.setTitanLink(resident.id, titan('conn-83'))
-    await repo.setGomafiaLink(resident.id, { player: player(232, 83), club: { id: 83, title: 'Тета', city: null, presidentID: 999 } }, NOW)
-    assert.equal((await repo.clubByGomafiaId(83))?.titan, null)
-
-    // Удалился подключивший — подключение остаётся у клуба, но уже без него.
+    await repo.setClubTitanLink(club.id, titan('conn-82'), boss.id)
     assert.equal(await repo.deleteUser(boss.id), true)
     const orphan = await repo.clubByGomafiaId(82)
     assert.equal(orphan?.titan?.connectionId, 'conn-82')
     assert.equal(orphan?.titanLinkedBy, null)
   })
 
-  it('setClubTitanLink возвращает заменённое подключение; clearClubTitanConnection снимает по номеру', async () => {
+  it('подключение клуба: замена возвращает прежнее, поиск по подключившему и по номеру, копии стираются', async () => {
     const boss = await newUser()
+    const former = await newUser()
     await repo.setGomafiaLink(boss.id, { player: player(241, 84), club: { id: 84, title: 'Йота', city: null, presidentID: 241 } }, NOW)
     const club = (await repo.clubByGomafiaId(84))!
 
@@ -396,16 +383,26 @@ describe('PgMafboardRepo: клубы', { skip: url ? false : 'нет MAFBOARD_TE
     assert.equal(await repo.setClubTitanLink('not-a-uuid', titan('conn-x'), boss.id), null)
     assert.equal(await repo.setClubTitanLink('00000000-0000-4000-8000-00000000dead', titan('conn-x'), boss.id), null)
 
-    await repo.clearClubTitanConnection('conn-a')
-    assert.equal((await repo.clubByGomafiaId(84))?.titan?.connectionId, 'conn-b')
-    await repo.clearClubTitanConnection('conn-b')
-    const cleared = await repo.clubByGomafiaId(84)
-    assert.equal(cleared?.titan, null)
-    assert.equal(cleared?.titanLinkedBy, null)
+    assert.deepEqual((await repo.clubsLinkedBy(boss.id)).map((linked) => linked.id), [club.id])
+    assert.deepEqual(await repo.clubsLinkedBy(former.id), [])
+    assert.deepEqual(await repo.clubsLinkedBy('not-a-uuid'), [])
+    assert.equal((await repo.clubByTitanConnection('conn-b'))?.id, club.id)
+    assert.equal(await repo.clubByTitanConnection('conn-a'), null)
 
-    await repo.setClubTitanLink(club.id, titan('conn-c'), boss.id)
-    assert.equal((await repo.setClubTitanLink(club.id, null, null))?.connectionId, 'conn-c')
+    // Копии подключения в личных записях стираются по номеру, чужие — остаются.
+    await repo.setTitanLink(boss.id, titan('conn-b'))
+    await repo.setTitanLink(former.id, titan('conn-b'))
+    const bystander = await newUser()
+    await repo.setTitanLink(bystander.id, titan('conn-other'))
+    await repo.clearTitanMirrors('conn-b')
+    assert.equal((await repo.userById(boss.id))?.titan, null)
+    assert.equal((await repo.userById(former.id))?.titan, null)
+    assert.equal((await repo.userById(bystander.id))?.titan?.connectionId, 'conn-other')
+    assert.equal((await repo.clubByGomafiaId(84))?.titan?.connectionId, 'conn-b')
+
+    assert.equal((await repo.setClubTitanLink(club.id, null, null))?.connectionId, 'conn-b')
     assert.equal((await repo.clubByGomafiaId(84))?.titanLinkedBy, null)
+    assert.deepEqual(await repo.clubsLinkedBy(boss.id), [])
   })
 
   it('игра клуба получает ссылку на клуб, повторная загрузка её сохраняет, личная игра — без ссылки', async () => {

@@ -55,12 +55,14 @@ export class FakeTitan implements TitanConnectGateway {
   revoked = false
   down = false
   apiBase = TITAN_API_BASE
+  /** Что выдаст следующий обмен кода: смените, чтобы подключить клуб заново другим ключом. */
+  issued = { accessToken: 'tcn_live', connectionId: 'conn-1' }
   calls = { clients: 0, disconnect: [] as string[] }
 
   async exchange(code: string) {
     if (this.down) throw new TitanConnectError('unavailable', 'нет связи')
     if (code.replace(/[\s-]/g, '').toUpperCase() !== 'GOODCODE') throw new TitanConnectError('invalid_code', 'Код неверный, уже использован или истёк.')
-    return { accessToken: 'tcn_live', connectionId: 'conn-1', scopes: ['clients:read', 'clients:photos'], apiBase: this.apiBase }
+    return { ...this.issued, scopes: ['clients:read', 'clients:photos'], apiBase: this.apiBase }
   }
 
   async clubName() {
@@ -279,9 +281,7 @@ export class MemoryRepo implements MafboardRepo {
     const fresh = existing
       ? (isFull ? { ...existing, name: snapshot.title, city: snapshot.city ?? existing.city } : existing)
       : { id: this.uuid(), name: snapshot.title, city: snapshot.city, gomafiaClubId: snapshot.id, titan: null, titanLinkedBy: null }
-    const isPresident = link.source === 'password' && snapshot.presidentID != null && snapshot.presidentID === link.player.id
-    const moved = isPresident && fresh.titan == null && user.titan != null
-    this.clubs.set(fresh.id, moved ? { ...fresh, titan: user.titan, titanLinkedBy: user.id } : fresh)
+    this.clubs.set(fresh.id, fresh)
   }
 
   async clubByGomafiaId(gomafiaClubId: number): Promise<StoredClub | null> {
@@ -295,9 +295,17 @@ export class MemoryRepo implements MafboardRepo {
     return club.titan
   }
 
-  async clearClubTitanConnection(connectionId: string) {
-    for (const [id, club] of this.clubs) {
-      if (club.titan?.connectionId === connectionId) this.clubs.set(id, { ...club, titan: null, titanLinkedBy: null })
+  async clubsLinkedBy(userId: string) {
+    return [...this.clubs.values()].filter((club) => club.titan != null && club.titanLinkedBy === userId)
+  }
+
+  async clubByTitanConnection(connectionId: string) {
+    return [...this.clubs.values()].find((club) => club.titan?.connectionId === connectionId) ?? null
+  }
+
+  async clearTitanMirrors(connectionId: string) {
+    for (const [id, user] of this.users) {
+      if (user.titan?.connectionId === connectionId) this.users.set(id, { ...user, titan: null })
     }
   }
 

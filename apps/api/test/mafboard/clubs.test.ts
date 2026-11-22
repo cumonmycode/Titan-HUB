@@ -1,14 +1,18 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
+import { sealSecrets } from '../../src/modules/mafboard/studio.js'
 import { goMafiaPlayerID } from '../../src/modules/mafboard/titan.js'
 import type { GoMafiaClubJSON, GoMafiaPlayerJSON, TitanLinkState } from '../../src/modules/mafboard/types.js'
-import { call, createTestContext, NOW, signIn, TG_USER, type TestContext } from './helpers.js'
+import { call, config, createTestContext, gmPlayer, NOW, signIn, TG_USER, type TestContext } from './helpers.js'
 
-// Клубы MafBoard (docs/MAFBOARD.md, раздел «Клубы»). Выпуск 1а: клуб — своя запись, на неё
-// ссылаются игры и подключение Titan, а права и чтение Titan пока считаются по-старому.
+// Клубы MafBoard (docs/MAFBOARD.md, раздел «Клубы»): клуб — своя запись, на неё ссылаются игры и
+// подключение Titan HUB. Подключение принадлежит клубу и читается из него; президент клуба
+// по-прежнему берётся из GoMafia.
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
-const JUDGE_TG = { ...TG_USER, id: 1002, username: 'other' }
+const RESIDENT_TG = { ...TG_USER, id: 1002, username: 'other' }
+const JUDGE_TG = { ...TG_USER, id: 1004, username: 'judge' }
+const GUEST_TG = { ...TG_USER, id: 1003, username: 'guest' }
 
 const PLAYER: GoMafiaPlayerJSON = {
   id: 4242, nickname: 'host', fullName: null, avatarURL: null, elo: null, clubID: 77, clubTitle: 'TITAN',
@@ -16,14 +20,15 @@ const PLAYER: GoMafiaPlayerJSON = {
 }
 const FULL_CLUB: GoMafiaClubJSON = { id: 77, title: 'TITAN', city: 'Москва', presidentID: 4242 }
 
-function titanLink(connectionId: string): TitanLinkState {
+/** Подключение с настоящим шифротекстом ключа: его можно отозвать в HUB. */
+function titanLink(connectionId: string, token = `tcn_${connectionId}`): TitanLinkState {
   return {
     apiBase: 'https://club.titanpos.test/api/connect/v1', clubName: 'TITAN Нальчик', connectionId,
-    scopes: ['clients:read'], tokenSealed: `sealed-${connectionId}`, linkedAt: NOW,
+    scopes: ['clients:read'], tokenSealed: sealSecrets(config.studioSecretsKey, { token }), linkedAt: NOW,
   }
 }
 
-/** Президент клуба GoMafia 77 (логин «host»). */
+/** Президент клуба GoMafia 77 (логин «host», игрок 4242). */
 async function president(ctx: TestContext) {
   const session = await signIn(ctx)
   const linked = await call(ctx, 'POST', '/v1/me/gomafia', { token: session.accessToken, body: { login: 'host', password: 'secret' } })
@@ -31,12 +36,45 @@ async function president(ctx: TestContext) {
   return { ...session, account: linked.json }
 }
 
+/** Президент, подключивший клуб Titan HUB (ключ `tcn_live`, подключение `conn-1`). */
+async function titanPresident(ctx: TestContext) {
+  const host = await president(ctx)
+  const linked = await call(ctx, 'POST', '/v1/me/titan', { token: host.accessToken, body: { code: 'good-code' } })
+  assert.equal(linked.status, 200)
+  return { ...host, account: linked.json }
+}
+
 /** Резидент клуба 77 (игрок 5001) с привязкой паролем; доступа судьи у него ещё нет. */
 async function resident(ctx: TestContext) {
   ctx.gomafia.passwords.set('Шерлок', { password: 'pw', userId: '5001', clubId: '77' })
-  const session = await signIn(ctx, JUDGE_TG)
+  const session = await signIn(ctx, RESIDENT_TG)
   const linked = await call(ctx, 'POST', '/v1/me/gomafia', { token: session.accessToken, body: { login: 'Шерлок', password: 'pw' } })
   return { ...session, account: linked.json }
+}
+
+/** Ещё один резидент (игрок 5003), которого президент добавил в пул судей. */
+async function poolJudge(ctx: TestContext, presidentToken: string) {
+  const watson = gmPlayer(5003, 'Ватсон')
+  ctx.gomafia.players.set('5003', watson)
+  ctx.gomafia.roster.push(watson)
+  ctx.gomafia.passwords.set('Ватсон', { password: 'pw', userId: '5003', clubId: '77' })
+  const session = await signIn(ctx, JUDGE_TG)
+  await call(ctx, 'POST', '/v1/me/gomafia', { token: session.accessToken, body: { login: 'Ватсон', password: 'pw' } })
+  assert.equal((await call(ctx, 'PUT', '/v1/club/hosts/5003', { token: presidentToken })).status, 200)
+  return session
+}
+
+/** Президентом клуба 77 в GoMafia становится другой игрок; снимки привязок устаревают (старше суток). */
+function changePresident(ctx: TestContext, gomafiaId: string) {
+  ctx.gomafia.presidents.set('77', gomafiaId)
+  ctx.clock.now = new Date(ctx.clock.now.getTime() + 25 * 60 * 60_000)
+}
+
+/** Аккаунт после фонового обновления привязки GoMafia. */
+async function freshAccount(ctx: TestContext, token: string) {
+  await call(ctx, 'GET', '/v1/me', { token })
+  await ctx.flush()
+  return (await call(ctx, 'GET', '/v1/me', { token })).json
 }
 
 function game(hostId: string, format: 'rating' | 'funky', clubID: number | null, gameID = 'A1B2C3D4-0000-4000-8000-000000000901') {
@@ -75,7 +113,7 @@ describe('Клубы: запись клуба', () => {
 
   it('судья пула видит клуб как судья, резидент без доступа и ведущий без GoMafia — пустой список', async () => {
     const ctx = createTestContext()
-    const guest = await signIn(ctx, { ...TG_USER, id: 1003, username: 'guest' })
+    const guest = await signIn(ctx, GUEST_TG)
     assert.deepEqual(guest.account.clubs, [])
 
     const host = await president(ctx)
@@ -113,9 +151,9 @@ describe('Клубы: запись клуба', () => {
     assert.equal((await ctx.repo.clubByGomafiaId(78))?.name, 'Клуб #78')
   })
 
-  it('чтение клуба не удалось — аккаунт отдаётся с пустым списком клубов', async () => {
+  it('запись клуба не читается — клубов в аккаунте нет, права и Titan берутся по-старому из записи президента', async () => {
     const ctx = createTestContext()
-    const host = await president(ctx)
+    const host = await titanPresident(ctx)
     ctx.repo.clubByGomafiaId = async () => {
       throw new Error('relation "mb_clubs" does not exist')
     }
@@ -123,31 +161,33 @@ describe('Клубы: запись клуба', () => {
     assert.equal(me.status, 200)
     assert.deepEqual(me.json.clubs, [])
     assert.equal(me.json.goMafia.access, 'president')
+    assert.deepEqual(me.json.titan.club, { name: 'TITAN Нальчик' })
   })
 })
 
-describe('Клубы: подключение Titan', () => {
-  it('подключение пишется и в клуб, и в запись президента; отключение стирает оба', async () => {
+describe('Клубы: подключение Titan принадлежит клубу', () => {
+  it('подключение пишется в клуб и копией в запись президента; отключение стирает оба и отзывает ключ', async () => {
     const ctx = createTestContext()
-    const host = await president(ctx)
-
-    const linked = await call(ctx, 'POST', '/v1/me/titan', { token: host.accessToken, body: { code: 'good-code' } })
-    assert.equal(linked.status, 200)
-    assert.deepEqual(linked.json.clubs[0].titan.club, { name: 'TITAN Нальчик' })
+    const host = await titanPresident(ctx)
+    assert.deepEqual(host.account.clubs[0].titan.club, { name: 'TITAN Нальчик' })
+    assert.equal(host.account.titan.isShared, false)
 
     const personal = ctx.repo.users.get(host.account.id)!.titan!
     const club = (await ctx.repo.clubByGomafiaId(77))!
     assert.equal(club.titan?.connectionId, personal.connectionId)
     assert.equal(club.titan?.tokenSealed, personal.tokenSealed)
     assert.equal(club.titanLinkedBy, host.account.id)
-    assert.ok(!JSON.stringify(linked.json).includes(personal.tokenSealed))
+    assert.ok(!JSON.stringify(host.account).includes(personal.tokenSealed))
 
     const unlinked = await call(ctx, 'DELETE', '/v1/me/titan', { token: host.accessToken })
+    assert.equal(unlinked.json.titan, null)
     assert.equal(unlinked.json.clubs[0].titan, null)
     assert.equal(ctx.repo.users.get(host.account.id)!.titan, null)
     const after = (await ctx.repo.clubByGomafiaId(77))!
     assert.equal(after.titan, null)
     assert.equal(after.titanLinkedBy, null)
+    await ctx.flush()
+    assert.deepEqual(ctx.titan.calls.disconnect, ['tcn_live'])
   })
 
   it('setClubTitanLink возвращает заменённое подключение', async () => {
@@ -159,55 +199,174 @@ describe('Клубы: подключение Titan', () => {
     const replaced = await ctx.repo.setClubTitanLink(club.id, titanLink('conn-b'), host.account.id)
     assert.equal(replaced?.connectionId, 'conn-a')
     assert.equal((await ctx.repo.clubByGomafiaId(77))?.titan?.connectionId, 'conn-b')
+    assert.deepEqual((await ctx.repo.clubsLinkedBy(host.account.id)).map((linked) => linked.id), [club.id])
+    assert.equal((await ctx.repo.clubByTitanConnection('conn-b'))?.id, club.id)
+    assert.equal(await ctx.repo.clubByTitanConnection('conn-a'), null)
     assert.equal((await ctx.repo.setClubTitanLink(club.id, null, null))?.connectionId, 'conn-b')
+    assert.deepEqual(await ctx.repo.clubsLinkedBy(host.account.id), [])
   })
 
-  it('старый личный ключ президента переезжает в клуб при обновлении привязки', async () => {
-    const ctx = createTestContext()
-    const session = await signIn(ctx)
-    // Привязка без президента (страница клуба тогда не открылась), а клуб Titan уже подключён.
-    await ctx.repo.setGomafiaLink(session.account.id, { player: PLAYER, club: { id: 77, title: 'TITAN', city: null }, source: 'password' }, NOW)
-    await ctx.repo.setTitanLink(session.account.id, titanLink('conn-old'))
-    assert.equal((await ctx.repo.clubByGomafiaId(77))?.titan, null)
-
-    await ctx.repo.setGomafiaLink(session.account.id, { player: PLAYER, club: FULL_CLUB }, NOW)
-    const club = (await ctx.repo.clubByGomafiaId(77))!
-    assert.equal(club.titan?.connectionId, 'conn-old')
-    assert.equal(club.titanLinkedBy, session.account.id)
-  })
-
-  it('у клуба уже есть подключение — личный ключ нового президента его не заменяет', async () => {
-    const ctx = createTestContext()
-    const session = await signIn(ctx)
-    await ctx.repo.setGomafiaLink(session.account.id, { player: PLAYER, club: FULL_CLUB, source: 'password' }, NOW)
-    const club = (await ctx.repo.clubByGomafiaId(77))!
-    await ctx.repo.setClubTitanLink(club.id, titanLink('conn-club'), null)
-    await ctx.repo.setTitanLink(session.account.id, titanLink('conn-personal'))
-
-    await ctx.repo.setGomafiaLink(session.account.id, { player: PLAYER, club: FULL_CLUB }, NOW)
-    assert.equal((await ctx.repo.clubByGomafiaId(77))?.titan?.connectionId, 'conn-club')
-  })
-
-  it('резидент без прав президента личным ключом клуб не подключает', async () => {
-    const ctx = createTestContext()
-    const session = await signIn(ctx)
-    const notPresident = { ...FULL_CLUB, presidentID: 9999 }
-    await ctx.repo.setGomafiaLink(session.account.id, { player: PLAYER, club: notPresident, source: 'password' }, NOW)
-    await ctx.repo.setTitanLink(session.account.id, titanLink('conn-stale'))
-    await ctx.repo.setGomafiaLink(session.account.id, { player: PLAYER, club: notPresident }, NOW)
-    assert.equal((await ctx.repo.clubByGomafiaId(77))?.titan, null)
-  })
-
-  it('удаление аккаунта подключившего снимает подключение с клуба', async () => {
+  it('личная запись в клуб сама не переезжает и без подключения клуба ничего не даёт', async () => {
     const ctx = createTestContext()
     const host = await president(ctx)
-    await call(ctx, 'POST', '/v1/me/titan', { token: host.accessToken, body: { code: 'good-code' } })
+    await ctx.repo.setTitanLink(host.account.id, titanLink('conn-personal'))
+    // Обновление привязки GoMafia подключение клуба не трогает: его меняют только подключение и отключение.
+    await ctx.repo.setGomafiaLink(host.account.id, { player: PLAYER, club: FULL_CLUB }, NOW)
+
+    assert.equal((await ctx.repo.clubByGomafiaId(77))?.titan, null)
+    const me = await call(ctx, 'GET', '/v1/me', { token: host.accessToken })
+    assert.equal(me.json.titan, null)
+    assert.equal((await call(ctx, 'GET', '/v1/titan/players', { token: host.accessToken })).json.error.code, 'titan_not_linked')
+  })
+
+  it('смена президента: Titan остаётся у клуба — виден судье и новому президенту, бывшему — нет', async () => {
+    const ctx = createTestContext()
+    const former = await titanPresident(ctx)
+    const successor = await resident(ctx)
+    const judge = await poolJudge(ctx, former.accessToken)
+    changePresident(ctx, '5001')
+
+    const next = await freshAccount(ctx, successor.accessToken)
+    assert.equal(next.goMafia.access, 'president')
+    assert.deepEqual(next.titan.club, { name: 'TITAN Нальчик' })
+    assert.equal(next.titan.isShared, false)
+    assert.equal(next.clubs[0].role, 'owner')
+    assert.equal((await call(ctx, 'GET', '/v1/titan/players', { token: successor.accessToken })).status, 200)
+
+    const seenByJudge = await freshAccount(ctx, judge.accessToken)
+    assert.equal(seenByJudge.goMafia.access, 'host')
+    assert.equal(seenByJudge.titan.isShared, true)
+
+    const seenByFormer = await freshAccount(ctx, former.accessToken)
+    assert.equal(seenByFormer.goMafia.access, 'none')
+    assert.equal(seenByFormer.titan, null)
+    assert.deepEqual(seenByFormer.clubs, [])
+
+    // Новый президент отключает клуб, хотя подключал не он: ключ отозван, копия у бывшего стёрта.
+    const unlinked = await call(ctx, 'DELETE', '/v1/me/titan', { token: successor.accessToken })
+    assert.equal(unlinked.status, 200)
+    assert.equal(unlinked.json.titan, null)
+    assert.equal((await ctx.repo.clubByGomafiaId(77))?.titan, null)
+    assert.equal(ctx.repo.users.get(former.account.id)!.titan, null)
+    await ctx.flush()
+    assert.deepEqual(ctx.titan.calls.disconnect, ['tcn_live'])
+    assert.equal((await freshAccount(ctx, judge.accessToken)).titan, null)
+  })
+
+  it('подключивший, переставший быть президентом, может отключить клуб; судья пула — нет', async () => {
+    const ctx = createTestContext()
+    const former = await titanPresident(ctx)
+    await resident(ctx)
+    const judge = await poolJudge(ctx, former.accessToken)
+    changePresident(ctx, '5001')
+    assert.equal((await freshAccount(ctx, former.accessToken)).goMafia.access, 'none')
+
+    const denied = await call(ctx, 'DELETE', '/v1/me/titan', { token: judge.accessToken })
+    assert.equal(denied.status, 403)
+    assert.equal(denied.json.error.code, 'president_only')
     assert.ok((await ctx.repo.clubByGomafiaId(77))?.titan)
+
+    const unlinked = await call(ctx, 'DELETE', '/v1/me/titan', { token: former.accessToken })
+    assert.equal(unlinked.status, 200)
+    const club = (await ctx.repo.clubByGomafiaId(77))!
+    assert.equal(club.titan, null)
+    assert.equal(club.titanLinkedBy, null)
+    assert.equal(ctx.repo.users.get(former.account.id)!.titan, null)
+    await ctx.flush()
+    assert.deepEqual(ctx.titan.calls.disconnect, ['tcn_live'])
+  })
+
+  it('новый президент подключает клуб заново: прежний ключ отзывается, копия у бывшего президента стирается', async () => {
+    const ctx = createTestContext()
+    const former = await titanPresident(ctx)
+    const successor = await resident(ctx)
+    changePresident(ctx, '5001')
+    await freshAccount(ctx, successor.accessToken)
+
+    ctx.titan.issued = { accessToken: 'tcn_second', connectionId: 'conn-2' }
+    const relinked = await call(ctx, 'POST', '/v1/me/titan', { token: successor.accessToken, body: { code: 'good-code' } })
+    assert.equal(relinked.status, 200)
+
+    const club = (await ctx.repo.clubByGomafiaId(77))!
+    assert.equal(club.titan?.connectionId, 'conn-2')
+    assert.equal(club.titanLinkedBy, successor.account.id)
+    assert.equal(ctx.repo.users.get(successor.account.id)!.titan?.connectionId, 'conn-2')
+    assert.equal(ctx.repo.users.get(former.account.id)!.titan, null)
+    await ctx.flush()
+    assert.deepEqual(ctx.titan.calls.disconnect, ['tcn_live'])
+  })
+
+  it('бывший президент с устаревшим снимком подключить клуб не может', async () => {
+    const ctx = createTestContext()
+    const former = await titanPresident(ctx)
+    // Президент в GoMafia сменился, а снимок бывшего ещё называет президентом его самого.
+    changePresident(ctx, '5001')
+    ctx.titan.issued = { accessToken: 'tcn_second', connectionId: 'conn-2' }
+
+    const denied = await call(ctx, 'POST', '/v1/me/titan', { token: former.accessToken, body: { code: 'good-code' } })
+    assert.equal(denied.status, 403)
+    assert.equal(denied.json.error.code, 'president_only')
+    assert.equal((await ctx.repo.clubByGomafiaId(77))?.titan?.connectionId, 'conn-1')
+  })
+
+  it('личная запись не-президента (осталась от прежних времён): отключение стирает и отзывает только её', async () => {
+    const ctx = createTestContext()
+    const host = await titanPresident(ctx)
+    const guest = await signIn(ctx, GUEST_TG)
+    await ctx.repo.setTitanLink(guest.account.id, titanLink('conn-legacy', 'tcn_legacy'))
+
+    const unlinked = await call(ctx, 'DELETE', '/v1/me/titan', { token: guest.accessToken })
+    assert.equal(unlinked.status, 200)
+    assert.equal(ctx.repo.users.get(guest.account.id)!.titan, null)
+    await ctx.flush()
+    assert.deepEqual(ctx.titan.calls.disconnect, ['tcn_legacy'])
+    assert.equal((await ctx.repo.clubByGomafiaId(77))?.titan?.connectionId, 'conn-1')
+    assert.ok(ctx.repo.users.get(host.account.id)!.titan)
+
+    // Отключать больше нечего — повтор ничего не делает.
+    assert.equal((await call(ctx, 'DELETE', '/v1/me/titan', { token: guest.accessToken })).status, 200)
+    assert.deepEqual(ctx.titan.calls.disconnect, ['tcn_legacy'])
+  })
+
+  it('удаление аккаунта бывшего президента, который подключал, подключение клуба сохраняет', async () => {
+    const ctx = createTestContext()
+    const former = await titanPresident(ctx)
+    const successor = await resident(ctx)
+    changePresident(ctx, '5001')
+    await freshAccount(ctx, successor.accessToken)
+
+    assert.equal((await call(ctx, 'DELETE', '/v1/me', { token: former.accessToken })).status, 200)
+    const club = (await ctx.repo.clubByGomafiaId(77))!
+    assert.equal(club.titan?.connectionId, 'conn-1')
+    assert.equal(club.titanLinkedBy, null)
+    await ctx.flush()
+    assert.deepEqual(ctx.titan.calls.disconnect, [])
+    assert.deepEqual((await call(ctx, 'GET', '/v1/me', { token: successor.accessToken })).json.titan.club, { name: 'TITAN Нальчик' })
+  })
+
+  it('удаление аккаунта действующего президента, который подключал, снимает подключение и отзывает ключ', async () => {
+    const ctx = createTestContext()
+    const host = await titanPresident(ctx)
 
     assert.equal((await call(ctx, 'DELETE', '/v1/me', { token: host.accessToken })).status, 200)
     const club = (await ctx.repo.clubByGomafiaId(77))!
     assert.equal(club.titan, null)
     assert.equal(club.titanLinkedBy, null)
+    await ctx.flush()
+    assert.deepEqual(ctx.titan.calls.disconnect, ['tcn_live'])
+  })
+
+  it('удаление аккаунта президента, который клуб не подключал, подключение не трогает', async () => {
+    const ctx = createTestContext()
+    await titanPresident(ctx)
+    const successor = await resident(ctx)
+    changePresident(ctx, '5001')
+    assert.equal((await freshAccount(ctx, successor.accessToken)).goMafia.access, 'president')
+
+    assert.equal((await call(ctx, 'DELETE', '/v1/me', { token: successor.accessToken })).status, 200)
+    assert.equal((await ctx.repo.clubByGomafiaId(77))?.titan?.connectionId, 'conn-1')
+    await ctx.flush()
+    assert.deepEqual(ctx.titan.calls.disconnect, [])
   })
 })
 
@@ -226,7 +385,7 @@ describe('Клубы: игры', () => {
     assert.equal((await call(ctx, 'POST', '/v1/games', { token: host.accessToken, body: rating })).status, 200)
     assert.equal(ctx.repo.games.get(rating.setup.gameID.toLowerCase())!.clubRef, clubId)
 
-    const guest = await signIn(ctx, { ...TG_USER, id: 1003, username: 'guest' })
+    const guest = await signIn(ctx, GUEST_TG)
     const funky = game(guest.account.id, 'funky', null, 'A1B2C3D4-0000-4000-8000-000000000902')
     assert.equal((await call(ctx, 'POST', '/v1/games', { token: guest.accessToken, body: funky })).status, 201)
     assert.equal(ctx.repo.games.get(funky.setup.gameID.toLowerCase())!.clubRef, null)

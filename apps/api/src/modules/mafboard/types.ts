@@ -52,9 +52,9 @@ export type ClubAccess = 'president' | 'host' | 'none'
 /** Права пользователя на время запроса: считаются из привязки GoMafia и пула судей (clubHosts.ts). */
 export interface HostAccess {
   club: ClubAccess
-  /** Действующий клуб Titan HUB: свой у президента, клуб президента у судьи пула. */
+  /** Действующий клуб Titan HUB — подключение клуба MafBoard, общее для президента и судей пула. */
   titan: TitanLinkState | null
-  /** Клуб Titan подключил президент, а не сам пользователь: отключить его судья не может. */
+  /** Пользователь — судья пула: клуб Titan ему достался от клуба, и отключить его он не может. */
   titanShared: boolean
   /** Заявка судьи без пароля GoMafia, которая ждёт президента клуба. */
   request: StoredClubRequest | null
@@ -72,7 +72,7 @@ export interface StoredClub {
   city: string | null
   /** Клуб GoMafia, подключённый к этому клубу. null — клуб без GoMafia. */
   gomafiaClubId: number | null
-  /** Подключение Titan Connect клуба. Пока оно дублирует запись президента (`MafboardUser.titan`). */
+  /** Подключение Titan Connect клуба: действует у президента и судей пула, смену президента переживает. */
   titan: TitanLinkState | null
   /** Кто подключил Titan. null — подключения нет или подключивший удалил аккаунт. */
   titanLinkedBy: string | null
@@ -108,8 +108,10 @@ export interface MafboardUser {
   termsVersion: string | null
   gomafia: GoMafiaLinkState | null
   /**
-   * Клуб в Titan HUB, который этот пользователь подключил сам (Titan Connect). Действует он
-   * только у президента клуба GoMafia; судьям пула достаётся клуб президента — см. `HostAccess`.
+   * Личная запись о клубе Titan HUB. Действует подключение клуба (`StoredClub.titan`, см.
+   * `HostAccess`), а здесь лежит его копия у подключившего президента — на случай отката к коду,
+   * который читал Titan отсюда, и если запись клуба не прочиталась. У не-президента это может быть
+   * ключ прежних времён, когда клуб Titan подключал любой ведущий: он ни на что не влияет.
    */
   titan: TitanLinkState | null
 }
