@@ -112,7 +112,8 @@ export function registerClubRoutes(router: Hono<MafboardEnv>, requireUser: Middl
       createdAt: now, expiresAt: new Date(now.getTime() + INVITE_TTL_MS), revokedAt: null,
     }
     await deps.repo.createClubInvite(invite)
-    const url = `${deps.config.appLinkBase}/club/join?t=${encodeURIComponent(token)}`
+    // Токен — после `#`: эта часть ссылки не уходит на сервер и не попадает в журналы nginx.
+    const url = `${deps.config.appLinkBase}/club/join#t=${encodeURIComponent(token)}`
     return c.json({ id: invite.id, url, expiresAt: invite.expiresAt.toISOString() }, 201)
   })
 

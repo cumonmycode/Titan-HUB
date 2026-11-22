@@ -29,7 +29,9 @@ async function owner(ctx: TestContext) {
 async function invite(ctx: TestContext, token: string, clubId: string) {
   const res = await call(ctx, 'POST', `/v1/clubs/${clubId}/invites`, { token })
   assert.equal(res.status, 201)
-  return { id: res.json.id as string, token: new URL(res.json.url).searchParams.get('t')! }
+  const url = new URL(res.json.url)
+  assert.equal(url.search, '')
+  return { id: res.json.id as string, token: new URLSearchParams(url.hash.slice(1)).get('t')! }
 }
 
 async function judge(ctx: TestContext, ownerToken: string, clubId: string, user = JUDGE_TG) {
@@ -143,6 +145,16 @@ describe('Приглашения', () => {
     ctx.clock.now = new Date(ctx.clock.now.getTime() + 8 * 24 * 60 * 60_000)
     assert.equal((await call(ctx, 'POST', '/v1/clubs/join', { token: stranger.accessToken, body: { token: old.token } })).status, 410)
     assert.equal((await call(ctx, 'POST', '/v1/clubs/join', { token: stranger.accessToken, body: { token: 'x'.repeat(32) } })).status, 404)
+  })
+
+  it('владелец клуба без GoMafia удалил аккаунт — ключ Titan отозван, клуб HUB можно подключить заново', async () => {
+    const ctx = seeded()
+    const host = await owner(ctx)
+    assert.equal((await call(ctx, 'DELETE', '/v1/me', { token: host.accessToken })).status, 200)
+    await ctx.flush()
+    assert.deepEqual(ctx.titan.calls.disconnect, ['tcn_live'])
+    const next = await signIn(ctx, STRANGER_TG)
+    assert.equal((await call(ctx, 'POST', '/v1/clubs', { token: next.accessToken, body: { code: 'good-code' } })).status, 201)
   })
 
   it('владелец убирает судью — клуб у судьи пропадает; себя убрать нельзя', async () => {

@@ -293,6 +293,13 @@ export async function releaseTitanOnAccountDeletion(c: Context<MafboardEnv>): Pr
       const link = await disconnectClub(c, club)
       if (link) removed.push(link.connectionId)
     }
+    // Клуб без GoMafia, который он создал: владельца больше нет — ключ отзывается, и клуб HUB можно
+    // подключить заново (один клуб HUB — один клуб MafBoard).
+    for (const entry of access.clubs) {
+      if (entry.role !== 'owner' || entry.club.gomafiaClubId != null || !entry.club.titan) continue
+      const link = await disconnectClub(c, entry.club)
+      if (link) removed.push(link.connectionId)
+    }
     await dropPersonalLink(c, user, removed)
   } catch (error) {
     console.warn(`[mafboard] Titan не отключён при удалении аккаунта ${user.id}:`, error)
