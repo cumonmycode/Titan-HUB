@@ -1,23 +1,23 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { goMafiaPlayerID, titanPlayerID, trustedApiBase } from '../../src/modules/mafboard/titan.js'
-import { call, createTestContext, signIn, TG_USER, TITAN_API_BASE, titanClient, type TestContext } from './helpers.js'
+import { call, clubIdOf, connectTitan, createTestContext, signIn, TG_USER, TITAN_API_BASE, titanClient, type TestContext } from './helpers.js'
 
 const CLIENT_A = '00000000-0000-4000-8000-00000000000a'
 const CLIENT_B = '00000000-0000-4000-8000-00000000000b'
 const CLIENT_C = '00000000-0000-4000-8000-00000000000c'
 
-/** Президент клуба GoMafia 77 (логин «host»): клуб Titan HUB подключает только он. */
+/** Президент клуба GoMafia 77 (логин «host»): владелец клуба MafBoard, клуб Titan HUB подключает только он. */
 async function president(ctx: TestContext, user = TG_USER) {
   const session = await signIn(ctx, user)
   const linked = await call(ctx, 'POST', '/v1/me/gomafia', { token: session.accessToken, body: { login: 'host', password: 'secret' } })
   assert.equal(linked.json.goMafia.access, 'president')
-  return session
+  return { ...session, clubId: await clubIdOf(ctx, session.accessToken) }
 }
 
 async function titanHost(ctx: TestContext, user = TG_USER) {
   const session = await president(ctx, user)
-  const linked = await call(ctx, 'POST', '/v1/me/titan', { token: session.accessToken, body: { code: 'good-code' } })
+  const linked = await connectTitan(ctx, session.accessToken, { clubId: session.clubId })
   assert.equal(linked.status, 200)
   return { ...session, account: linked.json }
 }
@@ -58,41 +58,48 @@ function ratingGame(hostId: string, playerIDs: string[], clubID: number | null) 
   }
 }
 
-describe('Titan Connect: подключение клуба', () => {
-  it('код меняется на ключ; ключ не уходит в приложение и хранится шифротекстом', async () => {
-    const ctx = createTestContext()
-    const session = await president(ctx)
+const players = (ctx: TestContext, token: string, clubId: string) => call(ctx, 'GET', `/v1/clubs/${clubId}/titan/players`, { token })
+const match = (ctx: TestContext, token: string, clubId: string, clientId: string, goMafiaID: number | null) =>
+  call(ctx, 'PUT', `/v1/clubs/${clubId}/titan/players/${clientId}/gomafia`, { token, body: { goMafiaID } })
 
-    const bad = await call(ctx, 'POST', '/v1/me/titan', { token: session.accessToken, body: { code: 'WRONG-111' } })
+describe('Titan Connect: подключение клуба', () => {
+  it('код меняется на ключ; ключ не уходит в приложение и хранится шифротекстом в клубе', async () => {
+    const ctx = createTestContext()
+    const host = await president(ctx)
+
+    const bad = await connectTitan(ctx, host.accessToken, { clubId: host.clubId, code: 'WRONG-111' })
     assert.equal(bad.status, 422)
     assert.equal(bad.json.error.code, 'invalid_code')
 
-    const ok = await call(ctx, 'POST', '/v1/me/titan', { token: session.accessToken, body: { code: 'good-code' } })
+    const ok = await connectTitan(ctx, host.accessToken, { clubId: host.clubId })
     assert.equal(ok.status, 200)
     assert.deepEqual(ok.json.titan.club, { name: 'TITAN Нальчик' })
     assert.deepEqual(ok.json.titan.scopes, ['clients:read', 'clients:photos'])
     assert.equal(ok.json.titan.isShared, false)
+    assert.deepEqual(ok.json.clubs[0].titan.club, { name: 'TITAN Нальчик' })
     assert.ok(!JSON.stringify(ok.json).includes('tcn_live'))
 
-    const stored = ctx.repo.users.get(session.account.id)!.titan!
+    const stored = ctx.repo.clubs.get(host.clubId)!.titan!
     assert.equal(stored.apiBase, TITAN_API_BASE)
     assert.ok(!stored.tokenSealed.includes('tcn_live'))
+    // Личная запись президента больше не пишется: подключение — только у клуба.
+    assert.equal(ctx.repo.users.get(host.account.id)!.titan, null)
   })
 
   it('адрес клуба вне домена Titan не принимается', async () => {
     const ctx = createTestContext()
     ctx.titan.apiBase = 'https://evil.example/api/connect/v1'
-    const session = await president(ctx)
-    const linked = await call(ctx, 'POST', '/v1/me/titan', { token: session.accessToken, body: { code: 'good-code' } })
+    const host = await president(ctx)
+    const linked = await connectTitan(ctx, host.accessToken, { clubId: host.clubId })
     assert.equal(linked.status, 502)
-    assert.equal(ctx.repo.users.get(session.account.id)!.titan, null)
+    assert.equal(ctx.repo.clubs.get(host.clubId)!.titan, null)
   })
 
   it('Titan не отвечает — 502, а не «неверный код»', async () => {
     const ctx = createTestContext()
     ctx.titan.down = true
-    const session = await president(ctx)
-    const linked = await call(ctx, 'POST', '/v1/me/titan', { token: session.accessToken, body: { code: 'good-code' } })
+    const host = await president(ctx)
+    const linked = await connectTitan(ctx, host.accessToken, { clubId: host.clubId })
     assert.equal(linked.status, 502)
     assert.equal(linked.json.error.code, 'titan_unavailable')
   })
@@ -100,33 +107,35 @@ describe('Titan Connect: подключение клуба', () => {
   it('отключение стирает ключ и отзывает его в HUB', async () => {
     const ctx = seededContext()
     const host = await titanHost(ctx)
-    const unlinked = await call(ctx, 'DELETE', '/v1/me/titan', { token: host.accessToken })
+    const unlinked = await call(ctx, 'DELETE', `/v1/clubs/${host.clubId}/titan`, { token: host.accessToken })
     assert.equal(unlinked.status, 200)
     assert.equal(unlinked.json.titan, null)
     await ctx.flush()
     assert.deepEqual(ctx.titan.calls.disconnect, ['tcn_live'])
 
-    const players = await call(ctx, 'GET', '/v1/titan/players', { token: host.accessToken })
-    assert.equal(players.status, 409)
-    assert.equal(players.json.error.code, 'titan_not_linked')
+    const res = await players(ctx, host.accessToken, host.clubId)
+    assert.equal(res.status, 409)
+    assert.equal(res.json.error.code, 'titan_not_linked')
   })
 
-  it('код вводит только президент клуба: ведущему без клуба и резиденту — 403', async () => {
+  it('код вводит только владелец клуба: ведущему без клуба и резиденту без доступа — 403', async () => {
     const ctx = seededContext()
-    const guest = await signIn(ctx)
-    const denied = await call(ctx, 'POST', '/v1/me/titan', { token: guest.accessToken, body: { code: 'good-code' } })
+    const host = await president(ctx)
+    const guest = await signIn(ctx, { ...TG_USER, id: 1003, username: 'guest' })
+    const denied = await connectTitan(ctx, guest.accessToken, { clubId: host.clubId })
     assert.equal(denied.status, 403)
-    assert.equal(denied.json.error.code, 'president_only')
-    assert.equal(ctx.repo.users.get(guest.account.id)!.titan, null)
+    assert.equal(denied.json.error.code, 'club_access_required')
 
     ctx.gomafia.passwords.set('Шерлок', { password: 'pw', userId: '5001', clubId: '77' })
     const resident = await signIn(ctx, { ...TG_USER, id: 1002, username: 'other' })
     await call(ctx, 'POST', '/v1/me/gomafia', { token: resident.accessToken, body: { login: 'Шерлок', password: 'pw' } })
-    const alsoDenied = await call(ctx, 'POST', '/v1/me/titan', { token: resident.accessToken, body: { code: 'good-code' } })
+    const alsoDenied = await connectTitan(ctx, resident.accessToken, { clubId: host.clubId })
     assert.equal(alsoDenied.status, 403)
+    assert.equal(alsoDenied.json.error.code, 'club_access_required')
+    assert.equal(ctx.repo.clubs.get(host.clubId)!.titan, null)
   })
 
-  it('судье пула клуб Titan достаётся от президента: клиенты видны, отключить нельзя', async () => {
+  it('судье пула клуб Titan достаётся от президента: клиенты видны, подключить и отключить нельзя', async () => {
     const ctx = seededContext()
     const host = await titanHost(ctx)
     const judge = await poolJudge(ctx, host.accessToken)
@@ -134,19 +143,24 @@ describe('Titan Connect: подключение клуба', () => {
     const me = await call(ctx, 'GET', '/v1/me', { token: judge.accessToken })
     assert.deepEqual(me.json.titan.club, { name: 'TITAN Нальчик' })
     assert.equal(me.json.titan.isShared, true)
+    assert.equal(me.json.clubs[0].id, host.clubId)
+    assert.equal(me.json.clubs[0].role, 'judge')
     assert.equal(ctx.repo.users.get(judge.account.id)!.titan, null)
 
-    const players = await call(ctx, 'GET', '/v1/titan/players', { token: judge.accessToken })
-    assert.equal(players.status, 200)
-    assert.equal(players.json.players.length, 2)
+    const seen = await players(ctx, judge.accessToken, host.clubId)
+    assert.equal(seen.status, 200)
+    assert.equal(seen.json.players.length, 2)
 
-    const unlink = await call(ctx, 'DELETE', '/v1/me/titan', { token: judge.accessToken })
+    const relink = await connectTitan(ctx, judge.accessToken, { clubId: host.clubId })
+    assert.equal(relink.status, 403)
+    assert.equal(relink.json.error.code, 'owner_only')
+    const unlink = await call(ctx, 'DELETE', `/v1/clubs/${host.clubId}/titan`, { token: judge.accessToken })
     assert.equal(unlink.status, 403)
-    assert.equal(unlink.json.error.code, 'president_only')
-    assert.ok(ctx.repo.users.get(host.account.id)!.titan)
+    assert.equal(unlink.json.error.code, 'owner_only')
+    assert.ok(ctx.repo.clubs.get(host.clubId)!.titan)
 
     // Президент отключил клуб — у судьи он тоже пропал.
-    await call(ctx, 'DELETE', '/v1/me/titan', { token: host.accessToken })
+    await call(ctx, 'DELETE', `/v1/clubs/${host.clubId}/titan`, { token: host.accessToken })
     assert.equal((await call(ctx, 'GET', '/v1/me', { token: judge.accessToken })).json.titan, null)
   })
 })
@@ -157,7 +171,7 @@ describe('Titan Connect: клиенты клуба', () => {
     ctx.titan.pageSize = 2
     const host = await titanHost(ctx)
 
-    const res = await call(ctx, 'GET', '/v1/titan/players', { token: host.accessToken })
+    const res = await players(ctx, host.accessToken, host.clubId)
     assert.equal(res.status, 200)
     assert.deepEqual(res.json.club, { name: 'TITAN Нальчик' })
     assert.deepEqual(res.json.players.map((p: { nickname: string }) => p.nickname), ['Тигр', 'Ворон'])
@@ -183,7 +197,7 @@ describe('Titan Connect: клиенты клуба', () => {
     const ctx = seededContext()
     const host = await titanHost(ctx)
     ctx.titan.revoked = true
-    const res = await call(ctx, 'GET', '/v1/titan/players', { token: host.accessToken })
+    const res = await players(ctx, host.accessToken, host.clubId)
     assert.equal(res.status, 409)
     assert.equal(res.json.error.code, 'titan_revoked')
   })
@@ -191,12 +205,21 @@ describe('Titan Connect: клиенты клуба', () => {
   it('Titan не ответил — отдаётся последний состав', async () => {
     const ctx = seededContext()
     const host = await titanHost(ctx)
-    assert.equal((await call(ctx, 'GET', '/v1/titan/players', { token: host.accessToken })).status, 200)
+    assert.equal((await players(ctx, host.accessToken, host.clubId)).status, 200)
     ctx.clock.now = new Date(ctx.clock.now.getTime() + 10 * 60_000)
     ctx.titan.down = true
-    const res = await call(ctx, 'GET', '/v1/titan/players', { token: host.accessToken })
+    const res = await players(ctx, host.accessToken, host.clubId)
     assert.equal(res.status, 200)
     assert.equal(res.json.players.length, 2)
+  })
+
+  it('клиенты чужого клуба не читаются', async () => {
+    const ctx = seededContext()
+    const host = await titanHost(ctx)
+    const guest = await signIn(ctx, { ...TG_USER, id: 1003, username: 'guest' })
+    const res = await players(ctx, guest.accessToken, host.clubId)
+    assert.equal(res.status, 403)
+    assert.equal(res.json.error.code, 'club_access_required')
   })
 })
 
@@ -206,23 +229,23 @@ describe('Titan Connect: сопоставление с GoMafia', () => {
     const host = await titanHost(ctx)
     const other = await poolJudge(ctx, host.accessToken)
 
-    const matched = await call(ctx, 'PUT', `/v1/titan/players/${CLIENT_B}/gomafia`, { token: host.accessToken, body: { goMafiaID: 4242 } })
+    const matched = await match(ctx, host.accessToken, host.clubId, CLIENT_B, 4242)
     assert.equal(matched.status, 200)
     assert.equal(matched.json.goMafiaID, 4242)
     assert.equal(matched.json.goMafiaSource, 'manual')
     assert.equal(matched.json.playerID, goMafiaPlayerID(4242))
 
     // У Тигра в HUB чужой номер — ведущий говорит, что GoMafia у него нет.
-    const none = await call(ctx, 'PUT', `/v1/titan/players/${CLIENT_A}/gomafia`, { token: host.accessToken, body: { goMafiaID: null } })
+    const none = await match(ctx, host.accessToken, host.clubId, CLIENT_A, null)
     assert.equal(none.json.goMafiaID, null)
     assert.equal(none.json.playerID, titanPlayerID(TITAN_API_BASE, CLIENT_A))
 
-    const seenByOther = await call(ctx, 'GET', '/v1/titan/players', { token: other.accessToken })
+    const seenByOther = await players(ctx, other.accessToken, host.clubId)
     const byId = new Map(seenByOther.json.players.map((p: { id: string }) => [p.id, p]))
     assert.equal((byId.get(CLIENT_B) as { goMafiaID: number }).goMafiaID, 4242)
     assert.equal((byId.get(CLIENT_A) as { goMafiaID: number | null }).goMafiaID, null)
 
-    const reset = await call(ctx, 'DELETE', `/v1/titan/players/${CLIENT_A}/gomafia`, { token: host.accessToken })
+    const reset = await call(ctx, 'DELETE', `/v1/clubs/${host.clubId}/titan/players/${CLIENT_A}/gomafia`, { token: host.accessToken })
     assert.equal(reset.json.goMafiaID, 5001)
     assert.equal(reset.json.goMafiaSource, 'hub')
   })
@@ -232,11 +255,46 @@ describe('Titan Connect: сопоставление с GoMafia', () => {
     const host = await titanHost(ctx)
     // С 2026-11-17 GoMafia показывает профили только вошедшим: проверка номера — входом ведущего.
     await call(ctx, 'POST', '/v1/me/gomafia', { token: host.accessToken, body: { login: 'host', password: 'secret' } })
-    const noPlayer = await call(ctx, 'PUT', `/v1/titan/players/${CLIENT_B}/gomafia`, { token: host.accessToken, body: { goMafiaID: 999 } })
+    const noPlayer = await match(ctx, host.accessToken, host.clubId, CLIENT_B, 999)
     assert.equal(noPlayer.status, 404)
-    const noClient = await call(ctx, 'PUT', `/v1/titan/players/${CLIENT_C}/gomafia`, { token: host.accessToken, body: { goMafiaID: 4242 } })
+    const noClient = await match(ctx, host.accessToken, host.clubId, CLIENT_C, 4242)
     assert.equal(noClient.status, 404)
   })
+
+  it('сопоставлять может только член клуба', async () => {
+    const ctx = seededContext()
+    const host = await titanHost(ctx)
+    const guest = await signIn(ctx, { ...TG_USER, id: 1003, username: 'guest' })
+    const denied = await match(ctx, guest.accessToken, host.clubId, CLIENT_B, 4242)
+    assert.equal(denied.status, 403)
+    assert.equal(denied.json.error.code, 'club_access_required')
+  })
+})
+
+describe('Titan Connect: снятые ручки (выпуск 4в)', () => {
+  const legacy: Array<[string, string, unknown?]> = [
+    ['POST', '/v1/me/titan', { code: 'good-code' }],
+    ['DELETE', '/v1/me/titan'],
+    ['GET', '/v1/titan/players'],
+    ['PUT', `/v1/titan/players/${CLIENT_B}/gomafia`, { goMafiaID: 4242 }],
+    ['DELETE', `/v1/titan/players/${CLIENT_B}/gomafia`],
+  ]
+  for (const [method, path, body] of legacy) {
+    it(`${method} ${path} — 426 update_required, подключение клуба не меняется`, async () => {
+      const ctx = seededContext()
+      const host = await titanHost(ctx)
+      const reads = ctx.titan.calls.clients
+      const res = await call(ctx, method, path, { token: host.accessToken, ...(body === undefined ? {} : { body }) })
+      assert.equal(res.status, 426)
+      assert.deepEqual(res.json, {
+        error: { code: 'update_required', message: 'Эта версия MafBoard устарела — обновите приложение в TestFlight' },
+      })
+      await ctx.flush()
+      assert.equal(ctx.repo.clubs.get(host.clubId)!.titan?.connectionId, 'conn-1')
+      assert.deepEqual(ctx.titan.calls.disconnect, [])
+      assert.equal(ctx.titan.calls.clients, reads)
+    })
+  }
 })
 
 describe('Titan Connect: игры', () => {

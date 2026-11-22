@@ -5,11 +5,11 @@ import type { ClubMembership } from './clubAccess.js'
 import { hostAccess } from './clubHosts.js'
 import { respondClubPlayers } from './clubPlayers.js'
 import type { MafboardEnv } from './router.js'
-import { body, fail } from './router.js'
+import { body, fail, freshAccess } from './router.js'
 import { toAccountJSON } from './serialize.js'
 import { clearMirrors, disconnectClub, exchangeTitanCode, releaseLink } from './titanRoutes.js'
 import { sha256 } from './tokens.js'
-import type { MafboardUser } from './types.js'
+import type { HostAccess, MafboardUser } from './types.js'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Клубы MafBoard (docs/MAFBOARD.md, раздел «Клубы»):
@@ -18,7 +18,8 @@ import type { MafboardUser } from './types.js'
 //   POST/GET /v1/clubs/:id/invites, DELETE …/:inviteId — ссылки-приглашения (владелец);
 //   POST   /v1/clubs/join {token}              — вступить по ссылке судьёй;
 //   GET    /v1/clubs/:id/players               — состав клуба (члены клуба);
-//   PUT/DELETE /v1/clubs/:id/titan             — подключение Titan клуба (владелец).
+//   PUT/DELETE /v1/clubs/:id/titan             — подключение Titan клуба (владелец; у клуба GoMafia — президент).
+// Прежние `/v1/me/titan` и `/v1/club/players` с 4в отвечают 426 (legacy.ts).
 // ─────────────────────────────────────────────────────────────────────────────
 
 const INVITE_TTL_MS = 7 * 24 * 60 * 60_000
@@ -29,15 +30,18 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const codeSchema = z.object({ code: z.string().trim().min(6).max(20) })
 const joinSchema = z.object({ token: z.string().trim().min(16).max(128) })
 
-/** Клуб пользователя по id из адреса; не член клуба — ответ 403 (клуба нет — тоже 403: не выдаём, что он есть). */
-export function membershipOf(c: Context<MafboardEnv>): ClubMembership | Response {
+/**
+ * Клуб пользователя по id из адреса; не член клуба — ответ 403 (клуба нет — тоже 403: не выдаём, что он есть).
+ * `access` — права из `requireUser`; там, где снимок GoMafia важно освежить, — из `freshAccess`.
+ */
+export function membershipOf(c: Context<MafboardEnv>, access: HostAccess = c.get('access')): ClubMembership | Response {
   const id = (c.req.param('id') ?? '').toLowerCase()
-  const membership = UUID.test(id) ? c.get('access').clubs.find((entry) => entry.club.id === id) : undefined
+  const membership = UUID.test(id) ? access.clubs.find((entry) => entry.club.id === id) : undefined
   return membership ?? fail(c, 403, 'club_access_required', 'Клуб доступен его владельцу и судьям')
 }
 
-export function ownedClub(c: Context<MafboardEnv>): ClubMembership | Response {
-  const membership = membershipOf(c)
+export function ownedClub(c: Context<MafboardEnv>, access: HostAccess = c.get('access')): ClubMembership | Response {
+  const membership = membershipOf(c, access)
   if (membership instanceof Response) return membership
   return membership.role === 'owner' ? membership : fail(c, 403, 'owner_only', 'Это может только владелец клуба')
 }
@@ -166,9 +170,12 @@ export function registerClubRoutes(router: Hono<MafboardEnv>, requireUser: Middl
     return respondClubPlayers(c, membership)
   })
 
-  /** Подключить Titan к клубу заново (ключ отозвали в HUB или сменили клуб HUB). Прежний ключ отзывается. */
+  /**
+   * Подключить Titan к клубу (у клуба GoMafia — впервые, иначе заново: ключ отозвали в HUB или сменили клуб HUB).
+   * Прежний ключ отзывается. Права — по свежему клубу GoMafia: бывший президент с устаревшим снимком клуб не подключит.
+   */
   router.put('/v1/clubs/:id/titan', requireUser, body(codeSchema), async (c) => {
-    const owned = ownedClub(c)
+    const owned = ownedClub(c, (await freshAccess(c)).access)
     if (owned instanceof Response) return owned
     const deps = c.get('deps')
     const link = await exchangeTitanCode(c, c.req.valid('json').code)
@@ -189,8 +196,9 @@ export function registerClubRoutes(router: Hono<MafboardEnv>, requireUser: Middl
     return c.json(await accountJSON(c, c.get('user')))
   })
 
+  /** Отключить Titan от клуба: ключ отзывается в HUB, копии в личных записях стираются. Права — по свежему клубу. */
   router.delete('/v1/clubs/:id/titan', requireUser, async (c) => {
-    const owned = ownedClub(c)
+    const owned = ownedClub(c, (await freshAccess(c)).access)
     if (owned instanceof Response) return owned
     await disconnectClub(c, owned.club)
     return c.json(await accountJSON(c, c.get('user')))

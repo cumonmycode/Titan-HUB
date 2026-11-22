@@ -449,14 +449,6 @@ export class PgMafboardRepo implements MafboardRepo {
     return row ? toTitanLink(row['previous_link']) : null
   }
 
-  async clubsLinkedBy(userId: string): Promise<StoredClub[]> {
-    if (!UUID.test(userId)) return []
-    const found = await this.query(sql`
-      SELECT * FROM mb_clubs WHERE titan_linked_by = ${userId}::uuid AND titan_link IS NOT NULL ORDER BY created_at, id
-    `)
-    return found.map(toClub)
-  }
-
   async clubByTitanConnection(connectionId: string): Promise<StoredClub | null> {
     const row = await this.one(sql`SELECT * FROM mb_clubs WHERE titan_link->>'connectionId' = ${connectionId} LIMIT 1`)
     return row ? toClub(row) : null
@@ -1102,14 +1094,6 @@ export class PgMafboardRepo implements MafboardRepo {
     return found.map(toGame)
   }
 
-  async gamesByClub(clubId: number, since: Date | null, limit: number): Promise<StoredGame[]> {
-    const found = await this.query(sql`
-      SELECT * FROM mb_games
-      WHERE club_id = ${clubId} AND (${since ? iso(since) : null}::timestamptz IS NULL OR finished_at > ${since ? iso(since) : null}::timestamptz)
-      ORDER BY finished_at ASC LIMIT ${limit}
-    `)
-    return found.map(toGame)
-  }
   async saveActiveGame(game: StoredActiveGame): Promise<'saved' | 'stale' | 'conflict'> {
     const finished = await this.one(sql`SELECT host_user_id FROM mb_games WHERE id = ${game.id}::uuid`)
     if (finished) return String(finished['host_user_id']) === game.hostUserId ? 'stale' : 'conflict'

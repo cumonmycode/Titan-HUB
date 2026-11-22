@@ -1,12 +1,17 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { call, config, createTestContext, NOW, signIn, TG_USER, type TestContext } from './helpers.js'
+import { call, clubIdOf, config, createTestContext, NOW, signIn, TG_USER, type TestContext } from './helpers.js'
 
 async function linkedHost(ctx: TestContext) {
   const session = await signIn(ctx)
   const linked = await call(ctx, 'POST', '/v1/me/gomafia', { token: session.accessToken, body: { login: 'host', password: 'secret' } })
   assert.equal(linked.status, 200)
   return { ...session, account: linked.json }
+}
+
+/** История клуба GoMafia президента — по id его клуба MafBoard из `/v1/me` (`GET /v1/clubs/:id/games`). */
+async function clubHistory(ctx: TestContext, token: string, clubId: string) {
+  return call(ctx, 'GET', `/v1/clubs/${clubId}/games`, { token })
 }
 
 const goMafiaSeat = (n: number) => `6D616662-676D-8000-8000-${String(1000 + n).padStart(12, '0')}`
@@ -168,7 +173,8 @@ describe('история игр', () => {
     assert.equal((await call(ctx, 'POST', '/v1/games', { token: host.accessToken, body: record })).status, 201)
     assert.equal((await call(ctx, 'POST', '/v1/games', { token: host.accessToken, body: record })).status, 200)
 
-    const club = await call(ctx, 'GET', '/v1/clubs/77/games', { token: host.accessToken })
+    const club = await clubHistory(ctx, host.accessToken, await clubIdOf(ctx, host.accessToken))
+    assert.equal(club.status, 200)
     assert.equal(club.json.games.length, 1)
     assert.equal(club.json.games[0].setup.gameID, record.setup.gameID)
 
@@ -203,9 +209,9 @@ describe('история игр', () => {
     const clash = await call(ctx, 'POST', '/v1/games', { token: other.accessToken, body: gameRecord(other.account.id, 'funky', null, record.setup.gameID) })
     assert.equal(clash.status, 409)
 
-    const peek = await call(ctx, 'GET', '/v1/clubs/77/games', { token: other.accessToken })
+    const peek = await clubHistory(ctx, other.accessToken, await clubIdOf(ctx, host.accessToken))
     assert.equal(peek.status, 403)
-    assert.equal(peek.json.error.code, 'not_club_member')
+    assert.equal(peek.json.error.code, 'club_access_required')
   })
 
   it('слишком большая запись игры — 413', async () => {
@@ -220,20 +226,38 @@ describe('история игр', () => {
   it('история клуба: членство перепроверяется, ушедший из клуба теряет доступ', async () => {
     const ctx = createTestContext()
     const host = await linkedHost(ctx)
+    const clubId = await clubIdOf(ctx, host.accessToken)
     ctx.gomafia.players.set('4242', { ...ctx.gomafia.players.get('4242')!, clubId: null })
     ctx.clock.now = new Date(NOW.getTime() + 25 * 60 * 60_000)
-    const res = await call(ctx, 'GET', '/v1/clubs/77/games', { token: host.accessToken })
+    const res = await clubHistory(ctx, host.accessToken, clubId)
     assert.equal(res.status, 403)
+    assert.equal(res.json.error.code, 'club_access_required')
   })
 
   it('GoMafia недоступна неделю — права клуба снимаются', async () => {
     const ctx = createTestContext()
     const host = await linkedHost(ctx)
+    const clubId = await clubIdOf(ctx, host.accessToken)
     ctx.gomafia.players.clear()
     ctx.clock.now = new Date(NOW.getTime() + 2 * 24 * 60 * 60_000)
-    assert.equal((await call(ctx, 'GET', '/v1/clubs/77/games', { token: host.accessToken })).status, 200)
+    assert.equal((await clubHistory(ctx, host.accessToken, clubId)).status, 200)
     ctx.clock.now = new Date(NOW.getTime() + 8 * 24 * 60 * 60_000)
-    assert.equal((await call(ctx, 'GET', '/v1/clubs/77/games', { token: host.accessToken })).status, 403)
+    assert.equal((await clubHistory(ctx, host.accessToken, clubId)).status, 403)
+  })
+
+  it('история по номеру клуба GoMafia снята — 426 update_required, в том числе без входа; не uuid — 422', async () => {
+    const ctx = createTestContext()
+    const host = await linkedHost(ctx)
+    assert.equal((await call(ctx, 'POST', '/v1/games', { token: host.accessToken, body: gameRecord(host.account.id, 'rating', 77) })).status, 201)
+    for (const token of [host.accessToken, undefined]) {
+      const res = await call(ctx, 'GET', '/v1/clubs/77/games', token ? { token } : {})
+      assert.equal(res.status, 426)
+      assert.deepEqual(res.json, {
+        error: { code: 'update_required', message: 'Эта версия MafBoard устарела — обновите приложение в TestFlight' },
+      })
+    }
+    const bad = await call(ctx, 'GET', '/v1/clubs/titan/games', { token: host.accessToken })
+    assert.equal(bad.status, 422)
   })
 
   it('без токена — 401', async () => {

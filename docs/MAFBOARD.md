@@ -81,21 +81,17 @@ apps/api/test/mafboard/ — тесты (node:test через tsx), хранил�
 | `GET /v1/gomafia/players?q=` | Bearer | Поиск (от 2 символов): сначала свой клуб (`isInHostClub`), затем общий, до 30 |
 | `GET /v1/gomafia/players/:id` | Bearer | Игрок GoMafia |
 | `GET /v1/gomafia/clubs/:id/players?page=` | Bearer | Состав клуба |
-| `POST /v1/me/titan` `{code}` | Bearer, президент клуба (10 за 10 мин) | Подключить клуб Titan HUB одноразовым кодом Titan Connect → `UserAccount` с `titan: {club: {name}, scopes, linkedAt, isShared}`. 403 `president_only`, 422 `invalid_code`, 502 `titan_unavailable` |
-| `DELETE /v1/me/titan` | Bearer | Отключить клуб: подключение снимается с клуба, ключ в HUB отзывается в фоне (`DELETE /connection`). Отключают президент клуба и тот, кто подключал; у остальных стирается только своя личная запись прежних времён. Судье пула (клуб достался от клуба) — 403 `president_only` |
+| `POST /v1/me/titan`, `DELETE /v1/me/titan` | — | С 4в — 426 `update_required`, см. «Снятые ручки». Подключение Titan — `PUT/DELETE /v1/clubs/:id/titan` |
 | `GET /v1/club/hosts` | Bearer, президент клуба (60 в минуту) | `{club, hosts: [{player: GoMafiaPlayer, isResident, grantedAt, account: {name, username, source} \| null}], requests: [{id, player, account: {name, username}, createdAt}]}` — пул судей клуба и заявки судей без пароля GoMafia. 403 `president_only` |
 | `PUT /v1/club/hosts/:gomafiaId` `{requestID?}` | Bearer, президент клуба (120 изменений в час) | Дать резиденту клуба вести игры; с `requestID` — подтвердить заявку: аккаунт заявителя привязывается к этому игроку (`source: club`). Ответ — как у `GET`. 404 `not_resident`, 404 `request_not_found`, 409 `gomafia_taken` |
 | `DELETE /v1/club/hosts/:gomafiaId` | Bearer, президент клуба | Забрать доступ; привязка по заявке снимается вместе с ним. Ответ — как у `GET` |
 | `DELETE /v1/club/requests/:id` | Bearer, президент клуба | Отклонить заявку. Ответ — как у `GET` |
 | `PUT /v1/me/club-request` `{nickname}` | Bearer (5 в час) | Заявка судьи, который не помнит пароль GoMafia: ник, под которым он играет → `UserAccount` с `clubRequest`. Президент клуба с таким резидентом узнаёт о ней в боте. 409 `gomafia_linked` |
 | `DELETE /v1/me/club-request` | Bearer | Отозвать заявку → `UserAccount` |
-| `GET /v1/club/players` | Bearer, президент клуба или судья пула (60 в минуту) | `{club: {id, name}, players: [ClubPlayer], partial}` — состав клуба одним списком, см. «Игроки клуба». 403 `club_required` / `host_access_required` |
-| `GET /v1/titan/players` | Bearer (60 в минуту) | `{club: {name}, players: [TitanPlayer]}` — все клиенты клуба без удалённых, резиденты первыми. 409 `titan_not_linked`, 409 `titan_revoked` — клуб отключил MafBoard в HUB |
-| `PUT /v1/titan/players/:id/gomafia` `{goMafiaID: число \| null}` | Bearer (300 в час) | Ручное сопоставление клиента с GoMafia → `TitanPlayer`. `null` — у клиента нет GoMafia (номер в HUB неверный). 404 — нет такого клиента или игрока GoMafia |
-| `DELETE /v1/titan/players/:id/gomafia` | Bearer | Снять сопоставление: снова действует номер GoMafia из HUB |
+| `GET /v1/club/players`, `GET /v1/titan/players`, `PUT/DELETE /v1/titan/players/:id/gomafia` | — | С 4в — 426 `update_required`, см. «Снятые ручки». Замена — ручки клуба `/v1/clubs/:id/players` и `/v1/clubs/:id/titan/players*` |
 | `POST /v1/games` (GameRecord) | Bearer | 201 — сохранено, 200 — уже было (повтор безопасен), 409 — номер занят чужой игрой, 403 `host_access_required` — резиденту клуба президент не дал доступа |
 | `GET /v1/me/games?since=` | Bearer | Все игры ведущего, включая фанки |
-| `GET /v1/clubs/:id/games?since=` | Bearer, участник клуба | История клуба |
+| `GET /v1/clubs/:id/games?since=` | Bearer, член клуба | История клуба MafBoard (`:id` — uuid), см. «Клубы без GoMafia…». Числовой `:id` (номер клуба GoMafia) с 4в — 426 `update_required` |
 | `POST /tg-webhook` | secret_token | Вебхук бота |
 | `WS /v1/studio/relay` | Токен первым сообщением | Облачный канал пульта MafBoard Studio, см. ниже |
 | `GET /v1/studio/settings` | Bearer | Настройки MafBoard Studio ведущего: `{revision, updatedAt, document, secrets}`. Ничего не сохранено — `revision: 0` и `null` |
@@ -123,7 +119,8 @@ WebSocket идёт мимо Hono: обработчик `upgrade` на HTTP-се�
   неполный (страница клуба не открылась, в привязке заглушка) их не трогает.
 - Права по-прежнему считаются из GoMafia: президент — по снимку клуба в привязке, пул судей — `mb_club_hosts`.
 - Подключение Titan принадлежит клубу (`titan_link`, `titan_linked_by` — кто подключил) и читается из него, см.
-  «Titan Connect». Запись клуба не прочиталась — `hostAccess` берёт копию из записи президента, как до клубов.
+  «Titan Connect». Запись клуба не прочиталась — `hostAccess` берёт копию из записи президента, как до клубов
+  (такие копии остались только от сборок до 4в: `PUT /v1/clubs/:id/titan` их не пишет).
 - `UserAccount.clubs: [{id, name, city, role: owner | judge, goMafiaClubID, titan}]` — не больше одного клуба:
   президенту `owner`, судье пула `judge`, остальным пустой список. Запись клуба не прочиталась — список пустой,
   остальные поля аккаунта и права не страдают.
@@ -141,7 +138,7 @@ WebSocket идёт мимо Hono: обработчик `upgrade` на HTTP-се�
 Клуб MafBoard создаётся и без GoMafia: `POST /v1/clubs {code}` — кодом Titan Connect, который выдаёт владелец клуба в
 HUB; тот, кто ввёл код, — владелец клуба (`mb_clubs.owner_user_id` и запись `owner` в `mb_club_members`). Один клуб
 Titan HUB (`apiBase`) — один клуб MafBoard: повтор — 409 `club_exists`, выданный ключ сразу отзывается; так же
-отвечает `POST /v1/me/titan`, если этот HUB уже подключён к другому клубу.
+отвечает `PUT /v1/clubs/:id/titan`, если этот HUB уже подключён к другому клубу.
 
 Клубы пользователя (`UserAccount.clubs`, `HostAccess.clubs`) — клуб GoMafia (президент → `owner`, судья пула →
 `judge`, как раньше) плюс записи `mb_club_members`. Судья вступает по ссылке-приглашению владельца:
@@ -158,9 +155,9 @@ GoMafia — судьёй без своего GoMafia.
 | `GET /v1/clubs/:id/members`, `DELETE …/members/:userId` | владелец | Участники `{members: [{userId, name, username, role, addedAt}]}`; себя убрать нельзя — 422 |
 | `POST /v1/clubs/:id/invites`, `GET`, `DELETE …/invites/:inviteId` | владелец (30 в час) | Ссылка-приглашение → 201 `{id, url, expiresAt}`; список действующих (без ссылок) |
 | `POST /v1/clubs/join {token}` | любой (20 в час) | Вступить судьёй → `UserAccount`. 404 `invite_not_found`, 410 `invite_expired` |
-| `GET /v1/clubs/:id/players` | член клуба | Состав клуба, как `GET /v1/club/players` (см. «Игроки клуба») |
-| `GET /v1/clubs/:id/games?since=` | член клуба | История клуба по `mb_games.club_ref` (числовой `:id` — прежняя история клуба GoMafia) |
-| `PUT /v1/clubs/:id/titan {code}`, `DELETE` | владелец | Подключить Titan заново (прежний ключ отзывается) или отключить |
+| `GET /v1/clubs/:id/players` | член клуба (60 в минуту) | `{club: {id, name}, players: [ClubPlayer], partial}` — состав клуба одним списком (см. «Игроки клуба») |
+| `GET /v1/clubs/:id/games?since=` | член клуба | История клуба по `mb_games.club_ref`. Членство в клубе GoMafia перепроверяется по свежему снимку (`freshAccess`): ушедший из клуба историю не читает. Не uuid — 422; номер клуба GoMafia — 426 (снятая ручка) |
+| `PUT /v1/clubs/:id/titan {code}`, `DELETE` | владелец; у клуба GoMafia — президент (10 за 10 мин) | Подключить Titan (впервые или заново — прежний ключ отзывается) → `UserAccount`, или отключить (ключ отзывается в HUB, копии в личных записях стираются). Права — по свежему клубу GoMafia. Судье — 403 `owner_only`, не члену клуба — 403 `club_access_required`; 409 `club_exists`, 422 `invalid_code`, 502 `titan_unavailable` |
 
 Игра с `setup.host.clubRef` (uuid клуба MafBoard) принимается от члена этого клуба (иначе 403
 `club_access_required`) и идёт в его историю, включая фанки; в рейтинг, миникап и турнир — игроки GoMafia, свои
@@ -199,27 +196,52 @@ GoMafia — судьёй без своего GoMafia.
 | `PATCH /v1/clubs/:id/players/:playerID {nickname}`, `DELETE` | владелец | Переименовать, убрать в архив (только свои игроки) |
 | `PUT /v1/clubs/:id/players/:playerID/photo`, `DELETE` | член клуба (60 в час) | Фото игрока → `{playerID, photoURL}`; снять — снова фото из HUB / GoMafia. 422 `invalid_photo`, 413 `too_large` |
 | `POST /v1/clubs/:id/players/:playerID/link` | член клуба (30 в час) | Ссылка игрока на бота → 201 `{url, expiresAt}` |
-| `GET /v1/clubs/:id/titan/players`, `PUT/DELETE …/titan/players/:clientId/gomafia` | член клуба | Клиенты Titan клуба и ручное сопоставление, как `/v1/titan/players*`, но по клубу из адреса. 409 `titan_not_linked` |
+| `GET /v1/clubs/:id/titan/players` | член клуба (60 в минуту) | `{club: {name}, players: [TitanPlayer]}` — все клиенты клуба Titan без удалённых, резиденты первыми. 409 `titan_not_linked` — к клубу не подключён Titan, 409 `titan_revoked` — клуб отключил MafBoard в HUB |
+| `PUT …/titan/players/:clientId/gomafia {goMafiaID: число \| null}`, `DELETE` | член клуба (300 в час) | Ручное сопоставление клиента с GoMafia → `TitanPlayer`; `null` — у клиента нет GoMafia (номер в HUB неверный), `DELETE` — снова действует номер из HUB. 404 — нет такого клиента или игрока GoMafia |
+
+### Снятые ручки (выпуск 4в, `legacy.ts`)
+
+MafBoard с 1.0 (22) ходит только в ручки клуба `/v1/clubs/:id/...`. Пути, которыми пользовались сборки до 22, не
+удалены, а отвечают `426` с телом
+`{"error": {"code": "update_required", "message": "Эта версия MafBoard устарела — обновите приложение в TestFlight"}}`
+— старое приложение показывает этот текст. Вход не проверяется: ответ один для всех, данные не меняются.
+
+| Снятый путь | Замена |
+|---|---|
+| `GET /v1/club/players` | `GET /v1/clubs/:id/players` |
+| `POST /v1/me/titan {code}`, `DELETE /v1/me/titan` | `PUT /v1/clubs/:id/titan {code}`, `DELETE /v1/clubs/:id/titan` |
+| `GET /v1/titan/players` | `GET /v1/clubs/:id/titan/players` |
+| `PUT/DELETE /v1/titan/players/:id/gomafia` | `PUT/DELETE /v1/clubs/:id/titan/players/:clientId/gomafia` |
+| `GET /v1/clubs/<номер клуба GoMafia>/games` | `GET /v1/clubs/<uuid клуба MafBoard>/games` |
+
+Загрузка игр не снята: `POST /v1/games` без `clubRef` принимается по прежним правилам — в офлайн-очереди старых
+сборок могут лежать неотправленные игры.
 
 ### Titan Connect (`titan.ts`, `titanRoutes.ts`)
 
 Клуб Titan HUB даёт судьям клуба своих клиентов как игроков через собственный API Titan Connect
 ([TITAN_CONNECT.md](TITAN_CONNECT.md)). Владелец клуба выдаёт код в HUB («Интеграции» → «Titan Connect»), президент
-клуба GoMafia вводит его в приложении, сервер меняет код на ключ (`POST <MAFBOARD_TITAN_CONNECT_URL>/exchange`, по умолчанию
+клуба GoMafia (владелец клуба MafBoard) вводит его в приложении — `PUT /v1/clubs/:id/titan {code}`, где `:id` — клуб
+из `UserAccount.clubs` с `role: owner`; клуб без GoMafia подключается сразу при создании (`POST /v1/clubs {code}`).
+Сервер меняет код на ключ (`POST <MAFBOARD_TITAN_CONNECT_URL>/exchange`, по умолчанию
 `https://titanpos.ru/api/connect/v1`). `apiBase` из ответа принимается только на домене этого адреса или его
 поддомене. Подключение принадлежит клубу MafBoard: ключ хранится в `mb_clubs.titan_link` шифротекстом тем же
-ключом, что секреты студии, и в приложение не уходит. Его копия пишется в `mb_users.titan_link` подключившего — для
-отката на код, который читал Titan оттуда, и на случай, если запись клуба не прочиталась.
+ключом, что секреты студии, и в приложение не уходит. Ручки клуба — основные; прежние `POST/DELETE /v1/me/titan`,
+`GET /v1/titan/players` и `PUT/DELETE /v1/titan/players/:id/gomafia` с 4в отвечают 426 `update_required`
+(«Снятые ручки»). Копию в `mb_users.titan_link` подключившего писал только `/v1/me/titan`: старые копии ещё
+читаются, если запись клуба не прочиталась, и стираются при отключении клуба и удалении аккаунта.
 
-Код вводит только президент клуба GoMafia (остальным — 403 `president_only`; права считаются по свежему клубу,
-потому что `requireUser` снимок GoMafia не освежает). Подключение одно на клуб: судьям его пула клиенты клуба
-достаются без кода (`titan.isShared: true`), отключить клуб они не могут. Смену президента оно переживает — новый
-президент и судьи видят клиентов клуба дальше. Отключают клуб действующий президент и тот, кто подключал, даже
-если он уже не президент (но не если он теперь судья пула). Удалился аккаунт действующего президента, который сам
-подключал клуб, — подключение снимается, как до клубов; в остальных случаях клуб подключение сохраняет. Ключ при этом отзывается в HUB
-(в фоне), копии в личных записях стираются; так же отзывается прежний ключ, когда клуб подключают заново. Личная
-запись не-президента, оставшаяся с тех времён, когда клуб Titan подключал любой ведущий, ни на что не влияет: он
-может стереть её тем же `DELETE /v1/me/titan`, и ключ отзовётся, если им не пользуется ни один клуб.
+Подключает и отключает клуб только его владелец: у клуба GoMafia это действующий президент (судье пула — 403
+`owner_only`, не члену клуба — 403 `club_access_required`). Права считаются по свежему клубу (`freshAccess`),
+потому что `requireUser` снимок GoMafia не освежает: бывший президент с устаревшим снимком клуб не подключит и не
+отключит. Подключение одно на клуб: судьям его пула клиенты клуба достаются без кода (`titan.isShared: true`).
+Смену президента оно переживает — новый президент и судьи видят клиентов клуба дальше; подключивший, переставший
+быть президентом, отключить клуб уже не может (до 4в мог через `DELETE /v1/me/titan`). Удалился аккаунт
+действующего президента, который сам подключал клуб, — подключение снимается, как до клубов; в остальных случаях
+клуб подключение сохраняет. Ключ при этом отзывается в HUB (в фоне), копии в личных записях стираются; так же
+отзывается прежний ключ, когда клуб подключают заново. Личная запись не-президента, оставшаяся с тех времён, когда
+клуб Titan подключал любой ведущий, ни на что не влияет; её ключ отзывается при удалении аккаунта, если им не
+пользуется ни один клуб.
 
 Клиенты читаются целиком (`GET /clients`, страницы по 200, до 2000), кэш на 5 минут по `apiBase`. Если Titan не
 ответил, отдаётся последний состав; отозванный ключ — всегда 409 `titan_revoked`.
@@ -232,9 +254,11 @@ GoMafia — судьёй без своего GoMafia.
 
 ### Игроки клуба (`clubPlayers.ts`)
 
-`GET /v1/club/players` — клиенты клуба Titan HUB (если клуб подключён) и резиденты клуба GoMafia одним списком,
-без повторов: клиент с номером GoMafia (из HUB или ручного сопоставления) и резидент с тем же номером — один игрок.
-Сначала клиенты Titan (резиденты, затем по нику), потом резиденты GoMafia, которых среди клиентов нет (по ELO).
+`GET /v1/clubs/:id/players` (член клуба, `:id` — клуб из `UserAccount.clubs`) — клиенты клуба Titan HUB (если клуб
+подключён), свои игроки клуба и резиденты клуба GoMafia (если клуб из GoMafia) одним списком, без повторов: клиент с
+номером GoMafia (из HUB или ручного сопоставления) и резидент с тем же номером — один игрок. Сначала клиенты Titan
+(резиденты, затем по нику), потом свои игроки клуба, потом резиденты GoMafia, которых среди клиентов нет (по ELO).
+Прежний `GET /v1/club/players` (клуб GoMafia ведущего без id в адресе) с 4в отвечает 426 `update_required`.
 
 `ClubPlayer`: `playerID` (те же правила, что у `TitanPlayer`), `nickname`, `fullName`, `photoURL`, `titanClientID`,
 `goMafiaID`, `isResident`, `statusLabel`, `isVerified` (у игрока есть аккаунт MafBoard), `elo` (из GoMafia).
@@ -243,8 +267,8 @@ GoMafia — судьёй без своего GoMafia.
 HUB → Telegram → GoMafia из HUB). Фото HUB при замене получает новый адрес, у аватара GoMafia адрес постоянный —
 поэтому MafBoard Studio перепроверяет фото с диска условным запросом раз за запуск.
 
-Один источник не ответил — отдаётся второй и `partial: true`; оба (или GoMafia, когда Titan не подключён) — ошибка,
-как у прежних ручек. Кэш — кэши составов Titan и GoMafia (5 минут).
+Один источник не ответил — отдаётся второй и `partial: true`; оба (или единственный) — ошибка того источника
+(сначала Titan). Кэш — кэши составов Titan и GoMafia (5 минут).
 
 `UserAccount.photoURL` — фото самого пользователя по тому же правилу: клиент Titan его клуба с его номером GoMafia
 и своим фото, иначе аватар GoMafia, без GoMafia — `null`. В `GET /v1/me` состав Titan берётся только из кэша: его

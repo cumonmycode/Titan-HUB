@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { goMafiaPlayerID, titanPlayerID } from '../../src/modules/mafboard/titan.js'
-import { call, createTestContext, signIn, TG_USER, TITAN_API_BASE, titanClient, type TestContext } from './helpers.js'
+import { call, clubIdOf, connectTitan, createTestContext, signIn, TG_USER, TITAN_API_BASE, titanClient, type TestContext } from './helpers.js'
 
-// Состав клуба одним списком (`GET /v1/club/players`, docs/MAFBOARD.md, раздел «Игроки клуба»):
-// клиенты Titan HUB и резиденты клуба GoMafia без повторов, у каждого одно фото.
+// Состав клуба одним списком (`GET /v1/clubs/:id/players`, docs/MAFBOARD.md, раздел «Игроки клуба»):
+// клиенты Titan HUB и резиденты клуба GoMafia без повторов, у каждого одно фото. Клуб — клуб GoMafia
+// президента (id клуба MafBoard из `/v1/me`). Прежний `GET /v1/club/players` с 4в отвечает 426.
 
 const CLIENT_A = '00000000-0000-4000-8000-00000000000a'
 const CLIENT_B = '00000000-0000-4000-8000-00000000000b'
@@ -23,13 +24,16 @@ function seeded() {
   return ctx
 }
 
-/** Президент клуба GoMafia 77 (игрок 4242). С `titan` — ещё и подключил клуб Titan HUB. */
+/** Президент клуба GoMafia 77 (игрок 4242) и id его клуба MafBoard. С `titan` — ещё и подключил клуб Titan HUB. */
 async function president(ctx: TestContext, { titan = true } = {}) {
   const session = await signIn(ctx)
   await call(ctx, 'POST', '/v1/me/gomafia', { token: session.accessToken, body: { login: 'host', password: 'secret' } })
-  if (titan) assert.equal((await call(ctx, 'POST', '/v1/me/titan', { token: session.accessToken, body: { code: 'good-code' } })).status, 200)
-  return session
+  const clubId = await clubIdOf(ctx, session.accessToken)
+  if (titan) assert.equal((await connectTitan(ctx, session.accessToken, { clubId })).status, 200)
+  return { ...session, clubId }
 }
+
+const clubPlayers = (ctx: TestContext, token: string, clubId: string) => call(ctx, 'GET', `/v1/clubs/${clubId}/players`, { token })
 
 /** Резидент клуба 77 (игрок 5001); с `grantedBy` — президент добавил его в пул судей. */
 async function resident(ctx: TestContext, grantedBy?: string) {
@@ -49,7 +53,7 @@ describe('Игроки клуба: один список', () => {
     const ctx = seeded()
     const host = await president(ctx)
 
-    const res = await call(ctx, 'GET', '/v1/club/players', { token: host.accessToken })
+    const res = await clubPlayers(ctx, host.accessToken, host.clubId)
     assert.equal(res.status, 200)
     assert.equal(res.json.partial, false)
     assert.equal(res.json.club.name, 'TITAN')
@@ -84,16 +88,17 @@ describe('Игроки клуба: один список', () => {
     const ctx = seeded()
     ctx.titan.members[0] = { ...ctx.titan.members[0]!, photoUrl: 'https://titanpos.test/media/tiger-2.jpg' }
     const host = await president(ctx)
-    const res = await call(ctx, 'GET', '/v1/club/players', { token: host.accessToken })
+    const res = await clubPlayers(ctx, host.accessToken, host.clubId)
     assert.equal(byNickname(res.json.players).get('Тигр')!.photoURL, 'https://titanpos.test/media/tiger-2.jpg')
   })
 
   it('ручное сопоставление важнее номера из HUB: «нет GoMafia» — резидент GoMafia идёт отдельно', async () => {
     const ctx = seeded()
     const host = await president(ctx)
-    assert.equal((await call(ctx, 'PUT', `/v1/titan/players/${CLIENT_A}/gomafia`, { token: host.accessToken, body: { goMafiaID: null } })).status, 200)
+    const matched = await call(ctx, 'PUT', `/v1/clubs/${host.clubId}/titan/players/${CLIENT_A}/gomafia`, { token: host.accessToken, body: { goMafiaID: null } })
+    assert.equal(matched.status, 200)
 
-    const res = await call(ctx, 'GET', '/v1/club/players', { token: host.accessToken })
+    const res = await clubPlayers(ctx, host.accessToken, host.clubId)
     const players = byNickname(res.json.players)
     assert.equal(players.get('Тигр')!.playerID, titanPlayerID(TITAN_API_BASE, CLIENT_A))
     assert.equal(players.get('Тигр')!.photoURL, null)
@@ -105,7 +110,7 @@ describe('Игроки клуба: один список', () => {
     const ctx = seeded()
     ctx.titan.members.push(titanClient('00000000-0000-4000-8000-00000000000e', 'Тигр-дубль', { gomafiaId: '5001' }))
     const host = await president(ctx)
-    const res = await call(ctx, 'GET', '/v1/club/players', { token: host.accessToken })
+    const res = await clubPlayers(ctx, host.accessToken, host.clubId)
     const ids = res.json.players.map((p: Player) => p.playerID)
     assert.equal(new Set(ids).size, ids.length)
     assert.deepEqual(res.json.players.map((p: Player) => p.nickname), ['Тигр', 'Ворон', 'host'])
@@ -114,7 +119,7 @@ describe('Игроки клуба: один список', () => {
   it('клуб без Titan HUB — только резиденты GoMafia', async () => {
     const ctx = seeded()
     const host = await president(ctx, { titan: false })
-    const res = await call(ctx, 'GET', '/v1/club/players', { token: host.accessToken })
+    const res = await clubPlayers(ctx, host.accessToken, host.clubId)
     assert.equal(res.status, 200)
     assert.equal(res.json.partial, false)
     assert.deepEqual(res.json.players.map((p: Player) => p.nickname), ['host', 'Шерлок'])
@@ -124,7 +129,7 @@ describe('Игроки клуба: один список', () => {
     const ctx = seeded()
     const host = await president(ctx)
     ctx.titan.down = true
-    const withoutTitan = await call(ctx, 'GET', '/v1/club/players', { token: host.accessToken })
+    const withoutTitan = await clubPlayers(ctx, host.accessToken, host.clubId)
     assert.equal(withoutTitan.status, 200)
     assert.equal(withoutTitan.json.partial, true)
     assert.deepEqual(withoutTitan.json.players.map((p: Player) => p.nickname), ['host', 'Шерлок'])
@@ -135,7 +140,7 @@ describe('Игроки клуба: один список', () => {
     }
     // Состав GoMafia уже в кэше — сбросим его часами, чтобы источник действительно не ответил.
     ctx.clock.now = new Date(ctx.clock.now.getTime() + 10 * 60_000)
-    const withoutGoMafia = await call(ctx, 'GET', '/v1/club/players', { token: host.accessToken })
+    const withoutGoMafia = await clubPlayers(ctx, host.accessToken, host.clubId)
     assert.equal(withoutGoMafia.status, 200)
     assert.equal(withoutGoMafia.json.partial, true)
     assert.deepEqual(withoutGoMafia.json.players.map((p: Player) => p.nickname), ['Тигр', 'Ворон'])
@@ -143,7 +148,7 @@ describe('Игроки клуба: один список', () => {
     ctx.titan.down = true
     ctx.clock.now = new Date(ctx.clock.now.getTime() + 10 * 60_000)
     ctx.deps.titanRoster.forget(TITAN_API_BASE)
-    const neither = await call(ctx, 'GET', '/v1/club/players', { token: host.accessToken })
+    const neither = await clubPlayers(ctx, host.accessToken, host.clubId)
     assert.equal(neither.status, 502)
     assert.equal(neither.json.error.code, 'titan_unavailable')
   })
@@ -152,21 +157,33 @@ describe('Игроки клуба: один список', () => {
 describe('Игроки клуба: права', () => {
   it('судья пула видит состав клуба, резидент без доступа и ведущий без клуба — нет', async () => {
     const ctx = seeded()
-    const guest = await signIn(ctx, { ...TG_USER, id: 1003, username: 'guest' })
-    const noClub = await call(ctx, 'GET', '/v1/club/players', { token: guest.accessToken })
-    assert.equal(noClub.status, 403)
-    assert.equal(noClub.json.error.code, 'club_required')
-
     const host = await president(ctx)
+    const guest = await signIn(ctx, { ...TG_USER, id: 1003, username: 'guest' })
+    const noClub = await clubPlayers(ctx, guest.accessToken, host.clubId)
+    assert.equal(noClub.status, 403)
+    assert.equal(noClub.json.error.code, 'club_access_required')
+
     const judge = await resident(ctx)
-    const waiting = await call(ctx, 'GET', '/v1/club/players', { token: judge.accessToken })
+    const waiting = await clubPlayers(ctx, judge.accessToken, host.clubId)
     assert.equal(waiting.status, 403)
-    assert.equal(waiting.json.error.code, 'host_access_required')
+    assert.equal(waiting.json.error.code, 'club_access_required')
 
     await call(ctx, 'PUT', '/v1/club/hosts/5001', { token: host.accessToken })
-    const granted = await call(ctx, 'GET', '/v1/club/players', { token: judge.accessToken })
+    assert.equal(await clubIdOf(ctx, judge.accessToken), host.clubId)
+    const granted = await clubPlayers(ctx, judge.accessToken, host.clubId)
     assert.equal(granted.status, 200)
     assert.deepEqual(granted.json.players.map((p: Player) => p.nickname), ['Тигр', 'Ворон', 'host'])
+  })
+
+  it('прежний GET /v1/club/players — 426 update_required, в том числе без входа', async () => {
+    const ctx = seeded()
+    const host = await president(ctx)
+    for (const token of [host.accessToken, undefined]) {
+      const res = await call(ctx, 'GET', '/v1/club/players', token ? { token } : {})
+      assert.equal(res.status, 426)
+      assert.equal(res.json.error.code, 'update_required')
+      assert.equal(res.json.error.message, 'Эта версия MafBoard устарела — обновите приложение в TestFlight')
+    }
   })
 })
 

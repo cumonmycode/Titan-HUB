@@ -13,8 +13,9 @@ import { MIN_QUERY_LENGTH, rankForHost, refreshLink, resolveLink, searchForHost,
 import type { ClubHub } from './hub.js'
 import type { TitanConnectGateway, TitanRosterCache } from './titan.js'
 import { registerTitanRoutes, releaseTitanOnAccountDeletion } from './titanRoutes.js'
+import { registerLegacyRoutes } from './legacy.js'
 import { hostAccess, registerClubHostRoutes } from './clubHosts.js'
-import { accountPhotoURL, registerClubPlayerRoutes } from './clubPlayers.js'
+import { accountPhotoURL } from './clubPlayers.js'
 import { registerClubRoutes } from './clubs.js'
 import { registerClubApplicationRoutes } from './clubApplications.js'
 import { registerClubRosterRoutes } from './clubRoster.js'
@@ -254,6 +255,17 @@ export async function withFreshClub(deps: MafboardDeps, user: MafboardUser): Pro
   )
   if (fresh) return (await deps.repo.setGomafiaLink(user.id, fresh, deps.now())) ?? user
   return age > CLUB_TRUST_MAX_MS ? { ...user, gomafia: { ...link, club: null } } : user
+}
+
+/**
+ * Права по свежему клубу GoMafia (`withFreshClub`): `requireUser` снимок GoMafia не освежает, и бывший
+ * президент или ушедший судья с устаревшим снимком распоряжался бы клубом. Снимок свежий — права из `requireUser`.
+ */
+export async function freshAccess(c: Context<MafboardEnv>): Promise<{ user: MafboardUser; access: HostAccess }> {
+  const deps = c.get('deps')
+  const user = c.get('user')
+  const fresh = await withFreshClub(deps, user)
+  return fresh === user ? { user, access: c.get('access') } : { user: fresh, access: await hostAccess(deps.repo, fresh) }
 }
 
 /** Вход на устройстве: новая сессия и первая пара токенов. */
@@ -716,9 +728,10 @@ export function createMafboardRouter(resolveDeps: DepsResolver): Hono<Env> {
     return c.json({ players: players.map((p) => ({ ...p, isVerified: verified.has(p.id) })) })
   })
 
+  // Снятые ручки сборок до 1.0 (22) — 426 «обновите MafBoard»; раньше клубных путей с `:id`.
+  registerLegacyRoutes(router)
   registerTitanRoutes(router, requireUser)
   registerClubHostRoutes(router, requireUser)
-  registerClubPlayerRoutes(router, requireUser)
   // Заявки — раньше клубных путей с `:id`, чтобы «applications» не читался как номер клуба.
   registerClubApplicationRoutes(router, requireUser)
   registerClubRoutes(router, requireUser)
@@ -764,27 +777,22 @@ export function createMafboardRouter(resolveDeps: DepsResolver): Hono<Env> {
     return c.json({ games: games.map((g) => g.record) })
   })
 
-  /** История игр клуба — только для участников клуба. */
+  /**
+   * История игр клуба MafBoard (uuid) по `club_ref` — владельцу и судьям клуба, общая для всех них.
+   * Членство в клубе GoMafia перепроверяется (`freshAccess`): ушедший из клуба историю больше не читает.
+   * По номеру клуба GoMafia — снятая ручка (legacy.ts).
+   */
   router.get('/v1/clubs/:id/games', requireUser, async (c) => {
     const deps = c.get('deps')
-    const raw = (c.req.param('id') ?? '').toLowerCase()
-    // Клуб MafBoard (uuid): история по `club_ref` — владельцу и судьям клуба, общая для всех них.
-    if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(raw)) {
-      if (!c.get('access').clubs.some((entry) => entry.club.id === raw)) {
-        return fail(c, 403, 'club_access_required', 'История клуба доступна его владельцу и судьям')
-      }
-      const since = parseSince(c.req.query('since'))
-      if (since === 'invalid') return fail(c, 422, 'validation', 'Некорректная дата since')
-      const games = await deps.repo.gamesByClubRef(raw, since, GAMES_PAGE_LIMIT)
-      return c.json({ games: games.map((g) => g.record) })
+    const id = (c.req.param('id') ?? '').toLowerCase()
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id)) return fail(c, 422, 'validation', 'Некорректный клуб')
+    const { access } = await freshAccess(c)
+    if (!access.clubs.some((entry) => entry.club.id === id)) {
+      return fail(c, 403, 'club_access_required', 'История клуба доступна его владельцу и судьям')
     }
-    const clubId = Number(raw)
-    if (!Number.isInteger(clubId)) return fail(c, 422, 'validation', 'Некорректный клуб')
-    const member = await withFreshClub(deps, c.get('user'))
-    if (member.gomafia?.club?.id !== clubId) return fail(c, 403, 'not_club_member', 'История доступна только участникам клуба')
     const since = parseSince(c.req.query('since'))
     if (since === 'invalid') return fail(c, 422, 'validation', 'Некорректная дата since')
-    const games = await deps.repo.gamesByClub(clubId, since, GAMES_PAGE_LIMIT)
+    const games = await deps.repo.gamesByClubRef(id, since, GAMES_PAGE_LIMIT)
     return c.json({ games: games.map((g) => g.record) })
   })
 

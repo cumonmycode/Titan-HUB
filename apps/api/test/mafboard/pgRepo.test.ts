@@ -372,7 +372,7 @@ describe('PgMafboardRepo: клубы', { skip: url ? false : 'нет MAFBOARD_TE
     assert.equal(orphan?.titanLinkedBy, null)
   })
 
-  it('подключение клуба: замена возвращает прежнее, поиск по подключившему и по номеру, копии стираются', async () => {
+  it('подключение клуба: замена возвращает прежнее, поиск по номеру подключения, копии стираются', async () => {
     const boss = await newUser()
     const former = await newUser()
     await repo.setGomafiaLink(boss.id, { player: player(241, 84), club: { id: 84, title: 'Йота', city: null, presidentID: 241 } }, NOW)
@@ -384,9 +384,6 @@ describe('PgMafboardRepo: клубы', { skip: url ? false : 'нет MAFBOARD_TE
     assert.equal(await repo.setClubTitanLink('not-a-uuid', titan('conn-x'), boss.id), null)
     assert.equal(await repo.setClubTitanLink('00000000-0000-4000-8000-00000000dead', titan('conn-x'), boss.id), null)
 
-    assert.deepEqual((await repo.clubsLinkedBy(boss.id)).map((linked) => linked.id), [club.id])
-    assert.deepEqual(await repo.clubsLinkedBy(former.id), [])
-    assert.deepEqual(await repo.clubsLinkedBy('not-a-uuid'), [])
     assert.equal((await repo.clubByTitanConnection('conn-b'))?.id, club.id)
     assert.equal(await repo.clubByTitanConnection('conn-a'), null)
 
@@ -403,7 +400,6 @@ describe('PgMafboardRepo: клубы', { skip: url ? false : 'нет MAFBOARD_TE
 
     assert.equal((await repo.setClubTitanLink(club.id, null, null))?.connectionId, 'conn-b')
     assert.equal((await repo.clubByGomafiaId(84))?.titanLinkedBy, null)
-    assert.deepEqual(await repo.clubsLinkedBy(boss.id), [])
   })
 
   it('игра клуба получает ссылку на клуб, повторная загрузка её сохраняет, личная игра — без ссылки', async () => {
@@ -416,7 +412,7 @@ describe('PgMafboardRepo: клубы', { skip: url ? false : 'нет MAFBOARD_TE
     }
     assert.equal(await repo.insertGame(game), 'inserted')
     assert.equal(await repo.insertGame(game), 'exists')
-    assert.deepEqual((await repo.gamesByClub(85, null, 10)).map((stored) => stored.clubRef), [club.id])
+    assert.deepEqual((await repo.gamesByClubRef(club.id, null, 10)).map((stored) => stored.id), [game.id])
 
     // Ведущий переиграл конец игры уже не от клуба: ссылка уходит вместе с клубом.
     assert.equal(await repo.insertGame({ ...game, clubId: null }), 'exists')

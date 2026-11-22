@@ -1,4 +1,4 @@
-import type { Context, Hono, MiddlewareHandler } from 'hono'
+import type { Context } from 'hono'
 import type { GomafiaPlayer } from '../../lib/gomafia.js'
 import { GoMafiaLoginRequired, GoMafiaUnavailable } from './gomafiaSessions.js'
 import type { MafboardEnv } from './router.js'
@@ -10,7 +10,8 @@ import type { GoMafiaPlayerJSON, HostAccess, MafboardUser, StoredClubPlayer, Sto
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Игроки клуба одним списком (docs/MAFBOARD.md, раздел «Игроки клуба»):
-//   GET /v1/club/players — клиенты Titan HUB клуба и резиденты клуба GoMafia без повторов.
+//   GET /v1/clubs/:id/players (clubs.ts) — клиенты Titan HUB клуба, свои игроки клуба и резиденты клуба
+//   GoMafia без повторов. Прежний `GET /v1/club/players` с 4в отвечает 426 (legacy.ts).
 // У каждого игрока одно фото: своё фото клиента в HUB, иначе аватар GoMafia (Titan отдаёт `photoUrl`
 // уже в порядке HUB → Telegram → GoMafia). Тем же правилом считается фото самого судьи (`photoURL`).
 // ─────────────────────────────────────────────────────────────────────────────
@@ -39,7 +40,7 @@ interface TitanSource {
   matches: Map<string, number | null>
 }
 
-type Status = 403 | 409 | 502
+type Status = 409 | 502
 const fail = (c: Context, status: Status, code: string, message: string) => c.json(errorBody(code, message), status)
 
 /** Резиденты клуба GoMafia или ответ-ошибка. Входа в GoMafia нет — как в «Судьях клуба». */
@@ -58,12 +59,6 @@ async function goMafiaResidents(c: Context<MafboardEnv>, clubId: number): Promis
     if (!(error instanceof GoMafiaUnavailable)) console.warn('[mafboard] состав клуба GoMafia не прочитан:', error)
     return fail(c, 502, 'gomafia_unavailable', 'GoMafia не отвечает, попробуйте позже')
   }
-}
-
-function forbidden(c: Context<MafboardEnv>, user: MafboardUser) {
-  return user.gomafia?.club
-    ? fail(c, 403, 'host_access_required', 'Состав клуба видят президент клуба и судьи, которым он дал доступ в MafBoard')
-    : fail(c, 403, 'club_required', 'Состав клуба доступен судьям клуба')
 }
 
 /**
@@ -192,26 +187,6 @@ export function accountPhotoURL(c: Context<MafboardEnv>, user: MafboardUser, acc
   return client?.photoUrl ?? fallback
 }
 
-export function registerClubPlayerRoutes(router: Hono<MafboardEnv>, requireUser: MiddlewareHandler<MafboardEnv>): void {
-  /** Состав клуба одним списком — президенту и судьям пула. Один источник не ответил — второй и `partial`. */
-  router.get('/v1/club/players', requireUser, async (c) => {
-    const deps = c.get('deps')
-    const user = c.get('user')
-    const access = c.get('access')
-    if (!(await deps.limiter.hit(`mb:club:players:${user.id}`, LIST_LIMIT_PER_MIN, 60))) {
-      return c.json(errorBody('rate_limited', 'Слишком много запросов'), 429)
-    }
-    const club = user.gomafia?.club
-    if (access.club === 'none' || !club) return forbidden(c, user)
-    return clubPlayersJSON(c, {
-      id: access.mafboardClub?.id ?? null,
-      name: access.mafboardClub?.name ?? club.title,
-      titan: access.titan,
-      gomafiaClubId: club.id,
-    })
-  })
-}
-
 /** Состав клуба MafBoard, где пользователь — владелец или судья (`GET /v1/clubs/:id/players`, clubs.ts). */
 export async function respondClubPlayers(c: Context<MafboardEnv>, membership: ClubMembership): Promise<Response> {
   const deps = c.get('deps')
@@ -225,19 +200,18 @@ export async function respondClubPlayers(c: Context<MafboardEnv>, membership: Cl
 /** Склейка состава клуба из его источников: клиенты Titan (если подключён) и резиденты клуба GoMafia (если он есть). */
 async function clubPlayersJSON(
   c: Context<MafboardEnv>,
-  club: { id: string | null; name: string; titan: TitanLinkState | null; gomafiaClubId: number | null },
+  club: { id: string; name: string; titan: TitanLinkState | null; gomafiaClubId: number | null },
 ): Promise<Response> {
   const deps = c.get('deps')
-  const clubId = club.id
   const [titan, residents, own, photos] = await Promise.all([
     club.titan ? clubRoster(c, club.titan) : Promise.resolve(null),
     club.gomafiaClubId != null ? goMafiaResidents(c, club.gomafiaClubId) : Promise.resolve([] as GoMafiaPlayerJSON[]),
-    clubId ? deps.repo.clubPlayers(clubId, false) : Promise.resolve([] as StoredClubPlayer[]),
-    clubId ? deps.repo.playerPhotos(clubId) : Promise.resolve([] as StoredPlayerPhoto[]),
+    deps.repo.clubPlayers(club.id, false),
+    deps.repo.playerPhotos(club.id),
   ])
   const titanFailed = titan instanceof Response
   const goMafiaFailed = residents instanceof Response
-  // Оба не ответили (или единственный источник) — ошибка первого, как у прежних ручек.
+  // Оба не ответили (или единственный источник) — ошибка первого: Titan, затем GoMafia.
   if (titanFailed && (goMafiaFailed || club.gomafiaClubId == null)) return titan
   if (goMafiaFailed && titan == null) return residents
 

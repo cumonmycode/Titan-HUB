@@ -41,8 +41,8 @@ export interface MafboardRepo {
   setGomafiaLink(userId: string, link: GomafiaLinkInput | null, at: Date): Promise<MafboardUser | null>
   /**
    * Личная запись пользователя о клубе Titan HUB (или её удаление — null). Действует подключение
-   * клуба (`setClubTitanLink`); сюда пишется его копия — на случай отката к коду, который читал
-   * Titan из записи президента.
+   * клуба (`setClubTitanLink`); личные записи остались от сборок до 4в (`/v1/me/titan` писал сюда копию)
+   * и теперь только стираются — при удалении аккаунта.
    */
   setTitanLink(userId: string, link: TitanLinkState | null): Promise<MafboardUser | null>
   /**
@@ -54,8 +54,6 @@ export interface MafboardRepo {
   // ─── Клубы ─────────────────────────────────────────────────────────────────
   /** Клуб MafBoard, к которому подключён этот клуб GoMafia. Запись заводит `setGomafiaLink`. */
   clubByGomafiaId(gomafiaClubId: number): Promise<StoredClub | null>
-  /** Клубы, чьё действующее подключение Titan сделал этот пользователь. */
-  clubsLinkedBy(userId: string): Promise<StoredClub[]>
   /** Клуб, у которого действует подключение Titan с этим номером. */
   clubByTitanConnection(connectionId: string): Promise<StoredClub | null>
   /**
@@ -240,7 +238,6 @@ export interface MafboardRepo {
   /** Та же игра того же ведущего — запись обновляется ('exists'), чужая с тем же id — 'conflict'. */
   insertGame(game: StoredGame): Promise<'inserted' | 'exists' | 'conflict'>
   gamesByHost(userId: string, since: Date | null, limit: number): Promise<StoredGame[]>
-  gamesByClub(clubId: number, since: Date | null, limit: number): Promise<StoredGame[]>
 
   // ─── Идущие игры ───────────────────────────────────────────────────────────
   /**

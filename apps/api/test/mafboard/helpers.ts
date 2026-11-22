@@ -315,10 +315,6 @@ export class MemoryRepo implements MafboardRepo {
     return club.titan
   }
 
-  async clubsLinkedBy(userId: string) {
-    return [...this.clubs.values()].filter((club) => club.titan != null && club.titanLinkedBy === userId)
-  }
-
   async clubByTitanConnection(connectionId: string) {
     return [...this.clubs.values()].find((club) => club.titan?.connectionId === connectionId) ?? null
   }
@@ -695,10 +691,6 @@ export class MemoryRepo implements MafboardRepo {
 
   async gamesByHost(userId: string, since: Date | null, limit: number) {
     return [...this.games.values()].filter((g) => g.hostUserId === userId && (!since || g.finishedAt > since)).slice(0, limit)
-  }
-
-  async gamesByClub(clubId: number, since: Date | null, limit: number) {
-    return [...this.games.values()].filter((g) => g.clubId === clubId && (!since || g.finishedAt > since)).slice(0, limit)
   }
 
   async saveActiveGame(game: StoredActiveGame) {
@@ -1087,4 +1079,21 @@ export async function signIn(
   })
   if (complete.status !== 200) throw new Error(`вход не завершён: ${complete.status} ${JSON.stringify(complete.json)}`)
   return { ...complete.json.tokens, account: complete.json.account }
+}
+
+/**
+ * id клуба MafBoard пользователя из `GET /v1/me` → `clubs[]` (клуб GoMafia идёт первым: президент — owner,
+ * судья пула — judge). Клубов нет — ошибка теста.
+ */
+export async function clubIdOf(ctx: TestContext, token: string): Promise<string> {
+  const me = await call(ctx, 'GET', '/v1/me', { token })
+  const id = me.json?.clubs?.[0]?.id
+  if (typeof id !== 'string') throw new Error(`у пользователя нет клуба: ${me.status} ${JSON.stringify(me.json)}`)
+  return id
+}
+
+/** Подключить Titan HUB к клубу пользователя (`PUT /v1/clubs/:id/titan`); без `clubId` — к первому клубу из `/v1/me`. */
+export async function connectTitan(ctx: TestContext, token: string, options: { clubId?: string; code?: string } = {}) {
+  const clubId = options.clubId ?? (await clubIdOf(ctx, token))
+  return call(ctx, 'PUT', `/v1/clubs/${clubId}/titan`, { token, body: { code: options.code ?? 'good-code' } })
 }

@@ -1,35 +1,31 @@
 import type { Context, Hono, MiddlewareHandler } from 'hono'
 import { zValidator } from '@hono/zod-validator'
 import { z } from 'zod'
-import { withFreshClub, type MafboardEnv } from './router.js'
+import { freshAccess, type MafboardEnv } from './router.js'
 import { GoMafiaLoginRequired } from './gomafiaSessions.js'
-import { hostAccess } from './clubHosts.js'
 import { membershipOf } from './clubs.js'
-import { errorBody, toAccountJSON } from './serialize.js'
+import { errorBody } from './serialize.js'
 import { openSecrets, sealSecrets } from './studio.js'
 import { TitanConnectError, toTitanPlayerJSON, trustedApiBase, type TitanClient } from './titan.js'
-import type { HostAccess, MafboardUser, StoredClub, TitanLinkState } from './types.js'
+import type { MafboardUser, StoredClub, TitanLinkState } from './types.js'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Ручки Titan Connect приложения MafBoard (контракт — docs/MAFBOARD.md, раздел «Titan Connect»):
-//   POST/DELETE /v1/me/titan                — подключить клуб кодом из HUB (президент клуба) / отключить
-//                                             (президент или тот, кто подключал);
-//   GET         /v1/titan/players           — клиенты клуба как игроки для подбора;
-//   PUT/DELETE  /v1/titan/players/:id/gomafia — ручное сопоставление с GoMafia.
-// Подключение принадлежит клубу MafBoard (`mb_clubs.titan_link`) и переживает смену президента.
-// Его копия пишется в личную запись подключившего (`mb_users.titan_link`) — для отката на код,
-// который читал Titan оттуда.
+//   GET         /v1/clubs/:id/titan/players                    — клиенты клуба как игроки для подбора;
+//   PUT/DELETE  /v1/clubs/:id/titan/players/:clientId/gomafia  — ручное сопоставление с GoMafia.
+// Подключают и отключают клуб ручки клуба `PUT/DELETE /v1/clubs/:id/titan` (clubs.ts) — здесь их общие
+// части: обмен кода, отзыв ключа, стирание копий. Подключение принадлежит клубу MafBoard
+// (`mb_clubs.titan_link`) и переживает смену президента. Личные записи `mb_users.titan_link` остались
+// от прежних сборок (`/v1/me/titan`, с 4в отвечает 426, legacy.ts): их стирают отключение клуба и удаление аккаунта.
 // ─────────────────────────────────────────────────────────────────────────────
 
 const LINK_LIMIT = { count: 10, windowSec: 600 }
 const ROSTER_LIMIT_PER_MIN = 60
 const MATCH_LIMIT_PER_HOUR = 300
-/** Код вида K7QM-3XPA; регистр, пробелы и дефис Titan не важны — проверяет он сам. */
-const codeSchema = z.object({ code: z.string().trim().min(6).max(20) })
 const matchSchema = z.object({ goMafiaID: z.number().int().positive().max(2 ** 48 - 1).nullable() })
 const CLIENT_ID = /^[0-9a-f-]{8,64}$/i
 
-type Status = 400 | 403 | 404 | 409 | 422 | 429 | 502
+type Status = 404 | 409 | 422 | 429 | 502
 const fail = (c: Context, status: Status, code: string, message: string) => c.json(errorBody(code, message), status)
 
 function body<T extends z.ZodTypeAny>(schema: T) {
@@ -55,23 +51,6 @@ export function tokenOf(c: Context<MafboardEnv>, link: TitanLinkState): string |
   return typeof secret?.['token'] === 'string' ? secret['token'] : null
 }
 
-/**
- * Права на общее подключение клуба — по свежему клубу: `requireUser` снимок GoMafia не освежает, и
- * бывший президент с устаревшим снимком распоряжался бы подключением клуба.
- */
-async function freshAccess(c: Context<MafboardEnv>): Promise<{ user: MafboardUser; access: HostAccess }> {
-  const deps = c.get('deps')
-  const user = c.get('user')
-  const fresh = await withFreshClub(deps, user)
-  return fresh === user ? { user, access: c.get('access') } : { user: fresh, access: await hostAccess(deps.repo, fresh) }
-}
-
-/**
- * Клиенты клуба ведущего и его ручные сопоставления. Клуб — действующий (`access.titan`): подключение
- * клуба MafBoard у президента и судей пула. Ошибку уже превратили в ответ — вернётся Response.
- * Права здесь — из `requireUser`, без освежения клуба: чтение клиентов ведёт себя как раньше, снимок
- * GoMafia освежается раз в сутки. Освежается только то, что меняет общее подключение (`freshAccess`).
- */
 /**
  * Одноразовый код Titan Connect → подключение (ключ — шифротекстом). Лимит попыток — на пользователя.
  * Ошибку уже превратили в ответ — вернётся Response.
@@ -99,9 +78,12 @@ export async function exchangeTitanCode(c: Context<MafboardEnv>, code: string): 
   }
 }
 
-export async function clubRoster(c: Context<MafboardEnv>, link: TitanLinkState | null = c.get('access').titan) {
+/**
+ * Клиенты клуба Titan и ручные сопоставления по его подключению. Права на клуб проверяет вызывающий
+ * (член клуба из адреса). Ошибку уже превратили в ответ — вернётся Response.
+ */
+export async function clubRoster(c: Context<MafboardEnv>, link: TitanLinkState) {
   const deps = c.get('deps')
-  if (!link) return fail(c, 409, 'titan_not_linked', 'Клуб Titan HUB подключает президент клуба')
   const token = tokenOf(c, link)
   if (!token) return fail(c, 409, 'titan_revoked', 'Ключ клуба не читается. Подключите клуб заново')
   try {
@@ -118,90 +100,17 @@ export function byClubOrder(a: TitanClient, b: TitanClient): number {
 }
 
 export function registerTitanRoutes(router: Hono<MafboardEnv>, requireUser: MiddlewareHandler<MafboardEnv>): void {
-  /**
-   * Подключить клуб: одноразовый код из Titan HUB меняется на постоянный ключ, ключ — шифротекстом в БД.
-   * Подключает президент клуба GoMafia — судьям его пула клиенты клуба достаются без кода.
-   */
-  router.post('/v1/me/titan', requireUser, body(codeSchema), async (c) => {
-    const deps = c.get('deps')
-    const { user, access } = await freshAccess(c)
-    if (access.club !== 'president') {
-      return fail(c, 403, 'president_only', 'Клуб Titan HUB подключает президент клуба GoMafia. Судьям клуба его клиенты доступны без кода')
-    }
-    const link = await exchangeTitanCode(c, c.req.valid('json').code)
-    if (link instanceof Response) return link
-    const apiBase = link.apiBase
-    const club = access.mafboardClub
-    // Запись клуба не прочиталась — подключение действует по копии в записи президента (`hostAccess`).
-    if (!club) console.warn(`[mafboard] Titan записан только президенту ${user.id}: у его клуба нет записи клуба`)
-    let replaced: TitanLinkState | null = null
-    try {
-      replaced = club ? await deps.repo.setClubTitanLink(club.id, link, user.id) : null
-    } catch (error) {
-      // Один клуб Titan HUB — один клуб MafBoard: этот HUB уже подключён к другому клубу.
-      if ((error as { code?: string }).code !== '23505') throw error
-      releaseLink(c, link)
-      return fail(c, 409, 'club_exists', 'Этот клуб Titan HUB уже подключён к другому клубу MafBoard')
-    }
-    // Заменённое подключение клуба отзывается сразу, до остальных записей: их сбой не оставит ключ в HUB.
-    const superseded = replaced != null && replaced.connectionId !== link.connectionId ? replaced : null
-    if (superseded) releaseLink(c, superseded)
-    const updated = await deps.repo.setTitanLink(user.id, link)
-    if (superseded) await clearMirrors(c, superseded.connectionId)
-
-    // Прежняя личная запись самого президента — только если ею не пользуется другой клуб.
-    const stale = user.titan
-    const isStale = stale != null && stale.connectionId !== link.connectionId && stale.connectionId !== replaced?.connectionId
-    if (isStale && !(await deps.repo.clubByTitanConnection(stale.connectionId))) releaseLink(c, stale)
-
-    deps.titanRoster.forget(apiBase)
-    const linked = updated ?? user
-    return c.json(toAccountJSON(linked, await hostAccess(deps.repo, linked)))
-  })
-
-  /**
-   * Отключить клуб: подключение снимается с клуба, ключ (по возможности) отзывается в Titan HUB.
-   * Отключают президент клуба и тот, кто подключал. У остальных стирается только своя личная запись
-   * прежних времён; судье пула клуб достался от клуба — ему отключать нечего.
-   */
-  router.delete('/v1/me/titan', requireUser, async (c) => {
-    const deps = c.get('deps')
-    const { user, access } = await freshAccess(c)
-    const presided = access.club === 'president' && access.mafboardClub?.titan ? [access.mafboardClub] : []
-    // Судья пула общий клуб не отключает, даже если сам подключал его, когда был президентом.
-    const linked = access.club === 'host' ? [] : await deps.repo.clubsLinkedBy(user.id)
-    const clubs = presided.length > 0 ? presided : linked
-    if (clubs.length === 0 && !user.titan && access.titanShared) {
-      return fail(c, 403, 'president_only', 'Клуб Titan HUB отключает президент клуба или тот, кто его подключал')
-    }
-    const removed: string[] = []
-    for (const club of clubs) {
-      const link = await disconnectClub(c, club)
-      if (link) removed.push(link.connectionId)
-    }
-    const unlinked = await dropPersonalLink(c, user, removed)
-    return c.json(toAccountJSON(unlinked, await hostAccess(deps.repo, unlinked)))
-  })
-
-  /** Клиенты клуба целиком (без удалённых): приложение ищет по ним само. */
-  router.get('/v1/titan/players', requireUser, async (c) => respondRoster(c, c.get('access').titan))
-
-  /** Сопоставить клиента с игроком GoMafia (`goMafiaID: null` — у клиента нет GoMafia, номер из HUB неверный). */
-  router.put('/v1/titan/players/:id/gomafia', requireUser, body(matchSchema), async (c) =>
-    matchGoMafia(c, c.get('access').titan, c.req.param('id') ?? '', c.req.valid('json').goMafiaID))
-
-  /** Снять ручное сопоставление: снова действует номер GoMafia из профиля в HUB. */
-  router.delete('/v1/titan/players/:id/gomafia', requireUser, async (c) => saveMatch(c, c.get('access').titan, c.req.param('id') ?? '', null))
-
-  // То же по клубу MafBoard из адреса — для любого клуба пользователя, не только клуба GoMafia.
+  /** Клиенты клуба целиком (без удалённых): приложение ищет по ним само. Клуб — любой клуб пользователя. */
   router.get('/v1/clubs/:id/titan/players', requireUser, async (c) => {
     const link = clubTitanLink(c)
     return link instanceof Response ? link : respondRoster(c, link)
   })
+  /** Сопоставить клиента с игроком GoMafia (`goMafiaID: null` — у клиента нет GoMafia, номер из HUB неверный). */
   router.put('/v1/clubs/:id/titan/players/:clientId/gomafia', requireUser, body(matchSchema), async (c) => {
     const link = clubTitanLink(c)
     return link instanceof Response ? link : matchGoMafia(c, link, c.req.param('clientId') ?? '', c.req.valid('json').goMafiaID)
   })
+  /** Снять ручное сопоставление: снова действует номер GoMafia из профиля в HUB. */
   router.delete('/v1/clubs/:id/titan/players/:clientId/gomafia', requireUser, async (c) => {
     const link = clubTitanLink(c)
     return link instanceof Response ? link : saveMatch(c, link, c.req.param('clientId') ?? '', null)
@@ -215,7 +124,7 @@ function clubTitanLink(c: Context<MafboardEnv>): TitanLinkState | Response {
   return membership.titan ?? fail(c, 409, 'titan_not_linked', 'К клубу не подключён Titan HUB')
 }
 
-async function respondRoster(c: Context<MafboardEnv>, link: TitanLinkState | null): Promise<Response> {
+async function respondRoster(c: Context<MafboardEnv>, link: TitanLinkState): Promise<Response> {
   const deps = c.get('deps')
   if (!(await deps.limiter.hit(`mb:titan:roster:${c.get('user').id}`, ROSTER_LIMIT_PER_MIN, 60))) {
     return fail(c, 429, 'rate_limited', 'Слишком много запросов')
@@ -226,7 +135,7 @@ async function respondRoster(c: Context<MafboardEnv>, link: TitanLinkState | nul
   return c.json({ club: { name: roster.link.clubName }, players })
 }
 
-async function matchGoMafia(c: Context<MafboardEnv>, link: TitanLinkState | null, clientId: string, goMafiaID: number | null): Promise<Response> {
+async function matchGoMafia(c: Context<MafboardEnv>, link: TitanLinkState, clientId: string, goMafiaID: number | null): Promise<Response> {
   const deps = c.get('deps')
   // lib/gomafia отвечает null и на «нет игрока», и на сбой GoMafia — различить их нельзя.
   // С 2026-11-17 GoMafia показывает профили только вошедшим: без входа ведущего номер не проверить —
@@ -243,7 +152,7 @@ async function matchGoMafia(c: Context<MafboardEnv>, link: TitanLinkState | null
   return saveMatch(c, link, clientId, { goMafiaId: goMafiaID })
 }
 
-async function saveMatch(c: Context<MafboardEnv>, link: TitanLinkState | null, clientId: string, match: { goMafiaId: number | null } | null) {
+async function saveMatch(c: Context<MafboardEnv>, link: TitanLinkState, clientId: string, match: { goMafiaId: number | null } | null) {
   const deps = c.get('deps')
   const user = c.get('user')
   if (!CLIENT_ID.test(clientId)) return fail(c, 422, 'validation', 'Некорректный клиент')
