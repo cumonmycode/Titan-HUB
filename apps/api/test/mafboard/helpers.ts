@@ -8,7 +8,7 @@ import type { PhotoStore } from '../../src/modules/mafboard/photos.js'
 import type { MafboardConfig } from '../../src/modules/mafboard/config.js'
 import { RosterCache, type GoMafiaGateway } from '../../src/modules/mafboard/gomafia.js'
 import { noHub } from '../../src/modules/mafboard/hub.js'
-import { TitanConnectError, TitanRosterCache, type TitanClient, type TitanConnectGateway } from '../../src/modules/mafboard/titan.js'
+import { TitanConnectError, TitanRosterCache, type TitanClient, type TitanConnectGateway, type TitanStream } from '../../src/modules/mafboard/titan.js'
 import { DELETED_HOST_ID } from '../../src/modules/mafboard/config.js'
 import { GomafiaTakenError, type MafboardRepo } from '../../src/modules/mafboard/repo.js'
 import { createMafboardRouter, type MafboardDeps } from '../../src/modules/mafboard/router.js'
@@ -62,7 +62,7 @@ export class FakeTitan implements TitanConnectGateway {
   apiBase = TITAN_API_BASE
   /** Что выдаст следующий обмен кода: смените, чтобы подключить клуб заново другим ключом. */
   issued = { accessToken: 'tcn_live', connectionId: 'conn-1' }
-  calls = { clients: 0, disconnect: [] as string[] }
+  calls = { clients: 0, disconnect: [] as string[], streams: [] as { apiBase: string; token: string; stream: TitanStream }[] }
 
   async exchange(code: string) {
     if (this.down) throw new TitanConnectError('unavailable', 'нет связи')
@@ -82,6 +82,11 @@ export class FakeTitan implements TitanConnectGateway {
     const items = this.members.slice(start, start + this.pageSize)
     const next = start + this.pageSize < this.members.length ? String(start + this.pageSize) : null
     return { items, nextCursor: next }
+  }
+
+  async publishStream(apiBase: string, token: string, stream: TitanStream) {
+    this.calls.streams.push({ apiBase, token, stream })
+    return { published: false }
   }
 
   async disconnect(_apiBase: string, token: string) {

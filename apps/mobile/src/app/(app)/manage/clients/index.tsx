@@ -16,6 +16,7 @@ import {
 } from '@/lib/clients-api';
 import { plural } from '@/lib/format';
 import { haptic } from '@/lib/haptics';
+import { useSession } from '@/lib/session';
 
 const SECTIONS: { key: ClientSection; label: string }[] = [
   { key: 'all', label: 'Все' },
@@ -40,6 +41,7 @@ const SORTS: { key: ClientSort; label: string; icon: SFSymbol }[] = [
  */
 export default function ClientsScreen() {
   const router = useRouter();
+  const isOwner = useSession((st) => st.user?.role === 'owner');
   const tiers = useClientTiers();
   const [section, setSection] = useState<ClientSection>('all');
   const [sort, setSort] = useState<ClientSort>('last_check');
@@ -115,6 +117,14 @@ export default function ClientsScreen() {
                 footer={<Text>До подтверждения клиенту не начисляются бонусы и закрыта оплата в приложении.</Text>}>
                 <RegistrationLine registration={registration} onPress={() => openById(registration.id)} />
                 <ActionRow title="Подтвердить" icon="checkmark.circle" disabled={deciding === registration.id} onPress={() => void decide(registration, 'approve')} />
+                {isOwner ? (
+                <ActionRow
+                  title="Чаты Telegram"
+                  icon="bubble.left.and.bubble.right"
+                  disabled={deciding === registration.id}
+                  onPress={() => router.push({ pathname: '/manage/clients/chats', params: { clientId: registration.id } })}
+                />
+                ) : null}
                 <ActionRow
                   title="Изменить"
                   icon="pencil"

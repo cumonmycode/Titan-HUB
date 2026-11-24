@@ -2,9 +2,16 @@ import { ContentUnavailableView, Form, Host, Picker, ProgressView, Section, Text
 import { pickerStyle, tag } from '@expo/ui/swift-ui/modifiers';
 import { Stack, useLocalSearchParams } from 'expo-router';
 
-import { LinkRow } from '@/components/native-form';
-import { useTelegramChat, type Harshness } from '@/lib/telegram-api';
+import { FieldRow, LinkRow } from '@/components/native-form';
+import { useTelegramChat, type Chime, type Harshness } from '@/lib/telegram-api';
 import { useAccentHex } from '@/lib/theme';
+
+const CHIMES: { key: Chime; label: string }[] = [
+  { key: 'off', label: 'Никогда' },
+  { key: 'rare', label: 'Изредка' },
+  { key: 'often', label: 'Почаще' },
+];
+const CUSTOM_MAX = 600;
 
 const HARSH: { key: Harshness; label: string }[] = [
   { key: 'soft', label: 'Мягко' },
@@ -12,7 +19,10 @@ const HARSH: { key: Harshness; label: string }[] = [
   { key: 'savage', label: 'Жёстко' },
 ];
 
-/** Tai в одном чате: отвечает ли, каким стилем, насколько остро и можно ли материться. */
+/**
+ * Tai в одном чате: отвечает ли, каким стилем, насколько остро, можно ли материться,
+ * свои указания владельца и как сам вступает в разговор. Всё — только для этого чата.
+ */
 export default function ChatTaiScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const accent = useAccentHex();
@@ -76,6 +86,33 @@ export default function ChatTaiScreen() {
               <Section footer={<Text>Только в этом чате. В личке с клиентами Tai никогда не матерится.</Text>}>
                 <Toggle label="Можно материться" isOn={tai.profanity} onIsOnChange={(on) => editor.save({ tai: { profanity: on } })} />
               </Section>
+
+              <Section
+                title="Свои указания"
+                footer={<Text>Кто Tai в этом чате и как себя вести — важнее стиля. Например: «Ты ведущий турнира, зови всех по никам, не шути про судей». Сохраняется, когда закончите ввод.</Text>}>
+                <FieldRow
+                  value={tai.custom}
+                  placeholder="Например: подкалывай Тигра за вечные промахи шерифом"
+                  multiline
+                  maxLength={CUSTOM_MAX}
+                  onCommit={(custom) => editor.save({ tai: { custom } })}
+                />
+              </Section>
+
+              {!work ? (
+                <Section
+                  title="Сам вступает в разговор"
+                  footer={<Text>Иногда Tai сам вставляет реплику, когда в чате живо болтают, а изредка ставит реакции на сообщения. Не чаще раза в 8–25 минут.</Text>}>
+                  <Picker selection={tai.chime} onSelectionChange={(value) => editor.save({ tai: { chime: value as Chime } })} modifiers={[pickerStyle('segmented')]}>
+                    {CHIMES.map((c) => (
+                      <Text key={c.key} modifiers={[tag(c.key)]}>
+                        {c.label}
+                      </Text>
+                    ))}
+                  </Picker>
+                  <Toggle label="Ставить реакции" isOn={tai.reactions} onIsOnChange={(on) => editor.save({ tai: { reactions: on } })} />
+                </Section>
+              ) : null}
             </>
           ) : null}
         </Form>

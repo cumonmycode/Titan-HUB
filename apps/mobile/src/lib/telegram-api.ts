@@ -16,8 +16,11 @@ export type ChatMode = 'game' | 'work' | 'notify';
 export type Harshness = 'soft' | 'medium' | 'savage';
 export type CommandAccess = 'admins' | 'everyone';
 export type MentionAudience = 'all' | 'unvoted' | 'yes' | 'no' | 'staff';
-export type CommandKind = 'mention' | 'text' | 'rules' | 'help';
-export type NotifyCategory = 'requests' | 'shifts' | 'clients' | 'money' | 'stock' | 'events';
+export type CommandKind = 'mention' | 'text' | 'rules' | 'help' | 'stream' | 'games' | 'tai' | 'random' | 'poll';
+export type NotifyCategory = 'requests' | 'shifts' | 'clients' | 'money' | 'stock' | 'events' | 'streams';
+export type Chime = 'off' | 'rare' | 'often';
+export type FunKind = 'fact' | 'joke' | 'mafia' | 'question';
+export type GameKind = 'sport' | 'city';
 export type BotStatus = 'member' | 'administrator' | 'left' | 'kicked' | 'unknown';
 
 export type ChatCommand = {
@@ -35,7 +38,10 @@ export type ChatCommand = {
 
 export type ChatConfig = {
   mode: ChatMode;
-  tai: { on: boolean; preset: string; harshness: Harshness; profanity: boolean };
+  tai: { on: boolean; preset: string; harshness: Harshness; profanity: boolean; custom: string; chime: Chime; reactions: boolean };
+  fun: { on: boolean; perDay: number; from: number; to: number; kinds: FunKind[]; threadId: number | null };
+  access: { invite: boolean; everyone: boolean; games: GameKind[]; staff: boolean; allow: string[]; guard: boolean };
+  moderation: { on: boolean };
   commands: { access: CommandAccess; cooldownMin: number; list: ChatCommand[] };
   notify: Record<NotifyCategory, { on: boolean; threadId: number | null }>;
   welcome: { on: boolean; text: string; deleteService: boolean; rules: string };
@@ -78,7 +84,7 @@ export type LiveChat =
       isForum: boolean;
       status: string;
       members: number | null;
-      rights: { admin: boolean; deleteMessages: boolean; pinMessages: boolean; inviteUsers: boolean; manageTopics: boolean };
+      rights: { admin: boolean; deleteMessages: boolean; pinMessages: boolean; inviteUsers: boolean; manageTopics: boolean; restrictMembers: boolean };
     };
 
 export type ChatDetail = {
@@ -88,12 +94,16 @@ export type ChatDetail = {
   polls: { id: string; title: string; enabled: boolean; threadId: number | null }[];
   presets: { key: string; label: string; desc: string }[];
   categories: { key: NotifyCategory; title: string; about: string }[];
+  moderationCommands: { name: string; description: string }[];
 };
 
 /** Правка чата: разделы целиком или частично; список команд — целиком. */
 export type ChatPatch = {
   mode?: ChatMode;
   tai?: Partial<ChatConfig['tai']>;
+  fun?: Partial<ChatConfig['fun']>;
+  access?: Partial<Omit<ChatConfig['access'], 'allow'>>;
+  moderation?: Partial<ChatConfig['moderation']>;
   commands?: Partial<ChatConfig['commands']>;
   notify?: Partial<ChatConfig['notify']>;
   welcome?: Partial<ChatConfig['welcome']>;
@@ -124,6 +134,19 @@ export const MODE_INFO: Record<ChatMode, { title: string; short: string; about: 
   },
 };
 export const MODES: ChatMode[] = ['game', 'work', 'notify'];
+
+export const COMMAND_KIND_INFO: Record<CommandKind, { title: string; about: string }> = {
+  text: { title: 'Ответ текстом', about: 'Бот отвечает заготовленным текстом' },
+  mention: { title: 'Отметить людей', about: 'Бот отмечает выбранных участников' },
+  tai: { title: 'Задание для Tai', about: 'Tai выполняет задание в стиле чата: факт, тост, прогноз' },
+  random: { title: 'Случайный человек', about: 'Бот выбирает одного участника' },
+  games: { title: 'Ближайшие игры', about: 'Расписание из опросов' },
+  stream: { title: 'Стрим', about: 'Ссылка на эфир и донаты, если стрим опубликован' },
+  poll: { title: 'Опрос', about: 'Показывает сегодняшний опрос в этом чате' },
+  rules: { title: 'Правила', about: 'Правила чата' },
+  help: { title: 'Справка', about: 'Что умеет бот' },
+};
+export const CUSTOM_KINDS: CommandKind[] = ['text', 'mention', 'tai', 'random', 'games', 'stream', 'poll'];
 
 export const AUDIENCE_INFO: Record<MentionAudience, string> = {
   all: 'Всех участников чата',
@@ -169,6 +192,9 @@ function merge(config: ChatConfig, patch: ChatPatch): ChatConfig {
     ...config,
     ...(patch.mode ? { mode: patch.mode } : {}),
     tai: { ...config.tai, ...patch.tai },
+    fun: { ...config.fun, ...patch.fun },
+    access: { ...config.access, ...patch.access },
+    moderation: { ...config.moderation, ...patch.moderation },
     commands: { ...config.commands, ...patch.commands },
     notify: { ...config.notify, ...patch.notify } as ChatConfig['notify'],
     welcome: { ...config.welcome, ...patch.welcome },
@@ -182,6 +208,10 @@ export function useTelegramChat(id: string) {
   const query = useQuery({ queryKey: key, queryFn: () => getChat(id), enabled: !!id });
 
   const mutation = useMutation({
+    // Правки одного чата уходят по очереди: иначе быстрые нажатия обгоняли друг друга,
+    // и ответ на старую правку возвращал экран к прежнему значению.
+    scope: { id: `telegram-chat-${id}` },
+    mutationKey: [club, 'telegram', 'chat', id, 'patch'],
     mutationFn: (patch: ChatPatch) => patchChat(id, patch),
     onMutate: async (patch) => {
       await queryClient.cancelQueries({ queryKey: key });
@@ -195,8 +225,10 @@ export function useTelegramChat(id: string) {
       failed(error);
     },
     onSuccess: ({ config }) => {
+      // Пока в очереди есть ещё правки, экран уже показывает их результат — не откатываем.
+      const pending = queryClient.isMutating({ mutationKey: [club, 'telegram', 'chat', id, 'patch'] });
       const current = queryClient.getQueryData<ChatDetail>(key);
-      if (current) queryClient.setQueryData<ChatDetail>(key, { ...current, config });
+      if (current && pending <= 1) queryClient.setQueryData<ChatDetail>(key, { ...current, config });
       void queryClient.invalidateQueries({ queryKey: [club, 'telegram', 'overview'] });
     },
   });
@@ -210,4 +242,45 @@ export function useTelegramChat(id: string) {
     saveAsync: (patch: ChatPatch) => mutation.mutateAsync(patch),
     saving: mutation.isPending,
   };
+}
+
+/* ─────────────────────────── Стримы ─────────────────────────── */
+
+export type StreamLink = { kind: 'watch' | 'donate'; label: string; url: string };
+export type Stream = {
+  id: string;
+  title: string;
+  links: StreamLink[];
+  source: 'mafboard' | 'studio' | 'hub';
+  startedAt: string;
+  endedAt: string | null;
+  published: boolean;
+  posts: { chatId: string; messageId: number }[];
+};
+export type StreamsState = { active: Stream | null; last: Stream | null; autoPublish: boolean; targets: number };
+
+export const getStreams = () => api.get<StreamsState>('/telegram/streams');
+export const setStreamsAutoPublish = (autoPublish: boolean) => api.put('/telegram/streams/settings', { autoPublish });
+export const startManualStream = (title: string, links: StreamLink[]) => api.post<{ stream: Stream }>('/telegram/streams', { title, links });
+export const publishActiveStream = () => api.post<{ stream: Stream }>('/telegram/streams/publish');
+export const endActiveStream = () => api.delete('/telegram/streams/active');
+
+export function useStreams() {
+  const club = useClubKey();
+  return useQuery({ queryKey: [club, 'telegram', 'streams'], queryFn: getStreams });
+}
+
+/* ─────────────────────── Доступ клиента к чатам ─────────────────────── */
+
+export type AccessReason = 'everyone' | 'staff' | 'manual' | 'games';
+export type ClientChat = { chatId: string; title: string | null; mode: ChatMode; invite: boolean; guard: boolean; manual: boolean; reason: AccessReason | null };
+export type ClientChats = { games: 'sport' | 'city' | 'both' | null; pending: boolean; hasTelegram: boolean; items: ClientChat[] };
+
+export const getClientChats = (profileId: string) => api.get<ClientChats>(`/telegram/clients/${encodeURIComponent(profileId)}/chats`);
+export const setClientChat = (profileId: string, chatId: string, allow: boolean) =>
+  api.put(`/telegram/clients/${encodeURIComponent(profileId)}/chats/${encodeURIComponent(chatId)}`, { allow });
+
+export function useClientChats(profileId: string) {
+  const club = useClubKey();
+  return useQuery({ queryKey: [club, 'telegram', 'client-chats', profileId], queryFn: () => getClientChats(profileId), enabled: !!profileId });
 }

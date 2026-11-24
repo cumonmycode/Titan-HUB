@@ -9,17 +9,36 @@ import { colors } from '@/lib/theme';
 const COOLDOWNS = [0, 5, 10, 30, 60];
 const MAX_COMMANDS = 40;
 
-type KindIcon = 'at' | 'text.bubble.fill' | 'list.bullet.rectangle.fill' | 'questionmark.circle.fill';
+type KindIcon =
+  | 'at'
+  | 'text.bubble.fill'
+  | 'list.bullet.rectangle.fill'
+  | 'questionmark.circle.fill'
+  | 'dot.radiowaves.left.and.right'
+  | 'calendar'
+  | 'sparkles'
+  | 'dice.fill'
+  | 'checklist';
 const KIND_ICON: Record<ChatCommand['kind'], { icon: KindIcon; color: string }> = {
   mention: { icon: 'at', color: '#FF2D55' },
   text: { icon: 'text.bubble.fill', color: '#0A84FF' },
   rules: { icon: 'list.bullet.rectangle.fill', color: '#34C759' },
   help: { icon: 'questionmark.circle.fill', color: '#8E8E93' },
+  stream: { icon: 'dot.radiowaves.left.and.right', color: '#FF3B30' },
+  games: { icon: 'calendar', color: '#FF9500' },
+  tai: { icon: 'sparkles', color: '#8B5CF6' },
+  random: { icon: 'dice.fill', color: '#30B0C7' },
+  poll: { icon: 'checklist', color: '#FF3B30' },
 };
 
 /** Что делает команда — второй строкой. */
 function commandSubtitle(cmd: ChatCommand): string {
-  const what = cmd.kind === 'mention' ? `Отмечает: ${AUDIENCE_INFO[cmd.audience ?? 'all'].toLowerCase()}` : cmd.description;
+  const what =
+    cmd.kind === 'mention'
+      ? `Отмечает: ${AUDIENCE_INFO[cmd.audience ?? 'all'].toLowerCase()}`
+      : cmd.kind === 'random'
+        ? `Выбирает одного: ${AUDIENCE_INFO[cmd.audience ?? 'all'].toLowerCase()}`
+        : cmd.description;
   return cmd.aliases.length ? `${what} · ${cmd.aliases.join(', ')}` : what;
 }
 
@@ -49,7 +68,7 @@ export default function ChatCommandsScreen() {
       <Stack.Title>Команды</Stack.Title>
       <Host style={{ flex: 1 }} useViewportSizeMeasurement>
         <Form>
-          <Section title="Кто может вызывать" footer={<Text>Справку и правила может вызвать любой. Администраторы чата не ждут паузу между командами.</Text>}>
+          <Section title="Кто может вызывать" footer={<Text>Справку, правила, стрим, игры и опрос может вызвать любой. Администраторы чата не ждут паузу между командами.</Text>}>
             <Picker selection={commands.access} onSelectionChange={(value) => editor.save({ commands: { access: value as CommandAccess } })} modifiers={[pickerStyle('segmented')]}>
               <Text modifiers={[tag('admins')]}>Админы чата</Text>
               <Text modifiers={[tag('everyone')]}>Все участники</Text>

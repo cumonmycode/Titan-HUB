@@ -19,6 +19,7 @@ const NOTIFY_SHORT: Record<NotifyCategory, string> = {
   money: 'деньги',
   stock: 'склад',
   events: 'мероприятия',
+  streams: 'стримы',
 };
 
 /** Что бот делает в чате — одной строкой, чтобы не заходить внутрь ради проверки. */
@@ -140,6 +141,7 @@ export default function TelegramScreen() {
 
           <Section title="Ещё">
             <LinkRow icon="checklist" color="#FF3B30" title="Опросы" subtitle="Сбор на игры по расписанию" onPress={() => router.push('/manage/polls')} />
+            <LinkRow icon="dot.radiowaves.left.and.right" color="#FF2D55" title="Стримы" subtitle="Ссылки на эфир и донаты из MafBoard" onPress={() => router.push('/manage/telegram/streams')} />
             <LinkRow icon="sparkles" color="#8B5CF6" title="Tai" subtitle="Голос, клиенты в личке, что рассказывать о клубе" onPress={() => router.push('/manage/tai')} />
             {bot.configured ? <LinkRow icon="key.fill" color="#8E8E93" title="Токен бота" onPress={openIntegration} /> : null}
           </Section>

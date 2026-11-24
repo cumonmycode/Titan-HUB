@@ -40,6 +40,9 @@ export interface TgMessage {
   new_chat_members?: TgUser[]
   left_chat_member?: TgUser
   forum_topic_created?: { name?: string }
+  /** Группа стала супергруппой с новым id. */
+  migrate_to_chat_id?: number
+  entities?: { type: string; offset: number; length: number; user?: TgUser }[]
 }
 
 export interface TgCallbackQuery {
@@ -65,4 +68,6 @@ export interface TgUpdate {
   chat_member?: TgChatMemberUpdate
   /** Нажатие кнопки в HTML-виджете бота (Bot API 10.4). */
   widget_query?: { id: string; from: TgUser; data?: string; chat?: TgChat; message_id?: number }
+  /** Заявка на вступление по ссылке с одобрением. */
+  chat_join_request?: { chat: TgChat; from: TgUser; user_chat_id?: number; date?: number }
 }

@@ -23,7 +23,7 @@ const inviteKey = (clubKey: string, code: string) => `tg:invite:${clubKey}:${cod
 export interface Invite { mode: ChatMode; by: string; chatId: string | null; title: string | null }
 
 /** Права администратора, которые Telegram предложит выдать боту при добавлении. */
-export const INVITE_ADMIN_RIGHTS = 'delete_messages+pin_messages+invite_users+manage_topics'
+export const INVITE_ADMIN_RIGHTS = 'delete_messages+restrict_members+pin_messages+invite_users+manage_topics'
 
 export async function createInvite(clubKey: string, mode: ChatMode, by: string): Promise<string> {
   const code = randomBytes(9).toString('base64url')

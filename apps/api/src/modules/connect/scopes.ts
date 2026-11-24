@@ -34,6 +34,12 @@ export const CONNECT_SCOPES = [
     description: 'Сколько вечеров клиент был в клубе.',
     required: false,
   },
+  {
+    key: 'streams:publish',
+    title: 'Стримы',
+    description: 'Сервис передаёт в HUB ссылки на эфир и донаты. Публиковать ли их через Tai — решаете в Telegram → Стримы.',
+    required: false,
+  },
 ] as const
 
 export type ConnectScope = (typeof CONNECT_SCOPES)[number]['key']

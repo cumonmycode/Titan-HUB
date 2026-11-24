@@ -44,6 +44,17 @@ export interface TitanConnectGateway {
   clients(apiBase: string, token: string, cursor: string | null): Promise<{ items: TitanClient[]; nextCursor: string | null }>
   /** Отключиться со стороны сервиса (`DELETE /connection`). */
   disconnect(apiBase: string, token: string): Promise<void>
+  /** Сообщить клубу об эфире (`POST /streams`, право streams:publish). HUB сам решает, публиковать ли. */
+  publishStream(apiBase: string, token: string, stream: TitanStream): Promise<{ published: boolean }>
+}
+
+/** Эфир для HUB: ссылки на трансляцию и донаты. */
+export interface TitanStream {
+  id: string
+  status: 'live' | 'ended'
+  title?: string
+  source: 'mafboard' | 'studio'
+  links: { kind: 'watch' | 'donate'; label: string; url: string }[]
 }
 
 const REQUEST_TIMEOUT_MS = 12_000
@@ -146,6 +157,10 @@ export function liveTitanConnect(connectUrl: string = titanConnectUrl()): TitanC
     },
     async disconnect(apiBase, token) {
       await request(`${apiBase}/connection`, { method: 'DELETE', token })
+    },
+    async publishStream(apiBase, token, stream) {
+      const payload = (await request(`${apiBase}/streams`, { method: 'POST', token, body: JSON.stringify(stream) })) as { published?: unknown } | null
+      return { published: payload?.published === true }
     },
   }
 }

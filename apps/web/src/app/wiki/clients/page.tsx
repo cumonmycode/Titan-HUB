@@ -19,6 +19,7 @@ export default function WikiClients() {
           [<code key="c">clients:contacts</code>, <code key="cf">contacts</code>, 'Телефон, дата рождения, Telegram. Открывает поиск по телефону.'],
           [<code key="b">clients:balance</code>, <code key="bf">balance</code>, 'Депозит (минус — долг) и бонусные баллы.'],
           [<code key="v">clients:visits</code>, <code key="vf">visits</code>, 'Сколько вечеров клиент был в клубе.'],
+          [<code key="s">streams:publish</code>, <code key="sf">POST /streams</code>, 'Сообщить клубу об эфире: ссылки на трансляцию и донаты. Публиковать ли их через Tai, решает клуб.'],
         ]}
       />
 

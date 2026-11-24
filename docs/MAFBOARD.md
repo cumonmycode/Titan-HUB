@@ -198,6 +198,7 @@ GoMafia — судьёй без своего GoMafia.
 | `POST /v1/clubs/:id/players/:playerID/link` | член клуба (30 в час) | Ссылка игрока на бота → 201 `{url, expiresAt}` |
 | `GET /v1/clubs/:id/titan/players` | член клуба (60 в минуту) | `{club: {name}, players: [TitanPlayer]}` — все клиенты клуба Titan без удалённых, резиденты первыми. 409 `titan_not_linked` — к клубу не подключён Titan, 409 `titan_revoked` — клуб отключил MafBoard в HUB |
 | `PUT …/titan/players/:clientId/gomafia {goMafiaID: число \| null}`, `DELETE` | член клуба (300 в час) | Ручное сопоставление клиента с GoMafia → `TitanPlayer`; `null` — у клиента нет GoMafia (номер в HUB неверный), `DELETE` — снова действует номер из HUB. 404 — нет такого клиента или игрока GoMafia |
+| `POST /v1/clubs/:id/stream {id, status: live \| ended, title?, source?: mafboard \| studio, links: [{kind: watch \| donate, label, url}]}` | член клуба, с ноутбука тоже (120 в час) | Эфир клуба: сервер молча передаёт его в HUB клуба (Titan Connect `POST /streams`, право `streams:publish`). Публиковать ли ссылки через Tai, решают в HUB → `{ok, published}`. 409 `titan_not_linked`, `titan_scope_required` (в HUB у подключения не включены «Стримы»), `titan_revoked`; 422 — для `live` нет https-ссылки на трансляцию |
 
 ### Снятые ручки (выпуск 4в, `legacy.ts`)
 

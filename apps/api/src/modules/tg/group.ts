@@ -9,34 +9,26 @@
 import { upsertRosterUser } from '../../lib/roster.js'
 import { recordChat, recordTopic } from '../../lib/tgChats.js'
 import { readPollConfigs } from '../../lib/polls.js'
-import { taiChatReply, taiStyleLine } from '../../lib/tai.js'
-import { readChatConfig, type ChatConfig } from '../../lib/tgChatConfig.js'
+import { taiStyleLine } from '../../lib/tai.js'
+import { moveChatConfig, readChatConfig, type ChatConfig } from '../../lib/tgChatConfig.js'
 import type { TgClub } from './club.js'
 import { whoIs } from './identity.js'
 import type { TgChatMemberUpdate, TgMessage } from './types.js'
 import { converse } from './dialog/converse.js'
 import { voiceToText } from './private.js'
 import { handleStaffAnswer } from './dialog/request-desk.js'
-import { handleChatCommand } from './commands.js'
+import { handleChatCommand, nicknamesByTgId } from './commands.js'
+import { chatContext, rememberLine, taiSays } from './chatTai.js'
+import { maybeJoinConversation } from './fun.js'
+import { handleModeration } from './moderation.js'
 import { handleStartInGroup, onBotMembership as onMembership, welcomeNewMembers } from './membership.js'
 
-// Tai-чат: анти-спам (1 ответ в 12с/польз.) + короткая память чата для контекста.
+// Tai-чат: анти-спам — 1 ответ в 12 с на человека.
 const TAI_COOLDOWN_MS = 12 * 1000
 const lastTaiReply = new Map<string, number>()
-const TAI_BUF_MAX = 8
-const taiBuffer = new Map<string, { name: string; text: string }[]>()
 // Не-сотрудник обратился к Tai в рабочем чате — отвечаем не чаще раза в 10 минут.
 const NOT_STAFF_THROTTLE_MS = 10 * 60 * 1000
 const lastNotStaff = new Map<string, number>()
-
-function pushTaiBuffer(chatId: string | number | null | undefined, name: string, text: string): void {
-  if (!chatId || !text) return
-  const k = String(chatId)
-  const arr = taiBuffer.get(k) ?? []
-  arr.push({ name, text: text.slice(0, 300) })
-  while (arr.length > TAI_BUF_MAX) arr.shift()
-  taiBuffer.set(k, arr)
-}
 
 // Сообщение адресовано Tai: реплай на сообщение бота, упоминание @бота или «tai/тай» словом.
 function directedAtTai(msg: TgMessage, botUsername: string | null): boolean {
@@ -47,7 +39,7 @@ function directedAtTai(msg: TgMessage, botUsername: string | null): boolean {
   return /(^|[^a-zа-яё0-9])(tai|тай)([^a-zа-яё0-9]|$)/i.test(text)
 }
 
-/** Дерзкий ответ Tai в игровой чат — по настройкам этого чата. */
+/** Ответ Tai в игровой чат — стилем, жёсткостью и указаниями этого чата. */
 async function handleBanter(club: TgClub, msg: TgMessage, config: ChatConfig): Promise<void> {
   const chatId = msg.chat.id
   const text = String(msg.text ?? '').trim()
@@ -57,18 +49,19 @@ async function handleBanter(club: TgClub, msg: TgMessage, config: ChatConfig): P
   if (now - (lastTaiReply.get(key) ?? 0) < TAI_COOLDOWN_MS) return
   lastTaiReply.set(key, now)
 
-  const fromName = msg.from?.first_name || (msg.from?.username ? '@' + msg.from.username : 'кто-то')
+  const fromName = await speakerName(club, msg)
   const replyText = msg.reply_to_message?.text ? String(msg.reply_to_message.text).slice(0, 300) : ''
-  const ctxArr = (taiBuffer.get(String(chatId)) ?? []).slice(0, -1).slice(-6)
-  const context = ctxArr.length ? ctxArr.map((m) => `${m.name}: ${m.text}`).join('\n') : undefined
   const userMessage = replyText ? `${fromName} отвечает на твою реплику «${replyText}»: ${text}` : `${fromName} пишет: ${text}`
+  const reply = await taiSays(club, chatId, config, { kind: 'reply', userMessage }, chatContext(chatId, true))
+  if (reply) await club.bot.send(chatId, reply, { threadId: msg.message_thread_id ?? null, replyTo: msg.message_id })
+}
 
-  const { preset, harshness, profanity } = config.tai
-  const reply = await taiChatReply(club.db, { userMessage, context, preset, harshness, profanity })
-  if (reply) {
-    pushTaiBuffer(chatId, 'Tai', reply)
-    await club.bot.send(chatId, reply, { threadId: msg.message_thread_id ?? null, replyTo: msg.message_id })
-  }
+/** Как Tai зовёт человека: ник клиента клуба, иначе имя из Telegram. */
+async function speakerName(club: TgClub, msg: TgMessage): Promise<string> {
+  const from = msg.from
+  if (!from) return 'кто-то'
+  const nick = (await nicknamesByTgId(club.db, [String(from.id)])).get(String(from.id))
+  return nick || from.first_name || (from.username ? '@' + from.username : 'кто-то')
 }
 
 /** Рабочий чат: отвечаем сотруднику по работе от его имени. */
@@ -98,7 +91,7 @@ async function handleWorkChat(club: TgClub, msg: TgMessage, config: ChatConfig):
     threadId: msg.message_thread_id ?? null,
     replyTo: msg.message_id,
     groupTitle: msg.chat.title ?? 'Рабочий чат',
-    style: { line: taiStyleLine(config.tai.preset, config.tai.harshness), profanity: config.tai.profanity },
+    style: { line: taiStyleLine(config.tai.preset, config.tai.harshness, config.tai.custom), profanity: config.tai.profanity },
   }, text, voice)
 }
 
@@ -136,19 +129,28 @@ export async function onGroupMessage(club: TgClub, msg: TgMessage, edited: boole
     await recordTopic(db, msg.chat.id, msg.message_thread_id, msg.forum_topic_created?.name ?? msg.reply_to_message?.forum_topic_created?.name ?? null)
   }
   if (edited) return
+  // Группа стала супергруппой: у неё новый id — настройки переезжают вместе с ней.
+  if (msg.migrate_to_chat_id) {
+    await moveChatConfig(db, String(msg.chat.id), String(msg.migrate_to_chat_id))
+    return
+  }
   if (await handleServiceMessage(club, msg)) return
   if (!msg.from || msg.from.is_bot) return
   if (await handleStartInGroup(club, msg)) return
 
   const config = await readChatConfig(db, String(msg.chat.id))
-  if (msg.text && config.mode === 'game') pushTaiBuffer(msg.chat.id, msg.from.first_name || msg.from.username || 'гость', msg.text)
+  if (msg.text && config.mode === 'game' && !msg.text.startsWith('/')) rememberLine(msg.chat.id, await speakerName(club, msg), msg.text)
+  if (await handleModeration(club, msg, config)) return
   if (await handleChatCommand(club, msg, config)) return
   if (await relayStaffAnswer(club, msg)) return
 
   if (!config.tai.on || config.mode === 'notify') return
   const botUsername = await club.bot.username()
   const voiceReplyToBot = !!(msg.voice && msg.reply_to_message?.from?.is_bot)
-  if (!directedAtTai(msg, botUsername) && !voiceReplyToBot) return
+  if (!directedAtTai(msg, botUsername) && !voiceReplyToBot) {
+    await maybeJoinConversation(club, msg, config)
+    return
+  }
   if (config.mode === 'work') await handleWorkChat(club, msg, config)
   else if (msg.text) await handleBanter(club, msg, config)
 }

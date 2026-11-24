@@ -14,7 +14,14 @@ import { colors, space, type } from '@/lib/theme';
 
 const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
-type ChatSubscreen = '/manage/telegram/tai' | '/manage/telegram/commands' | '/manage/telegram/notify' | '/manage/telegram/welcome';
+type ChatSubscreen =
+  | '/manage/telegram/tai'
+  | '/manage/telegram/commands'
+  | '/manage/telegram/notify'
+  | '/manage/telegram/welcome'
+  | '/manage/telegram/fun'
+  | '/manage/telegram/access'
+  | '/manage/telegram/moderation';
 
 /** Чего не хватает боту в правах — одной фразой под шапкой. */
 function rightsHint(detail: ChatDetail): string | null {
@@ -25,6 +32,8 @@ function rightsHint(detail: ChatDetail): string | null {
     !live.rights.pinMessages ? 'закреплять сообщения' : null,
     !live.rights.deleteMessages ? 'удалять сообщения' : null,
     live.isForum && !live.rights.manageTopics ? 'управлять темами' : null,
+    !live.rights.restrictMembers ? 'блокировать участников (для /mute)' : null,
+    !live.rights.inviteUsers ? 'приглашать по ссылке' : null,
   ].filter(Boolean);
   return missing.length ? `Боту не хватает прав: ${missing.join(', ')}.` : null;
 }
@@ -128,12 +137,40 @@ export default function TelegramChatScreen() {
                     icon="sparkles"
                     color="#8B5CF6"
                     title="Tai в чате"
-                    subtitle={config.mode === 'work' ? 'Отвечает сотрудникам по работе' : 'Шутит, когда к нему обращаются'}
+                    subtitle={config.mode === 'work' ? 'Отвечает сотрудникам по работе' : 'Стиль, мат, свои указания, реплики'}
                     value={config.tai.on ? detail.presets.find((p) => p.key === config.tai.preset)?.label : 'Молчит'}
                     onPress={() => go('/manage/telegram/tai')}
                   />
                 ) : null}
-                <LinkRow icon="command" color="#5856D6" title="Команды" subtitle="Отметки, правила, свои ответы" value={commandsOn ? String(commandsOn) : 'Нет'} onPress={() => go('/manage/telegram/commands')} />
+                {config.mode !== 'notify' ? (
+                  <LinkRow
+                    icon="theatermasks.fill"
+                    color="#FF2D55"
+                    title="Приколы и факты"
+                    subtitle="Tai сам пишет в чат время от времени"
+                    value={config.fun.on ? `${config.fun.perDay} в день` : 'Выкл.'}
+                    onPress={() => go('/manage/telegram/fun')}
+                  />
+                ) : null}
+                <LinkRow icon="command" color="#5856D6" title="Команды" subtitle="@all, @твари, /stream, свои действия" value={commandsOn ? String(commandsOn) : 'Нет'} onPress={() => go('/manage/telegram/commands')} />
+                {config.mode !== 'notify' ? (
+                  <LinkRow
+                    icon="shield.lefthalf.filled"
+                    color="#FF3B30"
+                    title="Модерация"
+                    subtitle="/mute, /mutechat, /ban — админам чата"
+                    value={config.moderation.on ? 'Вкл.' : 'Выкл.'}
+                    onPress={() => go('/manage/telegram/moderation')}
+                  />
+                ) : null}
+                <LinkRow
+                  icon="person.badge.key.fill"
+                  color="#30B0C7"
+                  title="Кто может войти"
+                  subtitle="Ссылки от Tai и проверка заявок"
+                  value={!config.access.invite ? 'Без ссылок' : config.access.everyone ? 'Всем' : config.access.guard ? 'По правилам' : 'По ссылке'}
+                  onPress={() => go('/manage/telegram/access')}
+                />
                 <LinkRow
                   icon="bell.badge.fill"
                   color="#FF9500"

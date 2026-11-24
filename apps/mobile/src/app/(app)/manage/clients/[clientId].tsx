@@ -261,6 +261,7 @@ export default function ClientScreen() {
           <InfoRow label="День рождения" value={birthdayText(data.birthday) ?? 'не указан'} muted={!data.birthday} />
           {tags.length > 0 ? <InfoRow label="Теги" value={tags.join(', ')} /> : null}
           {gomafiaId ? <InfoRow label="GoMafia" value={`#${gomafiaId}`} onPress={() => open(`https://gomafia.pro/stats/${gomafiaId}`)} /> : null}
+          {isOwner ? <InfoRow label="Чаты Telegram" value="доступ" chevron onPress={() => router.push({ pathname: '/manage/clients/chats', params: { clientId: data.id } })} /> : null}
         </Card>
 
         <Card title="Последние операции">

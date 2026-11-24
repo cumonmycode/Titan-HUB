@@ -9,6 +9,7 @@ import { dropCodeRoute, exchangeBlocked, isConnectToken, normalizeCode, readCode
 import { consumeCode, deleteConnection, findByToken, rotateToken, touchUsage, type ConnectConnection } from './repo.js'
 import { DEFAULT_PAGE, MAX_PAGE, decodeCursor, encodeCursor, getClientRow, listClientRows, serializeClients } from './clients.js'
 import { CONNECT_SCOPES } from './scopes.js'
+import { endStream, startStream, StreamError } from '../tg/streams.js'
 
 /**
  * Titan Connect — публичный API для сторонних сервисов (/api/connect/v1).
@@ -136,6 +137,8 @@ connectPublicRouter.use('/clients', requireConnectToken)
 connectPublicRouter.use('/clients/*', requireConnectToken)
 connectPublicRouter.use('/token/*', requireConnectToken)
 connectPublicRouter.use('/connection', requireConnectToken)
+connectPublicRouter.use('/streams', requireConnectToken)
+connectPublicRouter.use('/streams/*', requireConnectToken)
 
 connectPublicRouter.get('/me', (c) => {
   const conn = c.var.connection
@@ -204,6 +207,36 @@ connectPublicRouter.get('/clients/:id', async (c) => {
   if (!row) return fail(c, 404, 'not_found', 'Клиент не найден.')
   const [client] = await serializeClients(c.var.db, [row], c.var.connection.scopes, requestOrigin(c))
   return c.json(client)
+})
+
+// ── Стримы ───────────────────────────────────────────────────────────────────
+// Сервис (MafBoard) только сообщает HUB об эфире — молча. Отдавать ли ссылки Tai
+// для публикации в чатах, решает владелец в HUB (Telegram → Стримы).
+
+const StreamSchema = z.object({
+  id: z.string().trim().min(1).max(80),
+  status: z.enum(['live', 'ended']),
+  title: z.string().trim().max(120).optional(),
+  source: z.enum(['mafboard', 'studio']).default('mafboard'),
+  links: z.array(z.object({ kind: z.enum(['watch', 'donate']), label: z.string().trim().max(40).default(''), url: z.string().trim().url().max(500) })).max(6).default([]),
+})
+
+connectPublicRouter.post('/streams', async (c) => {
+  if (!c.var.connection.scopes.includes('streams:publish')) return fail(c, 403, 'scope_required', 'Нужно право streams:publish — включите «Стримы» у подключения в Titan HUB.')
+  const parsed = StreamSchema.safeParse(await c.req.json().catch(() => null))
+  if (!parsed.success) return fail(c, 400, 'invalid_request', parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; '))
+  const body = parsed.data
+  try {
+    if (body.status === 'ended') {
+      await endStream(c.var.db, body.id)
+      return c.json({ ok: true, status: 'ended' })
+    }
+    const stream = await startStream(c.var.db, { id: body.id, title: body.title, links: body.links, source: body.source })
+    return c.json({ ok: true, status: 'live', published: stream.published })
+  } catch (error) {
+    if (error instanceof StreamError) return fail(c, 400, 'invalid_request', error.message)
+    throw error
+  }
 })
 
 // ── Ключ и подключение ───────────────────────────────────────────────────────

@@ -64,6 +64,7 @@ export default function ManageLayout() {
       <Stack.Screen name="clients/adjust" options={compactSheet} />
       <Stack.Screen name="clients/referrer" options={compactSheet} />
       <Stack.Screen name="clients/telegram" options={editorModal} />
+      <Stack.Screen name="clients/chats" options={formHeader({ title: 'Чаты Telegram' })} />
       <Stack.Screen name="clients/tg-roster" options={editorModal} />
 
       <Stack.Screen name="balances/index" options={formHeader({ title: 'Депозиты и долги' })} />
@@ -163,6 +164,11 @@ export default function ManageLayout() {
       <Stack.Screen name="telegram/command" options={editorModal} />
       <Stack.Screen name="telegram/notify" options={formHeader({ title: 'Уведомления' })} />
       <Stack.Screen name="telegram/welcome" options={editorModal} />
+      <Stack.Screen name="telegram/fun" options={formHeader({ title: 'Приколы и факты' })} />
+      <Stack.Screen name="telegram/access" options={formHeader({ title: 'Кто может войти' })} />
+      <Stack.Screen name="telegram/moderation" options={formHeader({ title: 'Модерация' })} />
+      <Stack.Screen name="telegram/streams" options={formHeader({ title: 'Стримы' })} />
+      <Stack.Screen name="telegram/stream-new" options={editorModal} />
 
       <Stack.Screen name="tai/index" options={formHeader({ title: 'Tai' })} />
       <Stack.Screen name="tai/voice" options={formHeader({ title: 'Голос' })} />

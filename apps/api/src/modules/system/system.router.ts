@@ -606,13 +606,13 @@ systemRouter.put(
   requireRole('owner'),
   zValidator('json', z.object({
     enabled: z.boolean().optional(),
-    preset: z.enum(['friendly', 'sarcastic', 'roast', 'nerd', 'chaos']).optional(),
+    preset: z.enum(TAI_PRESETS.map((p) => p.key) as [string, ...string[]]).optional(),
     chats: z.array(z.object({
       id: z.union([z.string(), z.number()]),
       enabled: z.boolean(),
       profanity: z.boolean(),
       harshness: z.enum(['soft', 'medium', 'savage']),
-      preset: z.enum(['friendly', 'sarcastic', 'roast', 'nerd', 'chaos']).optional(),
+      preset: z.enum(TAI_PRESETS.map((p) => p.key) as [string, ...string[]]).optional(),
       mode: z.enum(['work', 'game']).optional(),
     })).optional(),
   })),
@@ -626,14 +626,20 @@ systemRouter.put(
     if (body.enabled !== undefined) await setKey('tai_chat_enabled', String(body.enabled))
     if (body.preset !== undefined) await setKey('tai_preset', body.preset)
     if (body.chats !== undefined) {
+      // Старый экран присылает все чаты сразу: пишем только то, что в чате реально изменилось,
+      // иначе он затирал правки из раздела «Telegram». Чат «уведомлений» он видит рабочим —
+      // его назначение отсюда не трогаем.
+      const current = await readAllChatConfigs(db, body.chats.map((ch) => String(ch.id)))
       for (const ch of body.chats) {
-        await patchChatConfig(db, String(ch.id), {
-          taiOn: ch.enabled,
-          profanity: ch.profanity,
-          harshness: ch.harshness,
-          ...(ch.preset ? { preset: ch.preset } : {}),
-          ...(ch.mode ? { mode: ch.mode } : {}),
-        })
+        const cur = current.get(String(ch.id))!
+        const patch = {
+          ...(ch.enabled !== cur.tai.on ? { taiOn: ch.enabled } : {}),
+          ...(ch.profanity !== cur.tai.profanity ? { profanity: ch.profanity } : {}),
+          ...(ch.harshness !== cur.tai.harshness ? { harshness: ch.harshness } : {}),
+          ...(ch.preset && ch.preset !== cur.tai.preset ? { preset: ch.preset } : {}),
+          ...(ch.mode && cur.mode !== 'notify' && ch.mode !== cur.mode ? { mode: ch.mode } : {}),
+        }
+        if (Object.keys(patch).length) await patchChatConfig(db, String(ch.id), { mode: cur.mode, ...patch })
       }
     }
     return c.json({ ok: true })

@@ -24,6 +24,14 @@ const ROSTER_LIMIT_PER_MIN = 60
 const MATCH_LIMIT_PER_HOUR = 300
 const matchSchema = z.object({ goMafiaID: z.number().int().positive().max(2 ** 48 - 1).nullable() })
 const CLIENT_ID = /^[0-9a-f-]{8,64}$/i
+const STREAM_LIMIT_PER_HOUR = 120
+const streamSchema = z.object({
+  id: z.string().trim().min(1).max(80),
+  status: z.enum(['live', 'ended']),
+  title: z.string().trim().max(120).optional(),
+  source: z.enum(['mafboard', 'studio']).default('mafboard'),
+  links: z.array(z.object({ kind: z.enum(['watch', 'donate']), label: z.string().trim().max(40).default(''), url: z.string().trim().url().max(500) })).max(6).default([]),
+}).refine((s) => s.status === 'ended' || s.links.some((l) => l.kind === 'watch' && l.url.startsWith('https://')), 'Для эфира нужна https-ссылка на трансляцию')
 
 type Status = 404 | 409 | 422 | 429 | 502
 const fail = (c: Context, status: Status, code: string, message: string) => c.json(errorBody(code, message), status)
@@ -42,6 +50,7 @@ function titanFailure(c: Context, error: unknown) {
     }
     if (error.code === 'invalid_code') return fail(c, 422, 'invalid_code', error.message)
     if (error.code === 'too_many_attempts') return fail(c, 429, 'rate_limited', error.message)
+    if (error.code === 'scope_required') return fail(c, 409, 'titan_scope_required', 'В Titan HUB у подключения MafBoard не включены «Стримы» (Интеграции → Titan Connect)')
   }
   return fail(c, 502, 'titan_unavailable', 'Titan HUB не отвечает, попробуйте позже')
 }
@@ -100,6 +109,26 @@ export function byClubOrder(a: TitanClient, b: TitanClient): number {
 }
 
 export function registerTitanRoutes(router: Hono<MafboardEnv>, requireUser: MiddlewareHandler<MafboardEnv>): void {
+  /**
+   * Эфир клуба: MafBoard или MafBoard Studio сообщают ссылки на трансляцию и донаты, сервер
+   * молча передаёт их в HUB клуба. Публиковать ли их через Tai, решают в HUB.
+   */
+  router.post('/v1/clubs/:id/stream', requireUser, body(streamSchema), async (c) => {
+    const link = clubTitanLink(c)
+    if (link instanceof Response) return link
+    const deps = c.get('deps')
+    if (!(await deps.limiter.hit(`mb:titan:stream:${c.get('user').id}`, STREAM_LIMIT_PER_HOUR, 3600))) {
+      return fail(c, 429, 'rate_limited', 'Слишком много запросов')
+    }
+    const token = tokenOf(c, link)
+    if (!token) return fail(c, 409, 'titan_revoked', 'Ключ клуба не читается. Подключите клуб заново')
+    try {
+      const result = await deps.titan.publishStream(link.apiBase, token, c.req.valid('json'))
+      return c.json({ ok: true, published: result.published })
+    } catch (error) {
+      return titanFailure(c, error)
+    }
+  })
   /** Клиенты клуба целиком (без удалённых): приложение ищет по ним само. Клуб — любой клуб пользователя. */
   router.get('/v1/clubs/:id/titan/players', requireUser, async (c) => {
     const link = clubTitanLink(c)

@@ -126,6 +126,8 @@ function desktopAllowed(method: string, path: string): boolean {
   if (path.includes('/v1/studio/vk/')) return true
   // Вход MBS в DonationAlerts — так же, секрет приложения только у сервера.
   if (path.includes('/v1/studio/donationalerts/')) return true
+  // MBS сообщает клубу об эфире: ссылки на трансляцию и донаты (titanRoutes.ts).
+  if (method === 'POST' && /\/v1\/clubs\/[0-9a-f-]{36}\/stream$/i.test(path)) return true
   return (method === 'GET' || method === 'PUT') && path.endsWith('/v1/studio/settings')
 }
 

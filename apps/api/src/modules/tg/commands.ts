@@ -1,8 +1,10 @@
 /**
  * Команды группового чата. У каждого чата свой список (lib/tgChatConfig):
- * встроенные отметки (@all, @tvari, …), /rules и /help, свои текстовые команды
- * и свои отметки. Команда вызывается как /name, /name@бот или словом из aliases.
+ * встроенные отметки (@all, @tvari, …), /stream, /games, /rules и /help, и свои —
+ * ответ текстом, отметка людей, задание для Tai, случайный человек, ближайшие игры,
+ * стрим или сегодняшний опрос. Вызов — /name, /name@бот или словом из aliases.
  * Кто может вызывать — админы чата или все; не-админам — не чаще раза в N минут.
+ * Админские /mute и т. п. — moderation.ts (в меню «/» видны только админам).
  */
 import { profiles, inArray, isNull, and, type Database } from '@titan/database'
 import { listRosterForChat, listRoster } from '../../lib/roster.js'
@@ -13,6 +15,10 @@ import { escapeHtml, type TgBot } from '../../lib/tgBot.js'
 import { type ChatCommand, type ChatConfig, type MentionAudience } from '../../lib/tgChatConfig.js'
 import type { TgClub } from './club.js'
 import type { TgMessage } from './types.js'
+import { taiSays } from './chatTai.js'
+import { gameConfigs, nightLabel, upcomingNights } from './games.js'
+import { MODERATION_COMMANDS } from './moderation.js'
+import { publishedStream, streamCommandReply } from './streams.js'
 
 type MentionTarget = { tgId: string; username: string | null; firstName: string | null }
 
@@ -132,7 +138,8 @@ export function helpText(config: ChatConfig): string {
     .filter((c) => commandVisible(c, config) && c.kind !== 'help')
     .map((c) => `/${c.name}${c.aliases.length ? ` (${c.aliases.join(', ')})` : ''} — ${c.description}`)
   const tai = config.tai.on ? '\n\nКо мне можно обратиться «Тай, …» или ответом на моё сообщение.' : ''
-  return lines.length ? `Команды чата:\n${lines.join('\n')}${tai}` : `В этом чате команд нет.${tai}`
+  const mod = config.moderation.on ? '\nАдминам: /mute, /unmute, /mutechat, /unmutechat, /kick, /ban, /unban, /del, /pin.' : ''
+  return (lines.length ? `Команды чата:\n${lines.join('\n')}${tai}` : `В этом чате команд нет.${tai}`) + mod
 }
 
 async function cooldownPassed(send: Send, key: string, minutes: number): Promise<boolean> {
@@ -170,6 +177,12 @@ export async function handleChatCommand(club: TgClub, msg: TgMessage, config: Ch
     return true
   }
 
+  // Стрим, игры и опрос никого не пингуют — всем и без паузы, если владелец не ограничил.
+  if (QUIET_KINDS.has(cmd.kind) && !cmd.access) {
+    await runAction(club, msg, config, cmd, send)
+    return true
+  }
+
   const access = cmd.access ?? config.commands.access
   const isAdmin = await isTelegramChatAdmin(club.bot.token, msg.chat.id, msg.from.id).catch(() => false)
   if (access === 'admins' && !isAdmin) {
@@ -179,14 +192,60 @@ export async function handleChatCommand(club: TgClub, msg: TgMessage, config: Ch
   const cooldown = config.commands.cooldownMin
   if (!isAdmin && cooldown > 0 && !(await cooldownPassed(send, `${chatId}:${msg.from.id}:${cmd.id}`, cooldown))) return true
 
-  if (cmd.kind === 'text') {
-    await send(cmd.text?.trim() || cmd.description)
-    return true
-  }
-  const resolved = await resolveAudience(club.db, chatId, cmd.audience ?? 'all')
-  if ('error' in resolved) await send(resolved.error)
-  else await sendMentions(club.db, send, cmd, resolved.targets)
+  await runAction(club, msg, config, cmd, send)
   return true
+}
+
+const QUIET_KINDS = new Set<ChatCommand['kind']>(['stream', 'games', 'poll'])
+const RANDOM_DEFAULT = '🎲 Выбор пал на'
+const GAMES_AHEAD = 6
+
+/** Что делает команда — после проверок прав и паузы. */
+async function runAction(club: TgClub, msg: TgMessage, config: ChatConfig, cmd: ChatCommand, send: Send): Promise<void> {
+  const chatId = String(msg.chat.id)
+  const threadId = msg.message_thread_id ?? null
+  switch (cmd.kind) {
+    case 'text':
+      await send(cmd.text?.trim() || cmd.description)
+      return
+    case 'stream': {
+      const reply = streamCommandReply(await publishedStream(club.db))
+      await club.bot.send(msg.chat.id, reply.text, { html: true, threadId, ...(reply.markup ? { markup: reply.markup } : {}) })
+      return
+    }
+    case 'games': {
+      const nights = upcomingNights(await gameConfigs(club.db), 8).slice(0, GAMES_AHEAD)
+      await send(nights.length ? `🗓 Ближайшие игры:\n${nights.map((n) => `• ${nightLabel(n)}`).join('\n')}` : 'Расписание игр пока не заведено.')
+      return
+    }
+    case 'poll': {
+      const last = await lastPollForChat(club.db, chatId)
+      if (!last) return void (await send('Сегодняшнего опроса в этом чате нет.'))
+      await club.bot.send(msg.chat.id, cmd.description || '👆 Вот опрос — отмечайтесь!', { threadId: last.threadId ?? threadId, replyTo: last.messageId })
+      return
+    }
+    case 'tai': {
+      const words = String(msg.text ?? '').trim().split(/\s+/).slice(1).join(' ')
+      const said = await taiSays(club, chatId, config, { kind: 'command', instruction: cmd.text?.trim() || cmd.description, userMessage: words })
+      await club.bot.send(msg.chat.id, said ?? 'Что-то я задумался… попробуй ещё раз 🙃', { threadId, replyTo: msg.message_id })
+      return
+    }
+    case 'random': {
+      const resolved = await resolveAudience(club.db, chatId, cmd.audience ?? 'all')
+      if ('error' in resolved) return void (await send(resolved.error))
+      const pool = resolved.targets.filter((u) => u.tgId !== String(msg.from?.id ?? ''))
+      const pick = pool[Math.floor(Math.random() * pool.length)]
+      if (!pick) return void (await send(EMPTY_TEXT[cmd.audience ?? 'all']))
+      const nick = (await nicknamesByTgId(club.db, [pick.tgId])).get(pick.tgId) || pick.firstName || (pick.username ? `@${pick.username}` : 'участник')
+      await send(`${escapeHtml(cmd.text?.trim() || RANDOM_DEFAULT)} <a href="tg://user?id=${pick.tgId}">${escapeHtml(nick)}</a>`, true)
+      return
+    }
+    default: {
+      const resolved = await resolveAudience(club.db, chatId, cmd.audience ?? 'all')
+      if ('error' in resolved) await send(resolved.error)
+      else await sendMentions(club.db, send, cmd, resolved.targets)
+    }
+  }
 }
 
 /**
@@ -195,10 +254,16 @@ export async function handleChatCommand(club: TgClub, msg: TgMessage, config: Ch
  */
 export async function syncCommandMenu(bot: TgBot, chatId: string, config: ChatConfig): Promise<boolean> {
   const scope = { type: 'chat', chat_id: chatId }
+  const adminScope = { type: 'chat_administrators', chat_id: chatId }
   const commands = config.commands.list
     .filter((c) => commandVisible(c, config))
-    .slice(0, 100)
+    .slice(0, 80)
     .map((c) => ({ command: c.name, description: c.description.slice(0, 256) || c.name }))
-  if (commands.length === 0) return (await bot.call<boolean>('deleteMyCommands', { scope })) === true
-  return (await bot.call<boolean>('setMyCommands', { scope, commands })) === true
+  const taken = new Set(commands.map((c) => c.command))
+  const moderation = config.moderation.on ? MODERATION_COMMANDS.filter((m) => !taken.has(m.name)).map((m) => ({ command: m.name, description: m.description })) : []
+  const admins = [...commands, ...moderation]
+  const setOrDelete = async (sc: Record<string, unknown>, list: { command: string; description: string }[]) =>
+    list.length ? (await bot.call<boolean>('setMyCommands', { scope: sc, commands: list })) === true : (await bot.call<boolean>('deleteMyCommands', { scope: sc })) === true
+  const [forAll, forAdmins] = await Promise.all([setOrDelete(scope, commands), setOrDelete(adminScope, admins)])
+  return forAll && forAdmins
 }

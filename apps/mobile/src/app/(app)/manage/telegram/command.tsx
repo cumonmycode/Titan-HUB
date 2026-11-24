@@ -7,11 +7,18 @@ import { Alert } from 'react-native';
 import { EditorToolbar } from '@/components/editor-toolbar';
 import { ActionRow, FieldRow, FormHost } from '@/components/native-form';
 import { haptic } from '@/lib/haptics';
-import { AUDIENCE_INFO, useTelegramChat, type ChatCommand, type CommandAccess, type MentionAudience } from '@/lib/telegram-api';
+import { AUDIENCE_INFO, COMMAND_KIND_INFO, CUSTOM_KINDS, useTelegramChat, type ChatCommand, type CommandAccess, type MentionAudience } from '@/lib/telegram-api';
 
 const NAME_RE = /^[a-z0-9_]{1,32}$/;
 const AUDIENCES: MentionAudience[] = ['all', 'unvoted', 'yes', 'no', 'staff'];
 type AccessChoice = 'chat' | CommandAccess;
+const TEXT_TITLE: Partial<Record<ChatCommand['kind'], string>> = { text: 'Ответ бота', mention: 'Заголовок над отметками', tai: 'Задание для Tai', random: 'Перед именем' };
+const TEXT_PLACEHOLDER: Partial<Record<ChatCommand['kind'], string>> = {
+  text: 'Пятница 20:00 — спортивная, суббота 19:00 — городская',
+  mention: '📣 Участники:',
+  tai: 'Расскажи неожиданный факт о мафии и подколи того, кто спросил',
+  random: '🎲 Сегодня ведущий —',
+};
 type SaveAsync = ReturnType<typeof useTelegramChat>['saveAsync'];
 
 const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error));
@@ -42,7 +49,9 @@ function CommandForm({ list, original, save, busy }: { list: ChatCommand[]; orig
   const patch = (next: Partial<ChatCommand>) => setDraft((current) => ({ ...current, ...next }));
   const builtin = !!original?.builtin;
   const access: AccessChoice = draft.access ?? 'chat';
-  const callable = draft.kind === 'mention' || draft.kind === 'text';
+  const callable = draft.kind !== 'rules' && draft.kind !== 'help';
+  const withAudience = draft.kind === 'mention' || draft.kind === 'random';
+  const withText = draft.kind === 'mention' || draft.kind === 'text' || draft.kind === 'tai' || draft.kind === 'random';
 
   const problem = (): string | null => {
     const name = draft.name.trim().toLowerCase();
@@ -50,6 +59,7 @@ function CommandForm({ list, original, save, busy }: { list: ChatCommand[]; orig
     if (list.some((c) => c.id !== draft.id && c.name === name)) return 'Такая команда уже есть';
     if (!draft.description.trim()) return 'Добавьте описание — оно видно в меню «/»';
     if (draft.kind === 'text' && !draft.text?.trim()) return 'Напишите, что бот ответит';
+    if (draft.kind === 'tai' && !draft.text?.trim()) return 'Напишите задание для Tai';
     return null;
   };
 
@@ -78,7 +88,8 @@ function CommandForm({ list, original, save, busy }: { list: ChatCommand[]; orig
       { text: 'Удалить', style: 'destructive', onPress: () => void persist(list.filter((c) => c.id !== original.id)) },
     ]);
 
-  const setKind = (value: string) => patch({ kind: value as ChatCommand['kind'], audience: value === 'mention' ? (draft.audience ?? 'all') : undefined });
+  const setKind = (value: string) =>
+    patch({ kind: value as ChatCommand['kind'], audience: value === 'mention' || value === 'random' ? (draft.audience ?? 'all') : undefined });
 
   return (
     <>
@@ -102,16 +113,19 @@ function CommandForm({ list, original, save, busy }: { list: ChatCommand[]; orig
           </Section>
 
           {!builtin ? (
-            <Section title="Что делает">
-              <Picker selection={draft.kind} onSelectionChange={(value) => setKind(String(value))} modifiers={[pickerStyle('segmented')]}>
-                <Text modifiers={[tag('text')]}>Отвечает текстом</Text>
-                <Text modifiers={[tag('mention')]}>Отмечает людей</Text>
+            <Section title="Что делает" footer={<Text>{COMMAND_KIND_INFO[draft.kind].about}</Text>}>
+              <Picker selection={draft.kind} onSelectionChange={(value) => setKind(String(value))} modifiers={[pickerStyle('inline')]}>
+                {CUSTOM_KINDS.map((kind) => (
+                  <Text key={kind} modifiers={[tag(kind)]}>
+                    {COMMAND_KIND_INFO[kind].title}
+                  </Text>
+                ))}
               </Picker>
             </Section>
           ) : null}
 
-          {draft.kind === 'mention' && !builtin ? (
-            <Section title="Кого отметить" footer={<Text>Бот знает тех, кого видел в чате. С правами администратора он видит всех, кто пишет.</Text>}>
+          {withAudience && !builtin ? (
+            <Section title={draft.kind === 'random' ? 'Из кого выбирать' : 'Кого отметить'} footer={<Text>Бот знает тех, кого видел в чате. С правами администратора он видит всех, кто пишет.</Text>}>
               <Picker selection={draft.audience ?? 'all'} onSelectionChange={(value) => patch({ audience: value as MentionAudience })} modifiers={[pickerStyle('inline')]}>
                 {AUDIENCES.map((key) => (
                   <Text key={key} modifiers={[tag(key)]}>
@@ -122,11 +136,13 @@ function CommandForm({ list, original, save, busy }: { list: ChatCommand[]; orig
             </Section>
           ) : null}
 
-          {callable ? (
-            <Section title={draft.kind === 'text' ? 'Ответ бота' : 'Заголовок над отметками'}>
+          {withText ? (
+            <Section
+              title={TEXT_TITLE[draft.kind] ?? 'Текст'}
+              footer={draft.kind === 'tai' ? <Text>Tai выполнит это в стиле чата; что человек написал после команды, он тоже учтёт.</Text> : undefined}>
               <FieldRow
                 value={draft.text ?? ''}
-                placeholder={draft.kind === 'text' ? 'Пятница 20:00 — спортивная, суббота 19:00 — городская' : '📣 Участники:'}
+                placeholder={TEXT_PLACEHOLDER[draft.kind] ?? ''}
                 multiline
                 maxLength={2000}
                 onChange={(text) => patch({ text })}

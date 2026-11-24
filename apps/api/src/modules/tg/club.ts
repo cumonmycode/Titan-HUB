@@ -25,7 +25,7 @@ const PRIVATE_COMMANDS = [
 ]
 
 /** Какие апдейты нужны Tai: сообщения, кнопки, опросы, вход/выход из групп. */
-export const TAI_ALLOWED_UPDATES = ['message', 'edited_message', 'callback_query', 'poll_answer', 'my_chat_member', 'chat_member', 'widget_query']
+export const TAI_ALLOWED_UPDATES = ['message', 'edited_message', 'callback_query', 'poll_answer', 'my_chat_member', 'chat_member', 'widget_query', 'chat_join_request']
 
 export interface TgClub {
   /** id клуба в control-БД (null — основная БД без регистрации). */

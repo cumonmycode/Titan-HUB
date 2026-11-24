@@ -7,46 +7,52 @@
  * profanity) читаются как раньше, новые дописываются рядом. Сырые записи всегда
  * проходят через normalizeChatConfig — недостающее берётся из умолчаний режима.
  */
-import { appSettings, type Database } from '@titan/database'
+import { appSettings, sql, type Database } from '@titan/database'
 import { getBoolSetting, getStringSetting } from './appSettings.js'
 import { TAI_PRESETS } from './tai.js'
+import { builtinCommands, normalizeCommands, type ChatCommand, type CommandAccess } from './tgChatCommands.js'
 
 export const CHAT_SETTINGS_KEY = 'tai_chat_settings'
 
 /** game — чат игроков, work — чат персонала, notify — только уведомления. */
 export type ChatMode = 'game' | 'work' | 'notify'
 export type Harshness = 'soft' | 'medium' | 'savage'
-export type CommandAccess = 'admins' | 'everyone'
-/** Кого отмечает команда-отметка. */
-export type MentionAudience = 'all' | 'unvoted' | 'yes' | 'no' | 'staff'
-export type CommandKind = 'mention' | 'text' | 'rules' | 'help'
+export type { ChatCommand, CommandAccess, CommandKind, MentionAudience } from './tgChatCommands.js'
+export { COMMAND_NAME_RE, builtinCommands }
+import { COMMAND_NAME_RE } from './tgChatCommands.js'
+/** Иногда Tai сам вступает в разговор (без обращения к нему). */
+export type Chime = 'off' | 'rare' | 'often'
+/** Что Tai сам присылает в чат время от времени. */
+export type FunKind = 'fact' | 'joke' | 'mafia' | 'question'
+export type GameKind = 'sport' | 'city'
 
-export interface ChatCommand {
-  id: string
-  /** Латиница для меню «/» Telegram: /all, /rules. */
-  name: string
-  /** Другие слова, на которые отзывается команда: @all, @твари, правила. */
-  aliases: string[]
-  /** Подпись в меню «/» и в справке. */
-  description: string
-  kind: CommandKind
-  audience?: MentionAudience
-  /** Ответ команды (text) или заголовок отметки (mention). */
-  text?: string
-  enabled: boolean
-  /** Свои права вместо общих для чата. */
-  access?: CommandAccess
-  builtin?: boolean
-}
-
-export const NOTIFY_CATEGORIES = ['requests', 'shifts', 'clients', 'money', 'stock', 'events'] as const
+export const NOTIFY_CATEGORIES = ['requests', 'shifts', 'clients', 'money', 'stock', 'events', 'streams'] as const
 export type NotifyCategory = (typeof NOTIFY_CATEGORIES)[number]
 export type BroadcastCategory = Exclude<NotifyCategory, 'requests'>
 export interface NotifyTarget { on: boolean; threadId: number | null }
 
 export interface ChatConfig {
   mode: ChatMode
-  tai: { on: boolean; preset: string; harshness: Harshness; profanity: boolean }
+  tai: {
+    on: boolean
+    preset: string
+    harshness: Harshness
+    profanity: boolean
+    /** Свои указания владельца: кто Tai в этом чате, о чём шутить, чего не трогать. */
+    custom: string
+    chime: Chime
+    /** Иногда ставит реакции-эмодзи на сообщения. */
+    reactions: boolean
+  }
+  /** Приколы и факты от Tai сами по себе: сколько в день, в какие часы, куда. */
+  fun: { on: boolean; perDay: number; from: number; to: number; kinds: FunKind[]; threadId: number | null }
+  /**
+   * Кто может попасть в чат: Tai в личке даёт ссылку только тем, кому можно, а заявки
+   * на вступление по ссылке бота (guard) одобряет или отклоняет сам.
+   */
+  access: { invite: boolean; everyone: boolean; games: GameKind[]; staff: boolean; allow: string[]; guard: boolean }
+  /** Админские команды /mute, /mutechat, /ban и т. п. */
+  moderation: { on: boolean }
   commands: { access: CommandAccess; cooldownMin: number; list: ChatCommand[] }
   notify: Record<NotifyCategory, NotifyTarget>
   welcome: { on: boolean; text: string; deleteService: boolean; rules: string }
@@ -63,6 +69,14 @@ export interface RawConfig {
   preset?: string
   harshness?: string
   profanity?: boolean
+  custom?: string
+  chime?: string
+  reactions?: boolean
+  fun?: Partial<ChatConfig['fun']>
+  access?: Partial<ChatConfig['access']>
+  moderation?: Partial<ChatConfig['moderation']>
+  /** Постоянная ссылка-заявка бота в чат (createChatInviteLink). */
+  inviteLink?: string
   commands?: Partial<ChatConfig['commands']>
   notify?: Partial<Record<BroadcastCategory, Partial<NotifyTarget>>>
   welcome?: Partial<ChatConfig['welcome']>
@@ -71,9 +85,7 @@ export interface RawConfig {
 
 const HARSH: Harshness[] = ['soft', 'medium', 'savage']
 export const MODES: ChatMode[] = ['game', 'work', 'notify']
-export const COMMAND_NAME_RE = /^[a-z0-9_]{1,32}$/
 export const DEFAULT_COOLDOWN_MIN = 10
-const AUDIENCES: MentionAudience[] = ['all', 'unvoted', 'yes', 'no', 'staff']
 
 export const DEFAULT_WELCOME: Record<ChatMode, string> = {
   game: 'Привет, {name}! 👋 Добро пожаловать в {chat}. Здесь опросы на игры и новости клуба. Правила — /rules',
@@ -81,19 +93,7 @@ export const DEFAULT_WELCOME: Record<ChatMode, string> = {
   notify: 'Привет, {name}! Здесь бот присылает уведомления клуба.',
 }
 
-/** Встроенные команды — как раньше, но теперь их можно выключить и переименовать. */
-export function builtinCommands(): ChatCommand[] {
-  return [
-    { id: 'all', name: 'all', aliases: ['@all'], description: 'Отметить всех участников', kind: 'mention', audience: 'all', text: '📣 Участники:', enabled: true, builtin: true },
-    { id: 'tvari', name: 'tvari', aliases: ['@tvari', '@твари'], description: 'Кто не отметился в опросе', kind: 'mention', audience: 'unvoted', text: '⚠️ Не отметились или «Думаю»:', enabled: true, builtin: true },
-    { id: 'lubimki', name: 'lubimki', aliases: ['@lubimki', '@любимки'], description: 'Кто идёт («Да»)', kind: 'mention', audience: 'yes', text: '❤️ Любимки (проголосовали «Да»):', enabled: true, builtin: true },
-    { id: 'supertvari', name: 'supertvari', aliases: ['@supertvari', '@супертвари'], description: 'Кто не идёт («Нет»)', kind: 'mention', audience: 'no', text: '🚫 Проголосовали «Нет»:', enabled: true, builtin: true },
-    { id: 'rules', name: 'rules', aliases: ['правила'], description: 'Правила чата', kind: 'rules', enabled: true, builtin: true },
-    { id: 'help', name: 'help', aliases: [], description: 'Что умеет бот', kind: 'help', enabled: true, builtin: true },
-  ]
-}
-
-const TAI_DEFAULTS: Record<ChatMode, ChatConfig['tai']> = {
+const TAI_DEFAULTS: Record<ChatMode, Pick<ChatConfig['tai'], 'on' | 'preset' | 'harshness' | 'profanity'>> = {
   game: { on: true, preset: 'roast', harshness: 'savage', profanity: true },
   work: { on: true, preset: 'friendly', harshness: 'soft', profanity: false },
   notify: { on: false, preset: 'friendly', harshness: 'soft', profanity: false },
@@ -120,33 +120,40 @@ export interface ChatGlobals {
 
 const validPreset = (p: unknown): p is string => typeof p === 'string' && TAI_PRESETS.some((x) => x.key === p)
 const str = (v: unknown, max: number): string => (typeof v === 'string' ? v.slice(0, max) : '')
+export const CUSTOM_MAX = 600
 
-function normalizeCommand(c: Partial<ChatCommand>, base?: ChatCommand): ChatCommand | null {
-  const name = String(c.name ?? base?.name ?? '').toLowerCase()
-  if (!COMMAND_NAME_RE.test(name)) return null
-  const kind: CommandKind = base?.kind ?? (c.kind === 'mention' ? 'mention' : 'text')
-  const audience = base?.audience ?? (AUDIENCES.includes(c.audience as MentionAudience) ? (c.audience as MentionAudience) : 'all')
+const CHIMES: Chime[] = ['off', 'rare', 'often']
+export const FUN_KINDS: FunKind[] = ['fact', 'joke', 'mafia', 'question']
+const GAME_KINDS: GameKind[] = ['sport', 'city']
+const MAX_ALLOW = 2000
+const clampInt = (v: unknown, min: number, max: number, fallback: number): number => {
+  const n = Math.round(Number(v))
+  return Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : fallback
+}
+
+function normalizeFun(r: RawConfig['fun'], mode: ChatMode): ChatConfig['fun'] {
+  const kinds = (r?.kinds ?? []).filter((k): k is FunKind => FUN_KINDS.includes(k as FunKind))
+  const from = clampInt(r?.from, 0, 23, 12)
+  const to = clampInt(r?.to, 1, 24, 22)
   return {
-    id: base?.id ?? String(c.id ?? name),
-    name,
-    aliases: [...new Set((c.aliases ?? base?.aliases ?? []).map((a) => String(a).trim().toLowerCase()).filter((a) => a && a.length <= 32))].slice(0, 8),
-    description: str(c.description ?? base?.description, 64) || name,
-    kind,
-    ...(kind === 'mention' ? { audience } : {}),
-    ...(kind === 'mention' || kind === 'text' ? { text: str(c.text ?? base?.text, 2000) } : {}),
-    enabled: c.enabled ?? base?.enabled ?? true,
-    ...(c.access === 'admins' || c.access === 'everyone' ? { access: c.access } : {}),
-    ...(base?.builtin ? { builtin: true } : {}),
+    on: r?.on === true && mode !== 'notify',
+    perDay: clampInt(r?.perDay, 1, 6, 1),
+    from,
+    to: to > from ? to : Math.min(24, from + 1),
+    kinds: kinds.length ? [...new Set(kinds)] : ['fact', 'joke', 'mafia'],
+    threadId: typeof r?.threadId === 'number' ? r.threadId : null,
   }
 }
 
-/** Встроенные (с правками владельца) + свои команды чата. */
-function normalizeCommands(raw: ChatCommand[] | undefined, mode: ChatMode): ChatCommand[] {
-  const saved = new Map((raw ?? []).map((c) => [c.id, c]))
-  const builtins = builtinCommands().map((b) => normalizeCommand(saved.get(b.id) ?? { enabled: mode !== 'notify' }, b)!)
-  const ids = new Set(builtins.map((b) => b.id))
-  const custom = (raw ?? []).filter((c) => !ids.has(c.id)).map((c) => normalizeCommand(c)).filter((c): c is ChatCommand => !!c)
-  return [...builtins, ...custom]
+function normalizeAccess(r: RawConfig['access']): ChatConfig['access'] {
+  return {
+    invite: r?.invite === true,
+    everyone: r?.everyone === true,
+    games: [...new Set((r?.games ?? []).filter((g): g is GameKind => GAME_KINDS.includes(g as GameKind)))],
+    staff: r?.staff !== false,
+    allow: [...new Set((r?.allow ?? []).filter((id): id is string => typeof id === 'string' && /^[0-9a-f-]{36}$/i.test(id)))].slice(0, MAX_ALLOW),
+    guard: r?.guard === true,
+  }
 }
 
 export function normalizeChatConfig(chatId: string, raw: RawConfig | undefined, g: ChatGlobals): ChatConfig {
@@ -160,12 +167,15 @@ export function normalizeChatConfig(chatId: string, raw: RawConfig | undefined, 
     preset: validPreset(r.preset) ? r.preset : mode === 'game' && validPreset(g.preset) ? g.preset : td.preset,
     harshness: HARSH.includes(r.harshness as Harshness) ? (r.harshness as Harshness) : td.harshness,
     profanity: typeof r.profanity === 'boolean' ? r.profanity : td.profanity,
+    custom: str(r.custom, CUSTOM_MAX),
+    chime: CHIMES.includes(r.chime as Chime) ? (r.chime as Chime) : mode === 'game' ? 'rare' : 'off',
+    reactions: typeof r.reactions === 'boolean' ? r.reactions : mode === 'game',
   }
   const access = r.commands?.access
   const commands: ChatConfig['commands'] = {
     access: access === 'everyone' || access === 'admins' ? access : g.adminOnly ? 'admins' : 'everyone',
     cooldownMin: Math.min(120, Math.max(0, Math.round(Number(r.commands?.cooldownMin ?? DEFAULT_COOLDOWN_MIN)) || 0)),
-    list: normalizeCommands(r.commands?.list, mode),
+    list: normalizeCommands(r.commands?.list, (c) => mode !== 'notify' && (mode === 'game' || c.kind !== 'stream')),
   }
   // Старые чаты без раздела уведомлений — всё выключено: ничего не начнёт приходить само.
   const notify = Object.fromEntries(
@@ -189,13 +199,13 @@ export function normalizeChatConfig(chatId: string, raw: RawConfig | undefined, 
     status: status === 'member' || status === 'administrator' || status === 'left' || status === 'kicked' ? status : 'unknown',
     at: typeof r.bot?.at === 'string' ? r.bot.at : null,
   }
-  return { mode, tai, commands, notify, welcome, bot }
+  return { mode, tai, fun: normalizeFun(r.fun, mode), access: normalizeAccess(r.access), moderation: { on: r.moderation?.on !== false && mode !== 'notify' }, commands, notify, welcome, bot }
 }
 
 /** Заготовка нового чата по назначению: что включено сразу после добавления. */
 export function presetFor(mode: ChatMode): RawConfig {
   const td = TAI_DEFAULTS[mode]
-  const commandOn = (c: ChatCommand) => mode === 'game' || (mode === 'work' && (c.kind === 'rules' || c.kind === 'help' || c.id === 'all'))
+  const commandOn = (c: ChatCommand) => mode === 'game' || (mode === 'work' && (c.kind === 'rules' || c.kind === 'help' || c.kind === 'games' || c.id === 'all'))
   return {
     mode,
     taiOn: td.on,
@@ -205,12 +215,17 @@ export function presetFor(mode: ChatMode): RawConfig {
     commands: { access: 'admins', cooldownMin: DEFAULT_COOLDOWN_MIN, list: builtinCommands().map((c) => ({ ...c, enabled: commandOn(c) })) },
     notify: Object.fromEntries(NOTIFY_CATEGORIES.filter((c): c is BroadcastCategory => c !== 'requests').map((c) => [c, { on: NOTIFY_PRESET[mode].includes(c), threadId: null }])),
     welcome: { on: mode === 'game', text: DEFAULT_WELCOME[mode], deleteService: false, rules: '' },
+    fun: { on: mode === 'game', perDay: 1, from: 12, to: 22, kinds: ['fact', 'joke', 'mafia'], threadId: null },
+    access: { invite: mode === 'game', everyone: false, games: [], staff: true, allow: [], guard: false },
+    moderation: { on: mode !== 'notify' },
   }
 }
 
 // ─── Чтение / запись ─────────────────────────────────────────────────────────
 
-export async function readRawConfigs(db: Database): Promise<Record<string, RawConfig>> {
+type DbLike = Database | Parameters<Parameters<Database['transaction']>[0]>[0]
+
+export async function readRawConfigs(db: DbLike): Promise<Record<string, RawConfig>> {
   try {
     const raw = await getStringSetting(CHAT_SETTINGS_KEY, '', db)
     const parsed = raw ? JSON.parse(raw) : {}
@@ -220,9 +235,19 @@ export async function readRawConfigs(db: Database): Promise<Record<string, RawCo
   }
 }
 
-async function writeRawConfigs(db: Database, map: Record<string, RawConfig>): Promise<void> {
-  const value = JSON.stringify(map)
-  await db.insert(appSettings).values({ key: CHAT_SETTINGS_KEY, value }).onConflictDoUpdate({ target: appSettings.key, set: { value, updatedAt: new Date() } })
+/**
+ * Изменить настройки чатов под блокировкой. Все чаты лежат в одной записи, поэтому
+ * без неё две правки подряд (или правка из HUB и апдейт Telegram о статусе бота)
+ * читали одно и то же и последняя затирала первую.
+ */
+async function mutateRawConfigs(db: Database, change: (all: Record<string, RawConfig>) => Record<string, RawConfig> | null): Promise<void> {
+  await db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${CHAT_SETTINGS_KEY}, 0))`)
+    const next = change(await readRawConfigs(tx))
+    if (!next) return
+    const value = JSON.stringify(next)
+    await tx.insert(appSettings).values({ key: CHAT_SETTINGS_KEY, value }).onConflictDoUpdate({ target: appSettings.key, set: { value, updatedAt: new Date() } })
+  })
 }
 
 export async function readGlobals(db: Database): Promise<ChatGlobals> {
@@ -263,41 +288,75 @@ function currentNotify(cur: RawConfig): NonNullable<RawConfig['notify']> {
   )
 }
 
+/** Слить раздел: только если он пришёл в правке. */
+const section = <K extends 'commands' | 'welcome' | 'fun' | 'access' | 'moderation'>(cur: RawConfig, patch: RawConfig, key: K) =>
+  patch[key] ? { [key]: { ...(cur[key] as object | undefined), ...(patch[key] as object) } } : {}
+
 /**
  * Записать часть настроек чата поверх сохранённых. Вложенные разделы сливаются
- * по полям, список команд заменяется целиком. Заявки (requests) — отдельный ключ.
+ * по полям, списки (команды, люди с доступом) заменяются целиком. Заявки (requests) — отдельный ключ.
  */
 export async function patchChatConfig(db: Database, chatId: string, patch: RawConfig): Promise<void> {
-  const all = await readRawConfigs(db)
-  const cur = all[chatId] ?? {}
-  const next: RawConfig = {
-    ...cur,
-    ...patch,
-    ...(patch.commands ? { commands: { ...cur.commands, ...patch.commands } } : {}),
-    ...(patch.welcome ? { welcome: { ...cur.welcome, ...patch.welcome } } : {}),
-    ...(patch.notify ? { notify: { ...currentNotify(cur), ...patch.notify } } : {}),
-  }
-  await writeRawConfigs(db, { ...all, [chatId]: next })
+  await mutateRawConfigs(db, (all) => {
+    const cur = all[chatId] ?? {}
+    const next: RawConfig = {
+      ...cur,
+      ...patch,
+      ...section(cur, patch, 'commands'),
+      ...section(cur, patch, 'welcome'),
+      ...section(cur, patch, 'fun'),
+      ...section(cur, patch, 'access'),
+      ...section(cur, patch, 'moderation'),
+      ...(patch.notify ? { notify: { ...currentNotify(cur), ...patch.notify } } : {}),
+    }
+    return { ...all, [chatId]: next }
+  })
 }
 
 /** Заменить настройки чата целиком (заготовка при добавлении), сохранив статус бота. */
 export async function replaceChatConfig(db: Database, chatId: string, raw: RawConfig): Promise<void> {
-  const all = await readRawConfigs(db)
-  await writeRawConfigs(db, { ...all, [chatId]: { ...raw, bot: all[chatId]?.bot } })
+  await mutateRawConfigs(db, (all) => ({ ...all, [chatId]: { ...raw, bot: all[chatId]?.bot } }))
 }
 
 export async function setBotStatus(db: Database, chatId: string, status: BotStatus): Promise<void> {
-  const all = await readRawConfigs(db)
-  if (all[chatId]?.bot?.status === status) return
-  await writeRawConfigs(db, { ...all, [chatId]: { ...all[chatId], bot: { status, at: new Date().toISOString() } } })
+  // Частый случай — статус не поменялся: проверяем без блокировки.
+  if ((await readRawConfigs(db))[chatId]?.bot?.status === status) return
+  await mutateRawConfigs(db, (all) =>
+    all[chatId]?.bot?.status === status ? null : { ...all, [chatId]: { ...all[chatId], bot: { status, at: new Date().toISOString() } } },
+  )
 }
 
 export async function forgetChatConfig(db: Database, chatId: string): Promise<void> {
-  const all = await readRawConfigs(db)
-  if (!(chatId in all)) return
-  const rest = { ...all }
-  delete rest[chatId]
-  await writeRawConfigs(db, rest)
+  await mutateRawConfigs(db, (all) => {
+    if (!(chatId in all)) return null
+    const rest = { ...all }
+    delete rest[chatId]
+    return rest
+  })
+}
+
+/** Группа стала супергруппой — Telegram дал ей новый id: переносим настройки. */
+export async function moveChatConfig(db: Database, fromId: string, toId: string): Promise<void> {
+  await mutateRawConfigs(db, (all) => {
+    if (!all[fromId] || all[toId]?.mode) return null
+    const rest = { ...all, [toId]: all[fromId]! }
+    delete rest[fromId]
+    return rest
+  })
+}
+
+/** Ссылка-заявка бота в чат (создаётся один раз). */
+export async function readInviteLink(db: DbLike, chatId: string): Promise<string | null> {
+  return (await readRawConfigs(db))[chatId]?.inviteLink ?? null
+}
+
+export async function saveInviteLink(db: Database, chatId: string, link: string | null): Promise<void> {
+  await mutateRawConfigs(db, (all) => {
+    const cur = { ...all[chatId] }
+    if (link) cur.inviteLink = link
+    else delete cur.inviteLink
+    return { ...all, [chatId]: cur }
+  })
 }
 
 export const botActive = (c: ChatConfig): boolean => c.bot.status !== 'left' && c.bot.status !== 'kicked'

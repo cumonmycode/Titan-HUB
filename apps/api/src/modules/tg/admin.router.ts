@@ -16,13 +16,17 @@ import { TAI_PRESETS } from '../../lib/tai.js'
 import { tgWebhookUrl } from '../../lib/tgWebhook.js'
 import type { TgBot } from '../../lib/tgBot.js'
 import {
-  COMMAND_NAME_RE, NOTIFY_CATEGORIES, botActive, forgetChatConfig, patchChatConfig, readAllChatConfigs, readChatConfig, readGlobals,
-  type BroadcastCategory, type ChatConfig, type RawConfig,
+  COMMAND_NAME_RE, CUSTOM_MAX, FUN_KINDS, NOTIFY_CATEGORIES, botActive, saveInviteLink, forgetChatConfig, patchChatConfig, readAllChatConfigs, readChatConfig, readGlobals,
+  type BroadcastCategory, type ChatConfig, type FunKind, type RawConfig,
 } from '../../lib/tgChatConfig.js'
 import { REQUESTS_CHAT_KEY } from '../site/settings.js'
 import { ensureTaiWebhook, taiBot } from './club.js'
 import { syncCommandMenu } from './commands.js'
 import { createInvite, INVITE_ADMIN_RIGHTS, readInvite } from './membership.js'
+import { MODERATION_COMMANDS } from './moderation.js'
+import { COMMAND_KINDS, type CommandKind } from '../../lib/tgChatCommands.js'
+import { registerAccessRoutes } from './admin.access.js'
+import { registerStreamRoutes } from './admin.streams.js'
 
 export const tgAdminRouter = new Hono<AppEnv>()
 tgAdminRouter.use('*', requireAuth, requireRole('owner'))
@@ -36,6 +40,7 @@ export const CATEGORY_INFO: { key: (typeof NOTIFY_CATEGORIES)[number]; title: st
   { key: 'money', title: 'Деньги клиентов', about: 'Пополнения депозитов, новые долги, повторные оплаты по СБП.' },
   { key: 'stock', title: 'Склад', about: 'Заканчивается товар, принята поставка.' },
   { key: 'events', title: 'Мероприятия', about: 'Новые мероприятия, начало аренды, завершённые события.' },
+  { key: 'streams', title: 'Стримы', about: 'Ссылки на эфир и донаты из MafBoard — если в «Стримах» включена публикация. Укажите тему «Стримы».' },
 ]
 
 // ─── Бот ─────────────────────────────────────────────────────────────────────
@@ -148,7 +153,7 @@ tgAdminRouter.get('/invites/:code', async (c) => {
 
 // ─── Один чат ────────────────────────────────────────────────────────────────
 
-interface ChatMemberInfo { status?: string; can_delete_messages?: boolean; can_pin_messages?: boolean; can_invite_users?: boolean; can_manage_topics?: boolean }
+interface ChatMemberInfo { status?: string; can_delete_messages?: boolean; can_pin_messages?: boolean; can_invite_users?: boolean; can_manage_topics?: boolean; can_restrict_members?: boolean }
 interface ChatInfo { title?: string; type?: string; is_forum?: boolean }
 
 /** Что бот реально может в чате сейчас (по Telegram). null — Telegram не ответил. */
@@ -174,6 +179,7 @@ async function liveChat(bot: TgBot, chatId: string) {
       pinMessages: admin && member.can_pin_messages === true,
       inviteUsers: admin && member.can_invite_users === true,
       manageTopics: admin && member.can_manage_topics === true,
+      restrictMembers: admin && member.can_restrict_members === true,
     },
   }
 }
@@ -190,6 +196,7 @@ async function chatPayload(db: Database, bot: TgBot | null, chatId: string) {
     polls: polls.filter((p) => p.chatId === chatId).map((p) => ({ id: p.id, title: p.title, enabled: p.enabled, threadId: p.threadId })),
     presets: TAI_PRESETS,
     categories: CATEGORY_INFO,
+    moderationCommands: MODERATION_COMMANDS,
   }
 }
 
@@ -205,7 +212,7 @@ const CommandSchema = z.object({
   name: z.string().trim().toLowerCase().regex(COMMAND_NAME_RE, 'Команда — латиница, цифры и «_», до 32 символов'),
   aliases: z.array(z.string().trim().min(1).max(32)).max(8),
   description: z.string().trim().min(1).max(64),
-  kind: z.enum(['mention', 'text', 'rules', 'help']),
+  kind: z.enum(COMMAND_KINDS as [CommandKind, ...CommandKind[]]),
   audience: z.enum(['all', 'unvoted', 'yes', 'no', 'staff']).optional(),
   text: z.string().max(2000).optional(),
   enabled: z.boolean(),
@@ -214,7 +221,31 @@ const CommandSchema = z.object({
 const PRESET_KEYS = TAI_PRESETS.map((p) => p.key) as [string, ...string[]]
 const PatchSchema = z.object({
   mode: ModeSchema.optional(),
-  tai: z.object({ on: z.boolean(), preset: z.enum(PRESET_KEYS), harshness: z.enum(['soft', 'medium', 'savage']), profanity: z.boolean() }).partial().optional(),
+  tai: z.object({
+    on: z.boolean(),
+    preset: z.enum(PRESET_KEYS),
+    harshness: z.enum(['soft', 'medium', 'savage']),
+    profanity: z.boolean(),
+    custom: z.string().max(CUSTOM_MAX),
+    chime: z.enum(['off', 'rare', 'often']),
+    reactions: z.boolean(),
+  }).partial().optional(),
+  fun: z.object({
+    on: z.boolean(),
+    perDay: z.number().int().min(1).max(6),
+    from: z.number().int().min(0).max(23),
+    to: z.number().int().min(1).max(24),
+    kinds: z.array(z.enum(FUN_KINDS as [FunKind, ...FunKind[]])).min(1).max(4),
+    threadId: Thread,
+  }).partial().optional(),
+  access: z.object({
+    invite: z.boolean(),
+    everyone: z.boolean(),
+    games: z.array(z.enum(['sport', 'city'])).max(2),
+    staff: z.boolean(),
+    guard: z.boolean(),
+  }).partial().optional(),
+  moderation: z.object({ on: z.boolean() }).partial().optional(),
   commands: z.object({ access: z.enum(['admins', 'everyone']), cooldownMin: z.number().int().min(0).max(120), list: z.array(CommandSchema).max(40) }).partial().optional(),
   notify: z.record(z.enum(NOTIFY_CATEGORIES), z.object({ on: z.boolean(), threadId: Thread })).optional(),
   welcome: z.object({ on: z.boolean(), text: z.string().max(1000), deleteService: z.boolean(), rules: z.string().max(3000) }).partial().optional(),
@@ -240,6 +271,12 @@ function toRaw(body: Patch): RawConfig {
     ...(body.tai?.preset ? { preset: body.tai.preset } : {}),
     ...(body.tai?.harshness ? { harshness: body.tai.harshness } : {}),
     ...(body.tai?.profanity !== undefined ? { profanity: body.tai.profanity } : {}),
+    ...(body.tai?.custom !== undefined ? { custom: body.tai.custom.trim() } : {}),
+    ...(body.tai?.chime ? { chime: body.tai.chime } : {}),
+    ...(body.tai?.reactions !== undefined ? { reactions: body.tai.reactions } : {}),
+    ...(body.fun ? { fun: body.fun } : {}),
+    ...(body.access ? { access: body.access } : {}),
+    ...(body.moderation ? { moderation: body.moderation } : {}),
     ...(body.commands ? { commands: body.commands } : {}),
     ...(broadcast && Object.keys(broadcast).length ? { notify: broadcast as Partial<Record<BroadcastCategory, { on: boolean; threadId: number | null }>> } : {}),
     ...(body.welcome ? { welcome: body.welcome } : {}),
@@ -260,8 +297,10 @@ tgAdminRouter.patch('/chats/:id', zValidator('json', PatchSchema), async (c) => 
   await patchChatConfig(db, chatId, { mode: current.mode, ...toRaw(body) })
   const config = await readChatConfig(db, chatId)
 
-  // Меню «/» в Telegram — когда поменялись команды или правила (для /rules).
-  if (body.commands?.list || body.welcome?.rules !== undefined) {
+  // Проверку заявок выключили — старая ссылка с заявкой больше не нужна.
+  if (body.access?.guard === false) await saveInviteLink(db, chatId, null)
+  // Меню «/» в Telegram — когда поменялись команды, правила (для /rules) или модерация.
+  if (body.commands?.list || body.welcome?.rules !== undefined || body.moderation) {
     const bot = await taiBot(db)
     if (bot) await syncCommandMenu(bot, chatId, config)
   }
@@ -368,3 +407,6 @@ tgAdminRouter.post('/resolve-link', zValidator('json', z.object({ url: z.string(
   if (parsed.threadId) await recordTopic(db, chatId, parsed.threadId, name?.trim() || null)
   return c.json({ chatId, title: info.title ?? null, threadId: parsed.threadId, topicName: name?.trim() || null })
 })
+
+registerAccessRoutes(tgAdminRouter)
+registerStreamRoutes(tgAdminRouter)

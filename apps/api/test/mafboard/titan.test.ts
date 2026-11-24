@@ -347,3 +347,41 @@ describe('trustedApiBase', () => {
     assert.equal(trustedApiBase('https://user@club.titanpos.ru/api', root), null)
   })
 })
+
+describe('Titan Connect: эфир клуба', () => {
+  const live = {
+    id: 'stream-1',
+    status: 'live',
+    title: 'Финал',
+    links: [{ kind: 'watch', label: 'VK', url: 'https://live.vkvideo.ru/titan' }, { kind: 'donate', label: 'Донат', url: 'https://www.donationalerts.com/r/titan' }],
+  }
+
+  it('ссылки молча уходят в HUB клуба ключом клуба; решение о публикации — за HUB', async () => {
+    const ctx = seededContext()
+    const host = await titanHost(ctx)
+    const res = await call(ctx, 'POST', `/v1/clubs/${host.clubId}/stream`, { token: host.accessToken, body: live })
+    assert.equal(res.status, 200)
+    assert.deepEqual(res.json, { ok: true, published: false })
+    assert.equal(ctx.titan.calls.streams.length, 1)
+    const sent = ctx.titan.calls.streams[0]!
+    assert.equal(sent.apiBase, TITAN_API_BASE)
+    assert.equal(sent.stream.source, 'mafboard')
+    assert.equal(sent.stream.links.length, 2)
+  })
+
+  it('эфир без https-ссылки на трансляцию не принимается', async () => {
+    const ctx = seededContext()
+    const host = await titanHost(ctx)
+    const res = await call(ctx, 'POST', `/v1/clubs/${host.clubId}/stream`, { token: host.accessToken, body: { ...live, links: [{ kind: 'watch', label: '', url: 'http://insecure.example/x' }] } })
+    assert.equal(res.status, 422)
+    assert.equal(ctx.titan.calls.streams.length, 0)
+  })
+
+  it('клуб без Titan HUB — titan_not_linked', async () => {
+    const ctx = seededContext()
+    const host = await president(ctx)
+    const res = await call(ctx, 'POST', `/v1/clubs/${host.clubId}/stream`, { token: host.accessToken, body: live })
+    assert.equal(res.status, 409)
+    assert.equal(res.json.error.code, 'titan_not_linked')
+  })
+})
