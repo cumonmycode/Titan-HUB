@@ -19,11 +19,15 @@ import { MAX_UPLOAD_BODY_BYTES, storeImage } from '../../lib/imageStore.js'
 import { taiBot } from './club.js'
 import { appendMessage, markBlocked, markOutbound } from './dialog/memory.js'
 import { todaysPolls } from './games.js'
+import { answerAfterPause } from './inbox.js'
 
 const PAGE = 50
 const LIST_LIMIT = 200
 const TEXT_MAX = 3_500
 const CAPTION_MAX = 1_000
+/** Сотрудник молчит час — Tai сам возвращается в чат (каждый ответ отодвигает время). */
+export const AUTO_RESUME_MS = 60 * 60_000
+const resumeAt = () => new Date(Date.now() + AUTO_RESUME_MS)
 const TG_ID_RE = /^\d{3,20}$/
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 /** Событие для живого обновления списка и переписки в HUB. */
@@ -52,6 +56,8 @@ export interface InboxChat {
   username: string | null
   profile: { id: string; nickname: string; photoUrl: string | null; role: string } | null
   aiPaused: boolean
+  /** Когда Tai сам вернётся (ISO) — пока на паузе. */
+  resumeAt: string | null
   needsAttention: boolean
   dmOpen: boolean
   unread: number
@@ -68,7 +74,7 @@ interface ChatFilter {
 /** Диалоги Tai в личке: ждущие человека сверху, дальше — свежие. */
 async function listChats(db: Database, f: ChatFilter): Promise<InboxChat[]> {
   const res = await db.execute(sql`
-    SELECT c.tg_id, c.first_name, c.username, c.ai_paused, c.needs_attention, c.dm_open, c.updated_at,
+    SELECT c.tg_id, c.first_name, c.username, c.ai_paused, c.ai_resume_at, c.needs_attention, c.dm_open, c.updated_at,
            p.id AS profile_id, p.nickname, p.role,
            (SELECT count(DISTINCT ch.shift_id)::int FROM checks ch WHERE ch.player_id = p.id AND ch.status = 'closed') AS visits,
            COALESCE(p.photo_url, p.tg_photo_url, p.gomafia_photo_url) AS photo_url,
@@ -104,6 +110,7 @@ async function listChats(db: Database, f: ChatFilter): Promise<InboxChat[]> {
         ? { id: String(r['profile_id']), nickname: String(r['nickname']), photoUrl: (r['photo_url'] as string | null) ?? null, role: String(r['role']) }
         : null,
       aiPaused: !!r['ai_paused'],
+      resumeAt: r['ai_paused'] && r['ai_resume_at'] ? new Date(r['ai_resume_at'] as string).toISOString() : null,
       needsAttention: !!r['needs_attention'],
       dmOpen: r['dm_open'] !== false,
       unread: Number(r['unread'] ?? 0),
@@ -177,7 +184,7 @@ async function afterStaffSend(db: Database, clubId: string | null | undefined, t
   await markOutbound(db, tgId, false)
   const aiPaused = pauseAi || !!contact?.aiPaused
   await db.update(taiContacts)
-    .set({ needsAttention: false, staffReadAt: new Date(), aiPaused, updatedAt: new Date() })
+    .set({ needsAttention: false, staffReadAt: new Date(), aiPaused, aiResumeAt: aiPaused ? resumeAt() : null, updatedAt: new Date() })
     .where(eq(taiContacts.tgId, tgId))
   publishEvent(clubId, INBOX_EVENT, { tgId })
   return aiPaused
@@ -275,12 +282,15 @@ taiInboxRouter.patch('/:tgId', zValidator('json', z.object({ aiPaused: z.boolean
   const tgId = c.req.param('tgId')
   if (!TG_ID_RE.test(tgId)) return c.json({ error: 'Bad id' }, 400)
   const { aiPaused } = c.req.valid('json')
+  const [before] = await db.select().from(taiContacts).where(eq(taiContacts.tgId, tgId)).limit(1)
   const [updated] = await db.update(taiContacts)
-    .set({ aiPaused, ...(aiPaused ? {} : { needsAttention: false }), updatedAt: new Date() })
+    .set({ aiPaused, aiResumeAt: aiPaused ? resumeAt() : null, ...(aiPaused ? {} : { needsAttention: false }), updatedAt: new Date() })
     .where(eq(taiContacts.tgId, tgId))
     .returning({ tgId: taiContacts.tgId })
   if (!updated) return c.json({ error: 'Диалог не найден' }, 404)
   publishEvent(c.var.club?.id, INBOX_EVENT, { tgId })
+  // Вернули Tai, а человек ждёт ответа — Tai сразу отвечает (не ждём нового сообщения).
+  if (!aiPaused && before?.aiPaused && before.needsAttention) void answerAfterPause(db, c.var.club?.id ?? null, before)
   return c.json({ ok: true, aiPaused })
 })
 

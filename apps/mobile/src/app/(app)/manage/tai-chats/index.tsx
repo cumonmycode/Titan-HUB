@@ -8,7 +8,7 @@ import { Avatar } from '@/components/new-check-parts';
 import { whenText } from '@/lib/clients-api';
 import { haptic } from '@/lib/haptics';
 import { plural } from '@/lib/format';
-import { lastLine, useTaiChats, type InboxChat, type InboxFilter } from '@/lib/tai-inbox-api';
+import { lastLine, resumeText, useTaiChats, type InboxChat, type InboxFilter } from '@/lib/tai-inbox-api';
 
 
 const ATTENTION_COLOR = '#FF9500';
@@ -104,7 +104,7 @@ function ChatRow({ chat, onPress }: { chat: InboxChat; onPress: () => void }) {
   const status = chat.needsAttention
     ? { text: 'ждёт ответа', color: ATTENTION_COLOR }
     : chat.aiPaused
-      ? { text: 'ведёт сотрудник', color: STAFF_COLOR }
+      ? { text: chat.resumeAt ? `ведёт сотрудник · Tai ${resumeText(chat.resumeAt)}` : 'ведёт сотрудник', color: STAFF_COLOR }
       : chat.segment === 'staff'
         ? { text: 'команда', color: '#8E8E93' }
         : chat.segment === 'client'

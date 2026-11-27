@@ -25,6 +25,8 @@ export const taiContacts = pgTable('tai_contacts', {
   aiPaused: boolean('ai_paused').notNull().default(false),
   needsAttention: boolean('needs_attention').notNull().default(false),
   staffReadAt: timestamp('staff_read_at', { withTimezone: true }),
+  // Когда Tai сам вернётся в чат (миграция 096): последний ответ сотрудника + 1 час.
+  aiResumeAt: timestamp('ai_resume_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 })

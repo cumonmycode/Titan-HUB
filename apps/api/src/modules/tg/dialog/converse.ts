@@ -201,15 +201,27 @@ async function deliver(club: TgClub, person: TgPerson, target: ChatTarget, resul
  * Ход диалога. text — сообщение человека (голосовое уже распознано). voice —
  * ответить голосом. В личке contact обязателен (карточка собеседника).
  */
-export async function converse(club: TgClub, person: TgPerson, contact: TaiContact | null, target: ChatTarget, text: string, voice: boolean): Promise<void> {
+/**
+ * replay — Tai вернулся в чат после паузы и отвечает на сообщения, которые человек уже
+ * написал (они в истории): ничего нового в историю не пишем, отвечаем на последние.
+ */
+export async function converse(club: TgClub, person: TgPerson, contact: TaiContact | null, target: ChatTarget, text: string, voice: boolean, opts: { replay?: boolean } = {}): Promise<void> {
   if (await overLimit(club, person)) {
     await club.bot.send(target.chatId, 'Давай чуть передохнём — слишком много сообщений подряд. Напиши через полчасика 🙏', { threadId: target.threadId })
     return
   }
   // В группе в истории нужно видеть, кто именно спрашивал.
-  const userContent = target.groupTitle ? `${displayName(person)}: ${text}` : text
+  let userContent = target.groupTitle ? `${displayName(person)}: ${text}` : text
   const history = await recentTurns(club.db, target.chatId)
-  await appendMessage(club.db, { chatId: target.chatId, tgId: person.tgId, role: 'user', content: userContent, voice })
+  if (opts.replay) {
+    // Последняя реплика человека уже в истории — её и отвечаем.
+    const last = history[history.length - 1]
+    if (!last || last.role !== 'user') return
+    history.pop()
+    userContent = last.content
+  } else {
+    await appendMessage(club.db, { chatId: target.chatId, tgId: person.tgId, role: 'user', content: userContent, voice })
+  }
 
   const typing = setInterval(() => void club.bot.chatAction(target.chatId, voice ? 'record_voice' : 'typing', target.threadId), TYPING_EVERY_MS)
   void club.bot.chatAction(target.chatId, voice ? 'record_voice' : 'typing', target.threadId)

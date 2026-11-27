@@ -20,7 +20,7 @@ import { queryClient } from '@/lib/query';
 import { useClubKey } from '@/lib/queries';
 import { newcomerToClient } from '@/lib/leads-api';
 import { pickChatPhoto } from '@/lib/photo';
-import { markTaiChatRead, sendTaiPhoto, sendTaiPoll, sendTaiReply, setTaiPaused, taiMessagesKey, useTaiChat, useTaiMessages, useTodayPolls, type InboxMessage } from '@/lib/tai-inbox-api';
+import { markTaiChatRead, resumeText, sendTaiPhoto, sendTaiPoll, sendTaiReply, setTaiPaused, taiMessagesKey, useTaiChat, useTaiMessages, useTodayPolls, type InboxMessage } from '@/lib/tai-inbox-api';
 import { FONT_SCALE_MAX } from '@/lib/text-scale';
 import { colors, space, type } from '@/lib/theme';
 
@@ -254,7 +254,7 @@ export default function TaiDialogScreen() {
         onEndVisible={(visible) => {
           atEnd.current = visible;
         }}>
-        {data ? <ModeCard paused={paused} waiting={data.needsAttention} blocked={!data.dmOpen} onToggle={togglePause} /> : null}
+        {data ? <ModeCard paused={paused} waiting={data.needsAttention} blocked={!data.dmOpen} resumeAt={data.resumeAt} onToggle={togglePause} /> : null}
         {rows.map((row) =>
           row.kind === 'day' ? (
             <View key={row.key} style={styles.day}>
@@ -272,7 +272,22 @@ export default function TaiDialogScreen() {
         <View
           onLayout={(e) => setComposerTop(e.nativeEvent.layout.height)}
           style={[styles.composer, { paddingBottom: bottomPad, paddingLeft: insets.left + space.md, paddingRight: insets.right + space.md }]}>
-          {!paused ? <Text style={[type.caption1, styles.secondary, styles.hint]}>Ваш ответ поставит Tai на паузу в этом чате</Text> : null}
+          {paused && data?.dmOpen ? (
+            <Animated.View entering={FadeIn.duration(180)} exiting={FadeOut.duration(120)}>
+              <GlassView style={styles.resumeBar}>
+                <SymbolView name="pause.circle.fill" size={18} tintColor={colors.accent} />
+                <Text style={[type.footnote, styles.label, styles.flex]} numberOfLines={2}>
+                  {data.resumeAt ? `Tai на паузе — вернётся сам ${resumeText(data.resumeAt)}, если вы не ответите` : 'Tai на паузе — отвечаете вы'}
+                </Text>
+                <Pressable onPress={togglePause} style={({ pressed }) => [styles.resumeButton, pressed && styles.pressed]} accessibilityRole="button" accessibilityLabel="Включить Tai в этом чате">
+                  <SymbolView name="sparkles" size={13} weight="semibold" tintColor="white" />
+                  <Text style={[type.footnote, styles.resumeButtonText]}>Включить Tai</Text>
+                </Pressable>
+              </GlassView>
+            </Animated.View>
+          ) : !paused ? (
+            <Text style={[type.caption1, styles.secondary, styles.hint]}>Ваш ответ поставит Tai на паузу на час</Text>
+          ) : null}
           <View style={styles.inputRow}>
           <Pressable
             onPress={attach}
@@ -329,12 +344,12 @@ function DialogTitle({ title, subtitle }: { title: string; subtitle: string }) {
 }
 
 /** Кто сейчас отвечает клиенту — и одна кнопка, чтобы это поменять. */
-function ModeCard({ paused, waiting, blocked, onToggle }: { paused: boolean; waiting: boolean; blocked: boolean; onToggle: () => void }) {
+function ModeCard({ paused, waiting, blocked, resumeAt, onToggle }: { paused: boolean; waiting: boolean; blocked: boolean; resumeAt: string | null; onToggle: () => void }) {
   const title = blocked ? 'Клиент заблокировал бота' : paused ? (waiting ? 'Клиент ждёт вашего ответа' : 'Отвечаете вы — Tai на паузе') : 'Отвечает Tai';
   const about = blocked
     ? 'Сообщения не доставляются, пока клиент снова не откроет бота.'
     : paused
-      ? 'Tai читает переписку, но молчит. Верните его, когда закончите.'
+      ? `Tai читает переписку, но молчит.${resumeAt ? ` Если не ответите, вернётся сам ${resumeText(resumeAt)}.` : ' Верните его, когда закончите.'}`
       : 'Можно вмешаться в любой момент — просто напишите ниже.';
   return (
     <Animated.View entering={FadeIn.duration(200)}>
@@ -434,6 +449,9 @@ const styles = StyleSheet.create({
   composerDock: { position: 'absolute', left: 0, right: 0, bottom: 0 },
   composer: { gap: space.xs, paddingTop: space.sm, backgroundColor: colors.groupedBackground },
   hint: { textAlign: 'center' },
+  resumeBar: { flexDirection: 'row', alignItems: 'center', gap: space.sm, paddingVertical: space.sm, paddingLeft: space.md, paddingRight: space.sm, borderRadius: 18, borderCurve: 'continuous', overflow: 'hidden' },
+  resumeButton: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: space.md, minHeight: 34, borderRadius: 17, backgroundColor: '#8B5CF6' },
+  resumeButtonText: { color: 'white', fontWeight: '600' },
   inputRow: { flexDirection: 'row', alignItems: 'flex-end', gap: space.sm },
   attach: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.fill },
   photo: { width: 220, height: 220, borderRadius: 12, marginVertical: 2 },

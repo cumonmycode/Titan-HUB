@@ -27,6 +27,8 @@ export type InboxChat = {
   username: string | null;
   profile: { id: string; nickname: string; photoUrl: string | null; role: string } | null;
   aiPaused: boolean;
+  /** Когда Tai сам вернётся (ISO): через час после последнего ответа сотрудника. */
+  resumeAt: string | null;
   needsAttention: boolean;
   dmOpen: boolean;
   unread: number;
@@ -48,6 +50,12 @@ export type InboxMessage = {
 };
 
 const LIST_REFRESH_MS = 30_000;
+/** Сотрудник молчит час — Tai сам возвращается (как на сервере). */
+export const AUTO_RESUME_MS = 60 * 60_000;
+
+const hm = new Intl.DateTimeFormat('ru-RU', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Moscow' });
+/** «в 15:40» — когда Tai вернётся в чат. */
+export const resumeText = (iso: string | null): string | null => (iso ? `в ${hm.format(new Date(iso))}` : null);
 const CHAT_REFRESH_MS = 15_000;
 
 export type InboxFilter = 'all' | 'attention' | InboxSegment;
@@ -113,7 +121,9 @@ export async function sendTaiReply(club: string, tgId: string, text: string): Pr
 }
 
 export async function setTaiPaused(club: string, tgId: string, aiPaused: boolean): Promise<void> {
-  queryClient.setQueryData<InboxChat | undefined>([club, 'tai-inbox', 'chat', tgId], (old) => (old ? { ...old, aiPaused, needsAttention: aiPaused ? old.needsAttention : false } : old));
+  queryClient.setQueryData<InboxChat | undefined>([club, 'tai-inbox', 'chat', tgId], (old) =>
+    old ? { ...old, aiPaused, resumeAt: aiPaused ? new Date(Date.now() + AUTO_RESUME_MS).toISOString() : null, needsAttention: aiPaused ? old.needsAttention : false } : old,
+  );
   try {
     await api.patch(`/tai-inbox/${tgId}`, { aiPaused });
   } finally {

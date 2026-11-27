@@ -18,7 +18,7 @@ import { linkRequestChat, requestLinkedText } from './login/request.js'
 import { requestIntro } from './dialog/request-desk.js'
 import { converse } from './dialog/converse.js'
 import { touchContact, updateContact } from './dialog/memory.js'
-import { holdForStaff } from './inbox.js'
+import { holdForStaff, resumeTai } from './inbox.js'
 import { onSmmPrivate } from '../smm/tg-handlers.js'
 import { handleCardCommand } from './widgets.js'
 
@@ -28,7 +28,7 @@ const START_GREETING = 'Привет! (человек только что отк
 const ASKS_VOICE = /(ответь|скажи|запиши|отправь|пришли|расскажи)\w*\s+(мне\s+)?голос/i
 
 /** Модуль ИИ клуба включён (на основном домене — всегда). */
-async function aiEnabled(club: TgClub): Promise<boolean> {
+export async function aiEnabled(club: TgClub): Promise<boolean> {
   if (!club.id) return true
   const resolved = await resolveClubByHost(club.host).catch(() => null)
   return aiAllowed(resolved)
@@ -109,6 +109,11 @@ export async function onPrivateMessage(club: TgClub, msg: TgMessage): Promise<vo
   }
   // Карточки (/games, /me, /club, /shift) — без ИИ, сразу из данных клуба.
   if (text.startsWith('/') && (await handleCardCommand(club, from, chatId, text))) return
+  // Сотрудник молчал час — Tai возвращается в чат и отвечает сам.
+  if (contact.aiPaused && contact.aiResumeAt && contact.aiResumeAt.getTime() <= Date.now()) {
+    await resumeTai(club, person.tgId)
+    contact.aiPaused = false
+  }
   // Диалог ведёт сотрудник из HUB («Диалоги Tai»): Tai молчит, сообщение ждёт человека.
   if (contact.aiPaused && !person.staff) {
     await holdForStaff(club, person, msg, text)

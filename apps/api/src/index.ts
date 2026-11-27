@@ -17,6 +17,7 @@ import { runOutreach } from './modules/tg/outreach.js'
 import { pruneMessages } from './modules/tg/dialog/memory.js'
 import { FUN_TICK_MS, runFunPosts } from './modules/tg/fun.js'
 import { runChatUnlocks } from './modules/tg/moderation.js'
+import { resumeIdleChats } from './modules/tg/inbox.js'
 import { smmTick } from './modules/smm/workflow.js'
 import { runMigrations, runMigrationsOn } from './migrations/runner.js'
 import { listActiveClubDbNames, buildClubConnString } from './lib/clubResolver.js'
@@ -261,6 +262,8 @@ function scheduleTaiCron() {
   // Приколы и факты в чатах (раз в 10 минут) и открытие чатов после /mutechat (раз в минуту).
   setInterval(() => runForAllClubs('tai-fun', runFunPosts).catch(console.error), FUN_TICK_MS)
   setInterval(() => runForAllClubs('tg-unlocks', runChatUnlocks).catch(console.error), 60_000)
+  // «Диалоги Tai»: сотрудник молчит час — Tai возвращается в чат и отвечает сам.
+  setInterval(() => runForAllClubs('tai-resume', resumeIdleChats).catch(console.error), 60_000)
   console.log('🤖 Tai cron scheduled (вебхук, сообщения первым, чистка истории, приколы, модерация)')
 }
 
