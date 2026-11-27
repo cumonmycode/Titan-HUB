@@ -3,6 +3,8 @@ package ru.titan.menu
 import android.annotation.SuppressLint
 import android.annotation.TargetApi
 import android.app.Activity
+import android.app.AlarmManager
+import android.app.PendingIntent
 import android.content.Intent
 import android.graphics.Bitmap
 import android.net.ConnectivityManager
@@ -13,6 +15,8 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.Process
+import android.os.SystemClock
 import android.util.Log
 import android.view.KeyEvent
 import android.view.View
@@ -21,6 +25,7 @@ import android.view.WindowInsets
 import android.view.WindowInsetsController
 import android.view.WindowManager
 import android.webkit.ConsoleMessage
+import android.webkit.JavascriptInterface
 import android.webkit.RenderProcessGoneDetail
 import android.webkit.SslErrorHandler
 import android.webkit.WebChromeClient
@@ -29,12 +34,15 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.webkit.WebViewRenderProcess
+import android.webkit.WebViewRenderProcessClient
 import android.widget.FrameLayout
 import android.widget.TextView
 import org.json.JSONObject
 import java.io.IOException
 import java.net.Inet4Address
 import java.text.DateFormat
+import java.util.Calendar
 import java.util.Date
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledFuture
@@ -45,8 +53,12 @@ import java.util.concurrent.TimeUnit
  *  • привязан — открываем /screen/<id> клуба, раз в 20 с отмечаемся (в сети, поворот);
  *  • не привязан — показываем код, объявляемся в локальной сети и ждём телефон;
  *  • старый режим Titan Menu 1.0 — показываем /menu, но телефон уже может нас найти.
- * В любом режиме держим Wi‑Fi включённым (NetworkKeeper) и предупреждаем на экране, если
- * сбилась дата приставки — с ней нет связи с сервером (DeviceClock).
+ * В любом режиме держим Wi‑Fi включённым (NetworkKeeper). Точное время узнаём сами (TrueTime):
+ * сбитая дата приставки больше не рвёт связь с сервером, а систему подталкиваем взять время
+ * из сети заново (DeviceClock).
+ * Страница сама отмечается раз в 10 с (мост TitanMenu.alive). Замолчала на 90 с — перезагружаем
+ * её, не помогло — пересоздаём WebView; движок страницы завис или упал — тоже пересоздаём.
+ * Раз в сутки ночью приложение перезапускается целиком: WebView на приставке копит память.
  * «Назад» экран не закрывает; пропала связь — показываем, что происходит, и повторяем
  * сами. Настройки приставки — удержать OK на пульте.
  */
@@ -54,7 +66,10 @@ class MenuActivity : Activity(), LocalServer.Listener {
     private enum class Mode { PAIRED, LEGACY, UNPAIRED }
 
     private val handler = Handler(Looper.getMainLooper())
+    /** Пульс к серверу. */
     private val worker = Executors.newSingleThreadScheduledExecutor()
+    /** Wi‑Fi и часы — отдельно: зависший запрос пульса их не задерживает. */
+    private val upkeep = Executors.newSingleThreadScheduledExecutor()
     private lateinit var prefs: Prefs
     private lateinit var rotated: RotatedLayout
     private lateinit var stage: FrameLayout
@@ -77,6 +92,12 @@ class MenuActivity : Activity(), LocalServer.Listener {
     private var holdHandled = false
     private var heartbeat: ScheduledFuture<*>? = null
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
+    private var resumed = false
+    /** Страница отмечалась хотя бы раз после загрузки — значит, умеет, и её молчание — сбой. */
+    @Volatile private var aliveSeen = false
+    @Volatile private var lastAlive = 0L
+    private var rescues = 0
+    @Volatile private var unresponsiveSince = 0L
 
     private val retry = Runnable { load() }
     private val stuck = Runnable { fail(getString(R.string.status_slow)) }
@@ -85,6 +106,13 @@ class MenuActivity : Activity(), LocalServer.Listener {
         override fun run() {
             showClockWarning()
             handler.postDelayed(this, CLOCK_CHECK_MS)
+        }
+    }
+    private val watchdog = object : Runnable {
+        override fun run() {
+            checkPage()
+            maybeDailyRestart()
+            handler.postDelayed(this, WATCHDOG_MS)
         }
     }
 
@@ -99,8 +127,10 @@ class MenuActivity : Activity(), LocalServer.Listener {
         setContentView(buildScreen())
         hideSystemBars()
         watchNetwork()
-        worker.scheduleWithFixedDelay(guarded("Wi‑Fi") { keeper.check() }, 0, KEEPER_SEC, TimeUnit.SECONDS)
+        upkeep.scheduleWithFixedDelay(guarded("Wi‑Fi") { keeper.check() }, 0, KEEPER_SEC, TimeUnit.SECONDS)
+        upkeep.scheduleWithFixedDelay(guarded("часы") { syncClock() }, 0, CLOCK_SYNC_CHECK_SEC, TimeUnit.SECONDS)
         handler.post(clockWatch)
+        handler.postDelayed(watchdog, WATCHDOG_MS)
         applyMode()
     }
 
@@ -255,6 +285,20 @@ class MenuActivity : Activity(), LocalServer.Listener {
 
     // ── Дата приставки ─────────────────────────────────────────────────────
 
+    /**
+     * Сверяем время: пока точного нет или часы приставки сбиты — каждую минуту, иначе раз в
+     * 30 мин. Сбиты — подталкиваем систему; узнали точное время — сразу повторяем загрузку.
+     */
+    private fun syncClock() {
+        val due = !TrueTime.isKnown || TrueTime.isDeviceClockOff() || TrueTime.sinceSyncMs > CLOCK_RESYNC_MS
+        if (due) {
+            val wasKnown = TrueTime.isKnown
+            val hosts = listOfNotNull(prefs.host, url?.let { Uri.parse(it) }?.let { "${it.scheme}://${it.host}" }).distinct()
+            if (TrueTime.sync(hosts) && !wasKnown) handler.post { if (failed) { retryDelay = RETRY_MIN_MS; load() } }
+        }
+        DeviceClock.nudgeSystem(this)
+    }
+
     private fun showClockWarning() {
         val wrong = DeviceClock.isWrong()
         if (wrong) clockWarning.text = getString(R.string.clock_wrong, DateFormat.getDateInstance(DateFormat.LONG).format(Date()))
@@ -299,7 +343,8 @@ class MenuActivity : Activity(), LocalServer.Listener {
             settings.textZoom = 100 // крупный шрифт в системе ломает раскладку меню
             settings.setSupportZoom(false)
             settings.userAgentString = "${settings.userAgentString} TitanMenu/${BuildConfig.VERSION_NAME}"
-            cache = OfflineCache(this@MenuActivity, settings.userAgentString)
+            if (cache == null) cache = OfflineCache(this@MenuActivity, settings.userAgentString)
+            addJavascriptInterface(PageBridge(), "TitanMenu")
             webViewClient = PageClient()
             webChromeClient = object : WebChromeClient() {
                 override fun onConsoleMessage(message: ConsoleMessage): Boolean {
@@ -308,8 +353,92 @@ class MenuActivity : Activity(), LocalServer.Listener {
                 }
             }
         }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) watchRenderer(view)
         stage.addView(view, 0, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
         web = view
+        aliveSeen = false
+        unresponsiveSince = 0L
+    }
+
+    /** Мост для страницы экрана: «я жива» и точное время для часов на экране. */
+    private inner class PageBridge {
+        @JavascriptInterface
+        fun alive() {
+            lastAlive = SystemClock.elapsedRealtime()
+            aliveSeen = true
+        }
+
+        @JavascriptInterface
+        fun now(): Double = TrueTime.now().toDouble()
+
+        @JavascriptInterface
+        fun version(): String = BuildConfig.VERSION_NAME
+    }
+
+    /** Движок страницы завис (не отвечает дольше 30 с) — завершаем его, дальше onRenderProcessGone. */
+    @TargetApi(Build.VERSION_CODES.Q)
+    private fun watchRenderer(view: WebView) {
+        view.setWebViewRenderProcessClient(object : WebViewRenderProcessClient() {
+            override fun onRenderProcessUnresponsive(view: WebView, renderer: WebViewRenderProcess?) {
+                val now = SystemClock.elapsedRealtime()
+                if (unresponsiveSince == 0L) unresponsiveSince = now
+                if (now - unresponsiveSince < RENDERER_HANG_MS) return
+                Log.w(TAG, "Страница не отвечает ${(now - unresponsiveSince) / 1000} с — перезапускаем движок")
+                unresponsiveSince = 0L
+                if (renderer?.terminate() != true) handler.post { restartWebView() }
+            }
+
+            override fun onRenderProcessResponsive(view: WebView, renderer: WebViewRenderProcess?) {
+                unresponsiveSince = 0L
+            }
+        })
+    }
+
+    /**
+     * Страница отмечается раз в 10 с. Замолчала (зависли скрипты, сеть, движок) — сначала
+     * перезагружаем её, не помогло — пересоздаём WebView. Старая страница из кэша, которая
+     * отмечаться не умеет, сторожа не включает.
+     */
+    private fun checkPage() {
+        val view = web ?: return
+        if (url == null || failed || !aliveSeen) return
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastAlive < PAGE_SILENT_MS) {
+            rescues = 0
+            return
+        }
+        lastAlive = now
+        rescues++
+        if (rescues == 1) {
+            Log.w(TAG, "Страница замолчала — перезагружаем")
+            view.reload()
+        } else {
+            Log.w(TAG, "Страница снова молчит — пересоздаём WebView")
+            rescues = 0
+            restartWebView()
+        }
+    }
+
+    /**
+     * Раз в сутки, ночью (5:00–6:00 по точному времени) — перезапуск приложения целиком:
+     * WebView на приставке за дни копит память, а с ней приходят рывки и зависания.
+     * Если точного времени нет — после 26 часов работы в любое время.
+     */
+    private fun maybeDailyRestart() {
+        if (!resumed || mode == Mode.UNPAIRED) return
+        val up = SystemClock.elapsedRealtime() - Process.getStartElapsedRealtime()
+        if (up < DAILY_MIN_UPTIME_MS) return
+        val hour = Calendar.getInstance().apply { timeInMillis = TrueTime.now() }.get(Calendar.HOUR_OF_DAY)
+        val night = TrueTime.isKnown && hour == DAILY_RESTART_HOUR
+        if (!night && up < DAILY_MAX_UPTIME_MS) return
+        Log.i(TAG, "Плановый перезапуск после ${up / 3_600_000} ч работы")
+        val relaunch = PendingIntent.getActivity(
+            this, 0,
+            Intent(this, MenuActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            PendingIntent.FLAG_CANCEL_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        getSystemService(AlarmManager::class.java)?.set(AlarmManager.ELAPSED_REALTIME, SystemClock.elapsedRealtime() + RELAUNCH_DELAY_MS, relaunch)
+        Process.killProcess(Process.myPid())
     }
 
     private fun load() {
@@ -356,6 +485,7 @@ class MenuActivity : Activity(), LocalServer.Listener {
 
         override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) {
             if (url == "about:blank") return
+            aliveSeen = false
             failed = false
             handler.removeCallbacks(stuck)
             handler.postDelayed(stuck, LOAD_TIMEOUT_MS)
@@ -383,12 +513,14 @@ class MenuActivity : Activity(), LocalServer.Listener {
         @TargetApi(Build.VERSION_CODES.O)
         override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
             Log.w(TAG, "Процесс страницы завершился (сбой: ${detail.didCrash()}), открываем заново")
-            restartWebView()
+            // Колбэк может прийти и от уже убранного WebView — пересоздаём только текущий.
+            if (view === web) handler.post { restartWebView() } else view.destroy()
             return true
         }
     }
 
     private fun restartWebView() {
+        handler.removeCallbacks(stuck)
         web?.let {
             stage.removeView(it)
             it.destroy()
@@ -407,6 +539,7 @@ class MenuActivity : Activity(), LocalServer.Listener {
                         retryDelay = RETRY_MIN_MS
                         load()
                     }
+                    if (!TrueTime.isKnown || TrueTime.isDeviceClockOff()) upkeep.execute(guarded("часы") { syncClock() })
                     // Сеть сменилась — объявляемся заново (новый IP).
                     if (mode != Mode.PAIRED) startDiscovery()
                     if (mode == Mode.UNPAIRED) showPairing()
@@ -494,6 +627,7 @@ class MenuActivity : Activity(), LocalServer.Listener {
 
     override fun onResume() {
         super.onResume()
+        resumed = true
         web?.onResume()
         // Из настроек могли отвязать приставку или выключить старый режим.
         val expected = when {
@@ -505,6 +639,7 @@ class MenuActivity : Activity(), LocalServer.Listener {
     }
 
     override fun onPause() {
+        resumed = false
         web?.onPause()
         super.onPause()
     }
@@ -513,6 +648,7 @@ class MenuActivity : Activity(), LocalServer.Listener {
         handler.removeCallbacksAndMessages(null)
         stopHeartbeat()
         worker.shutdownNow()
+        upkeep.shutdownNow()
         stopDiscovery()
         networkCallback?.let { getSystemService(ConnectivityManager::class.java)?.unregisterNetworkCallback(it) }
         web?.destroy()
@@ -528,6 +664,15 @@ class MenuActivity : Activity(), LocalServer.Listener {
         const val HEARTBEAT_SEC = 20L
         const val KEEPER_SEC = 20L
         const val CLOCK_CHECK_MS = 15_000L
+        const val CLOCK_SYNC_CHECK_SEC = 60L
+        const val CLOCK_RESYNC_MS = 30 * 60_000L
+        const val WATCHDOG_MS = 30_000L
+        const val PAGE_SILENT_MS = 90_000L
+        const val RENDERER_HANG_MS = 30_000L
+        const val DAILY_RESTART_HOUR = 5
+        const val DAILY_MIN_UPTIME_MS = 20 * 3_600_000L
+        const val DAILY_MAX_UPTIME_MS = 26 * 3_600_000L
+        const val RELAUNCH_DELAY_MS = 2_000L
         const val HOLD_MS = 1_200L
         const val HINT_MS = 6_000L
         const val HINT_FADE_MS = 400L

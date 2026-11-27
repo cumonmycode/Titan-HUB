@@ -24,8 +24,8 @@ android {
         // 28 нарочно: с targetSdk 29+ Android не даёт приложению включить Wi‑Fi, а приставка
         // должна возвращаться в сеть сама (NetworkKeeper). APK ставится мимо Google Play.
         targetSdk = 28
-        versionCode = 6
-        versionName = "2.2.0"
+        versionCode = 7
+        versionName = "2.3.0"
     }
 
     signingConfigs {
@@ -42,7 +42,7 @@ android {
     buildTypes {
         release {
             isMinifyEnabled = true
-            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
         }
     }

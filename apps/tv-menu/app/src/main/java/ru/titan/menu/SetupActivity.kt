@@ -140,6 +140,10 @@ class SetupActivity : Activity() {
         val now = DateFormat.getDateTimeInstance(DateFormat.LONG, DateFormat.SHORT).format(Date())
         clock.text = when {
             DeviceClock.isWrong() -> getString(R.string.setup_clock_wrong, now)
+            DeviceClock.isOff() -> getString(
+                R.string.setup_clock_bypassed, now,
+                DateFormat.getDateTimeInstance(DateFormat.LONG, DateFormat.SHORT).format(Date(TrueTime.now())),
+            )
             !DeviceClock.isNetworkTime(this) -> getString(R.string.setup_clock_manual, now)
             else -> getString(R.string.setup_clock_ok, now)
         }

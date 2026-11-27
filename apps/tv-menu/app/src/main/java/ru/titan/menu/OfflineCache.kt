@@ -8,11 +8,17 @@ import android.webkit.WebResourceResponse
 import org.json.JSONObject
 import java.io.ByteArrayInputStream
 import java.io.File
-import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
 import java.security.MessageDigest
+import java.util.concurrent.ArrayBlockingQueue
+import java.util.concurrent.Callable
+import java.util.concurrent.ExecutionException
 import java.util.concurrent.Executors
+import java.util.concurrent.RejectedExecutionException
+import java.util.concurrent.ThreadPoolExecutor
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
@@ -23,10 +29,22 @@ import java.util.concurrent.atomic.AtomicInteger
  *  • Пришли свежие данные экрана — заранее докачиваем все картинки слайдов, чтобы
  *    без интернета показывались и те, до которых очередь ещё не дошла.
  * Ключ — адрес без служебных параметров (t, ping): страница добавляет их от кэша браузера.
+ *
+ * Каждый сетевой запрос ограничен по общему времени ([FRESH_DEADLINE_MS], [STATIC_DEADLINE_MS]):
+ * таймауты HttpURLConnection не покрывают поиск адреса (DNS), и при плохой сети запросы
+ * висели минутами, занимая потоки WebView, — страница переставала получать что-либо
+ * и «зависала» до перезапуска. Теперь по истечении срока отдаём сохранённое, а запрос
+ * доделывается в фоне и обновляет кэш.
  */
 class OfflineCache(context: Context, private val userAgent: String) {
     private val dir = File(context.filesDir, "screen-cache").apply { mkdirs() }
     private val prefetcher = Executors.newSingleThreadExecutor()
+    /** Ждёт опоздавшие ответы, чтобы сохранить их в кэш. */
+    private val lateResults = Executors.newSingleThreadExecutor()
+    /** Сетевые запросы — в своих потоках: зависший запрос не держит поток WebView. */
+    private val network = ThreadPoolExecutor(NET_THREADS, NET_THREADS, 30, TimeUnit.SECONDS, ArrayBlockingQueue(NET_QUEUE)).apply {
+        allowCoreThreadTimeOut(true)
+    }
     private val writes = AtomicInteger()
 
     fun intercept(request: WebResourceRequest): WebResourceResponse? {
@@ -46,7 +64,7 @@ class OfflineCache(context: Context, private val userAgent: String) {
 
     private fun networkFirst(url: Uri, headers: Map<String, String>): WebResourceResponse? {
         val key = keyOf(url)
-        val net = try { fetch(url, headers, FRESH_TIMEOUT_MS) } catch (e: IOException) { null }
+        val net = fetchWithin(url, headers, FRESH_TIMEOUT_MS, FRESH_DEADLINE_MS) { store(key, it) }
         if (net != null && net.status in 200..299) {
             store(key, net)
             if (url.path.orEmpty().endsWith("/public")) prefetchImages(net.body)
@@ -60,9 +78,34 @@ class OfflineCache(context: Context, private val userAgent: String) {
     private fun cacheFirst(url: Uri, headers: Map<String, String>): WebResourceResponse? {
         val key = keyOf(url)
         load(key)?.let { return respond(it) }
-        val net = try { fetch(url, headers, STATIC_TIMEOUT_MS) } catch (e: IOException) { return null }
+        val net = fetchWithin(url, headers, STATIC_TIMEOUT_MS, STATIC_DEADLINE_MS) { store(key, it) } ?: return null
         if (net.status in 200..299) store(key, net)
         return respond(net)
+    }
+
+    /**
+     * Запрос не дольше [deadlineMs]. Не успел — null (страница получит сохранённое), а
+     * удачный поздний ответ всё равно попадёт в кэш через [lateStore].
+     */
+    private fun fetchWithin(url: Uri, headers: Map<String, String>, timeoutMs: Int, deadlineMs: Long, lateStore: (Entry) -> Unit): Entry? {
+        val task = try {
+            network.submit(Callable { fetch(url, headers, timeoutMs) })
+        } catch (e: RejectedExecutionException) {
+            Log.w(TAG, "Сеть перегружена, отдаём сохранённое: ${url.path}")
+            return null
+        }
+        return try {
+            task.get(deadlineMs, TimeUnit.MILLISECONDS)
+        } catch (e: TimeoutException) {
+            Log.w(TAG, "Сеть не ответила за ${deadlineMs / 1000} с: ${url.host}${url.path}")
+            lateResults.execute { runCatching { task.get() }.getOrNull()?.takeIf { it.status in 200..299 }?.let(lateStore) }
+            null
+        } catch (e: ExecutionException) {
+            null
+        } catch (e: InterruptedException) {
+            Thread.currentThread().interrupt()
+            null
+        }
     }
 
     private fun prefetchImages(json: ByteArray) {
@@ -152,6 +195,10 @@ class OfflineCache(context: Context, private val userAgent: String) {
         const val TAG = "TitanMenu"
         const val FRESH_TIMEOUT_MS = 5_000
         const val STATIC_TIMEOUT_MS = 10_000
+        const val FRESH_DEADLINE_MS = 8_000L
+        const val STATIC_DEADLINE_MS = 20_000L
+        const val NET_THREADS = 4
+        const val NET_QUEUE = 24
         const val TRIM_EVERY = 20
         const val MAX_BYTES = 200L * 1024 * 1024
         const val TRIM_TO_BYTES = 150L * 1024 * 1024
