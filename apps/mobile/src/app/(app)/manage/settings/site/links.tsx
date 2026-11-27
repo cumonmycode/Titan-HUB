@@ -50,7 +50,9 @@ export default function SiteLinksScreen() {
     const c = data.contacts;
     switch (l.kind) {
       case 'tai':
-        return data.taiUrl ? null : 'бот Tai не подключён';
+        if (!data.taiUrl) return 'бот Tai не подключён';
+        // Запись на игру уже ведёт к Tai кнопкой «В Telegram» — отдельной кнопки на странице нет.
+        return value.links.some((x) => x.kind === 'book_game' && x.on) ? 'уже есть в записи на игру' : null;
       case 'telegram':
       case 'channel':
       case 'whatsapp':

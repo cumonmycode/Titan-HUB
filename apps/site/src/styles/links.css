@@ -1,5 +1,6 @@
 /* Таплинк (/link): одна колонка по центру, как открытка клуба в профиле соцсетей.
-   Стекло — то же, что на сайте; главные кнопки (запись и Tai) — фиолетовые капсулы. */
+   Стекло — то же, что на сайте. Блоки: карточка игры (единственный фиолетовый акцент),
+   строки действий, плитки связи, адрес. */
 .site.lk-site main.lk {
   position: relative; z-index: 1;
   width: min(520px, 100% - 2 * 16px); margin: 0 auto;
@@ -19,73 +20,100 @@
 .lk-bio { margin: 0; max-width: 40ch; color: var(--muted); font-size: 16px; line-height: 1.5; animation: lk-up .7s .1s var(--ease) both; }
 .lk-head .g-signups { margin-top: 8px; }
 
-.lk-list { display: grid; gap: 12px; }
-.lk-btn {
-  position: relative; display: flex; align-items: center; gap: 14px; width: 100%; min-height: 66px;
-  padding: 12px 16px 12px 12px; border-radius: 22px; color: var(--fg); text-align: left; text-decoration: none;
-  font: inherit; cursor: pointer;
-  transition: transform .3s var(--ease), box-shadow .3s var(--ease), background-color .2s;
-  animation: lk-up .6s var(--ease) both;
-}
-.lk-list > :nth-child(1) { animation-delay: .12s; }
-.lk-list > :nth-child(2) { animation-delay: .16s; }
-.lk-list > :nth-child(3) { animation-delay: .2s; }
-.lk-list > :nth-child(4) { animation-delay: .24s; }
-.lk-list > :nth-child(5) { animation-delay: .28s; }
-.lk-list > :nth-child(n+6) { animation-delay: .32s; }
-.site[data-theme="glass"] .lk-btn.glass { --glass-tint: rgba(20, 16, 44, .3); }
-.lk-primary {
-  border: 1px solid rgba(255, 255, 255, .3);
-  background: linear-gradient(180deg, rgba(255, 255, 255, .3), rgba(255, 255, 255, .02) 55%), rgba(124, 77, 255, .82);
-  -webkit-backdrop-filter: blur(14px) saturate(180%); backdrop-filter: blur(14px) saturate(180%);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .5), 0 18px 36px -16px rgba(90, 50, 230, .95);
-}
-.lk-btn:hover { transform: translateY(-2px); }
-.lk-btn:active { transform: translateY(0) scale(.985); }
-.lk-btn:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
+.lk-list { display: grid; gap: 22px; }
+.lk-list > * { animation: lk-up .5s var(--ease) both; }
+.lk-list > :nth-child(1) { animation-delay: .08s; }
+.lk-list > :nth-child(2) { animation-delay: .12s; }
+.lk-list > :nth-child(3) { animation-delay: .16s; }
+.lk-list > :nth-child(n+4) { animation-delay: .2s; }
 
+/* Карточка ближайшей игры — главное действие страницы. */
+.lk-game {
+  position: relative; overflow: hidden; display: grid; gap: 6px;
+  padding: 20px 18px 18px; border-radius: 28px;
+  border: 1px solid rgba(255, 255, 255, .28);
+  background:
+    radial-gradient(120% 90% at 100% 0%, rgba(198, 180, 255, .35), transparent 60%),
+    linear-gradient(180deg, rgba(255, 255, 255, .22), rgba(255, 255, 255, .02) 60%),
+    rgba(124, 77, 255, .78);
+  -webkit-backdrop-filter: blur(14px) saturate(180%); backdrop-filter: blur(14px) saturate(180%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .45), 0 24px 48px -20px rgba(90, 50, 230, .95);
+}
+.lk-eyebrow {
+  margin: 0; display: flex; align-items: center; gap: 7px;
+  font-size: 13.5px; font-weight: 700; letter-spacing: .01em; color: rgba(255, 255, 255, .86);
+}
+.lk-game-title { margin: 2px 0 0; font-size: clamp(24px, 6.6vw, 28px); font-weight: 800; line-height: 1.1; letter-spacing: -.03em; color: #fff; }
+.lk-game-sub { margin: 0 0 8px; font-size: 14.5px; line-height: 1.4; color: rgba(255, 255, 255, .8); }
+.lk-game-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.lk-game-actions.is-single { grid-template-columns: 1fr; }
+.lk-cta {
+  display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 52px; padding: 0 14px;
+  border-radius: 18px; font: inherit; font-size: 16px; font-weight: 750; letter-spacing: -.01em;
+  white-space: nowrap; text-decoration: none; cursor: pointer; transition: transform .18s var(--ease), background-color .18s;
+}
+@media (max-width: 359px) { .lk-cta { gap: 6px; padding: 0 8px; font-size: 15px; } .lk-game { padding-inline: 14px; } }
+.lk-cta-solid { border: 0; background: #fff; color: #2A1670; box-shadow: 0 10px 22px -12px rgba(20, 8, 70, .8); }
+.lk-cta-solid svg { color: var(--accent); }
+.lk-cta-solid:hover { background: #F1ECFF; }
+.lk-cta-ghost { border: 1px solid rgba(255, 255, 255, .42); background: rgba(255, 255, 255, .14); color: #fff; }
+.lk-cta-ghost:hover { background: rgba(255, 255, 255, .22); }
+.lk-cta:active { transform: scale(.97); }
+.lk-cta:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
+
+/* Строки действий и адрес. */
+.lk-rows, .lk-block { display: grid; gap: 10px; }
+.site[data-theme="glass"] .lk-row.glass, .site[data-theme="glass"] .lk-tile.glass { --glass-tint: rgba(20, 16, 44, .3); }
+.lk-row {
+  position: relative; display: flex; align-items: center; gap: 14px; width: 100%; min-height: 64px;
+  padding: 11px 14px 11px 11px; border-radius: 22px; color: var(--fg); text-align: left; text-decoration: none;
+  font: inherit; cursor: pointer; transition: transform .18s var(--ease);
+}
+.lk-row:active, .lk-tile:active { transform: scale(.985); }
+.lk-row:focus-visible, .lk-tile:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
 .lk-icon {
   position: relative; z-index: 2;
   flex: none; width: 42px; height: 42px; border-radius: 14px; display: grid; place-items: center;
   background: rgba(124, 77, 255, .22); color: var(--accent-text);
   box-shadow: inset 0 0 0 1px rgba(198, 180, 255, .22);
 }
-.lk-primary .lk-icon { background: rgba(255, 255, 255, .2); color: #fff; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .3); }
 .lk-text { flex: 1; min-width: 0; display: grid; gap: 2px; position: relative; z-index: 2; }
-.lk-label { font-size: 17px; font-weight: 700; letter-spacing: -.015em; line-height: 1.25; }
-.lk-hint { font-size: 13.5px; line-height: 1.35; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.lk-primary .lk-hint { color: rgba(255, 255, 255, .82); }
-.lk-arrow { flex: none; opacity: .45; transition: transform .3s var(--ease), opacity .2s; position: relative; z-index: 2; }
-.lk-btn:hover .lk-arrow { opacity: .9; transform: translate(2px, -2px); }
-
-/* «Записаться на игру»: под кнопкой раскрываются два способа — сайт или Telegram. */
-.lk-choice { display: grid; animation: lk-up .6s var(--ease) both; }
-.lk-choice > .lk-btn { animation: none; }
-.lk-choice-row { display: grid; grid-template-rows: 0fr; opacity: 0; transition: grid-template-rows .2s var(--ease), opacity .2s; }
-.lk-choice.is-open .lk-choice-row { grid-template-rows: 1fr; opacity: 1; }
-.lk-choice-inner { min-height: 0; overflow: hidden; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding-top: 0; transition: padding-top .2s var(--ease); }
-.lk-choice.is-open .lk-choice-inner { padding-top: 10px; }
-.lk-opt {
-  display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 52px; padding: 0 14px;
-  border-radius: 18px; color: var(--fg); font: inherit; font-size: 15.5px; font-weight: 700; text-decoration: none; cursor: pointer;
-  transition: transform .2s var(--ease);
+.lk-label { font-size: 16.5px; font-weight: 700; letter-spacing: -.015em; line-height: 1.25; }
+.lk-hint { font-size: 13.5px; line-height: 1.35; color: var(--muted); overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.lk-arrow { flex: none; opacity: .5; position: relative; z-index: 2; transition: transform .18s var(--ease), opacity .18s; }
+.lk-row:hover .lk-arrow { opacity: .9; transform: translateX(2px); }
+.lk-pill {
+  position: relative; z-index: 2; flex: none; display: inline-flex; align-items: center; gap: 6px;
+  padding: 8px 11px; border-radius: 999px; font-size: 13.5px; font-weight: 700;
+  background: rgba(124, 77, 255, .28); color: #fff; box-shadow: inset 0 0 0 1px rgba(198, 180, 255, .3);
 }
-.site[data-theme="glass"] .lk-opt.glass { --glass-tint: rgba(20, 16, 44, .3); }
-.lk-opt svg { color: var(--accent-text); position: relative; z-index: 2; }
-.lk-opt span { position: relative; z-index: 2; }
-.lk-opt:active { transform: scale(.97); }
-.lk-opt:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
-.lk-choice.is-open > .lk-btn .lk-arrow { transform: rotate(90deg); opacity: .9; }
 
-.lk-foot { display: grid; justify-items: center; gap: 6px; text-align: center; color: var(--muted); font-size: 13.5px; animation: lk-up .6s .36s var(--ease) both; }
-.lk-foot p { margin: 0; }
+/* Подписи блоков — слева, тихо. */
+.lk-sec { margin: 0 0 0 6px; font-size: 13px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+
+/* Плитки связи и соцсетей: иконка и подпись. */
+/* Ряд по --cols плиток; неполный последний ряд растягивается на всю ширину. */
+.lk-tiles { display: flex; flex-wrap: wrap; gap: 10px; }
+.lk-tiles > .lk-tile { flex: 1 1 calc((100% - (var(--cols, 3) - 1) * 10px) / var(--cols, 3)); min-width: 0; }
+.lk-tile {
+  position: relative; display: grid; justify-items: center; align-content: center; gap: 8px;
+  min-height: 92px; padding: 14px 6px 12px; border-radius: 22px;
+  color: var(--fg); text-decoration: none; transition: transform .18s var(--ease);
+}
+.lk-tile-icon {
+  position: relative; z-index: 2; width: 44px; height: 44px; border-radius: 15px; display: grid; place-items: center;
+  background: rgba(124, 77, 255, .22); color: var(--accent-text); box-shadow: inset 0 0 0 1px rgba(198, 180, 255, .22);
+}
+.lk-tile-label { position: relative; z-index: 2; max-width: 100%; font-size: 13.5px; font-weight: 650; line-height: 1.2; text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lk-tile:hover .lk-tile-icon { color: #fff; background: rgba(124, 77, 255, .4); }
+
+.lk-foot { display: grid; justify-items: center; gap: 6px; text-align: center; color: var(--muted); font-size: 13.5px; animation: lk-up .5s .24s var(--ease) both; }
 .lk-foot a { color: var(--accent-text); text-decoration: none; font-weight: 600; }
 .lk-foot a:hover { text-decoration: underline; }
 
-@keyframes lk-up { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+@keyframes lk-up { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
 @keyframes lk-pop { from { opacity: 0; transform: scale(.82); } to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: reduce) {
-  .lk-logo, .lk-head h1, .lk-bio, .lk-btn, .lk-foot { animation: none; }
-  .lk-btn, .lk-arrow, .lk-choice-row, .lk-choice-inner, .lk-opt { transition: none; }
-  .lk-choice { animation: none; }
+  .lk-logo, .lk-head h1, .lk-bio, .lk-list > *, .lk-foot { animation: none; }
+  .lk-row, .lk-tile, .lk-cta, .lk-arrow { transition: none; }
 }

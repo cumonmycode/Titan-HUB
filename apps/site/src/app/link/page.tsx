@@ -11,9 +11,10 @@ import { TonightSignups } from '@/components/live/TonightSignups'
 import { LinkButtons, type LinkItem } from '@/components/links/LinkButtons'
 
 /**
- * Таплинк клуба (/link): одна ссылка для профилей в соцсетях — запись на игру и
- * мероприятие, Tai в Telegram, телефон, мессенджеры, соцсети, как добраться и сайт.
- * Кнопки, их порядок и подписи — в HUB («Сайт → Таплинк»); адреса берутся из контактов.
+ * Таплинк клуба (/link): одна ссылка для профилей в соцсетях. Блоками: ближайшая игра
+ * с записью на сайте или в Telegram, мероприятие и свои ссылки, плитки связи и соцсетей,
+ * адрес с маршрутом. Кнопки, их порядок и подписи — в HUB («Сайт → Таплинк»); порядок
+ * действует внутри блока, адреса берутся из контактов.
  */
 export const viewport: Viewport = { themeColor: '#07060E', width: 'device-width', initialScale: 1, viewportFit: 'cover' }
 export const metadata: Metadata = {
@@ -29,7 +30,7 @@ const LABEL: Record<SiteLinkKind, string> = {
   book_event: 'Заказать мероприятие',
   tai: 'Написать администратору',
   telegram: 'Telegram',
-  channel: 'Канал клуба',
+  channel: 'Канал',
   whatsapp: 'WhatsApp',
   vk: 'ВКонтакте',
   instagram: 'Instagram',
@@ -40,7 +41,7 @@ const LABEL: Record<SiteLinkKind, string> = {
 }
 const HINT: Partial<Record<SiteLinkKind, string>> = {
   book_event: 'День рождения, корпоратив, детская мафия, выезд',
-  tai: 'Tai в Telegram — ответит сразу и подтвердит запись',
+  tai: 'Tai в Telegram ответит сразу',
 }
 
 const mapUrl = (address: string) => (address ? `https://yandex.ru/maps/?text=${encodeURIComponent(`Нальчик, ${address}`)}` : SITE.mapUrl)
@@ -61,7 +62,11 @@ function itemsOf(config: SiteConfig): LinkItem[] {
       case 'custom': return /^https:\/\//.test(l.url) ? l.url : null
     }
   }
-  return source.filter((l) => l.on).flatMap((l) => {
+  const on = source.filter((l) => l.on)
+  // Запись в Telegram уже ведёт к Tai — отдельная кнопка «Написать администратору» не нужна.
+  const gameViaTai = !!config.taiUrl && on.some((l) => l.kind === 'book_game')
+  // Сайт — ссылкой в подвале, а не кнопкой.
+  return on.filter((l) => l.kind !== 'site' && !(gameViaTai && l.kind === 'tai')).flatMap((l) => {
     const href = hrefOf(l)
     if (l.kind !== 'book_game' && l.kind !== 'book_event' && !href) return []
     const hint = l.kind === 'phone' ? contacts.phone : l.kind === 'map' ? config.venue.address || SITE.address : HINT[l.kind] ?? null
@@ -87,9 +92,8 @@ export default async function LinkPage() {
               {bio && <p className="lk-bio">{bio}</p>}
               <TonightSignups />
             </header>
-            <LinkButtons items={itemsOf(config)} schedule={config.schedule} taiUrl={config.taiUrl} />
+            <LinkButtons items={itemsOf(config)} schedule={config.schedule} taiUrl={config.taiUrl} hours={hours} />
             <footer className="lk-foot">
-              <p>{[config.venue.address || SITE.address, hours].filter(Boolean).join(' · ')}</p>
               <a href="/">{siteUrlOf(config.url).replace(/^https:\/\//, '')}</a>
             </footer>
           </main>
