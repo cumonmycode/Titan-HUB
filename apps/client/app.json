@@ -2,7 +2,7 @@
   "expo": {
     "name": "My Titan",
     "slug": "titan-resident",
-    "version": "1.5.0",
+    "version": "1.6.0",
     "orientation": "portrait",
     "scheme": "titanresident",
     "userInterfaceStyle": "dark",
@@ -10,7 +10,7 @@
     "icon": "./assets/images/icon.png",
     "ios": {
       "bundleIdentifier": "ru.titan.resident",
-      "buildNumber": "19",
+      "buildNumber": "20",
       "appleTeamId": "G99YH9UK8C",
       "supportsTablet": false,
       "infoPlist": {
@@ -26,7 +26,7 @@
     },
     "android": {
       "package": "ru.titan.resident",
-      "versionCode": 3,
+      "versionCode": 4,
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-foreground.png",
         "monochromeImage": "./assets/images/adaptive-monochrome.png",
