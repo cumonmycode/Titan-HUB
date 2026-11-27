@@ -1,7 +1,7 @@
 /** /app — страница клиентского приложения My Titan: возможности, экраны, загрузка. */
 import type { Metadata } from 'next'
 import type { LucideIcon } from 'lucide-react'
-import { Bell, Crown, Dices, Eye, Gift, IdCard, Radio, Receipt, Zap } from 'lucide-react'
+import { Bell, CircleUserRound, Crown, Dices, Eye, Gift, HandCoins, IdCard, KeyRound, Landmark, Megaphone, Radio, Receipt, Wallet } from 'lucide-react'
 import { MY_TITAN } from '@/content/app'
 import { getAndroidApk } from '@/lib/apk'
 import { StoreBadges } from '@/components/app/AppPromo'
@@ -16,15 +16,9 @@ export const metadata: Metadata = {
 }
 
 const ICONS: Record<string, LucideIcon> = {
-  'Карта клуба': IdCard,
-  'Бонусы': Gift,
-  'Депозит и чеки': Receipt,
-  'Оплата через СБП': Zap,
-  'Игровые вечера': Dices,
-  'Трансляции': Radio,
-  'Уведомления': Bell,
-  'Статус «Резидент»': Crown,
-  'Демо без аккаунта': Eye,
+  card: IdCard, gift: Gift, wallet: Wallet, debt: HandCoins, fund: Landmark, receipt: Receipt,
+  dice: Dices, live: Radio, crown: Crown, news: Megaphone,
+  login: KeyRound, bell: Bell, profile: CircleUserRound, demo: Eye,
 }
 
 const FAQ = [
@@ -37,7 +31,6 @@ const FAQ = [
 
 export default async function AppPage() {
   const apk = await getAndroidApk()
-  const all = [...MY_TITAN.features, ...MY_TITAN.moreFeatures]
   return (
     <>
       <PageHead
@@ -47,19 +40,27 @@ export default async function AppPage() {
         aside={<PhoneStack />}
       />
 
-      <Section title="Что умеет My Titan" lead="Всё, что раньше спрашивали у администратора, — теперь в кармане.">
-        <ul className="app-grid">
-          {all.map((f) => {
-            const Icon = ICONS[f.title] ?? IdCard
-            return (
-              <li key={f.title} className="app-tile glass">
-                <span className="app-tile-icon"><Icon size={22} aria-hidden="true" /></span>
-                <h3>{f.title}</h3>
-                <p>{f.text}</p>
-              </li>
-            )
-          })}
-        </ul>
+      <Section title="Что умеет My Titan" lead="Карта клуба, деньги, игры и эфиры — в одном приложении.">
+        {MY_TITAN.groups.map((g) => (
+          <div key={g.title} className="app-group">
+            <div className="app-group-head">
+              <h3>{g.title}</h3>
+              <p>{g.lead}</p>
+            </div>
+            <ul className={`app-grid${g.items.length % 3 ? ' is-pairs' : ''}`}>
+              {g.items.map((f) => {
+                const Icon = ICONS[f.icon] ?? IdCard
+                return (
+                  <li key={f.title} className="app-tile glass">
+                    <span className="app-tile-icon"><Icon size={22} aria-hidden="true" /></span>
+                    <h4>{f.title}</h4>
+                    <p>{f.text}</p>
+                  </li>
+                )
+              })}
+            </ul>
+          </div>
+        ))}
       </Section>
 
       <Section title="Экраны приложения">
