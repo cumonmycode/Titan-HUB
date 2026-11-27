@@ -21,6 +21,7 @@ import { useStaffPush } from '@/lib/staff-push';
 import { useDevicePrefs } from '@/lib/device-prefs';
 import { devLogin, localAutoLogin, useSession } from '@/lib/session';
 import { colors, accentHex } from '@/lib/theme';
+import { UpdateGate } from '@/components/update-gate';
 import { sheetOptions } from '@/lib/sheet';
 
 SplashScreen.preventAutoHideAsync();
@@ -92,6 +93,7 @@ export default function RootLayout() {
     <KeyboardProvider>
     <ThemeProvider value={theme}>
       <PersistQueryClientProvider client={queryClient} persistOptions={{ persister: queryPersister, maxAge: CACHE_MAX_AGE, buster: `${CACHE_BUSTER}:${cacheOwner}` }}>
+        <UpdateGate>
         <Stack screenOptions={{ headerShown: false }} screenLayout={sheetLayout}>
           <Stack.Protected guard={!signedIn}>
             <Stack.Screen name="(auth)" />
@@ -140,6 +142,7 @@ export default function RootLayout() {
             <Stack.Screen name="tai" options={{ presentation: 'fullScreenModal', headerShown: false, contentStyle: { backgroundColor: colors.background } }} />
           </Stack.Protected>
         </Stack>
+        </UpdateGate>
         {!warm && <SwiftUIWarmup onDone={finishWarmup} />}
         {signedIn && <Realtime />}
         {signedIn && <LocalTour />}

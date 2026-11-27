@@ -10,6 +10,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { sheetOptions } from '@/components/sheet';
+import { UpdateGate } from '@/components/update-gate';
 import { api } from '@/lib/api';
 import { useCardStyle } from '@/lib/card-style';
 import { openFromNotificationData, registerForPush, setBadge } from '@/lib/push';
@@ -26,7 +27,9 @@ export default function RootLayout() {
       <SafeAreaProvider>
         <QueryClientProvider client={queryClient}>
           <StatusBar style="light" />
-          <Root />
+          <UpdateGate>
+            <Root />
+          </UpdateGate>
         </QueryClientProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>

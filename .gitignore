@@ -61,3 +61,6 @@ minio-data/
 
 # Лента обновлений MafBoard Studio: файлы только на сервере
 nginx/mafboard/updates/
+
+# APK и latest.json Android-версий HUB и My Titan: файлы только на сервере
+nginx/apps/

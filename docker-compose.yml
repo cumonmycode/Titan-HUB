@@ -199,6 +199,8 @@ services:
       - ./nginx/sites:/etc/nginx/sites:ro
       # Статика поддомена mafboard.titanpos.ru (пользовательское соглашение).
       - ./nginx/mafboard:/usr/share/nginx/mafboard:ro
+      # Android-версии HUB и My Titan для самообновления (scripts/publish-android.sh), в git не хранятся.
+      - ./nginx/apps:/usr/share/nginx/apps:ro
       - nginx-cache:/var/cache/nginx
     # Стартуем nginx только когда апстримы здоровы (api прогнал миграции) —
     # закрывает окно 502 при холодном старте/перезагрузке хоста.
