@@ -16,7 +16,8 @@ import { api } from '@/lib/api';
 import { formatMoney } from '@/lib/format';
 import { haptic } from '@/lib/haptics';
 import { KEYBOARD_DISMISS } from '@/lib/layout';
-import { type EveningKey, invalidateShift, OPEN_SHIFT_EVENING_KEYS, type OpeningCashOp, parseAmount, useEveningTypes, useLastCashEnd } from '@/lib/shift-api';
+import { useScheduleToday } from '@/lib/schedule-api';
+import { type EveningKey, invalidateShift, type OpeningCashOp, parseAmount, useEveningTypes, useLastCashEnd } from '@/lib/shift-api';
 import { WorkerPicker } from '@/components/staff/worker-picker';
 import { useMe } from '@/lib/queries';
 import { useWorkers } from '@/lib/salary-api';
@@ -64,7 +65,10 @@ export default function OpenShift() {
   const [typed, setTyped] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
   const [reason, setReason] = useState('');
-  const [evening, setEvening] = useState<EveningKey>('none');
+  // Тип вечера — по расписанию клуба на сегодня; если вечер сменился, выбирают другой.
+  const today = useScheduleToday();
+  const [chosen, setChosen] = useState<EveningKey | null>(null);
+  const evening: EveningKey = chosen ?? today.data?.evening ?? 'none';
   const me = useMe();
   const workers = useWorkers();
   // Кто работает: по умолчанию — тот, кто открывает (если он сотрудник, а не владелец).
@@ -86,10 +90,8 @@ export default function OpenShift() {
   const diff = needsReason ? Math.round((cash - expected) * 100) / 100 : 0;
   const canSubmit = !loading && cash !== null && (!needsReason || reason.trim().length > 0);
 
-  // Сервер принимает только эти ключи вечера; свои типы из справочника пока не отправить.
-  const evenings = (eveningTypes.data ?? []).filter(
-    (t) => (OPEN_SHIFT_EVENING_KEYS as readonly string[]).includes(t.key) && t.key !== 'none',
-  );
+  // Все типы вечеров из справочника, включая свои (Хэллоуин и т.п.).
+  const evenings = (eveningTypes.data ?? []).filter((t) => t.key !== 'none');
 
   const open = useMutation({
     mutationFn: () =>
@@ -110,7 +112,7 @@ export default function OpenShift() {
 
   const pickEvening = (key: EveningKey) => {
     haptic.selection();
-    setEvening(key);
+    setChosen(key);
     setEditing(false);
   };
 

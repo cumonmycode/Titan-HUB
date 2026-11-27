@@ -17,6 +17,7 @@ const ROLE_LABEL: Record<string, string> = { owner: 'Владелец', staff: '
 
 /** Экран каждого раздела «Управления». */
 const SECTION_SCREENS: Record<ManageSectionKey, Href> = {
+  schedule: '/manage/schedule',
   goods: '/manage/goods',
   pricing: '/manage/pricing',
   screens: '/manage/screens',

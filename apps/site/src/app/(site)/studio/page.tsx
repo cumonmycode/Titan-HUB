@@ -1,6 +1,6 @@
 import type { Metadata } from 'next'
 import { SITE } from '@/content/site'
-import { getStories } from '@/lib/hub'
+import { getSiteConfig, getStories } from '@/lib/hub'
 import { CtaBand, PageHead, Section } from '@/components/sections/blocks'
 import { Reviews, StoriesGrid, Team, Values } from '@/components/sections/community'
 
@@ -11,19 +11,25 @@ export const metadata: Metadata = {
 }
 
 export default async function AboutPage() {
-  const stories = await getStories()
+  const [stories, config] = await Promise.all([getStories(), getSiteConfig()])
+  const { content } = config
+  const page = content.pages.studio
   return (
     <>
-      <PageHead title="Мафия — наше призвание" photoName="team-studio"
-        lead={`TITAN KBR (ex ${SITE.formerName}) создан в ${SITE.since} году. Мы проводим турниры и вечера мафии — спортивной, городской, детской и корпоративной — и создаём атмосферу азарта, общения и эмоций.`} />
+      <PageHead title={page.title} photoName="team-studio" lead={page.lead} />
+      {page.text.length > 0 && (
+        <Section>
+          <div className="prose">{page.text.map((p) => <p key={p}>{p}</p>)}</div>
+        </Section>
+      )}
       <Section title="Что для нас важно">
-        <Values />
+        <Values values={content.values} />
       </Section>
       <Section title="Команда" lead="Всё началось с двух людей, которые очень любили играть в мафию — и играют в неё каждый день.">
-        <Team />
+        <Team team={content.team} />
       </Section>
       <Section title="Нам доверяют">
-        <Reviews />
+        <Reviews reviews={content.reviews} />
       </Section>
       <Section title="Наши события">
         <StoriesGrid stories={stories} limit={3} />

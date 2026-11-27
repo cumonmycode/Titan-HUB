@@ -1,5 +1,5 @@
 import type { Metadata } from 'next'
-import { FORMATS } from '@/content/formats'
+import { formatsOf } from '@/lib/content'
 import { getSiteConfig, getStories } from '@/lib/hub'
 import { RequestButton } from '@/components/request/RequestButton'
 import { CtaBand, PageHead, Section, Steps } from '@/components/sections/blocks'
@@ -21,12 +21,13 @@ const STEPS = [
 
 export default async function EventsPage() {
   const [config, stories] = await Promise.all([getSiteConfig(), getStories()])
-  const events = FORMATS.filter((f) => f.request.kind === 'event')
+  const events = formatsOf(config.content).filter((f) => f.request.kind === 'event')
+  const page = config.content.pages.events
   return (
     <>
       <PageHead
-        title="Праздник с мафией"
-        lead="Дни рождения, корпоративы, детские праздники и тематические вечеринки. Проводим в штабе клуба или приезжаем к вам со всем реквизитом."
+        title={page.title}
+        lead={page.lead}
         photoName="5y-2"
         actions={<>
           <RequestButton preset={{ kind: 'event' }} className="btn btn-primary btn-lg">Заказать мероприятие</RequestButton>

@@ -1,5 +1,6 @@
 import type { Metadata } from 'next'
 import { RequestButton } from '@/components/request/RequestButton'
+import { getSiteConfig } from '@/lib/hub'
 import { CtaBand, PageHead, Section, Steps } from '@/components/sections/blocks'
 
 export const metadata: Metadata = {
@@ -7,20 +8,21 @@ export const metadata: Metadata = {
   description: 'Детская мафия в Нальчике: дни рождения, школьные праздники и выходные. Логика, речь и уверенность в весёлом игровом шоу с ведущим TITAN KBR.',
 }
 
-export default function KidsPage() {
+export const revalidate = 60
+
+export default async function KidsPage() {
+  const page = (await getSiteConfig()).content.pages.kids
   return (
     <>
       <PageHead
-        title="Детская мафия"
-        lead="Игра, где логика встречается с весельем. Каждый ребёнок пробует себя детективом, мирным жителем или хитрым мафиози."
+        title={page.title}
+        lead={page.lead}
         photoName="kid-mask"
         actions={<RequestButton preset={{ kind: 'event', format: 'kids' }} className="btn btn-primary btn-lg">Оставить заявку</RequestButton>}
       />
       <Section title="Почему детям нравится">
         <div className="prose">
-          <p>В TITAN KBR мафия становится настоящим приключением. Мы проводим адаптированные игры для ребят разных возрастов — в формате игрового шоу.</p>
-          <p>Дети учатся мыслить стратегически, развивают внимание, речь и уверенность в себе — в увлекательной, безопасной и позитивной атмосфере.</p>
-          <p>Детская мафия идеальна для дней рождения, школьных мероприятий и весёлых выходных: море эмоций, добрый смех и впечатления, о которых говорят ещё долго.</p>
+          {page.text.map((p) => <p key={p}>{p}</p>)}
         </div>
       </Section>
       <Section title="Что развивает игра">

@@ -8,7 +8,8 @@ import type { NumericString, PaymentMethod, Shift } from './types';
 
 /** Ключи вечера, которые принимает POST /shifts/open (жёсткий enum на сервере). */
 export const OPEN_SHIFT_EVENING_KEYS = ['sport_mafia', 'city_mafia', 'kids_mafia', 'board_games', 'none'] as const;
-export type EveningKey = (typeof OPEN_SHIFT_EVENING_KEYS)[number];
+/** Ключ типа вечера: базовые и свои из справочника (Хэллоуин и т.п.). */
+export type EveningKey = string;
 
 export type EveningType = { key: string; label: string; color: string; sortOrder: number };
 

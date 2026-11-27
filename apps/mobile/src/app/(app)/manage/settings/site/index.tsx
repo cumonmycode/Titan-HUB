@@ -10,11 +10,12 @@ import { LinkRow } from '@/components/native-form';
 import { GlassCard } from '@/components/new-check-parts';
 import { SiteMock } from '@/components/site/site-mock';
 import { Text as RNText } from '@/components/text';
-import { useBookingRequests } from '@/lib/events-api';
 import { haptic } from '@/lib/haptics';
 import { DEFAULT_SCHEDULE, siteUrlOf, useSiteConfig, useSiteDomain, useSiteStories, type SiteConfig, type SiteDomain } from '@/lib/site-api';
 import { lookOf } from '@/lib/site-looks';
 import { colors, space, type } from '@/lib/theme';
+import { useLeadRequests } from '@/lib/leads-api';
+import { useSchedule } from '@/lib/schedule-api';
 
 /**
  * «Сайт» клуба в HUB: превью первого экрана в текущем оформлении, адрес и его
@@ -26,7 +27,8 @@ export default function SiteScreen() {
   const config = useSiteConfig();
   const domain = useSiteDomain();
   const stories = useSiteStories();
-  const requests = useBookingRequests();
+  const requests = useLeadRequests();
+  const schedule = useSchedule();
 
   const refresh = async () => {
     await Promise.allSettled([config.refetch(), domain.refetch(), stories.refetch(), requests.refetch()]);
@@ -41,7 +43,7 @@ export default function SiteScreen() {
   }
 
   const look = lookOf(config.data.holiday);
-  const evenings = (config.data.schedule ?? DEFAULT_SCHEDULE).length;
+  const evenings = schedule.data ? schedule.data.slots.filter((s) => s.repeat === 'weekly' && s.onSite).length : (config.data.schedule ?? DEFAULT_SCHEDULE).length;
   const published = (stories.data ?? []).filter((s) => s.is_published).length;
   const fresh = (requests.data ?? []).length;
   const go = (path: string) => router.push(path as never);
@@ -55,13 +57,24 @@ export default function SiteScreen() {
 
           <Section title="Сайт">
             <LinkRow icon="paintpalette.fill" color="#AF52DE" title="Оформление" subtitle={look.hint} value={look.title} onPress={() => go('/manage/settings/site/look')} />
-            <LinkRow icon="calendar" color="#FF9500" title="Расписание вечеров" subtitle="По нему сайт показывает ближайшие игры" value={`${evenings} в неделю`} onPress={() => go('/manage/settings/site/schedule')} />
+            <LinkRow icon="calendar" color="#FF3B30" title="Расписание" subtitle="Одно для сайта, Tai, кассы и опросов" value={`${evenings} в неделю`} onPress={() => go('/manage/schedule')} />
             <LinkRow icon="link.circle.fill" color="#7C4DFF" title="Таплинк" subtitle="Одна ссылка для соцсетей: запись, Tai, контакты" onPress={() => go('/manage/settings/site/links')} />
             <LinkRow icon="photo.on.rectangle.angled" color="#34C759" title="Публикации" subtitle="Турниры и вечеринки с фото" value={stories.data ? String(published) : undefined} onPress={() => go('/manage/settings/site/stories')} />
           </Section>
 
+          <Section
+            title="Содержимое"
+            footer={<Text>Тексты и фото сайта живут здесь: что поменяли в приложении — через минуту на сайте.</Text>}>
+            <LinkRow icon="square.grid.2x2.fill" color="#FF9500" title="Форматы" subtitle="Карточки «Городская», «Спортивная», «Детская»…" onPress={() => go('/manage/settings/site/content?section=formats')} />
+            <LinkRow icon="person.2.fill" color="#5856D6" title="Команда" subtitle="Ведущие клуба — из сотрудников" onPress={() => go('/manage/settings/site/content?section=team')} />
+            <LinkRow icon="quote.bubble.fill" color="#34C759" title="Отзывы" onPress={() => go('/manage/settings/site/content?section=reviews')} />
+            <LinkRow icon="heart.fill" color="#FF2D55" title="Ценности" subtitle="«Что для нас важно» на странице «О клубе»" onPress={() => go('/manage/settings/site/content?section=values')} />
+            <LinkRow icon="book.fill" color="#A2845E" title="Документы" subtitle="Правила и книги для резидентов" onPress={() => go('/manage/settings/site/content?section=docs')} />
+            <LinkRow icon="doc.text.fill" color="#8E8E93" title="Тексты страниц" subtitle="Заголовки и подзаголовки разделов" onPress={() => go('/manage/settings/site/content?section=pages')} />
+          </Section>
+
           <Section title="Онлайн-запись" footer={<Text>Запись на игру, бронь зоны, выезд, сертификаты и вопросы с сайта. Бывшая ссылка /book ведёт туда же.</Text>}>
-            <LinkRow icon="tray.full.fill" color="#007AFF" title="Заявки" value={requests.data ? (fresh ? `${fresh} новых` : 'Нет новых') : undefined} onPress={() => router.navigate('/events')} />
+            <LinkRow icon="tray.full.fill" color="#007AFF" title="Записи на игру" subtitle="Заявки на мероприятия — в «Событиях»" value={requests.data ? (fresh ? `${fresh} новых` : 'Нет новых') : undefined} onPress={() => go('/manage/requests')} />
             <LinkRow
               icon="bell.badge.fill"
               color="#FF3B30"

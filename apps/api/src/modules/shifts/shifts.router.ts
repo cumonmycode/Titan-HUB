@@ -15,12 +15,13 @@ import {
   setShiftStaff,
 } from './shifts.service.js'
 import { shiftSalaries, shiftWorkers } from '../../lib/salary.js'
-import { shifts, profiles, eq, and, isNull } from '@titan/database'
+import { shifts, profiles, eveningTypes, eq, and, isNull } from '@titan/database'
 import { notify } from '../notifications/push.js'
 
 const OpenShiftSchema = z.object({
   cashStart: z.number().min(0).default(0),
-  eveningType: z.enum(['sport_mafia', 'city_mafia', 'kids_mafia', 'board_games', 'none']).default('none'),
+  // Ключ типа вечера из справочника evening_types (в т.ч. свои: «Хэллоуин» и т.п.) или none.
+  eveningType: z.string().trim().min(1).max(40).regex(/^[a-z0-9_]+$/).default('none'),
   note: z.string().optional(),
   adjustmentReason: z.string().optional(),
   // Кто работает сегодня (сотрудники); не передали — открывший, если он сотрудник.
@@ -63,6 +64,10 @@ shiftsRouter.post('/open', requireRole('owner', 'staff'), zValidator('json', Ope
   const db = c.var.db
   const user = c.get('user')
   const body = c.req.valid('json')
+  if (body.eveningType !== 'none') {
+    const [known] = await db.select({ key: eveningTypes.key }).from(eveningTypes).where(eq(eveningTypes.key, body.eveningType)).limit(1)
+    if (!known) return c.json({ error: 'Такого типа вечера нет — выберите из списка' }, 400)
+  }
   try {
     const shift = await openShift({ openedBy: user.sub, ...body }, db, c.var.club?.id ?? null)
     return c.json({ shift }, 201)

@@ -46,6 +46,7 @@ import { systemRouter } from './modules/system/system.router.js'
 import { tgAdminRouter } from './modules/tg/admin.router.js'
 import { taiInboxRouter } from './modules/tg/inbox.router.js'
 import { leadsRouter } from './modules/requests/leads.router.js'
+import { scheduleRouter } from './modules/schedule/schedule.router.js'
 import { uploadRouter } from './modules/upload/upload.router.js'
 import { staffRouter } from './modules/staff/staff.router.js'
 import { cashopsRouter } from './modules/cashops/cashops.router.js'
@@ -257,6 +258,8 @@ app.route('/api/telegram', tgAdminRouter)
 app.route('/api/tai-inbox', taiInboxRouter)
 // «Заявки»: записи на игру, регистрации My Titan, новые из Telegram.
 app.route('/api/leads', leadsRouter)
+// Расписание клуба: сайт, Tai, касса и опросы берут вечера отсюда.
+app.route('/api/schedule', scheduleRouter)
 // Сайт клуба: публикации (турниры, вечеринки) — ведёт владелец из HUB.
 app.route('/api/site-admin', siteAdminRouter)
 app.route('/api/upload', uploadRouter)

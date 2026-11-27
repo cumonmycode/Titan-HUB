@@ -1,11 +1,13 @@
 /**
- * Игровые вечера клуба для Tai: расписание берём из регулярных опросов (опрос
- * выкладывается в день игры, подзаголовок — время), сегодняшний опрос — из
- * poll_state. Отсюда Tai знает, когда звать человека и какой опрос ему переслать.
+ * Игровые вечера клуба для Tai: расписание — из «Управление → Расписание»
+ * (lib/schedule.ts; пока его не сохраняли — собрано из расписания сайта и опросов),
+ * сегодняшний опрос — из poll_state. Отсюда Tai знает, когда звать человека и какой
+ * опрос ему переслать.
  */
 import type { Database, TaiGames } from '@titan/database'
 import { postsOnDay, readPollConfigs, type PollConfig } from '../../lib/polls.js'
 import { listLastPolls } from '../../lib/pollState.js'
+import { kindOfEvening, readSchedule } from '../../lib/schedule.js'
 import { readRoster } from '../../lib/roster.js'
 import { getBusinessDayStartHour } from '../../lib/appSettings.js'
 import { businessDayStartMs } from '../../lib/prechecks.js'
@@ -52,7 +54,33 @@ function mskDate(ms: number): { date: string; dow: number } {
   return { date: d.toISOString().slice(0, 10), dow: js === 0 ? 7 : js }
 }
 
+/**
+ * Вечера расписания в виде конфигов (upcomingNights и прочие считают по ним): обычный
+ * вечер — день недели, разовый — дата. Чат — тот, куда идёт опрос вечера (если есть).
+ */
 export async function gameConfigs(db: Database): Promise<PollConfig[]> {
+  const { slots } = await readSchedule(db)
+  return slots.map((s): PollConfig => ({
+    id: s.id,
+    kind: kindOfEvening(s.evening),
+    enabled: true,
+    chatId: s.poll.on ? (s.poll.chatId ?? '') : '',
+    threadId: s.poll.threadId ?? null,
+    title: s.title,
+    subtitleDay: '',
+    autoDay: true,
+    subtitleTime: s.time,
+    options: [],
+    weekdays: s.repeat === 'weekly' && s.day ? [s.day] : [],
+    postTime: s.poll.postTime ?? '',
+    lastPostedAt: null,
+    scheduleKind: s.repeat === 'weekly' ? 'weekly' : 'dates',
+    dates: s.repeat === 'once' && s.date ? [s.date] : [],
+  }))
+}
+
+/** Настоящие регулярные опросы с чатом — по ним узнаём вид выложенного опроса и чаты игроков. */
+async function pollChatConfigs(db: Database): Promise<PollConfig[]> {
   return (await readPollConfigs(db)).filter((c) => c.enabled && c.chatId && c.title)
 }
 
@@ -92,7 +120,7 @@ export interface TodayPoll {
 /** Опросы, выложенные с начала бизнес-дня, по видам вечеров. */
 export async function todaysPolls(db: Database): Promise<TodayPoll[]> {
   const since = businessDayStartMs(await getBusinessDayStartHour(db))
-  const configs = await gameConfigs(db)
+  const configs = await pollChatConfigs(db)
   return (await listLastPolls(db))
     .filter((p) => Date.parse(p.postedAt) >= since && p.messageId > 0)
     .map((p) => {
@@ -109,7 +137,7 @@ export async function gamesFromChats(db: Database, tgId: string): Promise<TaiGam
   const user = (await readRoster(db)).find((u) => u.tgId === tgId)
   if (!user) return null
   const chats = new Set([...(user.chatIds ?? []), user.chatId].filter(Boolean) as string[])
-  const kinds = new Set((await gameConfigs(db)).filter((c) => chats.has(c.chatId)).map(kindOf))
+  const kinds = new Set((await pollChatConfigs(db)).filter((c) => chats.has(c.chatId)).map(kindOf))
   if (kinds.has('sport') && kinds.has('city')) return 'both'
   if (kinds.has('sport')) return 'sport'
   if (kinds.has('city')) return 'city'

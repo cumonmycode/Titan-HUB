@@ -2,7 +2,8 @@
 import Link from 'next/link'
 import { ArrowUpRight, Download } from 'lucide-react'
 import type { Player, PlayersPayload, StorySummary } from '@/lib/types'
-import { DOCS, REVIEWS, TEAM, VALUES } from '@/content/people'
+import type { Doc, Review, TeamMember, Value } from '@/lib/content'
+import { photoProps } from '@/lib/content'
 import { GOMAFIA, SITE } from '@/content/site'
 import type { Contacts } from '@/lib/contacts'
 import { Photo } from './blocks'
@@ -31,10 +32,10 @@ export function StoriesGrid({ stories, limit }: { stories: StorySummary[]; limit
   )
 }
 
-export function Reviews() {
+export function Reviews({ reviews }: { reviews: Review[] }) {
   return (
     <ul className="reviews">
-      {REVIEWS.map((r) => (
+      {reviews.map((r) => (
         <li key={r.author} className="review">
           <blockquote><p>{r.text}</p></blockquote>
           <cite>{r.author}</cite>
@@ -44,28 +45,33 @@ export function Reviews() {
   )
 }
 
-export function Team() {
+export function Team({ team }: { team: TeamMember[] }) {
   return (
     <ul className="team">
-      {TEAM.map((m) => <li key={m.name} className="member"><b>{m.name}</b><span>{m.role}</span></li>)}
+      {team.map((m) => (
+        <li key={m.name} className="member">
+          {m.photo ? <Photo {...photoProps(m.photo)} alt={m.name} className="member-photo" sizes="96px" /> : null}
+          <b>{m.name}</b><span>{m.role}</span>
+        </li>
+      ))}
     </ul>
   )
 }
 
-export function Values() {
+export function Values({ values }: { values: Value[] }) {
   return (
     <ul className="values">
-      {VALUES.map((v) => <li key={v.title} className="value"><h3>{v.title}</h3><p>{v.text}</p></li>)}
+      {values.map((v) => <li key={v.title} className="value"><h3>{v.title}</h3><p>{v.text}</p></li>)}
     </ul>
   )
 }
 
-export function Docs() {
+export function Docs({ docs }: { docs: Doc[] }) {
   return (
     <ul className="docs">
-      {DOCS.map((d) => (
+      {docs.map((d) => (
         <li key={d.href} className="doc">
-          <Photo name={d.cover} alt={`Обложка: ${d.title}`} sizes="160px" />
+          {d.cover ? <Photo {...photoProps(d.cover)} alt={`Обложка: ${d.title}`} sizes="160px" /> : null}
           <div>
             <h3>{d.title}</h3>
             <p>{d.text}</p>
@@ -154,8 +160,8 @@ export function PlayersPodium({ data, limit = 10 }: { data: PlayersPayload; limi
 }
 
 /** Отзывы бегущей лентой (останавливается под курсором). Дубль для бесшовной петли скрыт от чтения. */
-export function ReviewsMarquee() {
-  const card = (r: (typeof REVIEWS)[number], hidden?: boolean) => (
+export function ReviewsMarquee({ reviews }: { reviews: Review[] }) {
+  const card = (r: Review, hidden?: boolean) => (
     <li key={`${r.author}${hidden ? '-2' : ''}`} className="review glass" aria-hidden={hidden || undefined}>
       <blockquote><p>{r.text}</p></blockquote>
       <cite>{r.author}</cite>
@@ -164,8 +170,8 @@ export function ReviewsMarquee() {
   return (
     <div className="marquee">
       <ul className="marquee-track">
-        {REVIEWS.map((r) => card(r))}
-        {REVIEWS.map((r) => card(r, true))}
+        {reviews.map((r) => card(r))}
+        {reviews.map((r) => card(r, true))}
       </ul>
     </div>
   )

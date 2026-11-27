@@ -24,6 +24,8 @@ import { getBusinessDayStartHour } from '../../lib/appSettings.js'
 import { businessDayStartMs } from '../../lib/prechecks.js'
 import { listLastPolls, votersForToday } from '../../lib/pollState.js'
 import { readPollConfigs } from '../../lib/polls.js'
+import { nightsAhead, readSchedule } from '../../lib/schedule.js'
+import { readSiteContent } from './content.js'
 import { readAliases } from '../../lib/tgAliases.js'
 import { findPublished, listPublished, publicStory } from './stories.js'
 import { readSiteContacts, readSiteDomain, readSiteLinks } from './settings.js'
@@ -48,6 +50,8 @@ const SIGNUPS_NAMES_MAX = 12
 export const siteRouter = new Hono<AppEnv>()
 
 // ─── Витрина ─────────────────────────────────────────────────────────────────
+/** Разовые события расписания на сайте — на столько дней вперёд. */
+const SPECIALS_DAYS = 60
 const VENUE_KEYS = ['venue_name', 'venue_address', 'hours_open', 'hours_close', 'site_schedule', 'site_holiday']
 // Праздничное оформление сайта — включает владелец в HUB («Сайт → Оформление»);
 // пусто — обычный вид. Список совпадает с apps/site/src/content/holidays.ts.
@@ -99,9 +103,12 @@ siteRouter.get('/config', async (c) => {
   // Бронь зоны — все активные зоны клуба (как было в форме /book, которую заменил сайт).
   const zones = await db.select({ id: spaces.id, name: spaces.name, capacity: spaces.capacity, hourlyRate: spaces.hourlyRate })
     .from(spaces).where(eq(spaces.isActive, true)).orderBy(asc(spaces.name))
-  const [contacts, domain, links, bot] = await Promise.all([
-    readSiteContacts(db), readSiteDomain(db), readSiteLinks(db), getClientBot(db).catch(() => null),
+  const [contacts, domain, links, bot, schedule, content] = await Promise.all([
+    readSiteContacts(db), readSiteDomain(db), readSiteLinks(db), getClientBot(db).catch(() => null), readSchedule(db), readSiteContent(db),
   ])
+  // Расписание — одно на клуб («Управление → Расписание»): вечера недели и разовые события.
+  const weekly = schedule.slots.filter((s) => s.repeat === 'weekly' && s.onSite && s.day)
+  const specials = nightsAhead(schedule.slots.filter((s) => s.repeat === 'once' && s.onSite), SPECIALS_DAYS)
 
   c.header('Cache-Control', `public, max-age=${CONFIG_MAX_AGE_SECONDS}`)
   return c.json({
@@ -114,13 +121,16 @@ siteRouter.get('/config', async (c) => {
     },
     contacts,
     url: domain.url,
-    schedule: parseSchedule(m['site_schedule']),
+    schedule: weekly.length ? weekly.map((s) => ({ day: s.day!, title: s.title, time: s.time, evening: s.evening })) : parseSchedule(m['site_schedule']),
+    specials: specials.map((n) => ({ date: n.date, title: n.title, time: n.time, evening: n.evening })),
     eveningPrices,
     eventRates: rates.map((r) => ({ hours: r.hours, price: Number(r.price) })),
     zones: zones.map((z) => ({ id: z.id, name: z.name, capacity: z.capacity, hourlyRate: Number(z.hourlyRate) })),
     // Таплинк (/link) и прямая ссылка на Tai — администратора клуба в Telegram.
     links,
     taiUrl: bot?.username ? `https://t.me/${bot.username}` : null,
+    // Тексты и фото сайта из приложения HUB (форматы, команда, отзывы, страницы).
+    content,
   })
 })
 

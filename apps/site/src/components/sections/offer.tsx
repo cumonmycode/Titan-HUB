@@ -7,6 +7,7 @@ import type { Format } from '@/content/formats'
 import { RequestButton } from '@/components/request/RequestButton'
 import { eveningOf } from '@/components/request/options'
 import { Photo } from './blocks'
+import { photoProps } from '@/lib/content'
 
 /** Подпись под форматом: дни недели и цена из HUB. */
 export function formatMeta(f: Format, config: SiteConfig): string {
@@ -25,7 +26,7 @@ export function Formats({ formats, config }: { formats: Format[]; config: SiteCo
     <ul className="formats">
       {formats.map((f) => (
         <li key={f.id} className="fmt">
-          <Photo name={f.photo} alt={f.title} sizes="(max-width: 720px) 100vw, 33vw" />
+          <Photo {...photoProps(f.photo)} alt={f.title} sizes="(max-width: 720px) 100vw, 33vw" />
           <div className="fmt-body">
             <h3>{f.title}</h3>
             <p className="fmt-meta">{formatMeta(f, config)}</p>

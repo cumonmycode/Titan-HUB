@@ -9,7 +9,8 @@ import https from 'node:https'
 import { unstable_cache } from 'next/cache'
 import { TOURNAMENTS, type Tournament } from '@/content/tournaments'
 import { isHoliday } from '@/content/holidays'
-import { type PlayersPayload, type ScheduleDay, type SiteConfig, type Story, type StorySummary } from './types'
+import { type PlayersPayload, type ScheduleDay, type SiteConfig, type SpecialNight, type Story, type StorySummary } from './types'
+import { BUILTIN_CONTENT, mergeContent } from './content'
 
 const API_URL = process.env['SITE_API_URL'] ?? 'http://api:3001'
 const CLUB_HOST = process.env['SITE_CLUB_HOST'] ?? 'kbr.titanpos.ru'
@@ -49,6 +50,8 @@ export const FALLBACK_CONFIG: SiteConfig = {
   url: null,
   venue: { name: 'TITAN KBR', address: 'Кабардинская улица, 152', hoursOpen: '19:00', hoursClose: '03:00' },
   schedule: DEFAULT_SCHEDULE,
+  specials: [],
+  content: BUILTIN_CONTENT,
   eveningPrices: [
     { name: 'Новичок', price: 800 }, { name: 'Резидент', price: 600 },
     { name: 'Студент', price: 300 }, { name: 'Одна игра', price: 200 },
@@ -66,6 +69,8 @@ interface RawConfig {
   url?: unknown
   venue?: SiteConfig['venue']
   schedule?: ScheduleDay[] | null
+  specials?: SpecialNight[]
+  content?: unknown
   eveningPrices?: SiteConfig['eveningPrices']
   eventRates?: SiteConfig['eventRates']
   zones?: SiteConfig['zones']
@@ -83,6 +88,8 @@ async function loadConfig(): Promise<SiteConfig> {
     url: typeof raw.url === 'string' && /^https:\/\//.test(raw.url) ? raw.url : null,
     venue: raw.venue ?? FALLBACK_CONFIG.venue,
     schedule: raw.schedule?.length ? raw.schedule : DEFAULT_SCHEDULE,
+    specials: Array.isArray(raw.specials) ? raw.specials : [],
+    content: mergeContent(raw.content),
     eveningPrices: raw.eveningPrices?.length ? raw.eveningPrices : FALLBACK_CONFIG.eveningPrices,
     eventRates: raw.eventRates?.length ? raw.eventRates : FALLBACK_CONFIG.eventRates,
     zones: raw.zones ?? [],

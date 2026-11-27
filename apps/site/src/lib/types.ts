@@ -15,6 +15,11 @@ export type SiteLinkKind = 'book_game' | 'book_event' | 'tai' | 'telegram' | 'ch
 export interface SiteLink { id: string; kind: SiteLinkKind; label: string; url: string; on: boolean }
 export interface SiteLinks { title: string; bio: string; links: SiteLink[] }
 
+import type { SiteContent } from './content'
+
+/** Разовое событие расписания (Хэллоуин, Новый год…): дата и время. */
+export interface SpecialNight { date: string; title: string; time: string; evening?: string }
+
 export interface SiteConfig {
   /** Праздничное оформление (включается в HUB) или null. */
   holiday: HolidayId | null
@@ -23,6 +28,10 @@ export interface SiteConfig {
   /** Адрес сайта из HUB («Сайт → Домен») или null — встроенный. */
   url: string | null
   schedule: ScheduleDay[]
+  /** Разовые события из «Управление → Расписание» на два месяца вперёд. */
+  specials: SpecialNight[]
+  /** Тексты и фото из приложения HUB (форматы, команда, отзывы, страницы). */
+  content: SiteContent
   eveningPrices: Price[]
   eventRates: EventRate[]
   zones: Zone[]

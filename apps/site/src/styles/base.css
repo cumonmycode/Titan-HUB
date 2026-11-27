@@ -165,6 +165,7 @@ html { scrollbar-color: var(--scroll, #555) transparent; }
 .member { display: grid; gap: 2px; padding: 18px 22px; min-width: 240px; }
 .member b { font-family: var(--font-display); font-size: 22px; font-weight: var(--display-weight, 700); }
 .member span { color: var(--muted); }
+.member .member-photo { width: 72px; height: 72px; border-radius: 50%; object-fit: cover; margin-bottom: 8px; }
 
 /* ── Публикации, галерея ────────────────────────────────────────────────── */
 .stories { list-style: none; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr)); gap: clamp(18px, 2vw, 28px); }

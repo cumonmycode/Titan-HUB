@@ -34,6 +34,8 @@ export const SHEET_ROUTES: Record<string, ReadonlySet<string>> = {
   analytics: new Set(['check/[checkId]', 'period']),
   manage: new Set([
     'requests/new',
+    'schedule/slot',
+    'settings/site/content-item',
     'goods/edit',
     'goods/pick',
     'goods/category',

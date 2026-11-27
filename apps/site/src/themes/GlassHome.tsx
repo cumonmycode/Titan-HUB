@@ -6,7 +6,7 @@
 import Link from 'next/link'
 import type { CSSProperties } from 'react'
 import { ArrowRight, MapPin } from 'lucide-react'
-import { FORMATS } from '@/content/formats'
+import { formatsOf, photoProps } from '@/lib/content'
 import { GOMAFIA, SITE } from '@/content/site'
 import { DAY_LONG, DAY_SHORT, dateLabel, isoDate, nextEvening, newbiePrice, rub } from '@/lib/format'
 import type { ScheduleDay } from '@/lib/types'
@@ -78,7 +78,7 @@ export function GlassHome({ config, stories, players }: HomeProps) {
             <span className="g-line" style={v({ '--i': 1 })}>Каждый вечер —</span>
             <span className="g-line g-line-accent" style={v({ '--i': 2 })}><WordRotator words={['городская', 'спортивная', 'детская', 'корпоративная']} /></span>
           </h1>
-          <p className="lead g-rise" style={v({ '--i': 3 })}>Клуб TITAN KBR: игры с ведущими, турниры с рейтингом GoMafia, праздники и выезд со всем реквизитом.</p>
+          <p className="lead g-rise" style={v({ '--i': 3 })}>{config.content.pages.home.lead}</p>
           <div className="actions g-rise" style={v({ '--i': 4 })}>
             <RequestButton preset={{ kind: 'game' }} className="btn btn-primary btn-lg">Записаться на игру</RequestButton>
             <RequestButton preset={{ kind: 'event' }} className="btn btn-ghost btn-lg glass">Заказать праздник</RequestButton>
@@ -124,9 +124,9 @@ export function GlassHome({ config, stories, players }: HomeProps) {
       <Reveal as="section" className="sec">
         <SectionHead title="Выберите свой вечер" lead="Шесть форматов клуба — от первой игры до турнира и праздника под ключ." />
         <div className="k-tiles">
-          {FORMATS.map((f) => (
+          {formatsOf(config.content).map((f) => (
             <RevealItem key={f.id} className="k-tile glass">
-              <div className="k-tile-media"><Photo name={f.photo} alt="" sizes="(max-width: 700px) 85vw, 33vw" /></div>
+              <div className="k-tile-media"><Photo {...photoProps(f.photo)} alt="" sizes="(max-width: 700px) 85vw, 33vw" /></div>
               <div className="k-tile-body">
                 <p className="k-tile-meta">{formatMeta(f, config)}</p>
                 <h3>{f.title}</h3>
@@ -168,7 +168,7 @@ export function GlassHome({ config, stories, players }: HomeProps) {
 
       <section className="sec">
         <div className="sec-head"><h2>Что говорят гости</h2></div>
-        <ReviewsMarquee />
+        <ReviewsMarquee reviews={config.content.reviews} />
       </section>
 
       <Reveal as="section" className="cta-band glass">

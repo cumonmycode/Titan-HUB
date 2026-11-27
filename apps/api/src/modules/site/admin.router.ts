@@ -14,13 +14,14 @@ import { Hono } from 'hono'
 import { zValidator } from '@hono/zod-validator'
 import { z } from 'zod'
 import { Resolver } from 'node:dns/promises'
-import { appSettings, eq, inArray, type Database } from '@titan/database'
+import { and, appSettings, eq, inArray, isNull, profiles, type Database } from '@titan/database'
 import type { AppEnv } from '../../types.js'
 import { requireAuth, requireRole } from '../../middleware/auth.js'
 import { getClubIntegration } from '../../lib/secrets.js'
 import { listChats } from '../../lib/tgChats.js'
 import { getClientBot } from '../requests/clientBot.js'
 import { SITE_HOLIDAYS, isSiteHoliday, parseSchedule } from './site.router.js'
+import { DEFAULT_CONTENT, SECTION_IDS, SECTION_SCHEMAS, editedSections, readSiteContent, writeSection, type SectionId } from './content.js'
 import {
   DOMAIN_RE, REQUESTS_CHAT_KEY, SITE_CONTACTS_KEY, SITE_DOMAIN_KEY, SITE_DOMAIN_PRIMARY_KEY, SITE_LINKS_KEY, SiteContactsSchema, SiteLinksSchema,
   readRequestsChat, readSiteContacts, readSiteDomain, readSiteLinks,
@@ -174,4 +175,33 @@ siteAdminSettingsRouter.put('/site-domain', ...owner, zValidator('json', DomainS
   await upsert(db, SITE_DOMAIN_KEY, domain)
   await upsert(db, SITE_DOMAIN_PRIMARY_KEY, primary)
   return c.json(await domainPayload(db))
+})
+
+// ─── Содержимое сайта: форматы, команда, отзывы, ценности, документы, страницы ───
+// Приложение HUB и есть CMS сайта (modules/site/content.ts).
+siteAdminSettingsRouter.get('/site-content', ...owner, async (c) => {
+  const db = c.var.db
+  const [content, edited, staff] = await Promise.all([
+    readSiteContent(db),
+    editedSections(db),
+    // Команда на сайте — из сотрудников клуба.
+    db.select({ id: profiles.id, nickname: profiles.nickname, fullName: profiles.fullName, photoUrl: profiles.photoUrl, role: profiles.role })
+      .from(profiles).where(and(inArray(profiles.role, ['owner', 'staff']), isNull(profiles.deletedAt))),
+  ])
+  return c.json({ content, edited, defaults: DEFAULT_CONTENT, staff })
+})
+
+siteAdminSettingsRouter.put('/site-content/:section', ...owner, zValidator('json', z.object({ value: z.unknown() })), async (c) => {
+  const db = c.var.db
+  const key = c.req.param('section') as SectionId
+  if (!SECTION_IDS.includes(key)) return c.json({ error: 'Нет такого раздела' }, 404)
+  const { value } = c.req.valid('json')
+  if (value === null) {
+    await writeSection(db, key, null)
+  } else {
+    const parsed = SECTION_SCHEMAS[key].safeParse(value)
+    if (!parsed.success) return c.json({ error: parsed.error.issues[0]?.message ?? 'Проверьте поля' }, 400)
+    await writeSection(db, key, parsed.data)
+  }
+  return c.json({ content: await readSiteContent(db), edited: await editedSections(db) })
 })

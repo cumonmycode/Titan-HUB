@@ -30,6 +30,9 @@ export default function ManageLayout() {
       <Stack.Screen name="index" options={formHeader({ title: 'Управление', headerLargeTitle: true })} />
 
       {/* «Товары»: меню, остатки и операции склада (2026-10-08 вместо «Меню» и «Склада»). */}
+      {/* Расписание клуба: сайт, Tai, касса и опросы берут вечера отсюда. */}
+      <Stack.Screen name="schedule/index" options={formHeader({ title: 'Расписание' })} />
+      <Stack.Screen name="schedule/slot" options={editorModal} />
       <Stack.Screen name="goods/index" options={formHeader({ title: 'Товары' })} />
       <Stack.Screen name="goods/[itemId]" options={formHeader()} />
       <Stack.Screen name="goods/edit" options={editorModal} />
@@ -114,7 +117,8 @@ export default function ManageLayout() {
       <Stack.Screen name="settings/site/look" options={formHeader({ title: 'Оформление' })} />
       <Stack.Screen name="settings/site/links" options={formHeader({ title: 'Таплинк' })} />
       <Stack.Screen name="settings/site/schedule" options={formHeader({ title: 'Расписание вечеров' })} />
-      <Stack.Screen name="settings/site/evening" options={editorModal} />
+      <Stack.Screen name="settings/site/content" options={formHeader({ title: 'Содержимое' })} />
+      <Stack.Screen name="settings/site/content-item" options={editorModal} />
       <Stack.Screen name="settings/site/stories" options={formHeader({ title: 'Публикации' })} />
       <Stack.Screen name="settings/site/story" options={editorModal} />
       <Stack.Screen name="settings/site/domain" options={formHeader({ title: 'Домен' })} />

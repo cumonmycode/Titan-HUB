@@ -13,12 +13,14 @@ export async function generateMetadata(): Promise<Metadata> {
 }
 
 export default async function ContactPage() {
-  const contacts = contactsOf((await getSiteConfig()).contacts)
+  const config = await getSiteConfig()
+  const contacts = contactsOf(config.contacts)
+  const page = config.content.pages.contact
   return (
     <>
       <PageHead
-        title="Контакты"
-        lead="Клуб открыт для всех, кто любит мафию, общение и яркие эмоции. Турниры, миникапы, корпоративы и праздники в формате мафии."
+        title={page.title}
+        lead={page.lead}
         actions={<>
           <a className="btn btn-primary btn-lg" href={contacts.phoneHref}><Phone size={18} aria-hidden="true" /> Позвонить</a>
           <a className="btn btn-ghost btn-lg" href={SITE.mapUrl} target="_blank" rel="noopener noreferrer"><MapPin size={18} aria-hidden="true" /> Как добраться</a>

@@ -33,7 +33,8 @@ type UpdateEvent =
   | 'chat:message'
   | 'chat:read'
   | 'smart-home:updated'
-  | 'tai-inbox:updated';
+  | 'tai-inbox:updated'
+  | 'schedule:updated';
 
 const ATTENTION = new Set(['staff_call', 'request_bill', 'client_order', 'chat_message']);
 
@@ -152,6 +153,7 @@ export function useRealtime() {
       updates.addEventListener('smart-home:updated', () => invalidate(['smart-home']));
       // «Диалоги Tai»: новое сообщение клиента, ответ Tai или сотрудника, пауза.
       updates.addEventListener('tai-inbox:updated', () => invalidate(['tai-inbox'], ['leads']));
+      updates.addEventListener('schedule:updated', () => invalidate(['schedule']));
       updates.addEventListener('chat:read', (e) => {
         const payload = parse<{ checkId: string }>(e.data);
         if (payload) invalidate(['pos', 'chat', payload.checkId]);

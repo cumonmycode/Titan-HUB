@@ -1,5 +1,5 @@
 import type { Metadata } from 'next'
-import { FORMATS } from '@/content/formats'
+import { formatsOf } from '@/lib/content'
 import { getSiteConfig } from '@/lib/hub'
 import { RequestButton } from '@/components/request/RequestButton'
 import { CtaBand, Faq, PageHead, Section, Steps } from '@/components/sections/blocks'
@@ -20,12 +20,13 @@ const STEPS = [
 
 export default async function GamesPage() {
   const config = await getSiteConfig()
-  const games = FORMATS.filter((f) => f.request.kind === 'game')
+  const games = formatsOf(config.content).filter((f) => f.request.kind === 'game')
+  const page = config.content.pages.games
   return (
     <>
       <PageHead
-        title="Игровые вечера"
-        lead="Городская мафия для всех, спортивная — по правилам ФСМ с рейтингом, и настольные игры компанией. Приходите один или с друзьями."
+        title={page.title}
+        lead={page.lead}
         photoName="players"
         actions={<RequestButton preset={{ kind: 'game' }} className="btn btn-primary btn-lg">Записаться на игру</RequestButton>}
       />
