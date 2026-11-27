@@ -80,7 +80,7 @@ function Editor({ initial }: { initial: StreamLink[] }) {
               <FieldRow value={slot.url} placeholder={PLACEHOLDERS[i]!.url} keyboard="url" maxLength={500} onChange={(v) => update(i, { url: v })} />
             </Section>
           ))}
-          <Section title="Донат" footer={<Text>Кнопка «Поддержать донатом» в My Titan. Если у эфира своя ссылка на донат — во время эфира покажется она.</Text>}>
+          <Section title="Донат" footer={<Text>Кнопка «Поддержать донатом» в My Titan на Android (в iOS Apple донаты по ссылке не пропускает). Если у эфира своя ссылка на донат — во время эфира покажется она.</Text>}>
             <FieldRow value={donate} placeholder="https://www.donationalerts.com/r/titan" keyboard="url" maxLength={500} onChange={setDonate} />
           </Section>
         </Form>

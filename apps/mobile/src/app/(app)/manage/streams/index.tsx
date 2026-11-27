@@ -68,7 +68,7 @@ export default function MarketingStreamsScreen() {
             />
           </Section>
 
-          <Section title="Где смотреть" footer={<Text>Каналы клуба и ссылка на донат — клиенты видят их в «Трансляциях» My Titan всегда, и между эфирами.</Text>}>
+          <Section title="Где смотреть" footer={<Text>Каналы клуба клиенты видят в «Трансляциях» My Titan всегда, и между эфирами. Кнопка доната — только на Android: в iOS Apple разрешает донаты лишь через свои встроенные покупки.</Text>}>
             <LinkRow icon="play.tv.fill" color="#AF52DE" title="Площадки и донат" subtitle={channelsText} onPress={() => router.push('/manage/streams/channels')} />
           </Section>
 

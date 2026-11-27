@@ -93,6 +93,7 @@ export const NOTIFICATIONS_PERMISSION: PermissionInfo = {
     { icon: 'deposit', text: 'Пополнения депозита и долг' },
     { icon: 'paid', text: 'Подтверждение регистрации и оплат' },
     { icon: 'news', text: 'Новости и события клуба' },
+    { icon: 'live', text: 'Начало трансляций клуба' },
   ],
 };
 

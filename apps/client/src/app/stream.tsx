@@ -2,6 +2,9 @@
 // этого эфира и «Поддержать донатом»; эфира нет — постоянные площадки клуба (каналы) и
 // тот же донат. Открывается плашкой «В эфире» на главной, push «Мы в эфире» и строкой
 // «Трансляции» в профиле. Шторка по высоте содержимого — без прокрутки.
+//
+// Донат — только на Android: в iOS чаевые авторам цифрового контента Apple принимает
+// лишь через встроенные покупки (App Review 3.1.1), внешняя ссылка — причина отказа.
 import { Linking, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -14,7 +17,7 @@ import { errorText } from '@/lib/api';
 import { clock, relative } from '@/lib/format';
 import { haptic } from '@/lib/haptics';
 import { useStream, useWallet } from '@/lib/queries';
-import { colors, GUTTER, MAX_WIDTH, radius, space, type } from '@/lib/theme';
+import { colors, GUTTER, IS_IOS, MAX_WIDTH, radius, space, type } from '@/lib/theme';
 import type { StreamLink, StreamView } from '@/lib/types';
 
 /** Ссылка — в приложение площадки (VK Видео, YouTube, Twitch), если оно стоит, иначе в браузер. */
@@ -48,7 +51,7 @@ export default function StreamScreen() {
 function Content({ data }: { data: StreamView }) {
   const live = data.live;
   // Донат эфира важнее постоянного: во время эфира — его, иначе — постоянный донат клуба.
-  const donate = live?.donate[0] ?? data.donate[0] ?? null;
+  const donate = IS_IOS ? null : (live?.donate[0] ?? data.donate[0] ?? null);
   // Площадки клуба, которых нет среди ссылок эфира.
   const channels = data.channels.filter((c) => !live?.watch.some((w) => w.url === c.url));
 
