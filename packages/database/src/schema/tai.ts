@@ -21,6 +21,10 @@ export const taiContacts = pgTable('tai_contacts', {
   lastInboundAt: timestamp('last_inbound_at', { withTimezone: true }),
   lastOutboundAt: timestamp('last_outbound_at', { withTimezone: true }),
   lastProactiveAt: timestamp('last_proactive_at', { withTimezone: true }),
+  // Чат Tai с клиентами в HUB (миграция 094): Tai на паузе, нужен человек, прочитано сотрудником.
+  aiPaused: boolean('ai_paused').notNull().default(false),
+  needsAttention: boolean('needs_attention').notNull().default(false),
+  staffReadAt: timestamp('staff_read_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 })
@@ -30,10 +34,12 @@ export const taiMessages = pgTable('tai_messages', {
   id: bigserial('id', { mode: 'number' }).primaryKey(),
   chatId: text('chat_id').notNull(),
   tgId: text('tg_id'),
-  role: text('role').$type<'user' | 'assistant'>().notNull(),
+  // staff — ответ сотрудника из HUB (миграция 094), staff_id — кто ответил.
+  role: text('role').$type<'user' | 'assistant' | 'staff'>().notNull(),
   content: text('content').notNull(),
   voice: boolean('voice').notNull().default(false),
   memo: text('memo'),
+  staffId: uuid('staff_id'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 })
 

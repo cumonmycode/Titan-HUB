@@ -32,7 +32,8 @@ type UpdateEvent =
   | 'order:resolved'
   | 'chat:message'
   | 'chat:read'
-  | 'smart-home:updated';
+  | 'smart-home:updated'
+  | 'tai-inbox:updated';
 
 const ATTENTION = new Set(['staff_call', 'request_bill', 'client_order', 'chat_message']);
 
@@ -149,6 +150,8 @@ export function useRealtime() {
       updates.addEventListener('order:resolved', (e) => onCheckChanged(e.data));
       // Владелец поменял помещения или токен Home Assistant — шторка кассы перечитает их.
       updates.addEventListener('smart-home:updated', () => invalidate(['smart-home']));
+      // «Диалоги Tai»: новое сообщение клиента, ответ Tai или сотрудника, пауза.
+      updates.addEventListener('tai-inbox:updated', () => invalidate(['tai-inbox']));
       updates.addEventListener('chat:read', (e) => {
         const payload = parse<{ checkId: string }>(e.data);
         if (payload) invalidate(['pos', 'chat', payload.checkId]);

@@ -24,6 +24,8 @@ import { playerDetail as gomafiaPlayer } from '../../lib/gomafia.js'
 import { getShiftCashBalance } from '../shifts/shifts.service.js'
 import { createHmac } from 'node:crypto'
 import { taiUsername } from '../tg/club.js'
+import { clientAttendance } from '../../lib/clientAttendance.js'
+import { logBooking } from '../bookings/bookingDetails.js'
 
 const GM_TAG_RE = /^gomafia:\d+$/
 
@@ -39,6 +41,8 @@ const CreateClientSchema = z.object({
   photoUrl: z.string().max(500).optional(),
   gomafiaPhotoUrl: z.string().max(500).optional(),
   searchTags: z.array(z.string()).default([]),
+  // Клиент заведён из заявки (карточка заявки → «Создать клиента»).
+  bookingId: z.string().uuid().optional(),
 })
 
 const UpdateClientSchema = z.object({
@@ -239,7 +243,12 @@ clientsRouter.post('/', requireRole('owner', 'staff'), zValidator('json', Create
   const db = c.var.db
   const body = c.req.valid('json')
   const passwordHash = body.password ? await hashPassword(body.password) : undefined
+  const actor = c.get('user')
+  const [creator] = await db.select({ nickname: profiles.nickname }).from(profiles).where(eq(profiles.id, actor.sub)).limit(1)
   const [client] = await db.insert(profiles).values({
+    // Откуда клиент: завёл сотрудник в HUB (или из карточки заявки).
+    signupSource: body.bookingId ? 'request' : 'hub',
+    signupMeta: { by: actor.sub, byName: creator?.nickname ?? null, bookingId: body.bookingId ?? null },
     nickname: body.nickname,
     fullName: body.fullName ?? null,
     role: 'client',
@@ -254,6 +263,7 @@ clientsRouter.post('/', requireRole('owner', 'staff'), zValidator('json', Create
     passwordHash,
   }).returning()
   const { pin, passwordHash: _, ...safe } = client
+  if (body.bookingId) await logBooking(db, body.bookingId, 'client', actor.sub, `Создан клиент ${client.nickname}`).catch(() => {})
 
   const newClientTier = ({ newbie: 'Новичок', guest: 'Гость', resident: 'Резидент', student: 'Студент' } as Record<string, string>)[client.clientTier ?? '']
   void notify({
@@ -281,6 +291,8 @@ clientsRouter.get('/registrations', requireRole('owner', 'staff'), async (c) => 
     photoUrl: profiles.photoUrl,
     tgUsername: profiles.tgUsername,
     createdAt: profiles.createdAt,
+    signupSource: profiles.signupSource,
+    signupMeta: profiles.signupMeta,
   }).from(profiles)
     .where(and(eq(profiles.registrationStatus, REGISTRATION_PENDING), isNull(profiles.deletedAt)))
     .orderBy(asc(profiles.createdAt))
@@ -738,6 +750,13 @@ clientsRouter.delete('/:id/permanent', requireRole('owner'), async (c) => {
 })
 
 // Прогресс к статусу Резидент (посещения) — для карточки клиента.
+// На какие вечера ходит клиент — диаграмма в карточке (lib/clientAttendance).
+clientsRouter.get('/:id/attendance', requireRole('owner', 'staff'), async (c) => {
+  const id = c.req.param('id')
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) return c.json({ error: 'Bad id' }, 400)
+  return c.json(await clientAttendance(c.var.db, id))
+})
+
 clientsRouter.get('/:id/visit-progress', requireRole('owner', 'staff'), async (c) => {
   const db = c.var.db
   return c.json(await visitProgress(c.req.param('id'), db))

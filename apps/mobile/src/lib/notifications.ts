@@ -32,6 +32,8 @@ const LOOK: Record<string, { icon: SFSymbol; color: NamedColor }> = {
   certificate_used: { icon: 'giftcard.fill', color: 'teal' },
   booking: { icon: 'calendar.badge.clock', color: 'indigo' },
   guest_feedback: { icon: 'star.fill', color: 'yellow' },
+  site_request: { icon: 'tray.and.arrow.down.fill', color: 'indigo' },
+  tai_dialog: { icon: 'bubble.left.and.text.bubble.right.fill', color: 'purple' },
 };
 
 export function notificationLook(type: string) {

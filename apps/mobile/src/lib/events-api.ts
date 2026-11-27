@@ -79,6 +79,11 @@ export type BookingRequest = {
   meta?: Record<string, unknown> | null;
   /** Гость нажал «Получать статус в Telegram» — решение придёт ему от бота клуба. */
   guest_follows?: boolean;
+  /** Откуда заявка: site — сайт клуба, tai — бот в Telegram, widget — старая форма, manual — вручную в HUB. */
+  source?: string | null;
+  created_by_name?: string | null;
+  /** Заметка персонала (видна только в HUB). */
+  staff_note?: string | null;
 };
 
 /** Старая бронь: зона штаба, мероприятие по ней завершено. `check_total` — итог вечера. */

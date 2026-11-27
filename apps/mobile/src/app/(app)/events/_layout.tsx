@@ -26,6 +26,9 @@ export default function EventsLayout() {
       {/* Одна форма для мероприятия в клубе, выезда и миникапа (format=minicap). */}
       <Stack.Screen name="edit" options={formSheet} />
       <Stack.Screen name="participants" options={formSheet} />
+      {/* Карточка заявки: источник, журнал, клиент, диалог с Tai; заявка вручную — шторкой. */}
+      <Stack.Screen name="booking" options={{ title: 'Заявка' }} />
+      <Stack.Screen name="booking-new" options={formSheet} />
     </Stack>
   );
 }

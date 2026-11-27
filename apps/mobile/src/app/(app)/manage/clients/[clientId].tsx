@@ -3,6 +3,7 @@ import { SymbolView } from 'expo-symbols';
 import { useState } from 'react';
 import { ActivityIndicator, Alert, Linking, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
+import { ClientAttendanceCard } from '@/components/client-attendance';
 import { ClientMoveRow } from '@/components/client-moves';
 import { Card, ContactButtons, InfoRow, ProfileHeader, StatTile } from '@/components/profile-parts';
 import { AppRefreshControl } from '@/components/refresh-control';
@@ -15,6 +16,7 @@ import {
   gomafiaIdOf,
   purgeClient,
   restoreClient,
+  signupText,
   tierLook,
   useClient,
   useClientTiers,
@@ -27,6 +29,7 @@ import { formatMoney, plural, toNumber } from '@/lib/format';
 import { haptic } from '@/lib/haptics';
 import { usePageGutter } from '@/lib/layout';
 import { useSession } from '@/lib/session';
+import { useClientTaiChat } from '@/lib/tai-inbox-api';
 import { colors, space, type } from '@/lib/theme';
 
 const RECENT = 5;
@@ -53,6 +56,7 @@ export default function ClientScreen() {
   const data = client.data;
   const visits = useVisitProgress(clientId, data?.clientTier === 'newbie' && !data?.deletedAt);
   const history = useClientTransactions(clientId);
+  const taiChat = useClientTaiChat(clientId);
   const [visitBusy, setVisitBusy] = useState(false);
   const [pulling, setPulling] = useState(false);
 
@@ -82,7 +86,7 @@ export default function ClientScreen() {
 
   const refresh = async () => {
     setPulling(true);
-    await Promise.allSettled([client.refetch(), history.refetch(), visits.refetch()]);
+    await Promise.allSettled([client.refetch(), history.refetch(), visits.refetch(), taiChat.refetch()]);
     setPulling(false);
   };
 
@@ -216,6 +220,8 @@ export default function ClientScreen() {
 
         {visits.data && visits.data.tier === 'newbie' ? <VisitsCard progress={visits.data} busy={visitBusy} onChange={(delta) => void changeVisits(delta)} /> : null}
 
+        {!archived ? <ClientAttendanceCard clientId={data.id} /> : null}
+
         {data.role === 'staff' || data.role === 'owner' ? (
           <Card footer="Роль, права, формула зарплаты и вход в HUB — в карточке сотрудника.">
             <InfoRow
@@ -251,6 +257,15 @@ export default function ClientScreen() {
         ) : null}
 
         <Card title="Контакты" footer={`В клубе с ${new Date(data.createdAt).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' })}`}>
+          <InfoRow label="Откуда" value={signupText(data)} muted={!data.signupSource} />
+          {taiChat.data ? (
+            <InfoRow
+              label="Диалог с Tai"
+              value={taiChat.data.needsAttention ? 'ждёт ответа' : taiChat.data.aiPaused ? 'ведёт сотрудник' : 'переписка'}
+              chevron
+              onPress={() => router.push({ pathname: '/tai-dialog', params: { tgId: taiChat.data!.tgId } })}
+            />
+          ) : null}
           <InfoRow label="Телефон" value={data.phone || 'не указан'} muted={!data.phone} onPress={phone ? () => open(`tel:+${phone}`) : undefined} />
           <InfoRow
             label="Telegram"

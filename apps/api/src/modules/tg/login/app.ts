@@ -139,6 +139,9 @@ async function registerClient(club: TgClub, row: WalletLoginCode, tgId: string, 
       role: 'client',
       // Ждёт подтверждения персонала в HUB: до него без бонусов и оплаты в приложении.
       registrationStatus: 'pending',
+      // Откуда клиент: сам зарегистрировался в My Titan (устройство — из запроса входа).
+      signupSource: 'app',
+      signupMeta: { platform: row.platform ?? null, device: row.deviceName ?? null },
       tgId: tgHolder ? null : tgId,
       tgUsername: tgHolder ? null : tgUsername,
     }).returning()

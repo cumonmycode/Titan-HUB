@@ -159,7 +159,7 @@ function confirmRequest(s: ClientSession, list: RequestRow[]): ToolDef {
       const db = s.club.db
       const actor = await anyOwnerId(db)
       if (!actor) return { data: { error: 'Не могу подтвердить — передай администратору (call_admin)' } }
-      const result = await decideBooking(db, r.id, 'confirmed', actor)
+      const result = await decideBooking(db, r.id, 'confirmed', actor, 'Tai')
       if (result.kind === 'conflict') {
         return { data: { error: `На это время зона занята: «${result.event.title}» ${result.event.startTime}–${result.event.endTime ?? ''}. Предложи гостю другое время или зону.` } }
       }
@@ -218,7 +218,7 @@ function cancelRequest(s: ClientSession, list: RequestRow[]): ToolDef {
       const db = s.club.db
       const actor = await anyOwnerId(db)
       if (!actor) return { data: { error: 'Не могу отменить — передай администратору' } }
-      const result = await decideBooking(db, r.id, 'cancelled', actor)
+      const result = await decideBooking(db, r.id, 'cancelled', actor, 'Tai')
       if (result.kind !== 'ok') return { data: { error: result.kind === 'refused' ? result.error : 'Заявка не найдена' } }
       await notifyRequestStatus(db, r.id, 'cancelled', 'Tai', `https://${s.club.host}`, { guest: false })
       const reason = String(args['reason'] ?? '').slice(0, 300)

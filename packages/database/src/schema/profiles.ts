@@ -27,6 +27,15 @@ export const clientTiers = pgTable('client_tiers', {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 })
 
+/** Подробности появления клиента (profiles.signup_meta). */
+export interface SignupMeta {
+  by?: string | null
+  byName?: string | null
+  platform?: string | null
+  device?: string | null
+  bookingId?: string | null
+}
+
 export const profiles = pgTable('profiles', {
   id: uuid('id').primaryKey().defaultRandom(),
   nickname: text('nickname').notNull().unique(),
@@ -76,6 +85,9 @@ export const profiles = pgTable('profiles', {
   referredBy: uuid('referred_by'),
   referralRewardedAt: timestamp('referral_rewarded_at', { withTimezone: true }),
   welcomeBonusAt: timestamp('welcome_bonus_at', { withTimezone: true }),
+  // Откуда клиент (миграция 094): hub | app | request; NULL — неизвестно.
+  signupSource: text('signup_source'),
+  signupMeta: jsonb('signup_meta').$type<SignupMeta>(),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   deletedAt: timestamp('deleted_at', { withTimezone: true }),
 })

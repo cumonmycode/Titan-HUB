@@ -24,6 +24,7 @@ import { appendMessage, markBlocked, markOutbound, recentTurns } from './memory.
 import { activeRequests, requestPrompt, requestTools } from './request-desk.js'
 import { showCardTool } from '../widgets.js'
 import { chatInvitesTool } from '../access.js'
+import { publishEvent } from '../../../lib/realtime.js'
 
 export interface ChatTarget {
   chatId: string
@@ -226,7 +227,11 @@ export async function converse(club: TgClub, person: TgPerson, contact: TaiConta
       return
     }
     await appendMessage(club.db, { chatId: target.chatId, role: 'assistant', content: result.text.trim() || '(ответил карточками)', voice, memo: result.memo })
-    if (!target.groupTitle) await markOutbound(club.db, person.tgId, false)
+    if (!target.groupTitle) {
+      await markOutbound(club.db, person.tgId, false)
+      // «Диалоги Tai» в HUB обновляются вживую.
+      publishEvent(club.id, 'tai-inbox:updated', { tgId: person.tgId })
+    }
   } finally {
     clearInterval(typing)
   }

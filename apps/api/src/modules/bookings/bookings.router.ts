@@ -16,6 +16,7 @@ import { notifyRequestStatus } from '../requests/notify.js'
 import { findOverlappingEvent, lockEventBooking } from '../events/events.router.js'
 import { cancelEventTx } from '../events/eventLifecycle.js'
 import { publishEvent } from '../../lib/realtime.js'
+import { logBooking, registerBookingDetailRoutes } from './bookingDetails.js'
 
 function rows<T = Record<string, unknown>>(res: unknown): T[] {
   return ((res as { rows?: unknown[] }).rows ?? (res as unknown[])) as T[]
@@ -49,9 +50,10 @@ bookingsRouter.get('/', requireRole('owner', 'staff'), async (c) => {
     SELECT b.id, b.space_id, s.name AS zone_name, b.name, b.phone, b.guests, b.title,
            b.starts_at, b.duration_hours, b.tariff_hours, b.location, b.address,
            b.comment, b.status, b.source, b.kind, b.meta, b.event_id, b.created_at,
-           (b.guest_tg_chat IS NOT NULL) AS guest_follows
+           (b.guest_tg_chat IS NOT NULL) AS guest_follows, b.staff_note, cb.nickname AS created_by_name
     FROM bookings b
     LEFT JOIN spaces s ON s.id = b.space_id
+    LEFT JOIN profiles cb ON cb.id = b.created_by
     ${status ? sql`WHERE b.status = ${status}` : sql``}
     ORDER BY b.starts_at DESC
     LIMIT 300
@@ -93,7 +95,7 @@ export type DecideResult =
  * отклонить (с отменой созданного мероприятия). actorId — кто решил (создатель события);
  * его же зовёт Tai, когда сам подтверждает заявку гостя (requests/tai-desk.ts).
  */
-export async function decideBooking(db: Database, id: string, status: 'new' | 'confirmed' | 'cancelled' | 'done', actorId: string): Promise<DecideResult> {
+export async function decideBooking(db: Database, id: string, status: 'new' | 'confirmed' | 'cancelled' | 'done', actorId: string, actorName?: string): Promise<DecideResult> {
   // Подтверждение — в ОДНОЙ транзакции: строка брони под FOR UPDATE (два параллельных
   // подтверждения не создадут два мероприятия — второе увидит event_id первого), а
   // проверка пересечения и вставка события — под тем же advisory-lock (зона, дата),
@@ -163,7 +165,9 @@ export async function decideBooking(db: Database, id: string, status: 'new' | 'c
       eventId = ev?.id ?? null
     }
 
-    await tx.execute(sql`UPDATE bookings SET status = ${status}, event_id = ${eventId}, updated_at = now() WHERE id = ${id}`)
+    const decided = status === 'new' ? sql`` : sql`, decided_by = ${actorId}, decided_at = now()`
+    await tx.execute(sql`UPDATE bookings SET status = ${status}, event_id = ${eventId}, updated_at = now() ${decided} WHERE id = ${id}`)
+    if (bk['status'] !== status) await logBooking(tx, id, status, actorId, null, actorName)
     return { kind: 'ok', eventId, cancelledCheckIds }
   })
 }
@@ -193,3 +197,6 @@ bookingsRouter.patch('/:id', requireRole('owner', 'staff'), zValidator('json', P
   const eventId = result.eventId
   return c.json({ ok: true, status, eventId })
 })
+
+// Карточка заявки, ручное создание и заметка персонала — bookingDetails.ts.
+registerBookingDetailRoutes(bookingsRouter)

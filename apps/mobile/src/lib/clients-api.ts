@@ -40,6 +40,9 @@ export type Client = {
   deletedAt: string | null;
   /** Клиент сам удалил аккаунт My Titan (сутки без входа; при следующем входе снимается). */
   appDeletedAt?: string | null;
+  /** Откуда клиент (миграция 094): hub — завёл сотрудник, app — сам в My Titan, request — из заявки; null — неизвестно. */
+  signupSource?: 'hub' | 'app' | 'request' | null;
+  signupMeta?: { by?: string | null; byName?: string | null; platform?: string | null; device?: string | null; bookingId?: string | null } | null;
   /** Приглашения (GET /clients/:id): кто привёл и скольких привёл сам. */
   referredBy?: string | null;
   referral?: { inviter: { id: string; nickname: string } | null; invited: number; rewardedAt: string | null };
@@ -600,4 +603,21 @@ export async function saveCustomer(customerId: string | null, input: { name: str
 export async function deleteCustomer(customerId: string): Promise<void> {
   await api.delete(`/customers/${customerId}`);
   invalidateCustomers();
+}
+
+/** Откуда клиент появился в клубе — строкой для карточки. */
+export function signupText(client: Pick<Client, 'signupSource' | 'signupMeta'>): string {
+  const meta = client.signupMeta ?? {};
+  switch (client.signupSource) {
+    case 'app': {
+      const device = [meta.platform === 'ios' ? 'iPhone' : meta.platform === 'android' ? 'Android' : null, meta.device].filter(Boolean).join(', ');
+      return device ? `Сам в My Titan · ${device}` : 'Сам в My Titan';
+    }
+    case 'hub':
+      return meta.byName ? `Завёл ${meta.byName} в HUB` : 'Заведён в HUB';
+    case 'request':
+      return meta.byName ? `Из заявки · завёл ${meta.byName}` : 'Из заявки';
+    default:
+      return 'не записано';
+  }
 }

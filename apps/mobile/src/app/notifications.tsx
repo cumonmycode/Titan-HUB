@@ -8,7 +8,7 @@ import {
   refreshable,
   shapes,
 } from '@expo/ui/swift-ui/modifiers';
-import { Stack, useRouter } from 'expo-router';
+import { Stack, useRouter, type Href } from 'expo-router';
 import { useEffect } from 'react';
 
 import { FormHost } from '@/components/native-form';
@@ -38,7 +38,15 @@ export default function NotificationsSheet() {
     return () => clearTimeout(timer);
   }, [host]);
 
-  const openTarget = (checkId: unknown) => {
+  const openTarget = (meta: Record<string, unknown> | null | undefined) => {
+    const url = meta?.['url'];
+    // Диалог Tai с клиентом — прямо в переписку.
+    if (typeof url === 'string' && url.startsWith('/tai-dialog')) {
+      router.back();
+      router.push(url as Href);
+      return;
+    }
+    const checkId = meta?.['checkId'];
     if (typeof checkId !== 'string') return;
     router.back();
     router.push({ pathname: '/pos/[checkId]', params: { checkId } });
@@ -54,7 +62,7 @@ export default function NotificationsSheet() {
           size={15}
           color="white"
           modifiers={[frame({ width: 32, height: 32 }), background(look.color, shapes.circle())]}
-          onPress={() => openTarget(n.meta?.checkId)}
+          onPress={() => openTarget(n.meta)}
         />
         <VStack alignment="leading" spacing={2}>
           <HStack spacing={6}>

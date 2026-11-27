@@ -18,6 +18,7 @@ import { linkRequestChat, requestLinkedText } from './login/request.js'
 import { requestIntro } from './dialog/request-desk.js'
 import { converse } from './dialog/converse.js'
 import { touchContact, updateContact } from './dialog/memory.js'
+import { holdForStaff } from './inbox.js'
 import { onSmmPrivate } from '../smm/tg-handlers.js'
 import { handleCardCommand } from './widgets.js'
 
@@ -108,6 +109,11 @@ export async function onPrivateMessage(club: TgClub, msg: TgMessage): Promise<vo
   }
   // Карточки (/games, /me, /club, /shift) — без ИИ, сразу из данных клуба.
   if (text.startsWith('/') && (await handleCardCommand(club, from, chatId, text))) return
+  // Диалог ведёт сотрудник из HUB («Диалоги Tai»): Tai молчит, сообщение ждёт человека.
+  if (contact.aiPaused && !person.staff) {
+    await holdForStaff(club, person, msg, text)
+    return
+  }
   if (!(await aiEnabled(club))) {
     await club.bot.send(chatId, 'Я пока умею только подтверждать вход в приложения клуба. С вопросами — к администратору 🙂')
     return

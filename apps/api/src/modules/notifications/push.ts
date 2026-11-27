@@ -27,6 +27,7 @@ export function resolveNotifUrl(type: string, meta: Record<string, unknown> = {}
     case 'new_client': case 'client_registration': case 'birthday': return '/manage/clients'
     case 'staff_call': return checkId ? `/pos/${checkId}` : '/pos'
     case 'guest_feedback': return '/dashboard?tab=feedback'
+    case 'tai_dialog': return typeof meta['tgId'] === 'string' ? `/tai-dialog?tgId=${meta['tgId']}` : '/manage/tai-chats'
   }
   if (checkId) return `/pos/${checkId}`
   if (typeof meta['itemId'] === 'string') return `/manage/goods/item/${meta['itemId']}`
@@ -41,7 +42,7 @@ export function resolveNotifUrl(type: string, meta: Record<string, unknown> = {}
 // событие/закупка/клиент) сворачивается в одну запись со счётчиком. Без объекта
 // (напр. открытие/закрытие смены) — не группируем.
 function groupKeyFor(type: string, meta: Record<string, unknown>): string | null {
-  const entity = ['checkId', 'itemId', 'spaceId', 'eventId', 'supplyId', 'playerId']
+  const entity = ['checkId', 'itemId', 'spaceId', 'eventId', 'supplyId', 'playerId', 'tgId']
     .map((k) => (typeof meta[k] === 'string' ? (meta[k] as string) : null))
     .find(Boolean)
   return entity ? `${type}:${entity}` : null
@@ -103,6 +104,7 @@ export const NOTIFICATION_TYPES: NotificationTypeDef[] = [
   { key: 'supply_received', label: 'Приход на склад', description: 'Оформлен приход товара на склад', defaultEnabled: true },
   { key: 'large_refund', label: 'Крупный возврат', description: 'Оформлен возврат на крупную сумму', defaultEnabled: true },
   { key: 'site_request', label: 'Заявка с сайта', description: 'Запись на игру, бронь зоны, мероприятие или сообщение с сайта клуба', defaultEnabled: true },
+  { key: 'tai_dialog', label: 'Клиент ждёт ответа', description: 'Tai на паузе в диалоге, а клиент написал в личку бота', defaultEnabled: true },
   { key: 'smm', label: 'СММ и маркетинг', description: 'Пост ждёт одобрения, пора выложить в Instagram, план и отчёт от Tai', defaultEnabled: true },
 ]
 

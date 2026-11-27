@@ -6,7 +6,7 @@
  */
 import {
   profiles, clientTiers, checks, transactions, eq, and, desc, sql, count, max, gt,
-  type Database, type Profile, type TaiContact, type TaiGames,
+  type Database, type Profile, type TaiContact, type TaiGames, taiContacts,
 } from '@titan/database'
 import type { ToolDef, ToolResult } from '../../ai/tai/tools/types.js'
 import { createApiCaller } from '../../ai/tai/internal.js'
@@ -285,8 +285,11 @@ const callAdmin = (s: ClientSession): ToolDef => ({
       type: 'site_request',
       title: '💬 Вопрос клиента через Tai',
       body: `${who}${contact ? ` (${contact})` : ''}: ${summary}`,
-      meta: { url: '/events', ...(s.person.profile ? { playerId: s.person.profile.id } : {}) },
+      // Открывает этот диалог в «Диалогах Tai» — администратор может ответить прямо оттуда.
+      meta: { url: `/tai-dialog?tgId=${s.person.tgId}`, tgId: s.person.tgId },
     }, s.club.db, s.club.id).catch(() => {})
+    await s.club.db.update(taiContacts).set({ needsAttention: true, updatedAt: new Date() })
+      .where(eq(taiContacts.tgId, s.person.tgId)).catch(() => {})
     return { data: { ok: true, hint: 'Администратор свяжется в Telegram или по телефону.' }, memo: 'передал вопрос администратору' }
   },
 })

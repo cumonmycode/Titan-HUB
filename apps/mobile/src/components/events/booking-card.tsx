@@ -4,6 +4,7 @@ import type { SFSymbol } from 'sf-symbols-typescript';
 
 import { GlassCard } from '@/components/new-check-parts';
 import { Text } from '@/components/text';
+import { channelLabel, SOURCE_LOOK, sourceKeyOf } from '@/lib/bookings-api';
 import { formatMskDateTime, normalizePhone, parsePgTimestamp, type BookingRequest } from '@/lib/events-api';
 import { haptic } from '@/lib/haptics';
 import { useTextLayout } from '@/lib/text-scale';
@@ -47,7 +48,33 @@ function ContactChip({ icon, label, url }: { icon: SFSymbol; label: string; url:
   );
 }
 
-export function BookingCard({ booking, busy, onConfirm, onReject }: { booking: BookingRequest; busy: boolean; onConfirm: () => void; onReject: () => void }) {
+/** Откуда пришла заявка — плашкой цвета источника; у ручной — ещё и канал (звонок, Instagram…). */
+export function SourceBadge({ booking }: { booking: Pick<BookingRequest, 'source' | 'meta'> }) {
+  const look = SOURCE_LOOK[sourceKeyOf(booking.source)];
+  const channel = booking.source === 'manual' ? channelLabel(booking) : null;
+  return (
+    <View style={[styles.badge, { backgroundColor: `${look.color}1F` }]}>
+      <SymbolView name={look.icon} size={11} weight="semibold" tintColor={look.color} />
+      <Text style={[type.caption1, styles.badgeText, { color: look.color }]} numberOfLines={1}>
+        {channel ? `${look.label} · ${channel}` : look.label}
+      </Text>
+    </View>
+  );
+}
+
+export function BookingCard({
+  booking,
+  busy,
+  onConfirm,
+  onReject,
+  onOpen,
+}: {
+  booking: BookingRequest;
+  busy: boolean;
+  onConfirm: () => void;
+  onReject: () => void;
+  onOpen: () => void;
+}) {
   const look = bookingLook(booking);
   // Очень крупный текст: кнопки друг под другом, иначе подписи не помещаются.
   const { stacked } = useTextLayout();
@@ -62,13 +89,28 @@ export function BookingCard({ booking, busy, onConfirm, onReject }: { booking: B
 
   return (
     <GlassCard style={styles.card}>
-      <View style={styles.top}>
-        <SymbolView name={look.symbol ?? (booking.location === 'exit' ? 'car' : 'building.2')} size={15} weight="semibold" tintColor={colors.secondaryLabel} />
-        <Text style={[type.headline, styles.label, styles.flex]} numberOfLines={2}>
-          {booking.title || booking.name}
-        </Text>
-      </View>
-      <Text style={[type.subhead, styles.label]}>{when}</Text>
+      {/* Тап по верху карточки — подробная карточка заявки: источник, журнал, клиент, диалог с Tai. */}
+      <Pressable
+        onPress={() => {
+          haptic.selection();
+          onOpen();
+        }}
+        style={({ pressed }) => [styles.head, pressed && styles.pressed]}
+        accessibilityRole="button"
+        accessibilityLabel={`Открыть заявку: ${booking.title || booking.name}`}>
+        <View style={styles.top}>
+          <SourceBadge booking={booking} />
+          <View style={styles.flex} />
+          <SymbolView name="chevron.right" size={12} weight="semibold" tintColor={colors.tertiaryLabel} />
+        </View>
+        <View style={styles.top}>
+          <SymbolView name={look.symbol ?? (booking.location === 'exit' ? 'car' : 'building.2')} size={15} weight="semibold" tintColor={colors.secondaryLabel} />
+          <Text style={[type.headline, styles.label, styles.flex]} numberOfLines={2}>
+            {booking.title || booking.name}
+          </Text>
+        </View>
+        <Text style={[type.subhead, styles.label]}>{when}</Text>
+      </Pressable>
       {/* Телефон — текстом, только если по нему не позвонить кнопкой ниже: иначе он дважды. */}
       <Text style={[type.footnote, styles.secondary]} numberOfLines={2}>
         {[look.kind === 'Мероприятие' ? where : look.kind, booking.name, phoneNumber ? null : booking.phone].filter(Boolean).join(' · ')}
@@ -118,6 +160,9 @@ const styles = StyleSheet.create({
   tertiary: { color: colors.tertiaryLabel },
   card: { padding: space.lg, gap: 4 },
   top: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
+  head: { gap: 4 },
+  badge: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10, flexShrink: 1 },
+  badgeText: { fontWeight: '600' },
   buttons: { flexDirection: 'row', gap: space.sm, marginTop: space.sm },
   buttonsStacked: { flexDirection: 'column-reverse' },
   button: {

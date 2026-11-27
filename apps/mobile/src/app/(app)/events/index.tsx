@@ -28,6 +28,7 @@ import {
   type BookingRequest,
   type EventRow,
 } from '@/lib/events-api';
+import { chooseAction } from '@/lib/dialog';
 import { haptic } from '@/lib/haptics';
 import { usePageGutter } from '@/lib/layout';
 import { useSpaces } from '@/lib/pos-api';
@@ -140,7 +141,7 @@ export default function EventsScreen() {
     <View style={styles.list}>
       {requests.length > 0 && (
         <View style={styles.group}>
-          <GroupHeader title="Заявки с сайта" count={requests.length} />
+          <GroupHeader title="Заявки" count={requests.length} />
           {requests.map((booking) => (
             <Animated.View key={booking.id} entering={FadeIn} exiting={FadeOut} layout={rowLayout}>
               <BookingCard
@@ -148,6 +149,7 @@ export default function EventsScreen() {
                 busy={bookingBusy === booking.id}
                 onConfirm={() => void onBooking(booking, 'confirmed')}
                 onReject={() => rejectBooking(booking)}
+                onOpen={() => router.push({ pathname: '/events/booking', params: { bookingId: booking.id } })}
               />
             </Animated.View>
           ))}
@@ -203,7 +205,16 @@ export default function EventsScreen() {
           <Text style={[type.largeTitle, styles.label, styles.flex]} accessibilityRole="header">
             События
           </Text>
-          <AddButton label="Новое мероприятие" onPress={() => router.push('/events/edit')} />
+          <AddButton
+            label="Создать"
+            onPress={() =>
+              chooseAction('Создать', undefined, [
+                { text: 'Мероприятие', icon: 'calendar.badge.plus', onPress: () => router.push('/events/edit') },
+                { text: 'Заявку вручную', icon: 'tray.and.arrow.down', onPress: () => router.push('/events/booking-new') },
+                { text: 'Отмена', style: 'cancel' },
+              ])
+            }
+          />
         </View>
 
         <Host matchContents={{ vertical: true }} style={styles.segment}>

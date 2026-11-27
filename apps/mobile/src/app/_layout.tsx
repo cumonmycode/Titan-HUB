@@ -134,6 +134,8 @@ export default function RootLayout() {
             />
             {/* Чат с кабинкой — полный экран мессенджера: стеклянная шапка, поле ввода у клавиатуры. */}
             <Stack.Screen name="chat" options={glassHeader({ headerShown: true, headerBackButtonDisplayMode: 'minimal', title: 'Чат' })} />
+            {/* Диалог Tai с клиентом: переписка в боте и ответ сотрудника — поверх вкладок, как чат кабинки. */}
+            <Stack.Screen name="tai-dialog" options={glassHeader({ headerShown: true, headerBackButtonDisplayMode: 'minimal', title: 'Диалог' })} />
             {/* Tai — на весь экран, как Gemini: своя шапка с историей чатов и поле ввода внизу. */}
             <Stack.Screen name="tai" options={{ presentation: 'fullScreenModal', headerShown: false, contentStyle: { backgroundColor: colors.background } }} />
           </Stack.Protected>

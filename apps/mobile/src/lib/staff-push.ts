@@ -148,6 +148,16 @@ function openTarget(t: Target) {
     router.push((typeof t.url === 'string' && t.url.startsWith('/manage/smm') ? t.url : '/manage/smm') as Href);
     return;
   }
+  // Клиент ждёт ответа / Tai позвал администратора — сразу в диалог.
+  if (typeof t.url === 'string' && t.url.startsWith('/tai-dialog')) {
+    router.push(t.url as Href);
+    return;
+  }
+  // Заявка (сайт, Tai, вручную) — в «События», там её карточка.
+  if (t.type === 'site_request') {
+    router.push('/events');
+    return;
+  }
   // Новая регистрация из My Titan — в «Клиенты», там её подтверждают.
   if (t.type === 'client_registration') {
     router.push('/manage/clients');

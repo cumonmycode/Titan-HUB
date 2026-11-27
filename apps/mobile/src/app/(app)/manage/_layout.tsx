@@ -66,6 +66,7 @@ export default function ManageLayout() {
       <Stack.Screen name="clients/telegram" options={editorModal} />
       <Stack.Screen name="clients/chats" options={formHeader({ title: 'Чаты Telegram' })} />
       <Stack.Screen name="clients/tg-roster" options={editorModal} />
+      <Stack.Screen name="tai-chats/index" options={formHeader({ title: 'Диалоги Tai' })} />
 
       <Stack.Screen name="balances/index" options={formHeader({ title: 'Депозиты и долги' })} />
       <Stack.Screen name="balances/find" options={compactSheet} />

@@ -44,6 +44,7 @@ import { aiRouter } from './modules/ai/ai.router.js'
 import { smmRouter } from './modules/smm/smm.router.js'
 import { systemRouter } from './modules/system/system.router.js'
 import { tgAdminRouter } from './modules/tg/admin.router.js'
+import { taiInboxRouter } from './modules/tg/inbox.router.js'
 import { uploadRouter } from './modules/upload/upload.router.js'
 import { staffRouter } from './modules/staff/staff.router.js'
 import { cashopsRouter } from './modules/cashops/cashops.router.js'
@@ -251,6 +252,8 @@ app.route('/api/smm', smmRouter)
 app.route('/api/system', systemRouter)
 // Раздел «Telegram»: бот клуба, его группы и настройки каждой группы (только владелец).
 app.route('/api/telegram', tgAdminRouter)
+// Чат Tai с клиентами: персонал читает переписку и отвечает сам.
+app.route('/api/tai-inbox', taiInboxRouter)
 // Сайт клуба: публикации (турниры, вечеринки) — ведёт владелец из HUB.
 app.route('/api/site-admin', siteAdminRouter)
 app.route('/api/upload', uploadRouter)

@@ -30,7 +30,7 @@ export function useTabBarClearance(withAccessory = false): number {
  */
 export const SHEET_ROUTES: Record<string, ReadonlySet<string>> = {
   pos: new Set(['menu', 'chat', 'refund', 'player', 'discount', 'rental', 'zone']),
-  events: new Set(['edit', 'participants']),
+  events: new Set(['edit', 'participants', 'booking-new']),
   analytics: new Set(['check/[checkId]', 'period']),
   manage: new Set([
     'goods/edit',

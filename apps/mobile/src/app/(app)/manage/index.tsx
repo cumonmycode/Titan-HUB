@@ -20,6 +20,7 @@ const SECTION_SCREENS: Record<ManageSectionKey, Href> = {
   pricing: '/manage/pricing',
   screens: '/manage/screens',
   clients: '/manage/clients',
+  taiChats: '/manage/tai-chats',
   balances: '/manage/balances',
   customers: '/manage/customers',
   collections: '/manage/collections',

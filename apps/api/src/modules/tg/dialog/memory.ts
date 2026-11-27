@@ -104,10 +104,12 @@ export async function markBlocked(db: Database, tgId: string): Promise<void> {
 export interface StoredMessage {
   chatId: string
   tgId?: string | null
-  role: 'user' | 'assistant'
+  /** staff — сотрудник ответил из HUB (чат Tai с клиентами). */
+  role: 'user' | 'assistant' | 'staff'
   content: string
   voice?: boolean
   memo?: string | null
+  staffId?: string | null
 }
 
 export async function appendMessage(db: Database, m: StoredMessage): Promise<void> {
@@ -120,6 +122,7 @@ export async function appendMessage(db: Database, m: StoredMessage): Promise<voi
     content,
     voice: !!m.voice,
     memo: m.memo ? m.memo.slice(0, 1_500) : null,
+    staffId: m.staffId ?? null,
   })
 }
 
@@ -133,12 +136,15 @@ export async function recentTurns(db: Database, chatId: string, limit = HISTORY_
   // Модель ждёт чередование реплик: подряд идущие одной стороны склеиваем.
   const turns: TaiTurn[] = []
   for (const row of rows.reverse()) {
+    // Ответ сотрудника из HUB — для модели это реплика клуба, с пометкой, кто писал.
+    const role = row.role === 'user' ? 'user' : 'assistant'
+    const content = row.role === 'staff' ? `[ответил администратор клуба] ${row.content}` : row.content
     const prev = turns[turns.length - 1]
-    if (prev && prev.role === row.role) {
-      prev.content = `${prev.content}\n${row.content}`
+    if (prev && prev.role === role) {
+      prev.content = `${prev.content}\n${content}`
       if (row.memo) prev.memo = [prev.memo, row.memo].filter(Boolean).join('; ')
     } else {
-      turns.push({ role: row.role, content: row.content, ...(row.memo ? { memo: row.memo } : {}) })
+      turns.push({ role, content, ...(row.memo ? { memo: row.memo } : {}) })
     }
   }
   return turns
