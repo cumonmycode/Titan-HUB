@@ -9,9 +9,9 @@ import { ArrowRight, MapPin } from 'lucide-react'
 import { formatsOf, photoProps } from '@/lib/content'
 import { GOMAFIA, SITE } from '@/content/site'
 import { DAY_LONG, DAY_SHORT, dateLabel, isoDate, nextEvening, newbiePrice, rub } from '@/lib/format'
-import type { ScheduleDay } from '@/lib/types'
+import type { ScheduleDay, SpecialNight } from '@/lib/types'
 import { RequestButton } from '@/components/request/RequestButton'
-import { eveningOf } from '@/components/request/options'
+import { eveningOf, nightsOn } from '@/components/request/options'
 import { Photo } from '@/components/sections/blocks'
 import { formatMeta } from '@/components/sections/offer'
 import { PlayersPodium, ReviewsMarquee, StoriesGrid } from '@/components/sections/community'
@@ -29,7 +29,7 @@ const WEEK_DAYS = 14
 const v = (vars: Record<string, string | number>) => vars as CSSProperties
 
 /** Две недели по МСК с понедельника текущей недели; прошедшие дни — неактивны. */
-function buildWeek(schedule: ScheduleDay[]): WeekDay[] {
+function buildWeek(schedule: ScheduleDay[], specials: SpecialNight[]): WeekDay[] {
   const msk = new Date(Date.now() + 3 * 3600_000)
   const nowMin = msk.getUTCHours() * 60 + msk.getUTCMinutes()
   const todayDow = ((msk.getUTCDay() + 6) % 7) + 1
@@ -37,8 +37,8 @@ function buildWeek(schedule: ScheduleDay[]): WeekDay[] {
     const add = i - (todayDow - 1)
     const d = new Date(Date.UTC(msk.getUTCFullYear(), msk.getUTCMonth(), msk.getUTCDate() + add))
     const dow = ((d.getUTCDay() + 6) % 7) + 1
-    const events = add < 0 ? [] : schedule.filter((s) => s.day === dow).flatMap((s) => {
-      const time = s.time ?? '19:00'
+    const events = add < 0 ? [] : nightsOn(schedule, specials, isoDate(d), dow).flatMap((s) => {
+      const time = s.time
       const [h, m] = time.split(':').map(Number)
       if (add === 0 && (h ?? 19) * 60 + (m ?? 0) <= nowMin) return []
       const evening = eveningOf(s.title)
@@ -68,15 +68,18 @@ export function GlassHome({ config, stories, players }: HomeProps) {
   const top = players.players[0]
   const years = new Date().getFullYear() - SITE.since
   const nextKind = next ? eveningOf(next.day.title) : 'any'
+  // Заголовок главной правится в HUB: строки — через перевод строки, слова — сменяют друг друга.
+  const home = config.content.pages.home
+  const heroLines = home.title.split('\n').map((l) => l.trim()).filter(Boolean)
+  const heroWords = home.text.map((w) => w.trim()).filter(Boolean)
   return (
     <div className="g-home">
       <HeroDepth
         className="k-hero"
         copy={<>
           <h1 className="g-title">
-            <span className="g-line" style={v({ '--i': 0 })}>Мафия в Нальчике.</span>
-            <span className="g-line" style={v({ '--i': 1 })}>Каждый вечер —</span>
-            <span className="g-line g-line-accent" style={v({ '--i': 2 })}><WordRotator words={['городская', 'спортивная', 'детская', 'корпоративная']} /></span>
+            {heroLines.map((line, i) => <span key={line} className="g-line" style={v({ '--i': i })}>{line}</span>)}
+            {heroWords.length > 0 && <span className="g-line g-line-accent" style={v({ '--i': heroLines.length })}><WordRotator words={heroWords} /></span>}
           </h1>
           <p className="lead g-rise" style={v({ '--i': 3 })}>{config.content.pages.home.lead}</p>
           <div className="actions g-rise" style={v({ '--i': 4 })}>
@@ -143,7 +146,7 @@ export function GlassHome({ config, stories, players }: HomeProps) {
 
       <Reveal as="section" className="sec">
         <SectionHead title="Неделя игр" lead="Выберите день — запишитесь в один клик, администратор подтвердит." />
-        <RevealItem><WeekSchedule days={buildWeek(config.schedule)} /></RevealItem>
+        <RevealItem><WeekSchedule days={buildWeek(config.schedule, config.specials)} /></RevealItem>
       </Reveal>
 
       <Reveal as="section" className="sec">

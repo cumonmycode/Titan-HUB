@@ -5,7 +5,7 @@ import type { SiteConfig } from '@/lib/types'
 import { DAY_LONG, DAY_SHORT, daysOf, isoDate, rub } from '@/lib/format'
 import type { Format } from '@/content/formats'
 import { RequestButton } from '@/components/request/RequestButton'
-import { eveningOf } from '@/components/request/options'
+import { eveningOf, nightsOn } from '@/components/request/options'
 import { Photo } from './blocks'
 import { photoProps } from '@/lib/content'
 
@@ -50,8 +50,8 @@ export function Schedule({ config, days = 7 }: { config: SiteConfig; days?: numb
   for (let add = 0; add < 21 && rows.length < days; add++) {
     const date = new Date(Date.UTC(msk.getUTCFullYear(), msk.getUTCMonth(), msk.getUTCDate() + add))
     const dow = ((date.getUTCDay() + 6) % 7) + 1
-    for (const s of config.schedule.filter((x) => x.day === dow)) {
-      const time = s.time ?? '19:00'
+    for (const s of nightsOn(config.schedule, config.specials, isoDate(date), dow)) {
+      const time = s.time
       const [h, m] = time.split(':').map(Number)
       if (add === 0 && (h ?? 19) * 60 + (m ?? 0) <= nowMin) continue
       rows.push({ date, dow, title: s.title, time, today: add === 0 })

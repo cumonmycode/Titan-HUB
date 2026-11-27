@@ -78,7 +78,7 @@ export function RequestForm({ config, preset, variant, onClose, lockKind }: {
 
   // Вечера считаем на клиенте — по его «сейчас», без рассинхрона с серверным рендером.
   useEffect(() => {
-    const list = upcomingEvenings(config.schedule, 6)
+    const list = upcomingEvenings(config.schedule, 6, new Date(), config.specials)
     setSlots(list)
     if (preset.kind === 'game' && preset.evening) {
       const i = list.findIndex((x) => x.evening === preset.evening)

@@ -59,7 +59,7 @@ export const SECTION_LOOK: Record<SectionId, { title: string; item: string; icon
 };
 
 export const PAGE_LOOK: Record<PageId, { title: string; about: string }> = {
-  home: { title: 'Главная', about: 'На главной меняется подзаголовок под фирменным заголовком.' },
+  home: { title: 'Главная', about: 'Каждая строка заголовка — с новой строки. Под заголовком сменяют друг друга слова из поля ниже.' },
   games: { title: 'Игры', about: '/games — вечера, расписание и цены.' },
   events: { title: 'Праздники', about: '/events — дни рождения, корпоративы, выезд.' },
   kids: { title: 'Детская мафия', about: '/kidspromo — абзацы идут в блок «Почему детям нравится».' },

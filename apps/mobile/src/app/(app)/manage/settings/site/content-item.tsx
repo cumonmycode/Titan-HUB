@@ -251,7 +251,9 @@ function PageForm({ state, pageId }: { state: SiteContentState; pageId: PageId }
   const page = state.content.pages[pageId];
   const [title, setTitle] = useState(page.title);
   const [lead, setLead] = useState(page.lead);
-  const [text, setText] = useState(page.text.join('\n\n'));
+  // Главная: слова, которые сменяют друг друга, — по одному в строке; остальные — абзацы.
+  const isHome = pageId === 'home';
+  const [text, setText] = useState(page.text.join(isHome ? '\n' : '\n\n'));
   const { busy, run } = useSave(() => router.back());
   const look = PAGE_LOOK[pageId];
 
@@ -265,7 +267,7 @@ function PageForm({ state, pageId }: { state: SiteContentState; pageId: PageId }
       title: title.trim(),
       lead: lead.trim(),
       text: text
-        .split(PARAGRAPH_SPLIT)
+        .split(isHome ? '\n' : PARAGRAPH_SPLIT)
         .map((p) => p.trim())
         .filter(Boolean),
     };
@@ -278,11 +280,16 @@ function PageForm({ state, pageId }: { state: SiteContentState; pageId: PageId }
       <FormHost>
         <Form>
           <Section title="Заголовок" footer={<Text>{look.about}</Text>}>
-            <FieldRow value={title} placeholder="Заголовок" maxLength={80} onChange={setTitle} />
+            <FieldRow value={title} placeholder="Заголовок" maxLength={80} multiline={isHome} onChange={setTitle} />
           </Section>
           <Section title="Подзаголовок">
             <FieldRow value={lead} placeholder="Пара фраз под заголовком" multiline maxLength={400} onChange={setLead} />
           </Section>
+          {isHome ? (
+            <Section title="Сменяющиеся слова" footer={<Text>По одному в строке: «городская», «спортивная»…</Text>}>
+              <FieldRow value={text} placeholder="городская" multiline maxLength={400} onChange={setText} />
+            </Section>
+          ) : null}
           {pageId === 'kids' || pageId === 'studio' ? (
             <Section title="Текст" footer={<Text>Абзацы разделяйте пустой строкой.</Text>}>
               <FieldRow value={text} placeholder="Текст страницы" multiline maxLength={4000} onChange={setText} />

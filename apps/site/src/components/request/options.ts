@@ -1,4 +1,4 @@
-import type { ScheduleDay } from '@/lib/types'
+import type { ScheduleDay, SpecialNight } from '@/lib/types'
 import { DAY_SHORT } from '@/lib/format'
 
 export type Evening = 'city_mafia' | 'sport_mafia' | 'board_games' | 'any'
@@ -26,18 +26,28 @@ export function eveningOf(title: string): Evening {
   return 'any'
 }
 
+/**
+ * Вечера в этот день: разовое событие расписания (Хэллоуин, турнир) в свою дату, затем
+ * обычные вечера недели. Всё — из «Управление → Расписание» в HUB.
+ */
+export function nightsOn(schedule: ScheduleDay[], specials: SpecialNight[], iso: string, dow: number): { title: string; time: string; special: boolean }[] {
+  const once = specials.filter((s) => s.date === iso).map((s) => ({ title: s.title, time: s.time || '19:00', special: true }))
+  const weekly = schedule.filter((s) => s.day === dow).map((s) => ({ title: s.title, time: s.time ?? '19:00', special: false }))
+  return [...once, ...weekly].sort((a, b) => a.time.localeCompare(b.time))
+}
+
 export interface EveningSlot { date: string; time: string; title: string; evening: Evening; label: string }
 
 /** Ближайшие игровые вечера по расписанию (МСК), начиная с сегодняшнего, если он ещё впереди. */
-export function upcomingEvenings(schedule: ScheduleDay[], count: number, now = new Date()): EveningSlot[] {
+export function upcomingEvenings(schedule: ScheduleDay[], count: number, now = new Date(), specials: SpecialNight[] = []): EveningSlot[] {
   const out: EveningSlot[] = []
   const msk = new Date(now.getTime() + 3 * 3600_000)
   const minutesNow = msk.getUTCHours() * 60 + msk.getUTCMinutes()
   for (let add = 0; add < 21 && out.length < count; add++) {
     const d = new Date(Date.UTC(msk.getUTCFullYear(), msk.getUTCMonth(), msk.getUTCDate() + add))
     const dow = ((d.getUTCDay() + 6) % 7) + 1
-    for (const s of schedule.filter((x) => x.day === dow)) {
-      const time = s.time ?? '19:00'
+    for (const s of nightsOn(schedule, specials, d.toISOString().slice(0, 10), dow)) {
+      const time = s.time
       const [h, m] = time.split(':').map(Number)
       if (add === 0 && (h ?? 19) * 60 + (m ?? 0) <= minutesNow) continue
       const when = add === 0 ? 'Сегодня' : add === 1 ? 'Завтра' : `${DAY_SHORT[dow]}, ${d.getUTCDate()} ${d.toLocaleDateString('ru-RU', { timeZone: 'UTC', month: 'short' }).replace('.', '')}`
