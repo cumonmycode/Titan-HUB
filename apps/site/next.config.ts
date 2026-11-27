@@ -15,6 +15,9 @@ const nextConfig: NextConfig = {
       // Таплинк: одна ссылка для соцсетей живёт на /link.
       { source: '/links', destination: '/link', permanent: true },
       { source: '/taplink', destination: '/link', permanent: true },
+      // Приложение клуба: короткие ссылки для соцсетей и чатов.
+      { source: '/my-titan', destination: '/app', permanent: true },
+      { source: '/android', destination: '/app/android', permanent: false },
       // PDF со старого сайта (ссылки разошлись по чатам резидентов).
       { source: '/_files/ugd/ebde67_c09c4ac728c4427d8f6c32bceb5c5435.pdf', destination: '/docs/pravila-fsm.pdf', permanent: true },
       { source: '/_files/ugd/ebde67_3479bcb06de442b2b21c64fa52f22b29.pdf', destination: '/docs/50-ottenkov-krasnogo.pdf', permanent: true },

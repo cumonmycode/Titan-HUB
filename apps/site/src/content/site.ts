@@ -39,6 +39,7 @@ export const NAV: NavItem[] = [
   { href: '/portfolio', label: 'Турниры' },
   { href: '/residents', label: 'Резидентам' },
   { href: '/studio', label: 'О клубе' },
+  { href: '/app', label: 'Приложение' },
   { href: '/contact', label: 'Контакты' },
 ]
 
