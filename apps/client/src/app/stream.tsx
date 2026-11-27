@@ -1,11 +1,12 @@
 // «Трансляции» — эфир клуба и где его смотреть. Идёт эфир — название, кнопки площадок
 // этого эфира и «Поддержать донатом»; эфира нет — постоянные площадки клуба (каналы) и
 // тот же донат. Открывается плашкой «В эфире» на главной, push «Мы в эфире» и строкой
-// «Трансляции» в профиле. Шторка по высоте содержимого — без прокрутки.
+// «Трансляции» в профиле. На iOS шторка по высоте содержимого — без прокрутки; на Android
+// это полноэкранное окно, и на невысоком телефоне эфир + донат + площадки прокручиваются.
 //
 // Донат — только на Android: в iOS чаевые авторам цифрового контента Apple принимает
 // лишь через встроенные покупки (App Review 3.1.1), внешняя ссылка — причина отказа.
-import { Linking, StyleSheet, Text, View } from 'react-native';
+import { Linking, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { GlassButton } from '@/components/glass';
@@ -32,18 +33,21 @@ export default function StreamScreen() {
   const query = useStream();
   const data = query.data;
 
+  const body = (
+    <View style={styles.column}>
+      {data ? <Content data={data} /> : query.isError ? (
+        <EmptyState icon="offline" title="Не удалось загрузить" text={errorText(query.error)}>
+          <GlassButton title="Повторить" variant="secondary" onPress={() => void query.refetch()} />
+        </EmptyState>
+      ) : <Skeleton height={180} rounded={radius.card} />}
+    </View>
+  );
+  const padding = [styles.content, { paddingBottom: insets.bottom + space.xl }];
+
   return (
-    <View>
+    <View style={IS_IOS ? undefined : styles.root}>
       <SheetHeader title="Трансляции" onClose={close} />
-      <View style={[styles.content, { paddingBottom: insets.bottom + space.xl }]}>
-        <View style={styles.column}>
-          {data ? <Content data={data} /> : query.isError ? (
-            <EmptyState icon="offline" title="Не удалось загрузить" text={errorText(query.error)}>
-              <GlassButton title="Повторить" variant="secondary" onPress={() => void query.refetch()} />
-            </EmptyState>
-          ) : <Skeleton height={180} rounded={radius.card} />}
-        </View>
-      </View>
+      {IS_IOS ? <View style={padding}>{body}</View> : <ScrollView contentContainerStyle={padding}>{body}</ScrollView>}
     </View>
   );
 }
@@ -114,6 +118,7 @@ function hostOf(url: string): string | undefined {
 }
 
 const styles = StyleSheet.create({
+  root: { flex: 1 },
   flex: { flex: 1 },
   content: { paddingHorizontal: GUTTER },
   column: { width: '100%', maxWidth: MAX_WIDTH, alignSelf: 'center' },

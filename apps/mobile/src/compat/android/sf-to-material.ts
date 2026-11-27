@@ -224,6 +224,7 @@ const TABLE: Record<string, string> = {
   camera: 'photo_camera',
   'play.fill': 'play_arrow',
   'play.circle': 'play_circle',
+  'play.tv': 'live_tv',
   'ipad.landscape': 'tablet',
   visionpro: 'view_in_ar',
   other: 'more_horiz',

@@ -41,7 +41,7 @@
     },
     "android": {
       "package": "ru.titanpos.hub",
-      "versionCode": 26,
+      "versionCode": 27,
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/titan-android-foreground.png",
         "monochromeImage": "./assets/images/titan-android-monochrome.png",
