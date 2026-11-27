@@ -155,7 +155,12 @@ export default function ShiftSheet() {
           {forecast && (
             <Section
               title="Прогноз вечера · Tai"
-              footer={<Text>Каждый открытый чек дотягивается до среднего чека гостя за 120 дней.</Text>}>
+              footer={<Text>Уже оплаченное за смену плюс открытые чеки, каждый — до среднего чека гостя за 120 дней.</Text>}>
+              {forecast.paidTotal !== undefined && (
+                <LabeledContent label={`Оплачено · ${forecast.paidCount ?? 0} ${plural(forecast.paidCount ?? 0, ['чек', 'чека', 'чеков'])}`}>
+                  <Text modifiers={[monospacedDigit()]}>{formatMoney(forecast.paidTotal)}</Text>
+                </LabeledContent>
+              )}
               <LabeledContent label="Ожидаем">
                 <Text
                   modifiers={[

@@ -335,7 +335,7 @@ refundsRouter.get('/prepare/:checkId', requireRole('owner', 'staff'), async (c) 
     check: { id: check.id, status: check.status, totalAmount: check.totalAmount, closedAt: check.closedAt, playerId: check.playerId, certificateId: check.certificateId },
     items: items.map(i => ({
       itemId: i.checkItem.itemId,
-      name: i.item?.name ?? '—',
+      name: i.checkItem.customName ?? i.item?.name ?? '—',
       quantity: i.checkItem.quantity,
       priceAtTime: Number(i.checkItem.priceAtTime),
       trackStock: i.item?.trackStock ?? false,

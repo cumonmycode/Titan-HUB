@@ -42,7 +42,7 @@ export async function eligibleAmount(exec: Exec, cert: Pick<Certificate, 'scope'
   const [check] = await exec.select().from(checks).where(eq(checks.id, checkId))
   if (!check || check.staffCompId) return 0
   const items = await exec.select({
-    id: checkItems.id, itemId: checkItems.itemId, priceAtTime: checkItems.priceAtTime, quantity: checkItems.quantity, categoryId: inventory.category,
+    id: checkItems.id, itemId: checkItems.itemId, priceAtTime: checkItems.priceAtTime, quantity: checkItems.quantity, categoryId: inventory.category, customName: checkItems.customName,
   }).from(checkItems).leftJoin(inventory, eq(inventory.id, checkItems.itemId)).where(eq(checkItems.checkId, checkId))
   const ids = items.map((i) => i.id)
   const mods = ids.length ? await exec.select().from(checkItemModifiers).where(inArray(checkItemModifiers.checkItemId, ids)) : []

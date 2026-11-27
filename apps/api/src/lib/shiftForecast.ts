@@ -5,12 +5,14 @@
  * типичного итога этого гостя. Резидент с историей закрытых чеков → берём его
  * средний чек (с поправкой на день недели, если данных хватает) и проецируем
  * текущий чек минимум до этого среднего. Гость/без истории — оставляем как есть
- * (не раздуваем прогноз догадками). Прогноз = сумма спроецированных итогов.
+ * (не раздуваем прогноз догадками). Прогноз = уже оплаченное за смену + сумма
+ * спроецированных итогов открытых чеков: оплата чека не уменьшает прогноз (раньше
+ * считались только открытые, и закрытый чек «вычитался» из ожидаемой выручки).
  *
  * Объяснимо: в детализации видно по каждому чеку — текущая сумма, прогноз и
  * «обычно оставляет N по M чекам».
  */
-import { checks, profiles, eq, and, inArray, gte, desc } from '@titan/database'
+import { checks, profiles, eq, and, inArray, gte, desc, sql } from '@titan/database'
 import { getBusinessDayStartHour } from './appSettings.js'
 
 const RESIDENT_TIERS = ['resident', 'student', 'newbie']
@@ -31,7 +33,11 @@ export interface PerCheckForecast {
   weekdayBased: boolean
 }
 export interface ShiftForecast {
+  /** Ожидаемая выручка смены к закрытию: оплачено + прогноз по открытым чекам. */
   amount: number
+  /** Уже оплачено за смену (закрытые чеки, с арендой и базой мероприятия). */
+  paidTotal: number
+  paidCount: number
   currentTotal: number
   additional: number
   perCheck: PerCheckForecast[]
@@ -84,7 +90,21 @@ export async function computeShiftForecast(db: any, shiftId: string): Promise<Sh
     return { checkId: o.id, name, isResident, current, projected, avgSpend: avg, samples, weekdayBased }
   })
 
+  // Уже оплаченные чеки смены: их итог при закрытии — позиции + аренда + база мероприятия.
+  const [paid] = await db.select({
+    total: sql<string>`COALESCE(SUM(${checks.totalAmount}), 0)`,
+    count: sql<number>`COUNT(*)::int`,
+  }).from(checks).where(and(eq(checks.shiftId, shiftId), eq(checks.status, 'closed')))
+  const paidTotal = num(paid?.total)
+
   const currentTotal = perCheck.reduce((s, p) => s + p.current, 0)
-  const amount = perCheck.reduce((s, p) => s + p.projected, 0)
-  return { amount, currentTotal, additional: amount - currentTotal, perCheck }
+  const projectedOpen = perCheck.reduce((s, p) => s + p.projected, 0)
+  return {
+    amount: paidTotal + projectedOpen,
+    paidTotal,
+    paidCount: paid?.count ?? 0,
+    currentTotal,
+    additional: projectedOpen - currentTotal,
+    perCheck,
+  }
 }

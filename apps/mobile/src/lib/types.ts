@@ -96,7 +96,15 @@ export type CheckListItem = CheckRow & {
   hasRental: boolean;
 };
 
-export type CheckItemRow = { id: string; checkId: string; itemId: string; quantity: number; priceAtTime: NumericString };
+export type CheckItemRow = {
+  id: string;
+  checkId: string;
+  itemId: string;
+  quantity: number;
+  priceAtTime: NumericString;
+  /** Свободная позиция «Другое»: название, вписанное кассиром. Старый сервер не отдаёт. */
+  customName?: string | null;
+};
 
 export type CheckDiscountRow = {
   id: string;
@@ -177,7 +185,11 @@ export type ShiftSummary =
       cashInRegister: number;
       taiEnabled: boolean;
       forecast: {
+        /** Ожидаемая выручка смены: оплачено + прогноз по открытым чекам. */
         amount: number;
+        /** Уже оплачено за смену; старый сервер не отдаёт. */
+        paidTotal?: number;
+        paidCount?: number;
         currentTotal: number;
         additional: number;
         perCheck: ShiftForecastPerCheck[];

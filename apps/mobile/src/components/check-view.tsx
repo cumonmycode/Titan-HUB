@@ -18,7 +18,7 @@ import { formatDuration, formatMoney, formatTime, toNumber } from '@/lib/format'
 import { haptic } from '@/lib/haptics';
 import type { PosPlayer } from '@/lib/payment';
 import { categoryHex, categorySymbol } from '@/lib/catalog-api';
-import { addItem, reloadCheck, TIER_LABEL, useCheckSuggestions, useMenu, usePopularItems } from '@/lib/pos-api';
+import { addItem, reloadCheck, setCheckNote, TIER_LABEL, useCheckSuggestions, useMenu, usePopularItems } from '@/lib/pos-api';
 import { parseAmount } from '@/lib/shift-api';
 import { FONT_SCALE_MAX, useTextLayout } from '@/lib/text-scale';
 import { colors, radius, space, type } from '@/lib/theme';
@@ -38,6 +38,7 @@ import { useNow } from '@/lib/use-now';
  * карточки (скидок нет) не показываются.
  */
 
+const NOTE_MAX = 500;
 const rowLayout = LinearTransition.springify().damping(22).stiffness(220);
 const ORDER_TINT = 'rgba(255,149,0,0.20)';
 
@@ -66,7 +67,9 @@ export function CheckView({ check, totals, actions, player, now, contentInsetAdj
   usePopularItems(isOpen ? check.id : '', check.playerId ?? null);
   const categories = new Map((menu.data?.categories ?? []).map((c) => [c.id, c]));
   const itemCategory = new Map((menu.data?.items ?? []).map((i) => [i.id, i.category]));
-  const iconFor = (itemId: string): RowIconLook => {
+  const iconFor = (row: CheckDetail['items'][number]): RowIconLook => {
+    if (row.checkItem.customName) return CUSTOM_ICON;
+    const itemId = row.checkItem.itemId;
     const cat = categories.get(itemCategory.get(itemId) ?? '');
     return { symbol: categorySymbol(cat?.icon), color: categoryHex(cat?.color) };
   };
@@ -213,7 +216,7 @@ export function CheckView({ check, totals, actions, player, now, contentInsetAdj
                   quantity={row.checkItem.quantity}
                   price={toNumber(row.checkItem.priceAtTime)}
                   isOpen={isOpen}
-                  icon={iconFor(row.checkItem.itemId)}
+                  icon={iconFor(row)}
                   onQuantity={actions.onQuantity}
                 />
               </Animated.View>
@@ -238,6 +241,8 @@ export function CheckView({ check, totals, actions, player, now, contentInsetAdj
           ))}
         </GlassView>
 
+        {(isOpen || check.note) && <NoteCard checkId={check.id} note={check.note} isOpen={isOpen} />}
+
         {isOpen && check.playerId && <TaiSuggestions checkId={check.id} itemIds={new Set(itemRows.map((row) => row.checkItem.itemId))} />}
 
         {check.linkedEventId && <LinkedEventCard check={check} isOpen={isOpen} base={totals.eventBase} />}
@@ -253,6 +258,9 @@ type RowIconLook = { symbol: SFSymbol; color: string };
 /** Значкам нужен hex: к нему добавляется прозрачность подложки, а системные цвета iOS — не строки. */
 const GREEN_HEX = '#34C759';
 const PURPLE_HEX = '#AF52DE';
+const GRAY_HEX = '#8E8E93';
+/** Свободная позиция «Другое» — своим значком, у неё нет категории меню. */
+const CUSTOM_ICON: RowIconLook = { symbol: 'square.and.pencil', color: GRAY_HEX };
 
 /** Капсула под суммой: сколько идёт чек, с какого времени, предоплата. */
 function Capsule({ icon, text, strong }: { icon?: SFSymbol; text: string; strong?: boolean }) {
@@ -381,6 +389,61 @@ function ItemRow({
         <RollingText text={formatMoney(price * qty)} style={[type.body, type.amount, styles.label, styles.itemSum, stacked && styles.itemSumStacked]} />
       </View>
     </SwipeToDelete>
+  );
+}
+
+/* ─────────────────────────── Комментарий ─────────────────────────── */
+
+/**
+ * Комментарий к чеку — одной строкой под счётом: тап открывает ввод. В закрытом чеке
+ * виден только текст. Пустой открытый чек показывает приглашение «Добавить комментарий».
+ */
+function NoteCard({ checkId, note, isOpen }: { checkId: string; note: string | null; isOpen: boolean }) {
+  const [saving, setSaving] = useState(false);
+  const text = note?.trim() ?? '';
+
+  const edit = () => {
+    haptic.light();
+    promptText(
+      'Комментарий к чеку',
+      undefined,
+      [
+        { text: 'Отмена', style: 'cancel' },
+        ...(text ? [{ text: 'Удалить', style: 'destructive' as const, onPress: () => save('') }] : []),
+        { text: 'Сохранить', onPress: (value?: string) => save(value ?? '') },
+      ],
+      'plain-text',
+      text,
+    );
+  };
+
+  const save = (value: string) => {
+    const next = value.trim().slice(0, NOTE_MAX);
+    if (next === text) return;
+    setSaving(true);
+    setCheckNote(checkId, next)
+      .then(() => haptic.success())
+      .catch((error: Error) => {
+        haptic.error();
+        Alert.alert('Комментарий не сохранён', error.message === 'Чек уже закрыт' ? 'Чек уже закрыт.' : error.message);
+      })
+      .finally(() => setSaving(false));
+  };
+
+  return (
+    <Animated.View entering={FadeIn} exiting={FadeOut} layout={rowLayout}>
+      <Pressable onPress={edit} disabled={!isOpen || saving} accessibilityRole="button" accessibilityLabel={text ? `Комментарий: ${text}` : 'Добавить комментарий'}>
+        <GlassView isInteractive={isOpen} style={styles.card}>
+          <View style={styles.billRow}>
+            <RowIcon symbol="text.bubble" color={GRAY_HEX} />
+            <Text style={[type.body, text ? styles.label : styles.secondary, styles.flex]} numberOfLines={4}>
+              {text || 'Добавить комментарий'}
+            </Text>
+            {saving ? <ActivityIndicator size="small" /> : isOpen ? <SymbolView name="chevron.right" size={13} weight="semibold" tintColor={colors.tertiaryLabel} /> : null}
+          </View>
+        </GlassView>
+      </Pressable>
+    </Animated.View>
   );
 }
 

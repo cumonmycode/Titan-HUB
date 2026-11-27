@@ -14,7 +14,7 @@
  * Контакт покупателя обязателен (касса шлёт электронный чек): телефон гостя из
  * карточки, иначе fiscal_default_phone; без контакта чек пробить нельзя → null.
  */
-import { appSettings, profiles, checkItems, checkItemModifiers, inventory, modifiers, eq, inArray } from '@titan/database'
+import { appSettings, profiles, checkItems, checkItemModifiers, inventory, modifiers, eq, inArray, sql } from '@titan/database'
 import type { Database } from '@titan/database'
 import { round2 } from '../../../lib/money.js'
 import type { FiscalReceiptInput, FiscalPaymentKind, FiscalLineItem } from './types.js'
@@ -47,7 +47,7 @@ export async function buildReceiptLines(db: Database, checkId: string, total: nu
   if ((await getSetting(db, 'fiscal_itemized')) !== 'true') return single
 
   const itemRows = await db
-    .select({ id: checkItems.id, name: inventory.name, qty: checkItems.quantity, price: checkItems.priceAtTime })
+    .select({ id: checkItems.id, name: sql<string | null>`COALESCE(${checkItems.customName}, ${inventory.name})`, qty: checkItems.quantity, price: checkItems.priceAtTime })
     .from(checkItems)
     .leftJoin(inventory, eq(checkItems.itemId, inventory.id))
     .where(eq(checkItems.checkId, checkId))

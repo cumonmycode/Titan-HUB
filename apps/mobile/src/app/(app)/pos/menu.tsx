@@ -173,6 +173,18 @@ export default function MenuSheet() {
             </GlassView>
           )}
           <View style={styles.flex} />
+          {/* Свободная позиция с названием и суммой от кассира — то, чего нет в меню. */}
+          {!closed && (
+            <GlassChip
+              label="Другое"
+              icon="square.and.pencil"
+              active={false}
+              onPress={() => {
+                haptic.light();
+                router.push({ pathname: '/pos/custom-item', params: { checkId } });
+              }}
+            />
+          )}
           <CircleButton icon="xmark" label="Закрыть" onPress={() => router.back()} />
         </View>
 

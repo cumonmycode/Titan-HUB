@@ -13,7 +13,7 @@ export const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 10
  * НЕ включает аренду зоны и базу события — это отдельные слагаемые итога.
  */
 export function computeTotals(
-  items: { id: string; priceAtTime: string; quantity: number }[],
+  items: { id: string; priceAtTime: string; quantity: number; customName?: string | null }[],
   mods: { checkItemId: string; priceAtTime: string }[],
   discountRows: { type: string; value: string; target: string; itemId: string | null }[],
 ) {
@@ -21,16 +21,20 @@ export function computeTotals(
   const itemsTotal = items.reduce((s, i) => s + parseFloat(i.priceAtTime) * i.quantity, 0)
   const modsTotal = mods.reduce((s, m) => s + parseFloat(m.priceAtTime) * (qtyByItem.get(m.checkItemId) ?? 1), 0)
   const gross = itemsTotal + modsTotal
+  // Свободные строки «Другое» — возврат денег, оплаченных клубом за гостя: скидки на
+  // них не действуют (иначе скидка резидента «съедала» бы часть возврата).
+  const custom = items.reduce((s, i) => s + (i.customName ? parseFloat(i.priceAtTime) * i.quantity : 0), 0)
+  const discountable = gross - custom
   let discountTotal = 0
   for (const d of discountRows) {
-    let base = gross
+    let base = discountable
     if (d.target === 'item' && d.itemId) {
       const it = items.find(i => i.id === d.itemId)
-      base = it ? parseFloat(it.priceAtTime) * it.quantity : 0
+      base = it && !it.customName ? parseFloat(it.priceAtTime) * it.quantity : 0
     }
     discountTotal += d.type === 'percent' ? base * (parseFloat(d.value) / 100) : Math.min(parseFloat(d.value), base)
   }
-  discountTotal = Math.min(discountTotal, gross)
+  discountTotal = Math.min(discountTotal, discountable)
   return { gross: round2(gross), discountTotal: round2(discountTotal), total: round2(Math.max(0, gross - discountTotal)) }
 }
 

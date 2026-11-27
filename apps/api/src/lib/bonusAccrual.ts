@@ -52,9 +52,9 @@ export interface LoyaltyGift {
 
 /** Состав чека для начисления: позиции с категориями. */
 async function accrualLines(exec: DbExecutor, checkId: string): Promise<AccrualLine[]> {
-  const rows = await exec.select({ itemId: checkItems.itemId, price: checkItems.priceAtTime, qty: checkItems.quantity, categoryId: inventory.category })
+  const rows = await exec.select({ itemId: checkItems.itemId, price: checkItems.priceAtTime, qty: checkItems.quantity, categoryId: inventory.category, customName: checkItems.customName })
     .from(checkItems).leftJoin(inventory, eq(inventory.id, checkItems.itemId)).where(eq(checkItems.checkId, checkId))
-  return rows.map((r) => ({ itemId: r.itemId ?? '', categoryId: r.categoryId ?? null, amount: parseFloat(r.price) * r.qty }))
+  return rows.map((r) => ({ itemId: r.itemId ?? '', categoryId: r.categoryId ?? null, amount: parseFloat(r.price) * r.qty, noBonus: !!r.customName }))
 }
 
 /**

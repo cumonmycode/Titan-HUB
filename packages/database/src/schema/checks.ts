@@ -98,7 +98,14 @@ export const checkItems = pgTable('check_items', {
     .references(() => inventory.id),
   quantity: integer('quantity').notNull().default(1),
   priceAtTime: numeric('price_at_time', { precision: 10, scale: 2 }).notNull(),
+  // Свободная позиция «Другое» (миграция 098): название вписывает кассир, сумма — в
+  // priceAtTime, itemId — системная позиция OTHER_ITEM_ID. Не списывает склад, не
+  // попадает под скидки и бонусы (это возврат денег, оплаченных клубом за гостя).
+  customName: text('custom_name'),
 })
+
+/** Системная позиция «Другое» для свободных строк чека (см. 098_check_custom_items.sql). */
+export const OTHER_ITEM_ID = '00000000-0000-4000-8000-000000000098'
 
 // Заказы гостя с планшета, ожидающие подтверждения сотрудником. Гость отправляет
 // заказ → строка pending → уведомление персоналу. Сотрудник на экране чека

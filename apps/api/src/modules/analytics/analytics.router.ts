@@ -1877,7 +1877,8 @@ analyticsRouter.get('/checks/:id', async (c) => {
     .select({
       id: checkItems.id,
       itemId: checkItems.itemId,
-      name: inventory.name,
+      // Свободная позиция «Другое» — с названием, которое вписал кассир.
+      name: sql<string | null>`COALESCE(${checkItems.customName}, ${inventory.name})`,
       category: inventory.category,
       quantity: checkItems.quantity,
       priceAtTime: checkItems.priceAtTime,

@@ -5,7 +5,7 @@ import { z } from 'zod'
 import {
   checks, checkItems, checkItemModifiers, checkPayments, checkDiscounts, pendingOrders, chatMessages, guestFeedback,
   inventory, profiles, spaces, certificates, bonusHistory, transactions, modifiers as modifiersTable,
-  appSettings, events, discounts, clientDiscountRules, shifts, shiftStaff,
+  appSettings, events, discounts, clientDiscountRules, shifts, shiftStaff, OTHER_ITEM_ID,
   eq, and, ne, inArray, desc, asc, sql, isNull,
 } from '@titan/database'
 import type { Database } from '@titan/database'
@@ -106,7 +106,13 @@ async function getCheckWithItems(checkId: string, exec: DbOrTx) {
     arr.push(m)
     modsByItem.set(m.checkItemId, arr)
   }
-  const itemsWithMods = items.map(i => ({ ...i, modifiers: modsByItem.get(i.checkItem.id) ?? [] }))
+  // Свободная строка «Другое» показывает название, вписанное кассиром, — и старым
+  // версиям приложения, которые читают только item.name.
+  const itemsWithMods = items.map(i => ({
+    ...i,
+    item: i.item && i.checkItem.customName ? { ...i.item, name: i.checkItem.customName } : i.item,
+    modifiers: modsByItem.get(i.checkItem.id) ?? [],
+  }))
 
   // Получаем hourlyRate пространства для live-расчёта аренды на фронте
   let spaceHourlyRate: string | null = null
@@ -273,7 +279,9 @@ async function applyAutoDiscounts(exec: DbOrTx, checkId: string) {
 async function discountContext(exec: DbOrTx, check: typeof checks.$inferSelect): Promise<DiscountContext> {
   const items = await exec.select({
     id: checkItems.id, itemId: checkItems.itemId, priceAtTime: checkItems.priceAtTime, quantity: checkItems.quantity, categoryId: inventory.category,
-  }).from(checkItems).leftJoin(inventory, eq(inventory.id, checkItems.itemId)).where(eq(checkItems.checkId, check.id))
+  }).from(checkItems).leftJoin(inventory, eq(inventory.id, checkItems.itemId))
+    // Свободные строки «Другое» под скидки не попадают (см. computeTotals).
+    .where(and(eq(checkItems.checkId, check.id), isNull(checkItems.customName)))
   const ids = items.map((i) => i.id)
   const mods = ids.length ? await exec.select().from(checkItemModifiers).where(inArray(checkItemModifiers.checkItemId, ids)) : []
   const qtyByItem = new Map(items.map((i) => [i.id, i.quantity]))
@@ -534,11 +542,11 @@ posRouter.get('/checks', requireRole('owner', 'staff', 'tablet'), async (c) => {
   // у check_items нет поля порядка, id случайный). Карточка решает, как показать.
   const itemNameRows = checkIds.length
     ? await db
-        .select({ checkId: checkItems.checkId, name: inventory.name, quantity: checkItems.quantity })
+        .select({ checkId: checkItems.checkId, name: sql<string>`COALESCE(${checkItems.customName}, ${inventory.name})`, quantity: checkItems.quantity })
         .from(checkItems)
         .innerJoin(inventory, eq(inventory.id, checkItems.itemId))
         .where(inArray(checkItems.checkId, checkIds))
-        .orderBy(asc(inventory.name))
+        .orderBy(asc(sql`COALESCE(${checkItems.customName}, ${inventory.name})`))
     : []
   const itemsByCheck = new Map<string, string[]>()
   for (const r of itemNameRows as any[]) {
@@ -805,7 +813,8 @@ posRouter.patch('/checks/:id', requireRole('owner', 'staff'), zValidator('json',
   // nullable: null снимает привязанного плательщика (можно исправить ошибочную привязку).
   playerId: z.string().uuid().nullable().optional(),
   guestNames: z.array(z.string()).optional(),
-  note: z.string().optional(),
+  // Комментарий к чеку; null или пустая строка — убрать.
+  note: z.string().trim().max(500).nullable().optional(),
   linkedEventId: z.string().uuid().optional(),
   // Время аренды зоны: ISO-строки. spaceEndAt=null → снова «открытая» аренда
   // (живой счётчик до момента оплаты).
@@ -816,6 +825,7 @@ posRouter.patch('/checks/:id', requireRole('owner', 'staff'), zValidator('json',
   const checkId = c.req.param('id')
   const { spaceStartAt, spaceEndAt, ...rest } = c.req.valid('json')
   const update: Record<string, any> = { ...rest }
+  if (rest.note !== undefined) update.note = rest.note ? rest.note : null
   if (spaceStartAt !== undefined) update.spaceStartAt = new Date(spaceStartAt)
   if (spaceEndAt !== undefined) update.spaceEndAt = spaceEndAt === null ? null : new Date(spaceEndAt)
   const [prev] = await db.select({ playerId: checks.playerId, spaceId: checks.spaceId, spaceStartAt: checks.spaceStartAt, status: checks.status })
@@ -938,6 +948,35 @@ posRouter.post('/checks/:id/items', requireRole('owner', 'staff', 'tablet'), zVa
     console.error('POST /checks/:id/items error:', err)
     return c.json({ error: 'Internal error' }, 500)
   }
+})
+
+// Свободная позиция «Другое»: название и сумму вписывает кассир (например, еда из
+// другого заведения, оплаченная клубом за гостя). Строка ссылается на системную
+// позицию OTHER_ITEM_ID (миграция 098): склад не списывается, скидки и бонусы на неё
+// не действуют, с другими строками не сливается.
+const CustomItemSchema = z.object({
+  name: z.string().trim().min(1).max(120),
+  price: z.number().positive().max(1_000_000),
+  quantity: z.number().int().min(1).max(99).default(1),
+})
+
+posRouter.post('/checks/:id/custom-items', requireRole('owner', 'staff'), zValidator('json', CustomItemSchema), async (c) => {
+  const db = c.var.db
+  const checkId = c.req.param('id')
+  const { name, price, quantity } = c.req.valid('json')
+  const inserted = await db.transaction(async (tx) => {
+    const [check] = await tx.select({ status: checks.status }).from(checks).where(eq(checks.id, checkId)).for('update')
+    if (!check || check.status !== 'open') return null
+    const [row] = await tx.insert(checkItems).values({
+      checkId, itemId: OTHER_ITEM_ID, quantity, priceAtTime: String(round2(price)), customName: name,
+    }).returning()
+    return row
+  })
+  if (!inserted) return c.json({ error: 'Check not open' }, 400)
+  await recalcCheckTotal(checkId, db)
+  publishEvent(c.var.club?.id, 'check:updated', { checkId })
+  const data = await getCheckWithItems(checkId, db)
+  return c.json({ check: data }, 201)
 })
 
 // ─── Заказы гостя с планшета (pending → подтверждение сотрудником) ────────────
@@ -2103,7 +2142,8 @@ posRouter.post('/checks/:id/pay', requireRole('owner', 'staff'), zValidator('jso
         certificateId: cert?.id ?? null,
         certificateUsed: cert ? String(certSent) : '0',
         playerId: body.playerId ?? null,
-        note: body.note ?? null,
+        // Комментарий кассира к чеку при оплате не затираем: note пишем, только если его прислали.
+        ...(body.note !== undefined ? { note: body.note } : {}),
         spaceEndAt: check.spaceEndAt ?? (check.spaceId ? new Date() : undefined),
         closedAt: new Date(),
       }).where(eq(checks.id, checkId)).returning()

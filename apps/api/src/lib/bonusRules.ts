@@ -64,6 +64,8 @@ export interface AccrualLine {
   categoryId: string | null
   /** Стоимость строки до скидок (цена × количество). */
   amount: number
+  /** Свободная строка «Другое» (возврат денег за гостя) — бонусы на неё не начисляются. */
+  noBonus?: boolean
 }
 
 export interface AccrualInput extends ConditionContext {
@@ -110,6 +112,7 @@ export function computeAccrual(settings: BonusSettings, rules: BonusRule[], inpu
 
   let total = 0
   for (const line of lines) {
+    if (line.noBonus) continue
     const excluded = !!line.categoryId && settings.excludedCategories.has(line.categoryId)
     // Исключённую категорию «включает» только правило, которое назвало её явно.
     const fits = (r: BonusRule) => lineInScope(r, line) && (!excluded || r.scope !== 'check')

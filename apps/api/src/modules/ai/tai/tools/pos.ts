@@ -64,11 +64,11 @@ function pickByName<T extends { name: string }>(list: T[], query: string): T | n
 
 /* ─────────────────────────── Чтение ─────────────────────────── */
 
-type ShiftSummary = { shift: { id: string; openedAt: string } | null; openChecks?: { count: number; total: number }; cashInRegister?: number; forecast?: { amount: number } | null }
+type ShiftSummary = { shift: { id: string; openedAt: string } | null; openChecks?: { count: number; total: number }; cashInRegister?: number; forecast?: { amount: number; paidTotal?: number } | null }
 
 const shiftStatus: ToolDef = {
   name: 'shift_status',
-  description: 'Текущая смена: открыта ли, сколько открытых чеков и на какую сумму, сколько наличных в кассе, прогноз выручки вечера.',
+  description: 'Текущая смена: открыта ли, сколько открытых чеков и на какую сумму, сколько наличных в кассе, сколько уже оплачено за смену и прогноз выручки вечера (оплаченное + ожидаемое по открытым чекам).',
   parameters: { type: 'object', properties: {} },
   status: () => 'Смотрю смену…',
   run: async (_args, ctx) => {
@@ -84,12 +84,13 @@ const shiftStatus: ToolDef = {
           { label: 'Открытых чеков', value: String(s.openChecks?.count ?? 0) },
           { label: 'На сумму', value: rub(s.openChecks?.total ?? 0) },
           { label: 'В кассе', value: rub(s.cashInRegister ?? 0) },
+          ...(s.forecast?.paidTotal ? [{ label: 'Уже оплачено', value: rub(s.forecast.paidTotal) }] : []),
           ...(s.forecast ? [{ label: 'Прогноз вечера', value: rub(s.forecast.amount) }] : []),
         ],
         link: { label: 'Касса', to: { screen: 'pos' } },
       }],
       memo: `смена открыта с ${mskTime(s.shift.openedAt)}, открытых чеков ${s.openChecks?.count ?? 0}`,
-      data: { shiftOpenedAt: mskTime(s.shift.openedAt), openChecks: s.openChecks, cashInRegister: s.cashInRegister, forecast: s.forecast?.amount ?? null },
+      data: { shiftOpenedAt: mskTime(s.shift.openedAt), openChecks: s.openChecks, cashInRegister: s.cashInRegister, forecast: s.forecast?.amount ?? null, paidThisShift: s.forecast?.paidTotal ?? null },
     }
   },
 }

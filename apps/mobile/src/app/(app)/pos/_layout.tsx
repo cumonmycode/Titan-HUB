@@ -52,6 +52,7 @@ export default function PosLayout() {
       />
       <Stack.Screen name="player" options={compactSheet} />
       <Stack.Screen name="discount" options={compactSheet} />
+      <Stack.Screen name="custom-item" options={compactSheet} />
       <Stack.Screen name="rental" options={compactSheet} />
       <Stack.Screen name="zone" options={compactSheet} />
     </Stack>

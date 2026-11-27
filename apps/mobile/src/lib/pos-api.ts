@@ -303,6 +303,23 @@ export function addItem(checkId: string, itemId: string, quantity = 1) {
   });
 }
 
+/**
+ * Свободная позиция «Другое»: название и сумма от кассира (например, еда из другого
+ * заведения, которую клуб оплатил за гостя). Склад, скидки и бонусы её не трогают.
+ */
+export function addCustomItem(checkId: string, input: { name: string; price: number }) {
+  return enqueue(checkId, async () => {
+    try {
+      const { check } = await api.post<{ check: CheckDetail }>(`/pos/checks/${checkId}/custom-items`, input);
+      applyCheck(check);
+      return check;
+    } catch (error) {
+      await refetchCheck(checkId);
+      throw error;
+    }
+  });
+}
+
 /** Абсолютное количество строки (идемпотентно); 0 — удалить строку. */
 export function setItemQuantity(checkId: string, checkItemId: string, quantity: number) {
   return enqueue(checkId, async () => {
@@ -408,6 +425,20 @@ export function setCheckPlayer(checkId: string, playerId: string | null) {
     try {
       await fetchOpenCheck(checkId);
       const { check } = await api.patch<{ check: CheckDetail }>(`/pos/checks/${checkId}`, { playerId });
+      applyCheck(check);
+      return check;
+    } catch (error) {
+      await refetchCheck(checkId);
+      throw error;
+    }
+  });
+}
+
+/** Комментарий к чеку; пустая строка убирает его. */
+export function setCheckNote(checkId: string, note: string) {
+  return enqueue(checkId, async () => {
+    try {
+      const { check } = await api.patch<{ check: CheckDetail }>(`/pos/checks/${checkId}`, { note: note.trim() || null });
       applyCheck(check);
       return check;
     } catch (error) {
