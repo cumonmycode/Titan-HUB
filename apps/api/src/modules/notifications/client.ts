@@ -23,7 +23,7 @@ import { isBlocked } from '../../lib/tgBot.js'
 import { taiBot } from '../tg/club.js'
 import { appendMessage, markBlocked } from '../tg/dialog/memory.js'
 
-export type ClientNotifyKind = 'bonus' | 'deposit' | 'debt' | 'payment' | 'tier' | 'fund' | 'news' | 'system'
+export type ClientNotifyKind = 'bonus' | 'deposit' | 'debt' | 'payment' | 'tier' | 'fund' | 'news' | 'stream' | 'system'
 
 export interface ClientNotice {
   kind: ClientNotifyKind
@@ -34,7 +34,7 @@ export interface ClientNotice {
 }
 
 const KIND_EMOJI: Record<ClientNotifyKind, string> = {
-  bonus: '⭐', deposit: '💰', debt: '⚠️', payment: '✅', tier: '🎉', fund: '🏛', news: '📣', system: '🔔',
+  bonus: '⭐', deposit: '💰', debt: '⚠️', payment: '✅', tier: '🎉', fund: '🏛', news: '📣', stream: '🔴', system: '🔔',
 }
 
 // ── Telegram (бот Tai клуба) ────────────────────────────────────────────────
@@ -155,6 +155,7 @@ async function unreadCounts(profileIds: string[], database: Database): Promise<M
 }
 
 function channelFor(kind: ClientNotifyKind): string {
+  if (kind === 'stream') return 'streams'
   return kind === 'news' ? 'news' : 'wallet'
 }
 

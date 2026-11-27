@@ -3,7 +3,7 @@ import { QueryClient, useInfiniteQuery, useMutation, useQuery, useQueryClient } 
 
 import { api } from './api';
 import type {
-  CheckDetail, CreatedPayment, FeedPage, NotificationsPage, PaymentStatus, PayPurpose, Prefs, Wallet,
+  CheckDetail, CreatedPayment, Evenings, FeedPage, NotificationsPage, PaymentStatus, PayPurpose, Prefs, StreamView, Wallet,
 } from './types';
 
 export const queryClient = new QueryClient({
@@ -20,7 +20,27 @@ export const keys = {
   feed: (kind: string) => ['feed', kind] as const,
   notifications: ['notifications'] as const,
   check: (id: string) => ['check', id] as const,
+  evenings: ['evenings'] as const,
+  stream: ['stream'] as const,
 };
+
+/** Сколько и каких игровых вечеров у клиента. Меняется только после закрытого чека. */
+export function useEvenings() {
+  return useQuery({
+    queryKey: keys.evenings,
+    queryFn: () => api.get<Evenings>('/resident/evenings'),
+    staleTime: 5 * 60_000,
+  });
+}
+
+/** Эфир клуба и площадки. Пока приложение открыто — проверяем раз в минуту, не начался ли. */
+export function useStream() {
+  return useQuery({
+    queryKey: keys.stream,
+    queryFn: () => api.get<StreamView>('/resident/stream'),
+    refetchInterval: 60_000,
+  });
+}
 
 export function useWallet() {
   return useQuery({
@@ -66,6 +86,8 @@ export function refreshMoney(qc: QueryClient = queryClient) {
   void qc.invalidateQueries({ queryKey: keys.wallet });
   void qc.invalidateQueries({ queryKey: ['feed'] });
   void qc.invalidateQueries({ queryKey: keys.notifications });
+  void qc.invalidateQueries({ queryKey: keys.evenings });
+  void qc.invalidateQueries({ queryKey: keys.stream });
 }
 
 export function useMarkRead() {

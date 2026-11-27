@@ -2,7 +2,8 @@
  * Стримы в HUB (раздел «Telegram → Стримы»): что прислал MafBoard, отдавать ли эфиры
  * Tai для публикации и ручные действия.
  *   GET    /api/telegram/streams           — активный и последний эфир, настройка публикации;
- *   PUT    /api/telegram/streams/settings  — {autoPublish};
+ *   PUT    /api/telegram/streams/settings  — {autoPublish?, appPush?, appPushTitle?, appPushBody?, channels?}
+ *                                            (push и площадки для My Titan — экран HUB «Маркетинг → Трансляции»);
  *   POST   /api/telegram/streams           — эфир вручную (сразу публикуется);
  *   POST   /api/telegram/streams/publish   — опубликовать полученный эфир;
  *   DELETE /api/telegram/streams/active    — завершить эфир.
@@ -13,7 +14,7 @@ import { z } from 'zod'
 import { sql } from '@titan/database'
 import type { AppEnv } from '../../types.js'
 import { chatsForCategory } from '../../lib/tgChatConfig.js'
-import { endStream, publishStream, setAutoPublish, startStream, streamState, StreamError } from './streams.js'
+import { endStream, publishStream, setStreamSettings, startStream, streamState, StreamError } from './streams.js'
 
 export const StreamLinkSchema = z.object({
   kind: z.enum(['watch', 'donate']),
@@ -38,9 +39,16 @@ export function registerStreamRoutes(router: Hono<AppEnv>): void {
     return c.json({ ...state, targets: targets.length, sources: sources.map((r) => ({ id: r.id, name: r.name, canStream: !!r.can_stream })) })
   })
 
-  router.put('/streams/settings', zValidator('json', z.object({ autoPublish: z.boolean() })), async (c) => {
-    await setAutoPublish(c.var.db, c.req.valid('json').autoPublish)
-    return c.json({ ok: true })
+  router.put('/streams/settings', zValidator('json', z.object({
+    autoPublish: z.boolean().optional(),
+    appPush: z.boolean().optional(),
+    appPushTitle: z.string().max(80).optional(),
+    appPushBody: z.string().max(200).optional(),
+    channels: z.array(StreamLinkSchema).max(6).optional(),
+  })), async (c) => {
+    const next = await setStreamSettings(c.var.db, c.req.valid('json'))
+    const { active: _active, last: _last, ...settings } = next
+    return c.json({ ok: true, ...settings })
   })
 
   router.post('/streams', zValidator('json', z.object({ title: z.string().trim().max(120).optional(), links: z.array(StreamLinkSchema).min(1).max(6) })), async (c) => {

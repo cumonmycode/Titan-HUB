@@ -25,6 +25,7 @@ const LOOK: Record<NotificationKind, { icon: IconName; color: string }> = {
   tier: { icon: 'trophy', color: colors.violetLight },
   fund: { icon: 'fund', color: colors.cyan },
   news: { icon: 'news', color: colors.pink },
+  stream: { icon: 'live', color: colors.red },
   system: { icon: 'inbox', color: colors.violetLight },
 };
 

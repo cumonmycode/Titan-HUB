@@ -29,6 +29,7 @@ const SECTION_SCREENS: Record<ManageSectionKey, Href> = {
   collections: '/manage/collections',
   polls: '/manage/polls',
   broadcasts: '/manage/broadcasts',
+  streams: '/manage/streams',
   shifts: '/manage/shifts',
   salary: '/manage/salary',
   expenses: '/manage/expenses',

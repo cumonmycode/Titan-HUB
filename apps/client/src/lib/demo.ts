@@ -3,7 +3,7 @@
 // клуба — у проверяющего его нет), для скриншотов и знакомства с приложением.
 // Оплата в демо проходит сама через пару секунд и меняет баланс.
 import type {
-  CheckDetail, ClientNotification, Collection, FeedItem, Wallet,
+  CheckDetail, ClientNotification, Collection, Evenings, FeedItem, StreamView, Wallet,
 } from './types';
 
 const DAY = 86_400_000;
@@ -72,7 +72,7 @@ function initialWallet(): Wallet {
     collections: [fund, cup],
     pay: { online: true, surchargePercent: 8 },
     unreadNotifications: 2,
-    prefs: { push: true, telegram: true, news: true },
+    prefs: { push: true, telegram: true, news: true, streams: true },
     club: { name: 'Titan' },
   };
 }
@@ -109,6 +109,61 @@ function initialNotifications(): ClientNotification[] {
     { id: uid('a0000005', 5), kind: 'bonus', title: 'С днём рождения!', body: 'Дарим 500 бонусов — ждём вас в клубе.', meta: { screen: 'history' }, isRead: true, createdAt: iso(9 * DAY) },
     { id: uid('a0000006', 6), kind: 'tier', title: 'Вы — Резидент Titan!', body: 'Поздравляем с новым статусом — спасибо, что вы с нами.', meta: { screen: 'home' }, isRead: true, createdAt: iso(120 * DAY) },
   ];
+}
+
+/** Полгода по месяцам, последний — текущий. */
+function demoEvenings(): Evenings {
+  const counts = [
+    { city: 3, sport: 1, board: 0, other: 0 },
+    { city: 2, sport: 2, board: 1, other: 1 },
+    { city: 4, sport: 1, board: 0, other: 0 },
+    { city: 3, sport: 2, board: 1, other: 1 },
+    { city: 2, sport: 1, board: 1, other: 0 },
+    { city: 2, sport: 0, board: 0, other: 0 },
+  ];
+  const d = new Date();
+  const months = counts.map((c, i) => {
+    const m = new Date(d.getFullYear(), d.getMonth() - (counts.length - 1 - i), 1);
+    return { month: `${m.getFullYear()}-${String(m.getMonth() + 1).padStart(2, '0')}`, ...c, none: 0 };
+  });
+  const sum = (k: 'city' | 'sport' | 'board' | 'other') => counts.reduce((s, c) => s + c[k], 0);
+  return {
+    total: sum('city') + sum('sport') + sum('board') + sum('other') + 2,
+    firstAt: iso(210 * DAY),
+    lastAt: iso(2 * 3600_000),
+    categories: [
+      { key: 'city', label: 'Городская', count: sum('city'), lastAt: iso(2 * 3600_000) },
+      { key: 'sport', label: 'Спортивная', count: sum('sport'), lastAt: iso(10 * DAY) },
+      { key: 'board', label: 'Настолки', count: sum('board'), lastAt: iso(24 * DAY) },
+      { key: 'other', label: 'Другие ивенты', count: sum('other'), lastAt: iso(40 * DAY) },
+      { key: 'none', label: 'Без вечера', count: 2, lastAt: iso(17 * DAY) },
+    ],
+    others: [{ label: 'Хэллоуин', count: 1 }, { label: 'Кубок Titan', count: 1 }],
+    months,
+  };
+}
+
+/** Демо-эфир «идёт» первые 10 минут после входа в демо — видно и плашку, и экран без эфира. */
+const DEMO_LIVE_MS = 10 * 60_000;
+const demoStartedAt = now();
+
+function demoStream(): StreamView {
+  const live = now() - demoStartedAt < DEMO_LIVE_MS;
+  return {
+    live: live ? {
+      id: 'demo',
+      title: 'Финал осеннего кубка Titan',
+      startedAt: new Date(demoStartedAt - 25 * 60_000).toISOString(),
+      watch: [{ kind: 'watch', label: 'VK Видео', url: 'https://vkvideo.ru' }],
+      donate: [],
+    } : null,
+    channels: [
+      { kind: 'watch', label: 'VK Видео', url: 'https://vkvideo.ru' },
+      { kind: 'watch', label: 'YouTube', url: 'https://www.youtube.com' },
+    ],
+    donate: [{ kind: 'donate', label: 'Донат', url: 'https://www.donationalerts.com' }],
+    lastEndedAt: live ? null : iso(3 * DAY),
+  };
 }
 
 const CHECK_ITEMS: Record<string, CheckDetail['items']> = {
@@ -219,6 +274,8 @@ export async function demoRequest<T>(method: string, fullPath: string, body?: un
     return out(w.prefs);
   }
   if (path === '/resident/devices') return out({ ok: true });
+  if (method === 'GET' && path === '/resident/evenings') return out(demoEvenings());
+  if (method === 'GET' && path === '/resident/stream') return out(demoStream());
   if (method === 'POST' && path === '/resident/session/refresh') return out({ token: 'demo' });
   if (method === 'GET' && path.startsWith('/auth/me/checks/')) {
     const id = path.split('/').pop()!;

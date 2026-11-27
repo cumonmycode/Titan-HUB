@@ -57,6 +57,11 @@ const ICONS = {
   shield: { sf: 'checkmark.shield.fill', ion: 'shield-checkmark' },
   copy: { sf: 'doc.on.doc', ion: 'copy-outline' },
   money: { sf: 'banknote.fill', ion: 'cash' },
+  live: { sf: 'dot.radiowaves.left.and.right', ion: 'radio' },
+  play: { sf: 'play.rectangle.fill', ion: 'play-circle' },
+  heart: { sf: 'heart.fill', ion: 'heart' },
+  evenings: { sf: 'theatermasks.fill', ion: 'dice' },
+  calendar: { sf: 'calendar', ion: 'calendar' },
 } as const satisfies Record<string, { sf: SFSymbol; ion: IonName }>;
 
 export type IconName = keyof typeof ICONS;

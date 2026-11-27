@@ -31,6 +31,12 @@ export async function ensureAndroidChannels() {
     lightColor: '#8B5CF6',
     vibrationPattern: [0, 180, 120, 180],
   });
+  await Notifications.setNotificationChannelAsync('streams', {
+    name: 'Трансляции',
+    description: 'Клуб вышел в эфир',
+    importance: Notifications.AndroidImportance.HIGH,
+    lightColor: '#F87171',
+  });
   await Notifications.setNotificationChannelAsync('news', {
     name: 'Новости клуба',
     description: 'Турниры, события и объявления Titan',
@@ -114,6 +120,12 @@ export function openFromNotificationData(data: Record<string, unknown> | undefin
       return;
     case 'pay':
       router.push({ pathname: '/pay', params: typeof data?.purpose === 'string' ? { purpose: data.purpose } : {} });
+      return;
+    case 'stream':
+      router.push('/stream');
+      return;
+    case 'evenings':
+      router.push('/evenings');
       return;
     case 'history':
       router.navigate('/history');

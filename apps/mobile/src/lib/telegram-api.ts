@@ -261,6 +261,13 @@ export type StreamsState = {
   active: Stream | null;
   last: Stream | null;
   autoPublish: boolean;
+  /** Push «Мы в эфире» клиентам My Titan при публикации эфира (по умолчанию включён). */
+  appPush?: boolean;
+  /** Свой заголовок и текст push; пусто — стандартные. {название} — название эфира. */
+  appPushTitle?: string;
+  appPushBody?: string;
+  /** Постоянные площадки клуба (каналы и донат) — клиенты видят их в My Titan и между эфирами. */
+  channels?: StreamLink[];
   targets: number;
   /** Подключения Titan Connect (MafBoard): без права «Стримы» эфир до HUB не дойдёт. */
   sources?: { id: string; name: string; canStream: boolean }[];
@@ -268,6 +275,12 @@ export type StreamsState = {
 
 export const getStreams = () => api.get<StreamsState>('/telegram/streams');
 export const setStreamsAutoPublish = (autoPublish: boolean) => api.put('/telegram/streams/settings', { autoPublish });
+export const setStreamsAppPush = (appPush: boolean) => api.put('/telegram/streams/settings', { appPush });
+export const setStreamPushText = (appPushTitle: string, appPushBody: string) => api.put('/telegram/streams/settings', { appPushTitle, appPushBody });
+
+/** Стандартный push, если владелец не задал свой (как на сервере, notifications/streamPush.ts). */
+export const DEFAULT_STREAM_PUSH = { title: '🔴 Мы в эфире!', body: '{название} — заходите смотреть и болеть за своих' };
+export const setStreamChannels = (channels: StreamLink[]) => api.put('/telegram/streams/settings', { channels });
 export const startManualStream = (title: string, links: StreamLink[]) => api.post<{ stream: Stream }>('/telegram/streams', { title, links });
 export const publishActiveStream = () => api.post<{ stream: Stream }>('/telegram/streams/publish');
 export const endActiveStream = () => api.delete('/telegram/streams/active');

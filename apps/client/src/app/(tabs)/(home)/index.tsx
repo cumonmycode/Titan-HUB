@@ -2,6 +2,8 @@
 // • голо-карта — бонусы и срок их сгорания; нажатие открывает бонусную программу;
 // • «Депозит» — баланс и единственная кнопка «Пополнить»;
 // • «К оплате» — долг и взносы, у каждого своя кнопка оплаты;
+// • «В эфире» — плашка появляется, только пока идёт трансляция клуба, ведёт в «Трансляции»;
+// • «Игровые вечера» — сколько и каких вечеров сыграно, ведёт в шторку со статистикой;
 // • «Последние операции» — три свежие, «Все» ведёт во вкладку «История»;
 // • колокольчик в шапке — уведомления.
 import { Stack, useRouter } from 'expo-router';
@@ -9,15 +11,19 @@ import { StyleSheet, Text, View } from 'react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 
 import { ClubCard } from '@/components/club-card';
+import { gamesWord, ShareBar } from '@/components/evenings';
 import { FEED_ROW_INSET, FeedRow } from '@/components/feed-row';
 import { GlassButton, GlassIconButton } from '@/components/glass';
-import type { IconName } from '@/components/icon';
+import { Icon, type IconName } from '@/components/icon';
+import { LiveBadge } from '@/components/live-badge';
+import { Tap } from '@/components/tap';
 import { RollingNumber } from '@/components/rolling-number';
 import { TabScroll } from '@/components/screen';
 import { Divider, EmptyState, IconTile, SectionHeader, Skeleton, Surface } from '@/components/ui';
 import { errorText } from '@/lib/api';
 import { bonus, inDays, money, plural } from '@/lib/format';
-import { refreshMoney, useFeed, useWallet } from '@/lib/queries';
+import { EVENING_COLORS, summarize } from '@/lib/evenings';
+import { refreshMoney, useEvenings, useFeed, useStream, useWallet } from '@/lib/queries';
 import { useSession } from '@/lib/session';
 import { colors, IS_IOS, radius, space, type } from '@/lib/theme';
 import type { Collection, Wallet } from '@/lib/types';
@@ -106,10 +112,12 @@ export default function HomeScreen() {
         />
       </Animated.View>
 
+      <LiveBanner />
       {w.registration === 'pending' ? <RegistrationPending /> : null}
       <DepositCard wallet={w} />
       <Dues wallet={w} />
       {w.visitProgress.tier === 'newbie' && w.visitProgress.remaining >= 0 ? <ResidentProgress wallet={w} /> : null}
+      <EveningsCard />
 
       <View style={styles.section}>
         <SectionHeader title="Последние операции" action={items.length ? 'Все' : undefined} onAction={() => router.navigate('/history')} />
@@ -127,6 +135,68 @@ export default function HomeScreen() {
         </Surface>
       </View>
     </TabScroll>
+  );
+}
+
+/** Идёт трансляция клуба — плашка над депозитом; эфира нет — плашки нет. */
+function LiveBanner() {
+  const router = useRouter();
+  const live = useStream().data?.live;
+  if (!live) return null;
+  return (
+    <Tap onPress={() => router.push('/stream')} scaleTo={0.98} accessibilityRole="button"
+      accessibilityLabel={`Сейчас в эфире: ${live.title}. Смотреть`} style={styles.pending}>
+      <Surface tone={colors.red} style={[styles.card, styles.row]}>
+        <IconTile name="live" color={colors.red} />
+        <View style={styles.flex}>
+          <LiveBadge />
+          <Text style={[type.headline, styles.liveTitle]} numberOfLines={2}>{live.title}</Text>
+        </View>
+        <Icon name="chevron" size={14} color={colors.textMuted} weight="bold" />
+      </Surface>
+    </Tap>
+  );
+}
+
+/** «Игровые вечера»: число сыгранных вечеров, полоса видов и любимый — вход в статистику. */
+function EveningsCard() {
+  const router = useRouter();
+  const { data } = useEvenings();
+  if (!data) return null;
+  const s = summarize(data);
+  const open = () => router.push('/evenings');
+  return (
+    <View style={styles.section}>
+      <SectionHeader title="Игровые вечера" />
+      <Tap onPress={open} scaleTo={0.98} accessibilityRole="button"
+        accessibilityLabel={`Игровые вечера: ${s.games}${s.favorite ? `, любимый — ${s.favorite.label}` : ''}`}>
+        <Surface style={styles.card}>
+          {s.games ? (
+            <>
+              <View style={styles.eveningsHead}>
+                <Text style={styles.eveningsCount}>{s.games}</Text>
+                <Text style={[type.callout, styles.flex]}>{gamesWord(s.games)} в клубе</Text>
+                {s.thisMonth ? <Text style={type.caption}>+{s.thisMonth} в этом месяце</Text> : null}
+              </View>
+              <ShareBar shares={s.shares} />
+              <View style={styles.legend}>
+                {s.shares.map((sh) => (
+                  <View key={sh.key} style={styles.legendItem}>
+                    <View style={[styles.legendDot, { backgroundColor: EVENING_COLORS[sh.key] }]} />
+                    <Text style={type.caption} numberOfLines={1}>{sh.label} · {sh.count}</Text>
+                  </View>
+                ))}
+              </View>
+            </>
+          ) : (
+            <View style={styles.row}>
+              <IconTile name="evenings" color={colors.violetLight} />
+              <Text style={[type.callout, styles.flex]}>Сыграйте первый вечер — здесь появится ваша статистика игр</Text>
+            </View>
+          )}
+        </Surface>
+      </Tap>
+    </View>
   );
 }
 
@@ -295,4 +365,10 @@ const styles = StyleSheet.create({
   promptText: { marginTop: 2 },
   pending: { marginTop: space.lg },
   listLoading: { padding: space.lg, gap: space.md },
+  liveTitle: { marginTop: space.xs },
+  eveningsHead: { flexDirection: 'row', alignItems: 'baseline', gap: space.sm, marginBottom: space.md },
+  eveningsCount: { color: colors.text, fontSize: 30, fontWeight: '800', fontVariant: ['tabular-nums'] },
+  legend: { flexDirection: 'row', flexWrap: 'wrap', columnGap: space.md, rowGap: space.xs, marginTop: space.md },
+  legendItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  legendDot: { width: 8, height: 8, borderRadius: 4 },
 });

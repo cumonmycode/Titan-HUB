@@ -7,7 +7,12 @@
  *  • выключено — эфир виден только в HUB, его можно опубликовать вручную.
  * Конец эфира — опубликованный пост правится на «стрим завершён».
  *
- * Хранение — app_settings.tg_streams: { active, last, autoPublish } (одна запись на клуб).
+ * Опубликованный эфир видят и клиенты My Titan: экран «Трансляции» и push «Мы в эфире»
+ * (notifications/streamPush.ts). Push, его текст и постоянные площадки клуба (каналы и
+ * донат, видны и между эфирами) настраиваются в HUB: «Маркетинг → Трансляции».
+ *
+ * Хранение — app_settings.tg_streams: { active, last, autoPublish, appPush, appPushTitle,
+ * appPushBody, channels } (одна запись на клуб).
  */
 import { randomBytes } from 'node:crypto'
 import { appSettings, sql, type Database } from '@titan/database'
@@ -15,10 +20,12 @@ import { getStringSetting } from '../../lib/appSettings.js'
 import { escapeHtml, type InlineButton, type TgBot } from '../../lib/tgBot.js'
 import { chatsForCategory } from '../../lib/tgChatConfig.js'
 import { taiBot } from './club.js'
+import { notifyStreamStarted } from '../notifications/streamPush.js'
 
 export const STREAMS_KEY = 'tg_streams'
-export type StreamLinkKind = 'watch' | 'donate'
-export interface StreamLink { kind: StreamLinkKind; label: string; url: string }
+import { normalizeLinks, type StreamLink, type StreamLinkKind } from './streamLinks.js'
+
+export { normalizeLinks, safeUrl, type StreamLink, type StreamLinkKind } from './streamLinks.js'
 export type StreamSource = 'mafboard' | 'studio' | 'hub'
 
 export interface Stream {
@@ -34,7 +41,19 @@ export interface Stream {
   posts: { chatId: string; messageId: number }[]
 }
 
-interface Store { active: Stream | null; last: Stream | null; autoPublish: boolean }
+export interface StreamStore {
+  active: Stream | null
+  last: Stream | null
+  autoPublish: boolean
+  /** Push «Мы в эфире» клиентам My Titan при публикации эфира. */
+  appPush: boolean
+  /** Заголовок и текст push; пусто — стандартные. В тексте {название} — название эфира. */
+  appPushTitle: string
+  appPushBody: string
+  /** Постоянные площадки клуба: каналы (watch) и донат (donate) — видны и без эфира. */
+  channels: StreamLink[]
+}
+type Store = StreamStore
 
 export interface StreamInput {
   id?: string
@@ -43,20 +62,7 @@ export interface StreamInput {
   source: StreamSource
 }
 
-const MAX_LINKS = 6
 const DEFAULT_TITLE = 'Стрим клуба'
-const URL_MAX = 500
-
-/** Только https — кнопки Telegram и так принимают лишь http(s)/tg. */
-export function safeUrl(raw: string): string | null {
-  try {
-    const url = new URL(raw.trim())
-    if (url.protocol !== 'https:' || url.username || url.password || raw.length > URL_MAX) return null
-    return url.toString()
-  } catch {
-    return null
-  }
-}
 
 type DbLike = Database | Parameters<Parameters<Database['transaction']>[0]>[0]
 
@@ -64,9 +70,17 @@ async function readStore(db: DbLike): Promise<Store> {
   try {
     const raw = await getStringSetting(STREAMS_KEY, '', db)
     const parsed = raw ? (JSON.parse(raw) as Partial<Store>) : {}
-    return { active: parsed.active ?? null, last: parsed.last ?? null, autoPublish: parsed.autoPublish === true }
+    return {
+      active: parsed.active ?? null,
+      last: parsed.last ?? null,
+      autoPublish: parsed.autoPublish === true,
+      appPush: parsed.appPush !== false,
+      appPushTitle: typeof parsed.appPushTitle === 'string' ? parsed.appPushTitle : '',
+      appPushBody: typeof parsed.appPushBody === 'string' ? parsed.appPushBody : '',
+      channels: Array.isArray(parsed.channels) ? normalizeLinks(parsed.channels) : [],
+    }
   } catch {
-    return { active: null, last: null, autoPublish: false }
+    return { active: null, last: null, autoPublish: false, appPush: true, appPushTitle: '', appPushBody: '', channels: [] }
   }
 }
 
@@ -107,18 +121,6 @@ export function streamCommandReply(s: Stream | null): { text: string; markup?: {
   return { text: `🔴 Сейчас в эфире: ${escapeHtml(s.title)}`, markup: buttons(s) }
 }
 
-function normalizeLinks(links: StreamLink[]): StreamLink[] {
-  const seen = new Set<string>()
-  const out: StreamLink[] = []
-  for (const l of links) {
-    const url = safeUrl(l.url)
-    if (!url || seen.has(url)) continue
-    seen.add(url)
-    out.push({ kind: l.kind, label: l.label.trim().slice(0, 40) || (l.kind === 'donate' ? 'Донат' : 'Смотреть'), url })
-  }
-  return out.slice(0, MAX_LINKS)
-}
-
 async function postEverywhere(db: Database, bot: TgBot, s: Stream): Promise<Stream['posts']> {
   const targets = await chatsForCategory(db, 'streams')
   const sent = await Promise.all(targets.map(async (t) => ({ chatId: t.chatId, r: await bot.send(t.chatId, postText(s, true), { html: true, threadId: t.threadId, markup: buttons(s) }) })))
@@ -142,7 +144,7 @@ export async function startStream(db: Database, input: StreamInput, opts: { publ
   const store = await readStore(db)
   const publish = opts.publish ?? store.autoPublish
   const bot = await taiBot(db)
-  if (publish && !bot) throw new StreamError('Бот Tai не подключён')
+  if (publish && !bot && !store.appPush) throw new StreamError('Бот Tai не подключён')
   const current = store.active
   const id = input.id?.trim().slice(0, 80) || randomBytes(6).toString('hex')
   const title = input.title?.trim().slice(0, 120) || DEFAULT_TITLE
@@ -160,20 +162,41 @@ export async function startStream(db: Database, input: StreamInput, opts: { publ
   return publish ? publishStream(db) : fresh
 }
 
-/** Отдать активный эфир Tai: пост в чаты со «Стримами» и ссылка по /stream. */
+/**
+ * Отдать активный эфир клиентам: пост Tai в чаты со «Стримами», ссылка по /stream, экран
+ * «Трансляции» в My Titan и push «Мы в эфире» (один раз за эфир — повтор уже опубликованного
+ * ничего не шлёт). Без бота Tai публикуем только в приложение, если там включён push.
+ */
 export async function publishStream(db: Database): Promise<Stream> {
-  const current = await activeStream(db)
+  const store = await readStore(db)
+  const current = store.active
   if (!current) throw new StreamError('Сейчас эфира нет')
   if (current.published) return current
   const bot = await taiBot(db)
-  if (!bot) throw new StreamError('Бот Tai не подключён')
-  const posted: Stream = { ...current, published: true, posts: await postEverywhere(db, bot, current) }
+  if (!bot && !store.appPush) throw new StreamError('Бот Tai не подключён')
+  const posted: Stream = { ...current, published: true, posts: bot ? await postEverywhere(db, bot, current) : [] }
   await mutateStore(db, (s) => ({ ...s, active: s.active?.id === posted.id ? posted : s.active }))
+  if (store.appPush) void notifyStreamStarted(db, posted, { title: store.appPushTitle, body: store.appPushBody })
   return posted
 }
 
-export async function setAutoPublish(db: Database, on: boolean): Promise<void> {
-  await mutateStore(db, (s) => ({ ...s, autoPublish: on }))
+export interface StreamSettingsPatch {
+  autoPublish?: boolean
+  appPush?: boolean
+  appPushTitle?: string
+  appPushBody?: string
+  channels?: StreamLink[]
+}
+
+export async function setStreamSettings(db: Database, patch: StreamSettingsPatch): Promise<StreamStore> {
+  return mutateStore(db, (s) => ({
+    ...s,
+    ...(patch.autoPublish !== undefined ? { autoPublish: patch.autoPublish } : {}),
+    ...(patch.appPush !== undefined ? { appPush: patch.appPush } : {}),
+    ...(patch.appPushTitle !== undefined ? { appPushTitle: patch.appPushTitle.trim() } : {}),
+    ...(patch.appPushBody !== undefined ? { appPushBody: patch.appPushBody.trim() } : {}),
+    ...(patch.channels !== undefined ? { channels: normalizeLinks(patch.channels) } : {}),
+  }))
 }
 
 async function finishStream(db: Database, bot: TgBot | null, s: Stream): Promise<Stream> {
@@ -192,4 +215,31 @@ export async function endStream(db: Database, id?: string): Promise<Stream | nul
 
 export async function streamState(db: Database): Promise<Store> {
   return readStore(db)
+}
+
+/** Что видит клиент My Titan: опубликованный эфир и постоянные площадки клуба. */
+export interface ClientStreamView {
+  live: { id: string; title: string; startedAt: string; watch: StreamLink[]; donate: StreamLink[] } | null
+  channels: StreamLink[]
+  donate: StreamLink[]
+  lastEndedAt: string | null
+}
+
+export async function clientStreamView(db: Database): Promise<ClientStreamView> {
+  const s = await readStore(db)
+  const live = s.active?.published ? s.active : null
+  const own = (kind: StreamLinkKind) => s.channels.filter((l) => l.kind === kind)
+  return {
+    live: live ? {
+      id: live.id,
+      title: live.title,
+      startedAt: live.startedAt,
+      watch: live.links.filter((l) => l.kind === 'watch'),
+      donate: live.links.filter((l) => l.kind === 'donate'),
+    } : null,
+    channels: own('watch'),
+    // Донат эфира важнее постоянного: показываем его, а постоянный — если в эфире нет своего.
+    donate: own('donate'),
+    lastEndedAt: s.last?.published ? s.last.endedAt : null,
+  }
 }

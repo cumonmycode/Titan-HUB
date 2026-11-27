@@ -17,6 +17,8 @@ import {
 import { signToken } from '@titan/auth'
 import { requireAuth } from '../../middleware/auth.js'
 import { visitProgress } from '../../lib/loyalty.js'
+import { clientAttendance } from '../../lib/clientAttendance.js'
+import { clientStreamView } from '../tg/streams.js'
 import { round2 } from '../../lib/money.js'
 import { isRegistrationPending } from '../../lib/registration.js'
 import { excusedMonthKeys, recurringOwed } from '../../lib/collectionDues.js'
@@ -251,6 +253,7 @@ residentRouter.get('/wallet', async (c) => {
       push: p.clientPushEnabled !== false,
       telegram: p.walletNotifyEnabled !== false,
       news: p.clientNewsEnabled !== false,
+      streams: p.clientStreamsEnabled !== false,
     },
     club: { name: s['club_name'] ?? 'Titan' },
   })
@@ -340,6 +343,20 @@ residentRouter.get('/collections', async (c) => {
   return c.json({ collections: p ? await clientCollections(db, me, p.tier) : [] })
 })
 
+// ── Игровые вечера ──────────────────────────────────────────────────────────
+// На какие вечера ходит клиент — тот же расчёт, что в карточке клиента в HUB
+// (lib/clientAttendance): визит = смена с закрытым чеком, вид — по тарифу и типу вечера.
+residentRouter.get('/evenings', async (c) => {
+  return c.json(await clientAttendance(c.var.db, c.get('user').sub))
+})
+
+// ── Трансляции ──────────────────────────────────────────────────────────────
+// Опубликованный эфир клуба (ссылки на площадки и донат) и постоянные площадки клуба.
+// Неопубликованный эфир (MafBoard прислал, владелец не отдал) клиент не видит.
+residentRouter.get('/stream', async (c) => {
+  return c.json(await clientStreamView(c.var.db))
+})
+
 // ── Лента уведомлений ───────────────────────────────────────────────────────
 residentRouter.get('/notifications', async (c) => {
   const db = c.var.db
@@ -427,6 +444,7 @@ residentRouter.patch('/prefs', zValidator('json', z.object({
   push: z.boolean().optional(),
   telegram: z.boolean().optional(),
   news: z.boolean().optional(),
+  streams: z.boolean().optional(),
 })), async (c) => {
   const db = c.var.db
   const me = c.get('user').sub
@@ -435,12 +453,14 @@ residentRouter.patch('/prefs', zValidator('json', z.object({
   if (b.push !== undefined) patch.clientPushEnabled = b.push
   if (b.telegram !== undefined) patch.walletNotifyEnabled = b.telegram
   if (b.news !== undefined) patch.clientNewsEnabled = b.news
+  if (b.streams !== undefined) patch.clientStreamsEnabled = b.streams
   if (Object.keys(patch).length) await db.update(profiles).set(patch).where(eq(profiles.id, me))
   const [p] = await db.select().from(profiles).where(eq(profiles.id, me))
   return c.json({
     push: p?.clientPushEnabled !== false,
     telegram: p?.walletNotifyEnabled !== false,
     news: p?.clientNewsEnabled !== false,
+    streams: p?.clientStreamsEnabled !== false,
   })
 })
 

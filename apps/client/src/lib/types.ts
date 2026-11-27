@@ -28,6 +28,8 @@ export interface Prefs {
   push: boolean;
   telegram: boolean;
   news: boolean;
+  /** Push «Мы в эфире» о начале трансляции. Старый сервер поле не присылает — считаем включённым. */
+  streams?: boolean;
 }
 
 export interface Wallet {
@@ -84,7 +86,7 @@ export interface FeedPage {
   nextCursor: string | null;
 }
 
-export type NotificationKind = 'bonus' | 'deposit' | 'debt' | 'payment' | 'tier' | 'fund' | 'news' | 'system';
+export type NotificationKind = 'bonus' | 'deposit' | 'debt' | 'payment' | 'tier' | 'fund' | 'news' | 'stream' | 'system';
 
 export interface ClientNotification {
   id: string;
@@ -119,6 +121,35 @@ export interface CreatedPayment {
 }
 
 export type PaymentStatus = 'pending' | 'confirmed' | 'failed' | 'not_found';
+
+/** Вид игрового вечера — как считает сервер (apps/api lib/clientAttendance.ts). */
+export type EveningKey = 'city' | 'sport' | 'board' | 'other' | 'none';
+
+/** GET /resident/evenings — на какие вечера ходит клиент. Визит — вечер с закрытым чеком. */
+export interface Evenings {
+  total: number;
+  firstAt: string | null;
+  lastAt: string | null;
+  categories: { key: EveningKey; label: string; count: number; lastAt: string | null }[];
+  /** Что было в «Других ивентах»: название мероприятия или тип вечера. */
+  others: { label: string; count: number }[];
+  /** Последние полгода по месяцам (YYYY-MM). */
+  months: ({ month: string } & Record<EveningKey, number>)[];
+}
+
+export interface StreamLink {
+  kind: 'watch' | 'donate';
+  label: string;
+  url: string;
+}
+
+/** GET /resident/stream — эфир клуба (если идёт) и постоянные площадки клуба. */
+export interface StreamView {
+  live: { id: string; title: string; startedAt: string; watch: StreamLink[]; donate: StreamLink[] } | null;
+  channels: StreamLink[];
+  donate: StreamLink[];
+  lastEndedAt: string | null;
+}
 
 /** POST /auth/app/start — вход по номеру телефона. */
 export type LoginMode = 'login' | 'register';

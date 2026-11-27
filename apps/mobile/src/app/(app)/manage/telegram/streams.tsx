@@ -17,7 +17,8 @@ const timeText = (iso: string) => new Date(iso).toLocaleString('ru-RU', { day: '
 /**
  * Стримы: MafBoard и MafBoard Studio молча передают сюда ссылки на эфир и донаты.
  * Здесь решается, отдавать ли их Tai — он выложит пост в чаты, где включены уведомления
- * «Стримы» (в их тему), и ответит ссылкой на /stream.
+ * «Стримы» (в их тему), и ответит ссылкой на /stream. Опубликованный эфир видят и клиенты
+ * My Titan; push о нём, площадки и донат настраиваются в «Маркетинг → Трансляции».
  */
 export default function StreamsScreen() {
   const router = useRouter();

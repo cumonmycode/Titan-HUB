@@ -185,9 +185,13 @@ export default function ProfileScreen() {
               onChange={(v) => prefs.mutate({ telegram: v })} />
             <ToggleRow icon="news" color={colors.pink} title="Новости клуба" subtitle="Турниры, события и объявления"
               value={w.prefs.news} onChange={(v) => prefs.mutate({ news: v })} />
+            <ToggleRow icon="live" color={colors.red} title="Трансляции" subtitle="Push, когда клуб выходит в эфир"
+              value={w.prefs.streams !== false} onChange={(v) => prefs.mutate({ streams: v })} />
           </ListSection>
 
           <ListSection title="Клуб">
+            <ListRow icon="live" color={colors.red} title="Трансляции" subtitle="Где смотреть эфиры и донат"
+              onPress={() => router.push('/stream')} />
             <ListRow icon="chat" color={colors.telegram} title="Написать в бот клуба" value={`@${BOT}`} external
               onPress={() => void Linking.openURL(`https://t.me/${BOT}`)} />
             <ListRow icon="document" color={colors.textSecondary} title="Политика конфиденциальности" external

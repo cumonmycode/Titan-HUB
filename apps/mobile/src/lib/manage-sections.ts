@@ -23,6 +23,7 @@ export type ManageSectionKey =
   | 'collections'
   | 'polls'
   | 'broadcasts'
+  | 'streams'
   | 'staff'
   | 'shifts'
   | 'salary'
@@ -80,6 +81,7 @@ export const MANAGE_GROUPS: { title: string; items: ManageSection[] }[] = [
     items: [
       { key: 'broadcasts', title: 'Рассылки', subtitle: 'Push и сообщения клиентам', icon: 'megaphone', color: '#AF52DE', roles: ['owner'] },
       { key: 'polls', title: 'Опросы', subtitle: 'Опросы в чатах клуба', icon: 'checklist', color: '#FF3B30', roles: ['owner'] },
+      { key: 'streams', title: 'Трансляции', subtitle: 'Push о начале эфира, площадки и донат', icon: 'dot.radiowaves.left.and.right', color: '#FF2D55', roles: ['owner'] },
     ],
   },
   {

@@ -66,6 +66,8 @@ function Root() {
           <Stack.Screen name="bonus-rules" options={sheetOptions('fitToContents')} />
           <Stack.Screen name="notifications" options={sheetOptions([0.7, 1])} />
           <Stack.Screen name="card-style" options={sheetOptions([1])} />
+          <Stack.Screen name="evenings" options={sheetOptions([0.75, 1])} />
+          <Stack.Screen name="stream" options={sheetOptions('fitToContents')} />
         </Stack.Protected>
         <Stack.Protected guard={!inside}>
           <Stack.Screen name="login" options={{ animation: 'fade' }} />

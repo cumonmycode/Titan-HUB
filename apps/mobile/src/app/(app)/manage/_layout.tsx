@@ -91,6 +91,9 @@ export default function ManageLayout() {
 
       <Stack.Screen name="broadcasts/index" options={formHeader({ title: 'Рассылки' })} />
       <Stack.Screen name="broadcasts/compose" options={editorModal} />
+      <Stack.Screen name="streams/index" options={formHeader({ title: 'Трансляции' })} />
+      <Stack.Screen name="streams/channels" options={editorModal} />
+      <Stack.Screen name="streams/push-text" options={editorModal} />
 
       <Stack.Screen name="loyalty/index" options={formHeader({ title: 'Лояльность' })} />
       <Stack.Screen name="loyalty/bonus" options={formHeader({ title: 'Бонусная программа' })} />
