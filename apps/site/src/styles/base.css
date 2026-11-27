@@ -314,7 +314,7 @@ select.rq-input { appearance: none; background-image: linear-gradient(45deg, tra
 .app-tile-icon { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; margin-bottom: 6px; border-radius: 14px; background: color-mix(in oklab, var(--accent, #7C4DFF) 22%, transparent); color: var(--accent-text, #C6B4FF); }
 .app-tile h4 { font-size: 19px; }
 .app-tile p { color: var(--muted); font-size: 15px; }
-.app-screens { list-style: none; padding: 4px 0 24px; display: grid; grid-auto-flow: column; grid-auto-columns: clamp(190px, 19vw, 250px); gap: clamp(14px, 2vw, 24px); justify-content: center; overflow-x: auto; scroll-snap-type: x mandatory; }
+.app-screens { list-style: none; padding: 4px 0 24px; display: grid; grid-auto-flow: column; grid-auto-columns: clamp(190px, 19vw, 250px); gap: clamp(14px, 2vw, 24px); justify-content: safe center; overflow-x: auto; scroll-snap-type: x mandatory; }
 .phone-flat { scroll-snap-align: center; aspect-ratio: 9 / 19.5; padding: 7px; border-radius: 40px; background: #0E0A18; border: 1px solid rgba(255, 255, 255, .16); box-shadow: inset 0 0 0 2px #2A2340, 0 40px 70px -30px rgba(0, 0, 0, .8); }
 .phone-flat img { width: 100%; height: 100%; object-fit: cover; object-position: top; border-radius: 33px; }
 .app-android-cta { margin-top: 28px; }
