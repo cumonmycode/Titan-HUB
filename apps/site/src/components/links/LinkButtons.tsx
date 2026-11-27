@@ -1,7 +1,8 @@
 'use client'
 /**
- * Кнопки таплинка: запись на игру и мероприятие открывают шторку заявки (она сразу
- * ведёт к Tai), остальные — ссылки. Подписи и адреса уже собраны на сервере (page.tsx).
+ * Кнопки таплинка: запись на игру раскрывает выбор «На сайте» (шторка заявки) или
+ * «В Telegram» (Tai сразу начинает запись), мероприятие открывает шторку заявки,
+ * остальные — ссылки. Подписи и адреса уже собраны на сервере (page.tsx).
  */
 import { useEffect, useState } from 'react'
 import { ArrowUpRight, CalendarCheck, Globe, Instagram, Link2, MapPin, Megaphone, MessageCircle, PartyPopper, Phone, Send, Sparkles, type LucideIcon } from 'lucide-react'
@@ -36,9 +37,10 @@ function useNextGame(schedule: ScheduleDay[]): string | null {
   return label
 }
 
-export function LinkButtons({ items, schedule }: { items: LinkItem[]; schedule: ScheduleDay[] }) {
+export function LinkButtons({ items, schedule, taiUrl }: { items: LinkItem[]; schedule: ScheduleDay[]; taiUrl: string | null }) {
   const { open } = useRequest()
   const nextGame = useNextGame(schedule)
+  const [choosing, setChoosing] = useState(false)
   return (
     <nav className="lk-list" aria-label="Ссылки клуба">
       {items.map((item) => {
@@ -56,6 +58,27 @@ export function LinkButtons({ items, schedule }: { items: LinkItem[]; schedule: 
           </>
         )
         const className = `lk-btn ${primary ? 'lk-primary' : 'glass'}`
+        if (item.kind === 'book_game' && taiUrl) {
+          return (
+            <div key={item.id} className={`lk-choice${choosing ? ' is-open' : ''}`}>
+              <button type="button" className={className} aria-expanded={choosing} onClick={() => setChoosing((v) => !v)}>
+                {body}
+              </button>
+              <div className="lk-choice-row" aria-hidden={!choosing}>
+                <div className="lk-choice-inner">
+                  <button type="button" className="lk-opt glass" tabIndex={choosing ? 0 : -1} onClick={() => open({ kind: 'game' })}>
+                    <Globe size={18} strokeWidth={2.2} aria-hidden="true" />
+                    <span>На сайте</span>
+                  </button>
+                  <a className="lk-opt glass" href={`${taiUrl}?start=game`} target="_blank" rel="noopener noreferrer" tabIndex={choosing ? 0 : -1}>
+                    <Send size={18} strokeWidth={2.2} aria-hidden="true" />
+                    <span>В Telegram</span>
+                  </a>
+                </div>
+              </div>
+            </div>
+          )
+        }
         if (item.kind === 'book_game' || item.kind === 'book_event') {
           return (
             <button key={item.id} type="button" className={className} onClick={() => open(item.kind === 'book_game' ? { kind: 'game' } : { kind: 'event' })}>

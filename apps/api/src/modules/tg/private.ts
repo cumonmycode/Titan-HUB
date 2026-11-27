@@ -24,6 +24,8 @@ import { handleCardCommand } from './widgets.js'
 
 const MAX_VOICE_BYTES = 8 * 1024 * 1024
 const START_GREETING = 'Привет! (человек только что открыл бота и нажал «Старт» — поздоровайся и коротко скажи, чем можешь помочь)'
+// Кнопка «Записаться на игру → В Telegram» в таплинке: t.me/<бот>?start=game.
+const START_GAME = 'Хочу записаться на игру (человек пришёл из таплинка клуба по кнопке «Записаться на игру» — поздоровайся, покажи ближайшие игры и запиши его)'
 // «Ответь голосом», «скажи голосовым» — человек просит голос, даже если писал текстом.
 const ASKS_VOICE = /(ответь|скажи|запиши|отправь|пришли|расскажи)\w*\s+(мне\s+)?голос/i
 
@@ -87,6 +89,8 @@ export async function onPrivateMessage(club: TgClub, msg: TgMessage): Promise<vo
         return
       }
       intro = requestIntro(linked)
+    } else if (payload === 'game') {
+      intro = START_GAME
     } else if (payload && (await onStartPayload(club, from, chatId, payload))) return
   }
   if (msg.contact) {

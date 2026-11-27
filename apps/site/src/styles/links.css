@@ -58,6 +58,25 @@
 .lk-arrow { flex: none; opacity: .45; transition: transform .3s var(--ease), opacity .2s; position: relative; z-index: 2; }
 .lk-btn:hover .lk-arrow { opacity: .9; transform: translate(2px, -2px); }
 
+/* «Записаться на игру»: под кнопкой раскрываются два способа — сайт или Telegram. */
+.lk-choice { display: grid; animation: lk-up .6s var(--ease) both; }
+.lk-choice > .lk-btn { animation: none; }
+.lk-choice-row { display: grid; grid-template-rows: 0fr; opacity: 0; transition: grid-template-rows .2s var(--ease), opacity .2s; }
+.lk-choice.is-open .lk-choice-row { grid-template-rows: 1fr; opacity: 1; }
+.lk-choice-inner { min-height: 0; overflow: hidden; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding-top: 0; transition: padding-top .2s var(--ease); }
+.lk-choice.is-open .lk-choice-inner { padding-top: 10px; }
+.lk-opt {
+  display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 52px; padding: 0 14px;
+  border-radius: 18px; color: var(--fg); font: inherit; font-size: 15.5px; font-weight: 700; text-decoration: none; cursor: pointer;
+  transition: transform .2s var(--ease);
+}
+.site[data-theme="glass"] .lk-opt.glass { --glass-tint: rgba(20, 16, 44, .3); }
+.lk-opt svg { color: var(--accent-text); position: relative; z-index: 2; }
+.lk-opt span { position: relative; z-index: 2; }
+.lk-opt:active { transform: scale(.97); }
+.lk-opt:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
+.lk-choice.is-open > .lk-btn .lk-arrow { transform: rotate(90deg); opacity: .9; }
+
 .lk-foot { display: grid; justify-items: center; gap: 6px; text-align: center; color: var(--muted); font-size: 13.5px; animation: lk-up .6s .36s var(--ease) both; }
 .lk-foot p { margin: 0; }
 .lk-foot a { color: var(--accent-text); text-decoration: none; font-weight: 600; }
@@ -67,5 +86,6 @@
 @keyframes lk-pop { from { opacity: 0; transform: scale(.82); } to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: reduce) {
   .lk-logo, .lk-head h1, .lk-bio, .lk-btn, .lk-foot { animation: none; }
-  .lk-btn, .lk-arrow { transition: none; }
+  .lk-btn, .lk-arrow, .lk-choice-row, .lk-choice-inner, .lk-opt { transition: none; }
+  .lk-choice { animation: none; }
 }

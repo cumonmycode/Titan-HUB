@@ -87,7 +87,7 @@ export default async function LinkPage() {
               {bio && <p className="lk-bio">{bio}</p>}
               <TonightSignups />
             </header>
-            <LinkButtons items={itemsOf(config)} schedule={config.schedule} />
+            <LinkButtons items={itemsOf(config)} schedule={config.schedule} taiUrl={config.taiUrl} />
             <footer className="lk-foot">
               <p>{[config.venue.address || SITE.address, hours].filter(Boolean).join(' · ')}</p>
               <a href="/">{siteUrlOf(config.url).replace(/^https:\/\//, '')}</a>
