@@ -212,11 +212,11 @@ superadminClubsRouter.get('/clubs/:id/overview', async (c) => {
   const clubDb = getClubDb(buildClubConnString(club.dbName))
   try {
     const [today] = await clubDb
-      .select({ checks: count(), revenue: dsql<string>`coalesce(sum(${checks.totalAmount}::numeric), 0)` })
+      .select({ checks: count(), revenue: dsql<string>`coalesce(sum(greatest(${checks.totalAmount}::numeric - ${checks.customAmount}::numeric, 0)), 0)` })
       .from(checks)
       .where(and(eq(checks.status, 'closed'), dsql`${checks.createdAt} >= ${MSK_DAY}`))
     const [month] = await clubDb
-      .select({ checks: count(), revenue: dsql<string>`coalesce(sum(${checks.totalAmount}::numeric), 0)` })
+      .select({ checks: count(), revenue: dsql<string>`coalesce(sum(greatest(${checks.totalAmount}::numeric - ${checks.customAmount}::numeric, 0)), 0)` })
       .from(checks)
       .where(and(eq(checks.status, 'closed'), dsql`${checks.createdAt} >= ${MSK_MONTH}`))
     const [openChecks] = await clubDb.select({ n: count() }).from(checks).where(eq(checks.status, 'open'))

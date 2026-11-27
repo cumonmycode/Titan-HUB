@@ -15,6 +15,7 @@ import { requireAuth, requireRole } from '../../middleware/auth.js'
 import { getCurrentShift } from '../shifts/shifts.service.js'
 import { reverseCheckMovements } from '../inventory/ledger.js'
 import { bizDayStr } from '../../lib/dateFmt.js'
+import { revenueOf } from '../../lib/revenue.js'
 import { getBusinessDayStartHour } from '../../lib/appSettings.js'
 import { notify } from '../notifications/push.js'
 import { publishEvent } from '../../lib/realtime.js'
@@ -874,7 +875,8 @@ eventsRouter.get('/:id/analytics', requireRole('owner', 'staff'), async (c) => {
     .where(eq(checks.linkedEventId, eventId))
 
   const closedChecks = eventChecks.filter((c) => c.status === 'closed')
-  const totalRevenue = closedChecks.reduce((s, c) => s + parseFloat(c.totalAmount), 0)
+  // Без «Другого» — возврат денег за гостя, не выручка мероприятия.
+  const totalRevenue = closedChecks.reduce((s, c) => s + revenueOf(c), 0)
   const attendeesCount = eventChecks.length
   const avgCheckAmount = closedChecks.length > 0 ? totalRevenue / closedChecks.length : 0
 
@@ -888,7 +890,7 @@ eventsRouter.get('/:id/analytics', requireRole('owner', 'staff'), async (c) => {
     FROM check_items ci
     JOIN checks ch ON ch.id = ci.check_id
     JOIN inventory i ON i.id = ci.item_id
-    WHERE ch.linked_event_id = ${eventId}
+    WHERE ch.linked_event_id = ${eventId} AND ci.custom_name IS NULL
     GROUP BY ci.item_id, i.name
     ORDER BY revenue DESC
     LIMIT 5
@@ -902,7 +904,7 @@ eventsRouter.get('/:id/analytics', requireRole('owner', 'staff'), async (c) => {
 
   // Раскладка по методам оплаты
   const paymentBreakdownRows = await db.execute(sql`
-    SELECT cp.method, SUM(cp.amount::numeric) AS total
+    SELECT cp.method, SUM(cp.amount::numeric * (1 - LEAST(COALESCE(ch.custom_amount::numeric / NULLIF(ch.total_amount::numeric, 0), 0), 1))) AS total
     FROM check_payments cp
     JOIN checks ch ON ch.id = cp.check_id
     WHERE ch.linked_event_id = ${eventId}

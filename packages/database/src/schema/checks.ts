@@ -38,6 +38,10 @@ export const checks = pgTable('checks', {
     .references(() => shifts.id),
   status: checkStatusEnum('status').notNull().default('open'),
   totalAmount: numeric('total_amount', { precision: 12, scale: 2 }).notNull().default('0'),
+  // Сумма свободных позиций «Другое» внутри totalAmount (миграция 099). Это возврат денег,
+  // оплаченных клубом за гостя, а не выручка: аналитика, прогноз и зарплата считают
+  // выручку как totalAmount − customAmount (см. apps/api/src/lib/revenue.ts).
+  customAmount: numeric('custom_amount', { precision: 12, scale: 2 }).notNull().default('0'),
   paymentMethod: paymentMethodEnum('payment_method'),
   bonusUsed: numeric('bonus_used', { precision: 12, scale: 2 }).default('0'),
   certificateUsed: numeric('certificate_used', { precision: 12, scale: 2 }).default('0'),

@@ -6,6 +6,7 @@ import { salaryPayments, salarySchemes, shifts, shiftStaff, checks, cashOperatio
 import { requireAuth, requireRole } from '../../middleware/auth.js'
 import { getBusinessDayStartHour } from '../../lib/appSettings.js'
 import { computeSalary, describeRules, loadSchemes, normalizeRules, schemeOf, shiftSalaries, REVENUE_LABEL } from '../../lib/salary.js'
+import { checkRevenue } from '../../lib/revenue.js'
 
 // Смена закрылась между чтением и записью наличной выплаты — транзакцию откатываем.
 const SHIFT_CLOSED = 'SHIFT_CLOSED'
@@ -182,7 +183,8 @@ salaryRouter.get('/estimate', requireRole('owner', 'staff'), async (c) => {
   const hh = `${String(h).padStart(2, '0')}:00:00+03:00`
   const user = c.get('user')
   const staffId = user.role === 'owner' ? (c.req.query('staffId') ?? user.sub) : user.sub
-  const personalRevenue = sql<string>`coalesce(sum(${checks.totalAmount}::numeric - coalesce(${checks.eventBaseAmount}, 0)::numeric - coalesce((select sum(r.total_amount) from refunds r where r.check_id = ${checks.id}), 0)::numeric), 0)`
+  // Без «Другого»: возврат денег за гостя — не выручка (lib/revenue.ts).
+  const personalRevenue = sql<string>`coalesce(sum(${checkRevenue}::numeric - coalesce(${checks.eventBaseAmount}, 0)::numeric - coalesce((select sum(r.total_amount) from refunds r where r.check_id = ${checks.id}), 0)::numeric), 0)`
 
   const day = c.req.query('day')
   const from = c.req.query('from')

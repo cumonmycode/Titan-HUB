@@ -6,6 +6,7 @@ import { streamSSE } from 'hono/streaming'
 import { zValidator } from '@hono/zod-validator'
 import { z } from 'zod'
 import { getSharedRedis } from '../../lib/redis.js'
+import { checkRevenue } from '../../lib/revenue.js'
 import {
   checks,
   checkItems,
@@ -154,7 +155,7 @@ async function buildBusinessSnapshot(db: DbOrTx): Promise<string> {
   // Сегодня: выручка/чеки.
   try {
     const [today] = await db
-      .select({ rev: sum(checks.totalAmount), cnt: count() })
+      .select({ rev: sum(checkRevenue), cnt: count() })
       .from(checks)
       .where(and(eq(checks.status, 'closed'), gte(checks.createdAt, todayStart)))
     parts.push(`СЕГОДНЯ: выручка ${Number(today?.rev ?? 0).toFixed(0)} ₽, закрыто чеков ${today?.cnt ?? 0}.`)
@@ -193,9 +194,9 @@ async function buildContext(db: Database, action: string, payload?: Record<strin
       try {
         const [stats] = await db
           .select({
-            rev: sum(checks.totalAmount),
+            rev: sum(checkRevenue),
             cnt: count(),
-            avgCheck: avg(checks.totalAmount),
+            avgCheck: avg(checkRevenue),
           })
           .from(checks)
           .where(and(eq(checks.status, 'closed'), gte(checks.createdAt, thirtyDays)))
@@ -212,9 +213,9 @@ async function buildContext(db: Database, action: string, payload?: Record<strin
       try {
         const [stats] = await db
           .select({
-            rev: sum(checks.totalAmount),
+            rev: sum(checkRevenue),
             cnt: count(),
-            avgCheck: avg(checks.totalAmount),
+            avgCheck: avg(checkRevenue),
           })
           .from(checks)
           .where(and(eq(checks.status, 'closed'), gte(checks.createdAt, todayStart)))
@@ -250,7 +251,7 @@ async function buildContext(db: Database, action: string, payload?: Record<strin
           .limit(1)
 
         const [revenue] = await db
-          .select({ rev: sum(checks.totalAmount), cnt: count() })
+          .select({ rev: sum(checkRevenue), cnt: count() })
           .from(checks)
           .where(and(eq(checks.status, 'closed'), eq(checks.shiftId, targetShift.id)))
 
@@ -278,7 +279,8 @@ async function buildContext(db: Database, action: string, payload?: Record<strin
           .from(checkItems)
           .leftJoin(inventory, eq(inventory.id, checkItems.itemId))
           .leftJoin(checks, eq(checks.id, checkItems.checkId))
-          .where(and(eq(checks.status, 'closed'), gte(checks.createdAt, thirtyDays)))
+          // Без свободных позиций «Другое» — это не продажи клуба.
+          .where(and(eq(checks.status, 'closed'), gte(checks.createdAt, thirtyDays), isNull(checkItems.customName)))
           .groupBy(inventory.name)
           .orderBy(desc(sql`sum(${checkItems.quantity}::numeric * ${checkItems.priceAtTime})`))
           .limit(10)
@@ -303,12 +305,12 @@ async function buildContext(db: Database, action: string, payload?: Record<strin
           .where(and(eq(profiles.role, 'client'), eq(profiles.clientTier, 'resident')))
 
         const topSpenders = await db
-          .select({ nickname: profiles.nickname, rev: sum(checks.totalAmount) })
+          .select({ nickname: profiles.nickname, rev: sum(checkRevenue) })
           .from(checks)
           .leftJoin(profiles, eq(profiles.id, checks.playerId))
           .where(and(eq(checks.status, 'closed'), gte(checks.createdAt, thirtyDays)))
           .groupBy(profiles.nickname)
-          .orderBy(desc(sum(checks.totalAmount)))
+          .orderBy(desc(sum(checkRevenue)))
           .limit(5)
 
         const spendersList = topSpenders.map((s, i) => `${i + 1}. ${s.nickname ?? 'гость'}: ${Number(s.rev ?? 0).toFixed(2)} руб`).join('\n')
@@ -363,7 +365,7 @@ async function buildContext(db: Database, action: string, payload?: Record<strin
             // Час берём в МСК, а не UTC — иначе «популярные часы» съезжают на 3ч.
             hour: sql<number>`extract(hour from (${checks.closedAt} AT TIME ZONE 'Europe/Moscow'))::int`,
             cnt: count(),
-            rev: sum(checks.totalAmount),
+            rev: sum(checkRevenue),
           })
           .from(checks)
           .where(and(eq(checks.status, 'closed'), gte(checks.createdAt, thirtyDays)))
@@ -387,7 +389,7 @@ async function buildContext(db: Database, action: string, payload?: Record<strin
         const rows = await db
           .select({
             day: sql<string>`${bizDay}::text`,
-            avgCheck: avg(checks.totalAmount),
+            avgCheck: avg(checkRevenue),
             cnt: count(),
           })
           .from(checks)

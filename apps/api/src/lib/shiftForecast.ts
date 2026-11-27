@@ -11,9 +11,13 @@
  *
  * Объяснимо: в детализации видно по каждому чеку — текущая сумма, прогноз и
  * «обычно оставляет N по M чекам».
+ *
+ * Свободные позиции «Другое» (возврат денег за гостя) в прогноз не входят — ни в
+ * текущие суммы, ни в средний чек, ни в оплаченное (см. lib/revenue.ts).
  */
 import { checks, profiles, eq, and, inArray, gte, desc, sql } from '@titan/database'
 import { getBusinessDayStartHour } from './appSettings.js'
+import { checkRevenue } from './revenue.js'
 
 const RESIDENT_TIERS = ['resident', 'student', 'newbie']
 const num = (v: unknown) => parseFloat(String(v ?? 0)) || 0
@@ -35,9 +39,11 @@ export interface PerCheckForecast {
 export interface ShiftForecast {
   /** Ожидаемая выручка смены к закрытию: оплачено + прогноз по открытым чекам. */
   amount: number
-  /** Уже оплачено за смену (закрытые чеки, с арендой и базой мероприятия). */
+  /** Уже оплачено за смену (закрытые чеки, с арендой и базой мероприятия, без «Другого»). */
   paidTotal: number
   paidCount: number
+  /** Сколько гости должны по открытым чекам сейчас — вместе с «Другим» (для «Открыто чеков»). */
+  openDue: number
   currentTotal: number
   additional: number
   perCheck: PerCheckForecast[]
@@ -46,7 +52,7 @@ export interface ShiftForecast {
 export async function computeShiftForecast(db: any, shiftId: string): Promise<ShiftForecast> {
   // Открытые чеки смены + кто плательщик.
   const open = await db.select({
-    id: checks.id, playerId: checks.playerId, total: checks.totalAmount,
+    id: checks.id, playerId: checks.playerId, total: checkRevenue, custom: checks.customAmount,
     eventBase: checks.eventBaseAmount, guestNames: checks.guestNames,
     nickname: profiles.nickname, tier: profiles.clientTier,
   }).from(checks).leftJoin(profiles, eq(profiles.id, checks.playerId))
@@ -56,7 +62,7 @@ export async function computeShiftForecast(db: any, shiftId: string): Promise<Sh
 
   // История закрытых чеков этих игроков за 120 дней (что обычно оставляют).
   const hist = playerIds.length
-    ? await db.select({ playerId: checks.playerId, total: checks.totalAmount, createdAt: checks.createdAt })
+    ? await db.select({ playerId: checks.playerId, total: checkRevenue, createdAt: checks.createdAt })
         .from(checks)
         .where(and(inArray(checks.playerId, playerIds), eq(checks.status, 'closed'), gte(checks.createdAt, new Date(Date.now() - 120 * 86400000))))
         .orderBy(desc(checks.createdAt))
@@ -92,7 +98,7 @@ export async function computeShiftForecast(db: any, shiftId: string): Promise<Sh
 
   // Уже оплаченные чеки смены: их итог при закрытии — позиции + аренда + база мероприятия.
   const [paid] = await db.select({
-    total: sql<string>`COALESCE(SUM(${checks.totalAmount}), 0)`,
+    total: sql<string>`COALESCE(SUM(${checkRevenue}), 0)`,
     count: sql<number>`COUNT(*)::int`,
   }).from(checks).where(and(eq(checks.shiftId, shiftId), eq(checks.status, 'closed')))
   const paidTotal = num(paid?.total)
@@ -103,6 +109,7 @@ export async function computeShiftForecast(db: any, shiftId: string): Promise<Sh
     amount: paidTotal + projectedOpen,
     paidTotal,
     paidCount: paid?.count ?? 0,
+    openDue: currentTotal + (open as any[]).reduce((s, o) => s + num(o.custom), 0),
     currentTotal,
     additional: projectedOpen - currentTotal,
     perCheck,

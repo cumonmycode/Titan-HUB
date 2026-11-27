@@ -59,3 +59,13 @@ export function computeRental(
   const mins = Math.floor(Math.max(0, endMs - new Date(spaceStartAt).getTime()) / 60000)
   return Math.ceil(mins / 60) * parseFloat(hourlyRate)
 }
+
+/**
+ * Выручка одного чека без свободных позиций «Другое» (см. lib/revenue.ts) из строки с
+ * totalAmount/customAmount (числа или строки numeric).
+ */
+export function revenueOf(check: { totalAmount: string | number | null; customAmount?: string | number | null }): number {
+  const total = parseFloat(String(check.totalAmount ?? 0)) || 0
+  const custom = parseFloat(String(check.customAmount ?? 0)) || 0
+  return Math.max(0, Math.round((total - custom) * 100) / 100)
+}

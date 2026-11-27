@@ -47,3 +47,18 @@ describe('свободная позиция «Другое»', () => {
     assert.equal(computeAccrual(parseBonusSettings({ bonus_accrual_rate: '5' }), [], input).amount, 50)
   })
 })
+
+describe('выручка без «Другого»', () => {
+  it('вычитает свободные позиции из итога чека', async () => {
+    const { revenueOf } = await import('../../src/lib/money.js')
+    assert.equal(revenueOf({ totalAmount: '2500.00', customAmount: '1500.00' }), 1000)
+  })
+  it('списание на персонал не уходит в минус', async () => {
+    const { revenueOf } = await import('../../src/lib/money.js')
+    assert.equal(revenueOf({ totalAmount: '0', customAmount: '1500' }), 0)
+  })
+  it('старые строки без custom_amount — как раньше', async () => {
+    const { revenueOf } = await import('../../src/lib/money.js')
+    assert.equal(revenueOf({ totalAmount: 800 }), 800)
+  })
+})

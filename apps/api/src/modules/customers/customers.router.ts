@@ -32,7 +32,7 @@ customersRouter.get('/', requireRole('owner', 'staff'), async (c) => {
            coalesce(s.events, 0)::int AS events, s.last_date AS "lastDate", coalesce(s.total, 0)::float AS total
     FROM customers c
     LEFT JOIN LATERAL (
-      SELECT count(*) AS events, max(e.date) AS last_date, sum(ch.total_amount) AS total
+      SELECT count(*) AS events, max(e.date) AS last_date, sum(greatest(ch.total_amount::numeric - ch.custom_amount::numeric, 0)) AS total
       FROM events e LEFT JOIN checks ch ON ch.id = e.check_id
       WHERE e.status <> 'cancelled' AND ${MATCH}
     ) s ON true
@@ -52,7 +52,7 @@ customersRouter.get('/:id', requireRole('owner', 'staff'), async (c) => {
   if (!customer) return c.json({ error: 'Not found' }, 404)
   const res = await db.execute(sql`
     SELECT e.id, e.title, e.date, e.start_time AS "startTime", e.status, e.type, e.format,
-           ch.total_amount::float AS total
+           greatest(ch.total_amount::numeric - ch.custom_amount::numeric, 0)::float AS total
     FROM customers c
     JOIN events e ON ${MATCH}
     LEFT JOIN checks ch ON ch.id = e.check_id

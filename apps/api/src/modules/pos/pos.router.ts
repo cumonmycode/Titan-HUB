@@ -371,9 +371,12 @@ async function recalcCheckTotal(checkId: string, exec: DbOrTx) {
   let { discountTotal, total } = computeTotals(items, mods, discountRows)
   // Списание на персонал: итог 0₽, а вся товарная сумма уходит в «скидку» (−100%).
   if (chk?.staffCompId) { discountTotal = round2(total + discountTotal); total = 0 }
+  // Часть итога, которая приходится на «Другое» (не выручка — см. lib/revenue.ts).
+  const customAmount = round2(items.reduce((s, i) => s + (i.customName ? parseFloat(i.priceAtTime) * i.quantity : 0), 0))
   await exec.update(checks).set({
     totalAmount: String(total),
     discountTotal: String(discountTotal),
+    customAmount: String(customAmount),
   }).where(eq(checks.id, checkId))
   return total
 }
@@ -484,7 +487,8 @@ posRouter.get('/shift-summary', requireRole('owner', 'staff'), async (c) => {
   return c.json({
     shift: { id: shift.id, openedAt: shift.openedAt, eveningType: shift.eveningType },
     staff,
-    openChecks: { count: forecast.perCheck.length, total: forecast.currentTotal },
+    // «Открыто чеков» — сколько должны гости (с «Другим»); прогноз — только выручка.
+    openChecks: { count: forecast.perCheck.length, total: forecast.openDue },
     cashInRegister: expected,
     taiEnabled: tai,
     forecast: tai ? forecast : null,

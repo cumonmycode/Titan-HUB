@@ -136,13 +136,14 @@ export function schemeOf(schemes: SchemeRow[], schemeId: string | null): SchemeR
 }
 
 /**
- * Выручка смены по закрытым чекам за вычетом возвратов: вся и по кассирам. Базовая
+ * Выручка смены по закрытым чекам за вычетом возвратов и свободных позиций «Другое»
+ * (возврат денег за гостя — не выручка, см. lib/revenue.ts): вся и по кассирам. Базовая
  * сумма мероприятия — отдельно (схема решает, учитывать ли её).
  */
 async function shiftRevenue(db: Database, shiftId: string): Promise<{ total: number; events: number; byStaff: Map<string, { total: number; events: number }> }> {
   const res = await db.execute(sql`
     SELECT c.staff_id,
-           coalesce(sum(c.total_amount::numeric - coalesce((SELECT sum(r.total_amount) FROM refunds r WHERE r.check_id = c.id), 0)), 0)::float8 AS total,
+           coalesce(sum(GREATEST(c.total_amount::numeric - c.custom_amount::numeric, 0) - coalesce((SELECT sum(r.total_amount) FROM refunds r WHERE r.check_id = c.id), 0)), 0)::float8 AS total,
            coalesce(sum(coalesce(c.event_base_amount, 0)::numeric), 0)::float8 AS events
     FROM checks c
     WHERE c.shift_id = ${shiftId} AND c.status = 'closed'

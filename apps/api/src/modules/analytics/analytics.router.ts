@@ -10,6 +10,7 @@ import {
 } from '@titan/database'
 import { requireAuth, requireRole } from '../../middleware/auth.js'
 import { getBusinessDayStartHour } from '../../lib/appSettings.js'
+import { checkRevenue, revenueOf, revenueShare } from '../../lib/revenue.js'
 
 export const analyticsRouter = new Hono<AppEnv>()
 analyticsRouter.use('*', requireAuth, requireRole('owner', 'staff'))
@@ -31,6 +32,11 @@ analyticsRouter.post('/track', zValidator('json', z.object({
 })
 
 // ─── Helper ──────────────────────────────────────────────────────────────────
+// Свободные позиции «Другое» (возврат денег за гостя) — не выручка: суммы чеков берём
+// без них (checkRevenue), оплаты по способам — долей выручки, строки — фильтром.
+const paidRevenue = sql<string>`sum(${checkPayments.amount}::numeric * ${revenueShare})`
+const notCustomItem = isNull(checkItems.customName)
+
 function parseNum(v: unknown) {
   return parseFloat(String(v ?? 0)) || 0
 }
@@ -196,7 +202,7 @@ async function cogsInWindow(database: Database, start: Date, end: Date): Promise
 // Возвращает и «грязные», и «чистые» показатели — фронт сам решает, что показывать.
 async function netBreakdown(database: Database, start: Date, end: Date, expFrom: string, expTo: string) {
   const [grossRow] = await database
-    .select({ revenue: sum(checks.totalAmount), cnt: nonCompCount })
+    .select({ revenue: sum(checkRevenue), cnt: nonCompCount })
     .from(checks)
     .where(and(eq(checks.status, 'closed'), gte(checks.createdAt, start), lt(checks.createdAt, end)))
 
@@ -205,7 +211,7 @@ async function netBreakdown(database: Database, start: Date, end: Date, expFrom:
   // «среднего чека», чтобы крупная база мероприятия не раздувала клубный средний.
   // В общую выручку/прибыль мероприятия по-прежнему входят (gross/net не меняем).
   const [eventRow] = await database
-    .select({ revenue: sum(checks.totalAmount), cnt: nonCompCount })
+    .select({ revenue: sum(checkRevenue), cnt: nonCompCount })
     .from(checks)
     .where(and(
       eq(checks.status, 'closed'), gte(checks.createdAt, start), lt(checks.createdAt, end),
@@ -348,13 +354,13 @@ analyticsRouter.get('/dashboard', async (c) => {
   // возврата (см. refundedInWindow/комментарий выше). gross остаётся под капотом
   // (netToday.gross), но видимая «Выручка дня» теперь сходится с кассой.
   const [todayStats] = await db
-    .select({ revenue: sum(checks.totalAmount), count: nonCompCount })
+    .select({ revenue: sum(checkRevenue), count: nonCompCount })
     .from(checks)
     .where(and(eq(checks.status, 'closed'), gte(checks.createdAt, todayStart)))
 
   // Yesterday revenue for delta — полуоткрытый интервал [вчера-бизнес, сегодня-бизнес)
   const [yesterdayStats] = await db
-    .select({ revenue: sum(checks.totalAmount), count: nonCompCount })
+    .select({ revenue: sum(checkRevenue), count: nonCompCount })
     .from(checks)
     .where(and(
       eq(checks.status, 'closed'),
@@ -364,13 +370,13 @@ analyticsRouter.get('/dashboard', async (c) => {
 
   // Month revenue
   const [monthStats] = await db
-    .select({ revenue: sum(checks.totalAmount), count: nonCompCount })
+    .select({ revenue: sum(checkRevenue), count: nonCompCount })
     .from(checks)
     .where(and(eq(checks.status, 'closed'), gte(checks.createdAt, thirtyDaysAgo)))
 
   // Previous month for delta — полуоткрытый интервал [60д, 30д)
   const [prevMonthStats] = await db
-    .select({ revenue: sum(checks.totalAmount), count: nonCompCount })
+    .select({ revenue: sum(checkRevenue), count: nonCompCount })
     .from(checks)
     .where(and(
       eq(checks.status, 'closed'),
@@ -413,7 +419,7 @@ analyticsRouter.get('/dashboard', async (c) => {
 
   // Payment breakdown (30d)
   const paymentBreakdown = await db
-    .select({ method: checkPayments.method, total: sum(checkPayments.amount) })
+    .select({ method: checkPayments.method, total: paidRevenue })
     .from(checkPayments)
     .leftJoin(checks, eq(checks.id, checkPayments.checkId))
     .where(and(eq(checks.status, 'closed'), gte(checks.createdAt, thirtyDaysAgo)))
@@ -433,7 +439,7 @@ analyticsRouter.get('/dashboard', async (c) => {
     .leftJoin(inventory, eq(inventory.id, checkItems.itemId))
     .leftJoin(menuCategories, eq(menuCategories.id, inventory.category))
     .leftJoin(checks, eq(checks.id, checkItems.checkId))
-    .where(and(eq(checks.status, 'closed'), gte(checks.createdAt, thirtyDaysAgo), isNull(checks.staffCompId)))
+    .where(and(eq(checks.status, 'closed'), gte(checks.createdAt, thirtyDaysAgo), isNull(checks.staffCompId), notCustomItem))
     .groupBy(checkItems.itemId, inventory.name, menuCategories.name, inventory.category)
     .orderBy(desc(sql`sum(${checkItems.quantity}::numeric * ${checkItems.priceAtTime})`))
     .limit(20)
@@ -547,7 +553,7 @@ analyticsRouter.get('/overview', zValidator('query', dateRangeQuerySchema), asyn
 
   // Способы оплаты строго за период (фронт считает % от current.gross).
   const paymentBreakdown = await db
-    .select({ method: checkPayments.method, total: sum(checkPayments.amount) })
+    .select({ method: checkPayments.method, total: paidRevenue })
     .from(checkPayments)
     .leftJoin(checks, eq(checks.id, checkPayments.checkId))
     .where(and(eq(checks.status, 'closed'), gte(checks.createdAt, start), lt(checks.createdAt, end)))
@@ -611,7 +617,7 @@ analyticsRouter.get('/insights', zValidator('query', dateRangeQuerySchema), asyn
   const [structureRes, hoursRes, weekdaysRes, guestsRes, monthsRes] = await Promise.all([
     db.execute(sql`
       WITH c AS (
-        SELECT id, total_amount::numeric AS total, coalesce(event_base_amount, 0)::numeric AS base,
+        SELECT id, greatest(total_amount::numeric - custom_amount::numeric, 0) AS total, coalesce(event_base_amount, 0)::numeric AS base,
                coalesce(discount_total, 0)::numeric AS disc
         FROM checks
         WHERE status = 'closed' AND staff_comp_id IS NULL
@@ -624,6 +630,7 @@ analyticsRouter.get('/insights', zValidator('query', dateRangeQuerySchema), asyn
         FROM check_items ci
         JOIN c ON c.id = ci.check_id
         LEFT JOIN tariffs t ON t.item_id = ci.item_id
+        WHERE ci.custom_name IS NULL
         GROUP BY ci.check_id
       ),
       md AS (
@@ -645,7 +652,7 @@ analyticsRouter.get('/insights', zValidator('query', dateRangeQuerySchema), asyn
     db.execute(sql`
       SELECT extract(isodow FROM (created_at AT TIME ZONE 'Europe/Moscow') - make_interval(hours => ${h}))::int AS dow,
              extract(hour FROM created_at AT TIME ZONE 'Europe/Moscow')::int AS hour,
-             count(*)::int AS checks, coalesce(sum(total_amount), 0)::float AS revenue
+             count(*)::int AS checks, coalesce(sum(greatest(total_amount::numeric - custom_amount::numeric, 0)), 0)::float AS revenue
       FROM checks
       WHERE status = 'closed' AND staff_comp_id IS NULL
         AND created_at >= ${start}::timestamptz AND created_at < ${end}::timestamptz
@@ -676,7 +683,7 @@ analyticsRouter.get('/insights', zValidator('query', dateRangeQuerySchema), asyn
     `),
     db.execute(sql`
       SELECT to_char(date_trunc('month', (created_at AT TIME ZONE 'Europe/Moscow') - make_interval(hours => ${h})), 'YYYY-MM') AS month,
-             count(*)::int AS checks, coalesce(sum(total_amount), 0)::float AS revenue
+             count(*)::int AS checks, coalesce(sum(greatest(total_amount::numeric - custom_amount::numeric, 0)), 0)::float AS revenue
       FROM checks
       WHERE status = 'closed' AND staff_comp_id IS NULL
         AND created_at >= (date_trunc('month', ${to}::date) - interval '11 months')::timestamp AT TIME ZONE 'Europe/Moscow'
@@ -747,7 +754,7 @@ analyticsRouter.get('/revenue', zValidator('query', dateRangeQuerySchema), async
     .select({
       // День агрегируем по БИЗНЕС-ДНЮ (сдвиг −h ч в МСК → 00:00..(h−1):59 к прошлой дате).
       date: sql<string>`(${bizShift})::date::text`,
-      revenue: sum(checks.totalAmount),
+      revenue: sum(checkRevenue),
       count: count(),
     })
     .from(checks)
@@ -861,7 +868,7 @@ analyticsRouter.get('/payments', zValidator('query', dateRangeQuerySchema), asyn
   const toEndExclusive = bizDayBounds(to, h).end
 
   const rows = await db
-    .select({ method: checkPayments.method, total: sum(checkPayments.amount) })
+    .select({ method: checkPayments.method, total: paidRevenue })
     .from(checkPayments)
     .leftJoin(checks, eq(checks.id, checkPayments.checkId))
     .where(and(
@@ -910,6 +917,7 @@ analyticsRouter.get('/products', zValidator('query', dateRangeQuerySchema), asyn
       lt(checks.createdAt, toEndExclusive),
       // Списания на персонал (бесплатные) не учитываем в выручке бара — они в «Персонал».
       isNull(checks.staffCompId),
+      notCustomItem,
     ))
     .groupBy(checkItems.itemId, inventory.name, menuCategories.name, inventory.category)
     .orderBy(desc(sql`sum(${checkItems.quantity}::numeric * ${checkItems.priceAtTime})`))
@@ -929,6 +937,7 @@ analyticsRouter.get('/products', zValidator('query', dateRangeQuerySchema), asyn
       gte(checks.createdAt, fromStart),
       lt(checks.createdAt, toEndExclusive),
       isNull(checks.staffCompId),
+      notCustomItem,
     ))
   const totalRev = parseNum(totalRow?.total)
   let cumulative = 0
@@ -972,7 +981,7 @@ analyticsRouter.get('/events', zValidator('query', dateRangeQuerySchema), async 
       // ФАКТ — сумма ЗАКРЫТЫХ чеков, привязанных к событию (linked_event_id): основной
       // чек, чеки участников миникапа (у него нет events.check_id) и доп. чеки.
       // Открытый чек — ещё не выручка. NULL — закрытых чеков нет.
-      checkTotal: sql<string | null>`(SELECT sum(ch.total_amount) FROM checks ch WHERE ch.linked_event_id = ${events.id} AND ch.status = 'closed')`,
+      checkTotal: sql<string | null>`(SELECT sum(greatest(ch.total_amount::numeric - ch.custom_amount::numeric, 0)) FROM checks ch WHERE ch.linked_event_id = ${events.id} AND ch.status = 'closed')`,
     })
     .from(events)
     .leftJoin(spaces, eq(spaces.id, events.spaceId))
@@ -1312,7 +1321,7 @@ analyticsRouter.get('/clients', zValidator('query', dateRangeQuerySchema), async
   // возвраты, попавшие в окно по дате возврата (refundedInWindow). Иначе полностью
   // возвращённый чек продолжал раздувать «топ по тратам». refundsTotal по игроку
   // отдаём отдельным полем — фронт может показать «возвраты» в карточке строки.
-  const spendNet = sql<number>`sum(${checks.totalAmount}::numeric - ${refundedInWindow(checks.id, pStart, pEnd)}::numeric)`
+  const spendNet = sql<number>`sum(${checkRevenue}::numeric - ${refundedInWindow(checks.id, pStart, pEnd)}::numeric)`
   const topSpenders = await db
     .select({
       playerId: checks.playerId,
@@ -1320,7 +1329,7 @@ analyticsRouter.get('/clients', zValidator('query', dateRangeQuerySchema), async
       clientTier: profiles.clientTier,
       photoUrl: sql<string | null>`coalesce(${profiles.photoUrl}, ${profiles.tgPhotoUrl}, ${profiles.gomafiaPhotoUrl})`,
       total: spendNet,
-      grossTotal: sum(checks.totalAmount),
+      grossTotal: sum(checkRevenue),
       visits: count(),
     })
     .from(checks)
@@ -1339,7 +1348,7 @@ analyticsRouter.get('/clients', zValidator('query', dateRangeQuerySchema), async
   // Обезличенные продажи (без игрока) за период — отдельной строкой «Без игрока».
   // Тоже net-of-refunds: возвраты обезличенных чеков вычитаем по дате возврата.
   const [guestRow] = await db
-    .select({ total: sql<number>`sum(${checks.totalAmount}::numeric - ${refundedInWindow(checks.id, pStart, pEnd)}::numeric)`, visits: count() })
+    .select({ total: sql<number>`sum(${checkRevenue}::numeric - ${refundedInWindow(checks.id, pStart, pEnd)}::numeric)`, visits: count() })
     .from(checks)
     .where(and(eq(checks.status, 'closed'), gte(checks.createdAt, pStart), lt(checks.createdAt, pEnd), isNull(checks.playerId)))
   const guestSales = { total: parseNum(guestRow?.total), visits: guestRow?.visits ?? 0 }
@@ -1384,7 +1393,7 @@ analyticsRouter.get('/segment-members', zValidator('query', z.object({ segment: 
     clientTier: profiles.clientTier,
     photoUrl: sql<string | null>`coalesce(${profiles.photoUrl}, ${profiles.tgPhotoUrl}, ${profiles.gomafiaPhotoUrl})`,
     lastVisit: sql<string>`max(${checks.createdAt})::text`,
-    total: sum(checks.totalAmount),
+    total: sum(checkRevenue),
     visits: count(),
   }).from(checks).leftJoin(profiles, eq(profiles.id, checks.playerId))
     .where(and(eq(checks.status, 'closed'), gte(checks.createdAt, d90), isNotNull(checks.playerId)))
@@ -1443,7 +1452,7 @@ analyticsRouter.get('/staff', zValidator('query', dateRangeQuerySchema), async (
     .from(checks)
     .innerJoin(checkItems, eq(checkItems.checkId, checks.id))
     .leftJoin(profiles, eq(profiles.id, checks.staffCompId))
-    .where(and(eq(checks.status, 'closed'), isNotNull(checks.staffCompId), gte(checks.createdAt, pStart), lt(checks.createdAt, pEnd)))
+    .where(and(eq(checks.status, 'closed'), isNotNull(checks.staffCompId), gte(checks.createdAt, pStart), lt(checks.createdAt, pEnd), notCustomItem))
     .groupBy(checks.staffCompId, profiles.nickname, profiles.clientTier, profiles.photoUrl, profiles.tgPhotoUrl, profiles.gomafiaPhotoUrl)
 
   // (2) Зафиксированная себестоимость на сотрудника — по движениям склада comp-чеков.
@@ -1479,7 +1488,7 @@ analyticsRouter.get('/staff', zValidator('query', dateRangeQuerySchema), async (
     .from(checks)
     .innerJoin(checkItems, eq(checkItems.checkId, checks.id))
     .leftJoin(profiles, eq(profiles.id, checks.staffCompId))
-    .where(and(eq(checks.status, 'closed'), isNotNull(checks.staffCompId), gte(checks.createdAt, pStart), lt(checks.createdAt, pEnd)))
+    .where(and(eq(checks.status, 'closed'), isNotNull(checks.staffCompId), gte(checks.createdAt, pStart), lt(checks.createdAt, pEnd), notCustomItem))
     .groupBy(checks.id, checks.createdAt, checks.staffCompId, profiles.nickname)
     .orderBy(desc(checks.createdAt))
     .limit(100)
@@ -1523,14 +1532,14 @@ analyticsRouter.get('/players/:id', async (c) => {
   const h = await getBusinessDayStartHour(db)
   // Агрегаты за всё время: сумма, число чеков, визит-дни (distinct бизнес-день МСК), первый/последний визит.
   const [agg] = await db.select({
-    spend: sum(checks.totalAmount),
+    spend: sum(checkRevenue),
     checksCount: count(),
     visitDays: sql<number>`count(distinct ((${checks.createdAt} AT TIME ZONE 'Europe/Moscow') - interval '${sql.raw(String(h))} hours')::date)`,
     firstVisit: sql<string>`min(${checks.createdAt})::text`,
     lastVisit: sql<string>`max(${checks.createdAt})::text`,
   }).from(checks).where(and(eq(checks.status, 'closed'), eq(checks.playerId, id)))
 
-  const [agg30] = await db.select({ spend: sum(checks.totalAmount), checksCount: count() })
+  const [agg30] = await db.select({ spend: sum(checkRevenue), checksCount: count() })
     .from(checks).where(and(eq(checks.status, 'closed'), eq(checks.playerId, id), gte(checks.createdAt, d30)))
 
   // Возвраты игрока (P0): all-time и за 30д (по дате возврата). Считаем по чекам
@@ -1597,7 +1606,7 @@ analyticsRouter.get('/shifts', async (c) => {
     ? await db
         .select({
           shiftId: checks.shiftId,
-          revenue: sum(checks.totalAmount),
+          revenue: sum(checkRevenue),
           cnt: count(),
         })
         .from(checks)
@@ -1614,7 +1623,7 @@ analyticsRouter.get('/shifts', async (c) => {
         .select({
           shiftId: checks.shiftId,
           method: checkPayments.method,
-          total: sum(checkPayments.amount),
+          total: paidRevenue,
         })
         .from(checkPayments)
         .leftJoin(checks, eq(checks.id, checkPayments.checkId))
@@ -1678,7 +1687,7 @@ analyticsRouter.get('/shifts/:id', async (c) => {
     .where(and(eq(checks.shiftId, shiftId), eq(checks.status, 'closed')))
 
   const payments = await db
-    .select({ method: checkPayments.method, total: sum(checkPayments.amount) })
+    .select({ method: checkPayments.method, total: paidRevenue })
     .from(checkPayments)
     .leftJoin(checks, eq(checks.id, checkPayments.checkId))
     .where(eq(checks.shiftId, shiftId))
@@ -1696,7 +1705,7 @@ analyticsRouter.get('/shifts/:id', async (c) => {
     .leftJoin(inventory, eq(inventory.id, checkItems.itemId))
     .leftJoin(checks, eq(checks.id, checkItems.checkId))
     // Только закрытые продажи: позиции отменённых чеков и списаний на персонал не в топе.
-    .where(and(eq(checks.shiftId, shiftId), eq(checks.status, 'closed'), isNull(checks.staffCompId)))
+    .where(and(eq(checks.shiftId, shiftId), eq(checks.status, 'closed'), isNull(checks.staffCompId), notCustomItem))
     .groupBy(checkItems.itemId, inventory.name, inventory.category)
     .orderBy(desc(sql`sum(${checkItems.quantity}::numeric * ${checkItems.priceAtTime})`))
     .limit(15)
@@ -1721,7 +1730,7 @@ analyticsRouter.get('/shifts/:id', async (c) => {
   const refundsTotal = parseNum(shiftRefundRow?.total)
 
   const uniquePlayers = new Set(shiftChecks.map((ch: any) => ch.playerId).filter(Boolean)).size
-  const grossRevenue = shiftChecks.reduce((s: number, ch: any) => s + parseNum(ch.totalAmount), 0)
+  const grossRevenue = shiftChecks.reduce((s: number, ch: any) => s + revenueOf(ch), 0)
   // Выручка смены — net-of-refunds. Средний чек считаем от gross/числа чеков
   // (средний чек — характеристика типичной продажи, возвраты его искусственно
   // не занижают; net вынесен отдельно как totalRevenue).
@@ -1737,14 +1746,14 @@ analyticsRouter.get('/shifts/:id', async (c) => {
       playerId: checks.playerId,
       nickname: profiles.nickname,
       clientTier: profiles.clientTier,
-      total: sql<number>`sum(${checks.totalAmount}::numeric - coalesce((select sum(r.total_amount) from refunds r where r.check_id = ${checks.id}), 0)::numeric)`,
+      total: sql<number>`sum(${checkRevenue}::numeric - coalesce((select sum(r.total_amount) from refunds r where r.check_id = ${checks.id}), 0)::numeric)`,
       cnt: count(),
     })
     .from(checks)
     .leftJoin(profiles, eq(profiles.id, checks.playerId))
     .where(and(eq(checks.shiftId, shiftId), eq(checks.status, 'closed')))
     .groupBy(checks.playerId, profiles.nickname, profiles.clientTier)
-    .orderBy(desc(sql`sum(${checks.totalAmount}::numeric - coalesce((select sum(r.total_amount) from refunds r where r.check_id = ${checks.id}), 0)::numeric)`))
+    .orderBy(desc(sql`sum(${checkRevenue}::numeric - coalesce((select sum(r.total_amount) from refunds r where r.check_id = ${checks.id}), 0)::numeric)`))
     .limit(20)
   const playerStats = playerStatsRaw.map((r: any) => ({ ...r, total: parseNum(r.total) }))
 
