@@ -151,7 +151,7 @@ export function useRealtime() {
       // Владелец поменял помещения или токен Home Assistant — шторка кассы перечитает их.
       updates.addEventListener('smart-home:updated', () => invalidate(['smart-home']));
       // «Диалоги Tai»: новое сообщение клиента, ответ Tai или сотрудника, пауза.
-      updates.addEventListener('tai-inbox:updated', () => invalidate(['tai-inbox']));
+      updates.addEventListener('tai-inbox:updated', () => invalidate(['tai-inbox'], ['leads']));
       updates.addEventListener('chat:read', (e) => {
         const payload = parse<{ checkId: string }>(e.data);
         if (payload) invalidate(['pos', 'chat', payload.checkId]);

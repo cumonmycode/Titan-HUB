@@ -3,13 +3,13 @@ import { font, foregroundStyle, lineLimit, pickerStyle, refreshable, tag } from 
 import { Stack, useRouter } from 'expo-router';
 import { useState } from 'react';
 
-import { primary, secondary } from '@/components/native-form';
+import { LinkRow, primary, secondary } from '@/components/native-form';
 import { Avatar } from '@/components/new-check-parts';
 import { whenText } from '@/lib/clients-api';
 import { haptic } from '@/lib/haptics';
-import { lastLine, useTaiChats, type InboxChat } from '@/lib/tai-inbox-api';
+import { plural } from '@/lib/format';
+import { lastLine, useTaiChats, type InboxChat, type InboxFilter } from '@/lib/tai-inbox-api';
 
-type Filter = 'all' | 'attention';
 
 const ATTENTION_COLOR = '#FF9500';
 const TAI_COLOR = '#8B5CF6';
@@ -22,10 +22,14 @@ const STAFF_COLOR = '#007AFF';
  */
 export default function TaiChatsScreen() {
   const router = useRouter();
-  const [filter, setFilter] = useState<Filter>('all');
+  const [filter, setFilter] = useState<InboxFilter>('all');
   const chats = useTaiChats(filter);
+  // Счётчики категорий — всегда по всем диалогам.
+  const all = useTaiChats('all');
   const items = chats.data?.items ?? [];
-  const attention = chats.data?.attention ?? 0;
+  const attention = all.data?.attention ?? 0;
+  const counts = all.data?.counts;
+  const label = (title: string, n: number | undefined) => (n ? `${title} · ${n}` : title);
 
   const open = (chat: InboxChat) => {
     haptic.selection();
@@ -36,22 +40,36 @@ export default function TaiChatsScreen() {
     <>
       <Stack.Title>Диалоги Tai</Stack.Title>
       <Host style={{ flex: 1 }} useViewportSizeMeasurement>
-        <Form modifiers={[refreshable(async () => void (await chats.refetch()))]}>
+        <Form modifiers={[refreshable(async () => void (await Promise.allSettled([chats.refetch(), all.refetch()])))]}>
           <Section
             footer={
-              <Text>Tai отвечает клиентам в личке бота сам. Напишите в диалоге — Tai встанет на паузу в этом чате, пока вы его не вернёте.</Text>
+              <Text>«Новые» — ещё не клиенты: нет в базе или ни разу не приходили. Tai отвечает сам; напишите в диалоге — Tai встанет на паузу, пока вы его не вернёте.</Text>
             }>
             <Picker
-              selection={filter}
+              selection={filter === 'attention' ? 'all' : filter}
               onSelectionChange={(value) => {
                 haptic.selection();
-                setFilter(value as Filter);
+                setFilter(value as InboxFilter);
               }}
               modifiers={[pickerStyle('segmented')]}>
               <Text modifiers={[tag('all')]}>Все</Text>
-              <Text modifiers={[tag('attention')]}>{attention > 0 ? `Ждут ответа · ${attention}` : 'Ждут ответа'}</Text>
+              <Text modifiers={[tag('potential')]}>{label('Новые', counts?.potential)}</Text>
+              <Text modifiers={[tag('client')]}>{label('Клиенты', counts?.client)}</Text>
+              <Text modifiers={[tag('staff')]}>Команда</Text>
             </Picker>
           </Section>
+
+          {attention > 0 || filter === 'attention' ? (
+            <Section>
+              <LinkRow
+                icon={filter === 'attention' ? 'list.bullet' : 'exclamationmark.bubble.fill'}
+                color={ATTENTION_COLOR}
+                title={filter === 'attention' ? 'Показать все диалоги' : `Ждут ответа · ${attention}`}
+                subtitle={filter === 'attention' ? undefined : 'Tai на паузе или позвал администратора'}
+                onPress={() => setFilter(filter === 'attention' ? 'all' : 'attention')}
+              />
+            </Section>
+          ) : null}
 
           {chats.isLoading ? (
             <Section>
@@ -64,7 +82,7 @@ export default function TaiChatsScreen() {
           ) : items.length === 0 ? (
             <Section>
               <ContentUnavailableView
-                title={filter === 'attention' ? 'Никто не ждёт' : 'Диалогов пока нет'}
+                title={filter === 'attention' ? 'Никто не ждёт' : filter === 'potential' ? 'Новых нет' : 'Диалогов пока нет'}
                 systemImage="bubble.left.and.text.bubble.right"
                 description={filter === 'attention' ? 'Все клиенты получили ответ.' : 'Здесь появится переписка, когда клиенты напишут боту клуба.'}
               />
@@ -87,7 +105,11 @@ function ChatRow({ chat, onPress }: { chat: InboxChat; onPress: () => void }) {
     ? { text: 'ждёт ответа', color: ATTENTION_COLOR }
     : chat.aiPaused
       ? { text: 'ведёт сотрудник', color: STAFF_COLOR }
-      : { text: 'Tai', color: TAI_COLOR };
+      : chat.segment === 'staff'
+        ? { text: 'команда', color: '#8E8E93' }
+        : chat.segment === 'client'
+          ? { text: `был ${chat.visits} ${plural(chat.visits, ['раз', 'раза', 'раз'])}`, color: '#34C759' }
+          : { text: chat.profile ? 'ещё не был' : 'новый', color: TAI_COLOR };
   return (
     <Button onPress={onPress}>
       <HStack spacing={12}>

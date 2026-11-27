@@ -141,7 +141,7 @@ export default function EventsScreen() {
     <View style={styles.list}>
       {requests.length > 0 && (
         <View style={styles.group}>
-          <GroupHeader title="Заявки" count={requests.length} />
+          <GroupHeader title="Заявки на мероприятия" count={requests.length} />
           {requests.map((booking) => (
             <Animated.View key={booking.id} entering={FadeIn} exiting={FadeOut} layout={rowLayout}>
               <BookingCard
@@ -210,7 +210,7 @@ export default function EventsScreen() {
             onPress={() =>
               chooseAction('Создать', undefined, [
                 { text: 'Мероприятие', icon: 'calendar.badge.plus', onPress: () => router.push('/events/edit') },
-                { text: 'Заявку вручную', icon: 'tray.and.arrow.down', onPress: () => router.push('/events/booking-new') },
+                { text: 'Заявку на мероприятие', icon: 'tray.and.arrow.down', onPress: () => router.push({ pathname: '/events/booking-new', params: { kind: 'event' } }) },
                 { text: 'Отмена', style: 'cancel' },
               ])
             }

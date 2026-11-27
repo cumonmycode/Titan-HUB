@@ -57,6 +57,11 @@ export default function ManageLayout() {
       <Stack.Screen name="shifts/index" options={formHeader({ title: 'Смены' })} />
       <Stack.Screen name="shifts/[shiftId]" options={formHeader({ title: 'Отчёт смены' })} />
 
+      {/* «Заявки»: записи на игру, регистрации My Titan, новые из Telegram. */}
+      <Stack.Screen name="requests/index" options={formHeader({ title: 'Заявки' })} />
+      <Stack.Screen name="requests/booking" options={formHeader({ title: 'Заявка' })} />
+      <Stack.Screen name="requests/registration" options={formHeader({ title: 'Регистрация' })} />
+      <Stack.Screen name="requests/new" options={editorModal} />
       <Stack.Screen name="clients/index" options={formHeader({ title: 'Клиенты' })} />
       <Stack.Screen name="clients/[clientId]" options={formHeader()} />
       <Stack.Screen name="clients/history" options={formHeader({ title: 'История' })} />

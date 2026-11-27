@@ -257,7 +257,14 @@ export type Stream = {
   published: boolean;
   posts: { chatId: string; messageId: number }[];
 };
-export type StreamsState = { active: Stream | null; last: Stream | null; autoPublish: boolean; targets: number };
+export type StreamsState = {
+  active: Stream | null;
+  last: Stream | null;
+  autoPublish: boolean;
+  targets: number;
+  /** Подключения Titan Connect (MafBoard): без права «Стримы» эфир до HUB не дойдёт. */
+  sources?: { id: string; name: string; canStream: boolean }[];
+};
 
 export const getStreams = () => api.get<StreamsState>('/telegram/streams');
 export const setStreamsAutoPublish = (autoPublish: boolean) => api.put('/telegram/streams/settings', { autoPublish });

@@ -2,21 +2,15 @@ import { ContentUnavailableView, Form, Host, Picker, ProgressView, Section, Text
 import { pickerStyle, refreshable, tag } from '@expo/ui/swift-ui/modifiers';
 import { Stack, useRouter } from 'expo-router';
 import { useMemo, useState } from 'react';
-import { Alert } from 'react-native';
 import type { SFSymbol } from 'sf-symbols-typescript';
 
 import { ClientLine } from '@/components/client-line';
-import { ActionRow, SearchRow } from '@/components/native-form';
+import { ActionRow, LinkRow, SearchRow } from '@/components/native-form';
 import { useDebounced } from '@/components/player-picker';
-import { RegistrationLine } from '@/components/registration-line';
 import { ToolbarButton, ToolbarMenu, ToolbarMenuAction } from '@/components/toolbar';
-import {
-  decideRegistration, useClientList, useClientTiers, useRegistrations, whenText,
-  type Client, type ClientSection, type ClientSort, type Registration,
-} from '@/lib/clients-api';
+import { useClientList, useClientTiers, useRegistrations, type Client, type ClientSection, type ClientSort } from '@/lib/clients-api';
 import { plural } from '@/lib/format';
 import { haptic } from '@/lib/haptics';
-import { useSession } from '@/lib/session';
 
 const SECTIONS: { key: ClientSection; label: string }[] = [
   { key: 'all', label: 'Все' },
@@ -41,7 +35,6 @@ const SORTS: { key: ClientSort; label: string; icon: SFSymbol }[] = [
  */
 export default function ClientsScreen() {
   const router = useRouter();
-  const isOwner = useSession((st) => st.user?.role === 'owner');
   const tiers = useClientTiers();
   const [section, setSection] = useState<ClientSection>('all');
   const [sort, setSort] = useState<ClientSort>('last_check');
@@ -49,7 +42,6 @@ export default function ClientsScreen() {
   const search = useDebounced(query, 300);
   const list = useClientList(section, sort, search);
   const registrations = useRegistrations();
-  const [deciding, setDeciding] = useState<string | null>(null);
 
   const clients = useMemo(() => {
     const seen = new Set<string>();
@@ -58,26 +50,7 @@ export default function ClientsScreen() {
   const total = list.data?.pages[0]?.total ?? 0;
 
   const open = (client: Client) => router.push({ pathname: '/manage/clients/[clientId]', params: { clientId: client.id } });
-  const openById = (clientId: string) => router.push({ pathname: '/manage/clients/[clientId]', params: { clientId } });
 
-  // Регистрации из My Titan: до подтверждения клиенту не начисляются бонусы и закрыта оплата в приложении.
-  const decide = async (registration: Registration, action: 'approve' | 'reject') => {
-    setDeciding(registration.id);
-    try {
-      await decideRegistration(registration.id, action);
-      haptic.success();
-    } catch (error) {
-      haptic.error();
-      Alert.alert('Решение не сохранилось', error instanceof Error ? error.message : String(error));
-    } finally {
-      setDeciding(null);
-    }
-  };
-  const reject = (registration: Registration) =>
-    Alert.alert('Отклонить регистрацию?', `${registration.nickname} уйдёт в архив, приложение клиента выйдет на экран входа.`, [
-      { text: 'Отмена', style: 'cancel' },
-      { text: 'Отклонить', style: 'destructive', onPress: () => void decide(registration, 'reject') },
-    ]);
   const more = () => {
     if (list.hasNextPage && !list.isFetchingNextPage) void list.fetchNextPage();
   };
@@ -109,31 +82,18 @@ export default function ClientsScreen() {
 
       <Host style={{ flex: 1 }} useViewportSizeMeasurement>
         <Form modifiers={[refreshable(async () => void (await Promise.all([list.refetch(), registrations.refetch()])))]}>
-          {section !== 'archived' &&
-            (registrations.data ?? []).map((registration) => (
-              <Section
-                key={registration.id}
-                title={`Новая регистрация · ${whenText(registration.createdAt)}`}
-                footer={<Text>До подтверждения клиенту не начисляются бонусы и закрыта оплата в приложении.</Text>}>
-                <RegistrationLine registration={registration} onPress={() => openById(registration.id)} />
-                <ActionRow title="Подтвердить" icon="checkmark.circle" disabled={deciding === registration.id} onPress={() => void decide(registration, 'approve')} />
-                {isOwner ? (
-                <ActionRow
-                  title="Чаты Telegram"
-                  icon="bubble.left.and.bubble.right"
-                  disabled={deciding === registration.id}
-                  onPress={() => router.push({ pathname: '/manage/clients/chats', params: { clientId: registration.id } })}
-                />
-                ) : null}
-                <ActionRow
-                  title="Изменить"
-                  icon="pencil"
-                  disabled={deciding === registration.id}
-                  onPress={() => router.push({ pathname: '/manage/clients/edit', params: { clientId: registration.id } })}
-                />
-                <ActionRow title="Отклонить" icon="xmark.circle" destructive disabled={deciding === registration.id} onPress={() => reject(registration)} />
-              </Section>
-            ))}
+          {/* Регистрации из My Titan ждут подтверждения в «Заявках» — среди клиентов их нет. */}
+          {section !== 'archived' && (registrations.data ?? []).length > 0 ? (
+            <Section>
+              <LinkRow
+                icon="person.crop.circle.badge.questionmark"
+                color="#FF9500"
+                title={`${(registrations.data ?? []).length} ${plural((registrations.data ?? []).length, ['новая регистрация', 'новые регистрации', 'новых регистраций'])}`}
+                subtitle="Ждут подтверждения в «Заявках»"
+                onPress={() => router.push('/manage/requests')}
+              />
+            </Section>
+          ) : null}
           <Section>
             <SearchRow placeholder="Ник, имя, телефон или тег" onChange={setQuery} />
             <Picker

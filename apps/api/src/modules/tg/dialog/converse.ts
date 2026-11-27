@@ -16,7 +16,7 @@ import { synthesizeVoiceNote } from '../../ai/tai/speech.js'
 import type { ReplyMarkup } from '../../../lib/tgBot.js'
 import type { TgClub } from '../club.js'
 import { displayName, staffHeaders, type TgPerson } from '../identity.js'
-import { clientTools, selfTools, type ClientSession } from './client-tools.js'
+import { clientTools, selfTools, streamNowTool, type ClientSession } from './client-tools.js'
 import { TELEGRAM_STAFF_TOOLS } from './staff-tools.js'
 import { clientPrompt, staffTelegramPrompt } from './prompts.js'
 import { actionMarkup, actionText, blockText, choiceMarkup, linksMarkup, mdToHtml, supplyMarkup, supplyText } from './render.js'
@@ -103,7 +103,7 @@ async function buildEnv(club: TgClub, person: TgPerson, contact: TaiContact | nu
       clubName: club.name,
       permissions: profile.permissions ?? {},
       headers: await staffHeaders(club, profile),
-      extraTools: [...TELEGRAM_STAFF_TOOLS, ...(session && !target.groupTitle ? [...selfTools(session), showCardTool(club, person, target.chatId), chatInvitesTool(club, person.tgId, target.chatId)] : [])],
+      extraTools: [...TELEGRAM_STAFF_TOOLS, streamNowTool(club.db), ...(session && !target.groupTitle ? [...selfTools(session), showCardTool(club, person, target.chatId), chatInvitesTool(club, person.tgId, target.chatId)] : [])],
       extraPrompt: staffTelegramPrompt({ nickname: profile.nickname, group: target.groupTitle, selfTools: !!session && !target.groupTitle, style: target.style?.line ?? null }),
       ...(target.style ? { profanity: target.style.profanity } : {}),
     }

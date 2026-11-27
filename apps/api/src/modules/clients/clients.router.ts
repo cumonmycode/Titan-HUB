@@ -132,6 +132,8 @@ clientsRouter.get('/', async (c) => {
     inArray(profiles.role, CLIENT_ROLES),
     archived ? isNotNull(profiles.deletedAt) : isNull(profiles.deletedAt),
     tier ? eq(profiles.clientTier, tier) : undefined,
+    // Регистрация из My Titan, ещё не подтверждённая, — в разделе «Заявки», а не среди клиентов.
+    archived ? undefined : sql`${profiles.registrationStatus} IS DISTINCT FROM ${REGISTRATION_PENDING}`,
     // Сквозной умный поиск: ник / имя / ник в Telegram / теги (вкл. ник GoMafia),
     // с учётом раскладки и транслитерации в обе стороны. + телефон по сырому запросу.
     search

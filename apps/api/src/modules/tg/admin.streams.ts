@@ -10,6 +10,7 @@
 import type { Hono } from 'hono'
 import { zValidator } from '@hono/zod-validator'
 import { z } from 'zod'
+import { sql } from '@titan/database'
 import type { AppEnv } from '../../types.js'
 import { chatsForCategory } from '../../lib/tgChatConfig.js'
 import { endStream, publishStream, setAutoPublish, startStream, streamState, StreamError } from './streams.js'
@@ -23,8 +24,18 @@ export const StreamLinkSchema = z.object({
 export function registerStreamRoutes(router: Hono<AppEnv>): void {
   router.get('/streams', async (c) => {
     const db = c.var.db
-    const [state, targets] = await Promise.all([streamState(db), chatsForCategory(db, 'streams')])
-    return c.json({ ...state, targets: targets.length })
+    const [state, targets, sourcesRes] = await Promise.all([
+      streamState(db),
+      chatsForCategory(db, 'streams'),
+      // Кто может прислать эфир: подключения Titan Connect (MafBoard) и есть ли у них право «Стримы».
+      db.execute(sql`
+        SELECT id, name, ('streams:publish' = ANY(scopes)) AS can_stream
+        FROM connect_connections WHERE revoked_at IS NULL AND connected_at IS NOT NULL
+        ORDER BY created_at
+      `),
+    ])
+    const sources = ((sourcesRes as { rows?: unknown[] }).rows ?? (sourcesRes as unknown as unknown[])) as { id: string; name: string; can_stream: boolean }[]
+    return c.json({ ...state, targets: targets.length, sources: sources.map((r) => ({ id: r.id, name: r.name, canStream: !!r.can_stream })) })
   })
 
   router.put('/streams/settings', zValidator('json', z.object({ autoPublish: z.boolean() })), async (c) => {

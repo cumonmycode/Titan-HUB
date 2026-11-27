@@ -1,6 +1,6 @@
 import { SymbolView } from 'expo-symbols';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import Animated, { FadeIn } from 'react-native-reanimated';
 
 import { Text, TextInput } from '@/components/text';
@@ -10,6 +10,7 @@ import { Avatar, BalanceChips, GlassCard, sheetStyles } from '@/components/new-c
 import { useAutoFocus } from '@/lib/auto-focus';
 import { formatMoney } from '@/lib/format';
 import { haptic } from '@/lib/haptics';
+import { newcomerToClient, useNewcomers, type Newcomer } from '@/lib/leads-api';
 import { preselectTariff, sortTariffs, TIER_LABEL, usePlayerSearch, useTariffs, type PlayerSearchItem, type Tariff } from '@/lib/pos-api';
 import { FONT_SCALE_MAX } from '@/lib/text-scale';
 import { colors, space, type } from '@/lib/theme';
@@ -17,6 +18,11 @@ import { colors, space, type } from '@/lib/theme';
 /** Поиск игрока и выбор тарифа — общие для «Нового чека» и смены клиента в открытом чеке. */
 
 const RESULT_ROW_HEIGHT = 60;
+/** Сколько людей из Telegram показывать: в ленте над полем и среди найденных. */
+const NEWCOMER_STRIP = 12;
+const NEWCOMER_MATCHES = 5;
+const TELEGRAM = '#2AABEE';
+const CHIP_WIDTH = 64;
 /** Палитра веб-кассы для тарифов без своего цвета. */
 const PALETTE = ['#8B5CF6', '#10B981', '#F59E0B', '#3B82F6', '#F43F5E', '#06B6D4'];
 
@@ -37,6 +43,7 @@ export function PlayerSearch({
   onCreate,
   excludeId,
   excludeIds,
+  newcomers = false,
 }: {
   query: string;
   onQuery: (q: string) => void;
@@ -47,6 +54,11 @@ export function PlayerSearch({
   excludeId?: string | null;
   /** Игроки, которых не показываем (уже в составе). */
   excludeIds?: string[];
+  /**
+   * Показывать и тех, кто писал Tai в Telegram, но в базе их нет: лента над полем и
+   * совпадения в поиске. Тап — клиент-новичок с привязанным Telegram, дальше как обычно.
+   */
+  newcomers?: boolean;
 }) {
   const trimmed = query.trim();
   const debounced = useDebounced(trimmed, 250);
@@ -55,6 +67,35 @@ export function PlayerSearch({
   const typing = trimmed.length > 0;
   const waiting = typing && (debounced !== trimmed || search.isLoading);
   const focus = useAutoFocus();
+  const matches = useNewcomers(debounced, newcomers && typing && debounced.length >= 2);
+  const recent = useNewcomers('', newcomers && !typing);
+  const found = typing ? (matches.data ?? []).slice(0, NEWCOMER_MATCHES) : [];
+  const [adding, setAdding] = useState<string | null>(null);
+
+  const pickNewcomer = (n: Newcomer) => {
+    if (adding) return;
+    haptic.selection();
+    Alert.alert(`Завести «${n.name}» новичком?`, 'Писал Tai в Telegram — Telegram сразу привяжется к карточке клиента.', [
+      { text: 'Отмена', style: 'cancel' },
+      {
+        text: 'Завести',
+        onPress: () => {
+          setAdding(n.tgId);
+          newcomerToClient(n.tgId)
+            .then((client) => {
+              haptic.success();
+              onQuery('');
+              onPlayer(client);
+            })
+            .catch((error: unknown) => {
+              haptic.error();
+              Alert.alert('Клиент не заведён', error instanceof Error ? error.message : String(error));
+            })
+            .finally(() => setAdding(null));
+        },
+      },
+    ]);
+  };
 
   return (
     // column-reverse: поле поиска внизу блока, у клавиатуры, результаты растут вверх —
@@ -80,10 +121,38 @@ export function PlayerSearch({
         <ClearButton visible={query.length > 0} onPress={() => onQuery('')} />
       </GlassView>
 
+      {/* column-reverse: лента окажется над полем поиска. */}
+      {!typing && (recent.data?.length ?? 0) > 0 && (
+        <Animated.View entering={FadeIn.duration(150)} style={styles.strip}>
+          <Text style={[type.caption1, sheetStyles.secondary, styles.stripLabel]}>ПИСАЛИ TAI — НЕТ В БАЗЕ</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={styles.stripRow}>
+            {(recent.data ?? []).slice(0, NEWCOMER_STRIP).map((n) => (
+              <Pressable
+                key={n.tgId}
+                onPress={() => pickNewcomer(n)}
+                disabled={!!adding}
+                style={({ pressed }) => [styles.chip, pressed && styles.pressed]}
+                accessibilityRole="button"
+                accessibilityLabel={`${n.name}, писал Tai — завести новичком`}>
+                <View>
+                  <Avatar name={n.name} photoUrl={null} size={44} />
+                  <View style={styles.chipBadge}>
+                    {adding === n.tgId ? <ActivityIndicator size="small" color="white" /> : <SymbolView name="paperplane.fill" size={9} tintColor="white" />}
+                  </View>
+                </View>
+                <Text style={[type.caption1, styles.chipName]} numberOfLines={1} maxFontSizeMultiplier={FONT_SCALE_MAX.compact}>
+                  {n.name}
+                </Text>
+              </Pressable>
+            ))}
+          </ScrollView>
+        </Animated.View>
+      )}
+
       {typing && (
         <Animated.View entering={FadeIn.duration(150)}>
           <GlassCard>
-          {players.length === 0 ? (
+          {players.length === 0 && found.length === 0 ? (
             waiting ? (
               <View style={styles.resultState}>
                 <ActivityIndicator />
@@ -126,6 +195,29 @@ export function PlayerSearch({
                     <BalanceChips balance={player.balance} bonusPoints={player.bonusPoints} />
                   </Pressable>
                 </View>
+              ))}
+              {found.length > 0 && (
+                <Text style={[type.caption1, sheetStyles.secondary, styles.groupLabel]}>ПИСАЛИ TAI · НЕТ В БАЗЕ</Text>
+              )}
+              {found.map((n) => (
+                <Pressable
+                  key={n.tgId}
+                  style={({ pressed }) => [styles.resultRow, pressed && sheetStyles.pressedRow]}
+                  onPress={() => pickNewcomer(n)}
+                  disabled={!!adding}
+                  accessibilityRole="button"
+                  accessibilityLabel={`${n.name}, из Telegram`}>
+                  <Avatar name={n.name} photoUrl={null} size={40} />
+                  <View style={styles.flex}>
+                    <Text style={[type.body, styles.playerName]} numberOfLines={1}>
+                      {n.name}
+                    </Text>
+                    <Text style={[type.footnote, sheetStyles.secondary]} numberOfLines={1}>
+                      {n.username ? `@${n.username} · новичок из Telegram` : 'Новичок из Telegram'}
+                    </Text>
+                  </View>
+                  {adding === n.tgId ? <ActivityIndicator /> : <SymbolView name="paperplane.fill" size={15} tintColor={TELEGRAM} />}
+                </Pressable>
               ))}
             </ScrollView>
           )}
@@ -310,6 +402,25 @@ const styles = StyleSheet.create({
   // В шторке «по содержимому» ScrollView не должен сжиматься: его высота входит в высоту шторки.
   results: { maxHeight: RESULT_ROW_HEIGHT * 3.5, flexShrink: 0 },
   playerName: { color: colors.label, fontWeight: '600' },
+  groupLabel: { paddingHorizontal: space.lg, paddingTop: space.md, paddingBottom: space.xs, fontWeight: '600' },
+  strip: { gap: space.xs },
+  stripLabel: { paddingHorizontal: space.xs, fontWeight: '600' },
+  stripRow: { gap: space.md, paddingHorizontal: space.xs },
+  chip: { width: CHIP_WIDTH, alignItems: 'center', gap: 4 },
+  chipName: { color: colors.label, textAlign: 'center' },
+  chipBadge: {
+    position: 'absolute',
+    right: -2,
+    bottom: -2,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: TELEGRAM,
+    borderWidth: 2,
+    borderColor: colors.sheetBackground,
+  },
 
   playerCard: { flexDirection: 'row', alignItems: 'center', gap: space.md, padding: space.md },
   grid: { gap: 10 },

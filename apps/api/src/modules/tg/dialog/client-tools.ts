@@ -16,6 +16,7 @@ import type { TgClub } from '../club.js'
 import type { TgPerson } from '../identity.js'
 import { forwardTodayPoll, gameConfigs, gamesFromChats, nextNight, nightLabel, todaysPolls, upcomingNights } from '../games.js'
 import { markBlocked, rememberNote, updateContact } from './memory.js'
+import { publishedStream } from '../streams.js'
 
 export interface ClientSession {
   club: TgClub
@@ -83,6 +84,25 @@ const clubInfo = (s: ClientSession): ToolDef => ({
   status: () => 'Смотрю информацию о клубе…',
   async run(): Promise<ToolResult> {
     return { data: await clubSummary(s.club), memo: 'рассказал о клубе' }
+  },
+})
+
+/**
+ * Эфир клуба: опубликованный стрим (MafBoard/Studio → HUB, «Telegram → Стримы»).
+ * Нужен и клиенту («где смотреть игру?»), и сотруднику — db достаточно.
+ */
+export const streamNowTool = (db: Database): ToolDef => ({
+  name: 'stream_now',
+  description: 'Идёт ли сейчас стрим (трансляция) клуба: название и ссылки, где смотреть и куда донатить. Спрашивай, когда речь о трансляции, эфире, стриме, «где посмотреть игру».',
+  parameters: { type: 'object', properties: {} },
+  status: () => 'Смотрю, идёт ли эфир…',
+  async run(): Promise<ToolResult> {
+    const stream = await publishedStream(db)
+    if (!stream) return { data: { live: false, hint: 'Сейчас эфира нет. Ссылку пришлём в чаты клуба, когда стрим начнётся.' } }
+    return {
+      data: { live: true, title: stream.title, startedAt: stream.startedAt, links: stream.links.map((l) => ({ kind: l.kind === 'donate' ? 'донат' : 'смотреть', label: l.label, url: l.url })) },
+      memo: `дал ссылку на эфир «${stream.title}»`,
+    }
   },
 })
 
@@ -309,7 +329,7 @@ const notificationsToggle = (s: ClientSession): ToolDef => ({
 
 /** Инструменты разговора с клиентом. */
 export function clientTools(s: ClientSession): ToolDef[] {
-  return [clubInfo(s), gameNights(s), myAccount(s), remember(s), remindNextGame(s), sendPoll(s), signUp(s), callAdmin(s), notificationsToggle(s)]
+  return [clubInfo(s), gameNights(s), streamNowTool(s.club.db), myAccount(s), remember(s), remindNextGame(s), sendPoll(s), signUp(s), callAdmin(s), notificationsToggle(s)]
 }
 
 /** То, что сотрудник может спросить о себе как игрок. */

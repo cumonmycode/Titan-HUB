@@ -13,6 +13,7 @@ export type ManageSectionKey =
   | 'goods'
   | 'pricing'
   | 'screens'
+  | 'requests'
   | 'clients'
   | 'taiChats'
   | 'customers'
@@ -57,6 +58,7 @@ export const MANAGE_GROUPS: { title: string; items: ManageSection[] }[] = [
   {
     title: 'Клиенты',
     items: [
+      { key: 'requests', title: 'Заявки', subtitle: 'Записи на игру, регистрации, новые из Telegram', icon: 'tray.full', color: '#FF9500', roles: ['owner', 'staff'], perm: 'clients' },
       { key: 'clients', title: 'Клиенты', subtitle: 'Профили, статусы, Telegram', icon: 'person.2', color: '#007AFF', roles: ['owner', 'staff'], perm: 'clients' },
       { key: 'taiChats', title: 'Диалоги Tai', subtitle: 'Переписка Tai с клиентами, ответ вручную', icon: 'bubble.left.and.text.bubble.right', color: '#8B5CF6', roles: ['owner', 'staff'], perm: 'clients' },
       { key: 'loyalty', title: 'Лояльность', subtitle: 'Бонусы, скидки, статусы', icon: 'gift', color: '#FF2D55', roles: ['owner', 'staff'], perm: ['discounts', 'bonus'] },

@@ -185,7 +185,7 @@ function SearchStep({
         <QuickTile icon="person.badge.plus" title="Новый клиент" tint={colors.blue} onPress={() => onNewClient(query.trim())} />
         <QuickTile icon="timer" title="Аренда" tint={colors.accent} onPress={onSpace} />
       </View>
-      <PlayerSearch query={query} onQuery={onQuery} onPlayer={onPlayer} onCreate={onNewClient} />
+      <PlayerSearch query={query} onQuery={onQuery} onPlayer={onPlayer} onCreate={onNewClient} newcomers />
     </View>
   );
 }
@@ -327,7 +327,7 @@ function SpaceClientStep({
         <QuickTile icon="person.crop.circle.badge.questionmark" title="Без клиента" tint={colors.gray} busy={noClientBusy} onPress={onNoClient} />
         <QuickTile icon="person.badge.plus" title="Новый клиент" tint={colors.blue} onPress={() => onNewClient(query.trim())} />
       </View>
-      <PlayerSearch query={query} onQuery={onQuery} onPlayer={(player) => !busy && onPlayer(player)} onCreate={onNewClient} />
+      <PlayerSearch query={query} onQuery={onQuery} onPlayer={(player) => !busy && onPlayer(player)} onCreate={onNewClient} newcomers />
     </View>
   );
 }

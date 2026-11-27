@@ -41,7 +41,7 @@ export type Client = {
   /** Клиент сам удалил аккаунт My Titan (сутки без входа; при следующем входе снимается). */
   appDeletedAt?: string | null;
   /** Откуда клиент (миграция 094): hub — завёл сотрудник, app — сам в My Titan, request — из заявки; null — неизвестно. */
-  signupSource?: 'hub' | 'app' | 'request' | null;
+  signupSource?: 'hub' | 'app' | 'request' | 'telegram' | null;
   signupMeta?: { by?: string | null; byName?: string | null; platform?: string | null; device?: string | null; bookingId?: string | null } | null;
   /** Приглашения (GET /clients/:id): кто привёл и скольких привёл сам. */
   referredBy?: string | null;
@@ -189,6 +189,7 @@ export async function decideRegistration(clientId: string, action: 'approve' | '
   const club = host();
   void queryClient.invalidateQueries({ queryKey: [club, 'clients'] });
   void queryClient.invalidateQueries({ queryKey: [club, 'client', clientId] });
+  void queryClient.invalidateQueries({ queryKey: [club, 'leads'] });
 }
 
 export function useClientTiers() {
@@ -617,6 +618,8 @@ export function signupText(client: Pick<Client, 'signupSource' | 'signupMeta'>):
       return meta.byName ? `Завёл ${meta.byName} в HUB` : 'Заведён в HUB';
     case 'request':
       return meta.byName ? `Из заявки · завёл ${meta.byName}` : 'Из заявки';
+    case 'telegram':
+      return meta.byName ? `Писал Tai в Telegram · завёл ${meta.byName}` : 'Писал Tai в Telegram';
     default:
       return 'не записано';
   }

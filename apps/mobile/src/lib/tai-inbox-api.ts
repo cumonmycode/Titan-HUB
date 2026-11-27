@@ -1,6 +1,9 @@
 import { useQuery } from '@tanstack/react-query';
 
+import type { ImagePickerAsset } from 'expo-image-picker';
+
 import { api } from './api';
+import { CHAT_PHOTO_FIT, compressedImage } from './photo';
 import { queryClient } from './query';
 import { useClubKey } from './queries';
 
@@ -12,8 +15,14 @@ import { useClubKey } from './queries';
 
 export type InboxRole = 'user' | 'assistant' | 'staff';
 
+/** potential — ещё не клиент (нет в базе или ни разу не был), client — ходит в клуб, staff — команда. */
+export type InboxSegment = 'potential' | 'client' | 'staff';
+
 export type InboxChat = {
   tgId: string;
+  segment: InboxSegment;
+  /** Вечеров с закрытым чеком. */
+  visits: number;
   name: string;
   username: string | null;
   profile: { id: string; nickname: string; photoUrl: string | null; role: string } | null;
@@ -31,6 +40,7 @@ export type InboxMessage = {
   text: string;
   voice: boolean;
   memo: string | null;
+  photoUrl?: string | null;
   staff: { id: string; nickname: string } | null;
   createdAt: string;
   /** Локальная отправка с телефона: ещё в пути или не дошла. */
@@ -40,11 +50,15 @@ export type InboxMessage = {
 const LIST_REFRESH_MS = 30_000;
 const CHAT_REFRESH_MS = 15_000;
 
-export function useTaiChats(filter: 'all' | 'attention' = 'all') {
+export type InboxFilter = 'all' | 'attention' | InboxSegment;
+export type InboxList = { items: InboxChat[]; attention: number; counts: Record<InboxSegment, number> };
+
+export function useTaiChats(filter: InboxFilter = 'all') {
   const club = useClubKey();
+  const query = filter === 'all' ? '' : filter === 'attention' ? '?filter=attention' : `?segment=${filter}`;
   return useQuery({
     queryKey: [club, 'tai-inbox', 'list', filter],
-    queryFn: () => api.get<{ items: InboxChat[]; attention: number }>(`/tai-inbox${filter === 'attention' ? '?filter=attention' : ''}`),
+    queryFn: () => api.get<InboxList>(`/tai-inbox${query}`),
     refetchInterval: LIST_REFRESH_MS,
   });
 }
@@ -118,4 +132,30 @@ export function lastLine(chat: InboxChat): string {
   if (!m) return 'Сообщений пока нет';
   const who = m.role === 'assistant' ? 'Tai: ' : m.role === 'staff' ? 'Вы: ' : '';
   return `${who}${m.content.replace(/\s+/g, ' ')}`;
+}
+
+export type TodayPoll = { chatId: string; messageId: number; title: string; kind: string; options: string[] };
+
+/** Сегодняшние опросы записи из игровых чатов — их можно переслать клиенту. */
+export function useTodayPolls(enabled: boolean) {
+  const club = useClubKey();
+  return useQuery({
+    queryKey: [club, 'tai-inbox', 'polls'],
+    queryFn: () => api.get<{ polls: TodayPoll[] }>('/tai-inbox/polls').then((r) => r.polls),
+    enabled,
+    staleTime: 30_000,
+  });
+}
+
+export async function sendTaiPoll(club: string, tgId: string, poll: Pick<TodayPoll, 'chatId' | 'messageId'>): Promise<void> {
+  await api.post(`/tai-inbox/${tgId}/poll`, { chatId: poll.chatId, messageId: poll.messageId });
+  invalidateInbox(club);
+}
+
+export async function sendTaiPhoto(club: string, tgId: string, asset: ImagePickerAsset, caption: string): Promise<void> {
+  const form = new FormData();
+  form.append('file', await compressedImage(asset, CHAT_PHOTO_FIT));
+  if (caption.trim()) form.append('caption', caption.trim());
+  await api.post(`/tai-inbox/${tgId}/photo`, form);
+  invalidateInbox(club);
 }

@@ -1,3 +1,4 @@
+import { Image } from 'expo-image';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { HeaderHeightContext } from 'expo-router/react-navigation';
 import { SymbolView } from 'expo-symbols';
@@ -11,12 +12,15 @@ import { AmbientBackdrop } from '@/components/ambient-backdrop';
 import { GlassView } from '@/components/glass';
 import { Text, TextInput } from '@/components/text';
 import { ToolbarButton } from '@/components/toolbar';
+import { chooseAction, promptText, showActionList } from '@/lib/dialog';
 import { formatTime } from '@/lib/format';
 import { haptic } from '@/lib/haptics';
 import { KEYBOARD_DISMISS, useHeaderClearance } from '@/lib/layout';
 import { queryClient } from '@/lib/query';
 import { useClubKey } from '@/lib/queries';
-import { markTaiChatRead, sendTaiReply, setTaiPaused, taiMessagesKey, useTaiChat, useTaiMessages, type InboxMessage } from '@/lib/tai-inbox-api';
+import { newcomerToClient } from '@/lib/leads-api';
+import { pickChatPhoto } from '@/lib/photo';
+import { markTaiChatRead, sendTaiPhoto, sendTaiPoll, sendTaiReply, setTaiPaused, taiMessagesKey, useTaiChat, useTaiMessages, useTodayPolls, type InboxMessage } from '@/lib/tai-inbox-api';
 import { FONT_SCALE_MAX } from '@/lib/text-scale';
 import { colors, space, type } from '@/lib/theme';
 
@@ -115,6 +119,94 @@ export default function TaiDialogScreen() {
     });
   };
 
+  const [attaching, setAttaching] = useState(false);
+  const polls = useTodayPolls(!!tgId);
+
+  const sendPhoto = async (source: 'camera' | 'library') => {
+    if (!tgId) return;
+    const asset = await pickChatPhoto(source);
+    if (!asset) return;
+    const caption = text.trim();
+    setAttaching(true);
+    atEnd.current = true;
+    try {
+      await sendTaiPhoto(club, tgId, asset, caption);
+      if (caption) setText('');
+      haptic.success();
+      await messages.refetch();
+    } catch (error) {
+      haptic.error();
+      Alert.alert('Фото не отправлено', error instanceof Error ? error.message : String(error));
+    } finally {
+      setAttaching(false);
+    }
+  };
+
+  const sendPoll = async () => {
+    if (!tgId) return;
+    const list = polls.data ?? (await polls.refetch()).data ?? [];
+    if (!list.length) {
+      Alert.alert('Опросов на сегодня нет', 'Опрос записи появится, когда бот выложит его в игровой чат.');
+      return;
+    }
+    const send = (poll: (typeof list)[number]) => {
+      setAttaching(true);
+      sendTaiPoll(club, tgId, poll)
+        .then(() => {
+          haptic.success();
+          return messages.refetch();
+        })
+        .catch((error: unknown) => {
+          haptic.error();
+          Alert.alert('Опрос не отправлен', error instanceof Error ? error.message : String(error));
+        })
+        .finally(() => setAttaching(false));
+    };
+    chooseAction('Какой опрос отправить?', 'Клиент отметится прямо в личке бота.', [
+      ...list.map((poll) => ({ text: poll.title, icon: 'checklist', onPress: () => send(poll) })),
+      { text: 'Отмена', style: 'cancel' as const },
+    ]);
+  };
+
+  const attach = () => {
+    haptic.selection();
+    showActionList('Отправить клиенту', [
+      { text: 'Снять фото', icon: 'camera', onPress: () => void sendPhoto('camera') },
+      { text: 'Фото из галереи', icon: 'photo', onPress: () => void sendPhoto('library') },
+      { text: 'Опрос записи на игру', icon: 'checklist', onPress: () => void sendPoll() },
+      { text: 'Отмена', style: 'cancel' },
+    ]);
+  };
+
+  const makeClient = () => {
+    if (!tgId || !data) return;
+    promptText(
+      'Завести клиента',
+      'Ник в клубе — Telegram привяжется сам.',
+      [
+        { text: 'Отмена', style: 'cancel' },
+        {
+          text: 'Завести',
+          onPress: (value) => {
+            const nickname = (value ?? '').trim();
+            newcomerToClient(tgId, nickname.length >= 2 ? { nickname } : {})
+              .then((client) => {
+                haptic.success();
+                void chat.refetch();
+                router.push({ pathname: '/manage/clients/[clientId]', params: { clientId: client.id } });
+              })
+              .catch((error: unknown) => {
+                haptic.error();
+                Alert.alert('Клиент не заведён', error instanceof Error ? error.message : String(error));
+              });
+          },
+        },
+      ],
+      'plain-text',
+      data.name.replace(/^@/, ''),
+    );
+  };
+
   const scrollToEnd = (animated: boolean) => scroller.current?.scrollToEnd({ animated });
   const rows = rowsOf(list);
   const bottomPad = Math.max(insets.bottom, space.md);
@@ -131,6 +223,10 @@ export default function TaiDialogScreen() {
             accessibilityLabel="Карточка клиента"
             onPress={() => router.push({ pathname: '/manage/clients/[clientId]', params: { clientId: data.profile!.id } })}
           />
+        </Stack.Toolbar>
+      ) : data ? (
+        <Stack.Toolbar placement="right">
+          <ToolbarButton icon="person.badge.plus" accessibilityLabel="Завести клиента" onPress={makeClient} />
         </Stack.Toolbar>
       ) : null}
 
@@ -177,6 +273,16 @@ export default function TaiDialogScreen() {
           onLayout={(e) => setComposerTop(e.nativeEvent.layout.height)}
           style={[styles.composer, { paddingBottom: bottomPad, paddingLeft: insets.left + space.md, paddingRight: insets.right + space.md }]}>
           {!paused ? <Text style={[type.caption1, styles.secondary, styles.hint]}>Ваш ответ поставит Tai на паузу в этом чате</Text> : null}
+          <View style={styles.inputRow}>
+          <Pressable
+            onPress={attach}
+            disabled={attaching}
+            hitSlop={8}
+            style={({ pressed }) => [styles.attach, (pressed || attaching) && styles.pressed]}
+            accessibilityRole="button"
+            accessibilityLabel="Фото или опрос">
+            {attaching ? <ActivityIndicator /> : <SymbolView name="plus" size={18} weight="semibold" tintColor={colors.accent} />}
+          </Pressable>
           <GlassView style={styles.inputGlass}>
             <TextInput
               value={text}
@@ -199,6 +305,7 @@ export default function TaiDialogScreen() {
               </Animated.View>
             ) : null}
           </GlassView>
+          </View>
         </View>
       </KeyboardStickyView>
     </AmbientBackdrop>
@@ -262,7 +369,10 @@ function Bubble({ message, first, onRetry }: { message: InboxMessage; first: boo
           <Text style={[type.caption2, styles.whoText]}>{who}</Text>
         </View>
       ) : null}
-      <Text style={[type.body, ours ? styles.oursText : styles.label]}>{message.text}</Text>
+      {message.photoUrl ? <Image source={{ uri: message.photoUrl }} style={styles.photo} contentFit="cover" transition={150} accessibilityLabel="Фото" /> : null}
+      {message.photoUrl && /^\[Фото\]\s*$/.test(message.text) ? null : (
+        <Text style={[type.body, ours ? styles.oursText : styles.label]}>{message.photoUrl ? message.text.replace(/^\[Фото\]\s*/, '') : message.text}</Text>
+      )}
       <Text style={[styles.time, ours ? styles.timeOurs : styles.timeTheirs]} allowFontScaling={false}>
         {message.local === 'sending' ? 'отправляется…' : `${message.voice ? '🎤 ' : ''}${formatTime(message.createdAt)}`}
       </Text>
@@ -324,7 +434,10 @@ const styles = StyleSheet.create({
   composerDock: { position: 'absolute', left: 0, right: 0, bottom: 0 },
   composer: { gap: space.xs, paddingTop: space.sm, backgroundColor: colors.groupedBackground },
   hint: { textAlign: 'center' },
-  inputGlass: { flexDirection: 'row', alignItems: 'flex-end', borderRadius: 22, borderCurve: 'continuous', overflow: 'hidden', minHeight: 44 },
+  inputRow: { flexDirection: 'row', alignItems: 'flex-end', gap: space.sm },
+  attach: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.fill },
+  photo: { width: 220, height: 220, borderRadius: 12, marginVertical: 2 },
+  inputGlass: { flex: 1, flexDirection: 'row', alignItems: 'flex-end', borderRadius: 22, borderCurve: 'continuous', overflow: 'hidden', minHeight: 44 },
   input: { flex: 1, color: colors.label, paddingLeft: 16, paddingRight: 8, paddingTop: 11, paddingBottom: 11, maxHeight: 132 },
   sendWrap: { padding: 6 },
   send: { width: 32, height: 32, borderRadius: 16, backgroundColor: colors.accent, alignItems: 'center', justifyContent: 'center' },

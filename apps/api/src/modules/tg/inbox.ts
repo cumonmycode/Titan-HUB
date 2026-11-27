@@ -4,6 +4,7 @@
  * push «Клиент ждёт ответа» (один раз, пока сотрудник не ответит или не прочитает).
  */
 import { taiContacts, eq } from '@titan/database'
+import { storeImageBuffer } from '../../lib/imageStore.js'
 import { publishEvent } from '../../lib/realtime.js'
 import { notify } from '../notifications/push.js'
 import type { TgClub } from './club.js'
@@ -14,6 +15,16 @@ import { voiceToText } from './private.js'
 import { INBOX_EVENT } from './inbox.router.js'
 
 const PREVIEW_MAX = 140
+
+/** Фото клиента — копия в хранилище клуба, чтобы его было видно в переписке HUB. */
+async function keepPhoto(club: TgClub, msg: TgMessage): Promise<string | null> {
+  const largest = msg.photo?.[msg.photo.length - 1]
+  if (!largest) return null
+  const file = await club.bot.download(largest.file_id).catch(() => null)
+  if (!file) return null
+  const stored = await storeImageBuffer(file.data, 'tai')
+  return stored.ok ? stored.url : null
+}
 
 /** Что написал клиент, текстом: голос распознаём, вложения подписываем. */
 async function inboundText(club: TgClub, msg: TgMessage, text: string): Promise<{ content: string; voice: boolean }> {
@@ -31,7 +42,8 @@ async function inboundText(club: TgClub, msg: TgMessage, text: string): Promise<
 
 export async function holdForStaff(club: TgClub, person: TgPerson, msg: TgMessage, text: string): Promise<void> {
   const { content, voice } = await inboundText(club, msg, text)
-  await appendMessage(club.db, { chatId: person.tgId, tgId: person.tgId, role: 'user', content, voice })
+  const photoUrl = await keepPhoto(club, msg)
+  await appendMessage(club.db, { chatId: person.tgId, tgId: person.tgId, role: 'user', content, voice, photoUrl })
   const [before] = await club.db.select({ needsAttention: taiContacts.needsAttention }).from(taiContacts)
     .where(eq(taiContacts.tgId, person.tgId)).limit(1)
   await club.db.update(taiContacts).set({ needsAttention: true, updatedAt: new Date() }).where(eq(taiContacts.tgId, person.tgId))

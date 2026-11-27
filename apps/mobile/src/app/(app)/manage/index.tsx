@@ -9,6 +9,7 @@ import { SmmCard } from '@/components/smm/menu-card';
 import { permissionOn } from '@/lib/admin-api';
 import { haptic } from '@/lib/haptics';
 import { visibleManageGroups, type ManageSectionKey } from '@/lib/manage-sections';
+import { useLeadsSummary } from '@/lib/leads-api';
 import { signOutEverywhere, useMe } from '@/lib/queries';
 import { useSession } from '@/lib/session';
 
@@ -19,6 +20,7 @@ const SECTION_SCREENS: Record<ManageSectionKey, Href> = {
   goods: '/manage/goods',
   pricing: '/manage/pricing',
   screens: '/manage/screens',
+  requests: '/manage/requests',
   clients: '/manage/clients',
   taiChats: '/manage/tai-chats',
   balances: '/manage/balances',
@@ -46,6 +48,8 @@ export default function ManageScreen() {
   const club = useSession((s) => s.club);
   const sessionUser = useSession((s) => s.user);
   const me = useMe();
+  const leads = useLeadsSummary();
+  const leadsTotal = leads.data ? leads.data.requests + leads.data.registrations + leads.data.newcomers : 0;
 
   const nickname = me.data?.nickname ?? sessionUser?.nickname ?? '';
   const role = me.data?.role ?? sessionUser?.role ?? 'staff';
@@ -114,6 +118,8 @@ export default function ManageScreen() {
                   color={item.color}
                   title={item.title}
                   subtitle={item.subtitle}
+                  value={item.key === 'requests' && leadsTotal > 0 ? `${leadsTotal} новых` : undefined}
+                  valueColor={item.key === 'requests' && leadsTotal > 0 ? '#FF9500' : undefined}
                   onPress={() => router.push(SECTION_SCREENS[item.key])}
                 />
               ))}

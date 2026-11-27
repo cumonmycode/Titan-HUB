@@ -46,6 +46,12 @@ bookingsRouter.use('*', requireAuth)
 bookingsRouter.get('/', requireRole('owner', 'staff'), async (c) => {
   const db = c.var.db
   const status = c.req.query('status')
+  // kind=event — заявки на мероприятия («События»); kind=game,message — записи и обращения («Заявки»).
+  const kinds = (c.req.query('kind') ?? '').split(',').filter((k) => k === 'event' || k === 'game' || k === 'message')
+  const filters = [
+    status ? sql`b.status = ${status}` : null,
+    kinds.length ? sql`b.kind IN (${sql.join(kinds.map((k) => sql`${k}`), sql`, `)})` : null,
+  ].filter((f): f is NonNullable<typeof f> => f !== null)
   const res = await db.execute(sql`
     SELECT b.id, b.space_id, s.name AS zone_name, b.name, b.phone, b.guests, b.title,
            b.starts_at, b.duration_hours, b.tariff_hours, b.location, b.address,
@@ -54,7 +60,7 @@ bookingsRouter.get('/', requireRole('owner', 'staff'), async (c) => {
     FROM bookings b
     LEFT JOIN spaces s ON s.id = b.space_id
     LEFT JOIN profiles cb ON cb.id = b.created_by
-    ${status ? sql`WHERE b.status = ${status}` : sql``}
+    ${filters.length ? sql`WHERE ${sql.join(filters, sql` AND `)}` : sql``}
     ORDER BY b.starts_at DESC
     LIMIT 300
   `)

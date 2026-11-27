@@ -1,6 +1,6 @@
 import { DatePicker, Form, Picker, Section, Text } from '@expo/ui/swift-ui';
 import { pickerStyle, tag } from '@expo/ui/swift-ui/modifiers';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useState } from 'react';
 import { Alert } from 'react-native';
 
@@ -28,7 +28,9 @@ const GUESTS_MAX = 500;
 export default function BookingNewSheet() {
   const router = useRouter();
   const club = useClubKey();
-  const [kind, setKind] = useState<Kind>('game');
+  // Из «Событий» — заявка на мероприятие, из «Заявок» — запись на игру.
+  const { kind: kindParam } = useLocalSearchParams<{ kind?: Kind }>();
+  const [kind, setKind] = useState<Kind>(kindParam === 'event' || kindParam === 'message' ? kindParam : 'game');
   const [channel, setChannel] = useState<ManualChannel>('phone');
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');

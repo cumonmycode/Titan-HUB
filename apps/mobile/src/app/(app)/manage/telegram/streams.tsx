@@ -8,7 +8,7 @@ import { ActionRow, LinkRow } from '@/components/native-form';
 import { haptic } from '@/lib/haptics';
 import { queryClient } from '@/lib/query';
 import { useClubKey } from '@/lib/queries';
-import { endActiveStream, publishActiveStream, setStreamsAutoPublish, useStreams, type Stream } from '@/lib/telegram-api';
+import { endActiveStream, publishActiveStream, setStreamsAutoPublish, useStreams, type Stream, type StreamsState } from '@/lib/telegram-api';
 
 const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error));
 const SOURCE: Record<Stream['source'], string> = { mafboard: 'MafBoard', studio: 'MafBoard Studio', hub: 'Titan HUB' };
@@ -73,6 +73,21 @@ export default function StreamsScreen() {
             <Toggle label="Публиковать стримы через Tai" isOn={data.autoPublish} onIsOnChange={toggleAuto} />
           </Section>
 
+          {sourceWarning(data) ? (
+            <Section title="Эфир не дойдёт" footer={<Text>{sourceWarning(data)!.text}</Text>}>
+              {sourceWarning(data)!.connection ? (
+                <LinkRow
+                  icon="exclamationmark.triangle.fill"
+                  color="#FF9500"
+                  title={`Включить «Стримы» у «${sourceWarning(data)!.connection!.name}»`}
+                  onPress={() => router.push({ pathname: '/manage/settings/connect/connection', params: { id: sourceWarning(data)!.connection!.id } })}
+                />
+              ) : (
+                <LinkRow icon="exclamationmark.triangle.fill" color="#FF9500" title="Подключить MafBoard" onPress={() => router.push('/manage/settings/connect')} />
+              )}
+            </Section>
+          ) : null}
+
           <Section title="Сейчас" footer={active ? <Text>{`${SOURCE[active.source]} · с ${timeText(active.startedAt)} · ${active.published ? `опубликован в ${active.posts.length} чат(а)` : 'не опубликован'}`}</Text> : undefined}>
             {active ? (
               <>
@@ -102,4 +117,18 @@ export default function StreamsScreen() {
       </Host>
     </>
   );
+}
+
+/**
+ * Почему эфир может не приходить: MafBoard шлёт его через подключение Titan Connect, и без
+ * права «Стримы» HUB отвечает отказом — Tai публиковать нечего.
+ */
+function sourceWarning(data: StreamsState): { text: string; connection: { id: string; name: string } | null } | null {
+  const sources = data.sources;
+  if (!sources) return null;
+  if (sources.some((s) => s.canStream)) return null;
+  const first = sources[0] ?? null;
+  return first
+    ? { text: `У подключения «${first.name}» выключено право «Стримы» — MafBoard присылает эфир, а HUB его не принимает. Включите право, и следующий эфир Tai опубликует сам.`, connection: first }
+    : { text: 'MafBoard не подключён к HUB — эфиры сюда не приходят. Подключите его в «Настройки → Подключения».', connection: null };
 }

@@ -248,12 +248,13 @@ export function useEvent(eventId: string | undefined) {
   });
 }
 
-/** Новые заявки на бронь — веб опрашивает раз в минуту. */
+/** Новые заявки на мероприятия — веб опрашивает раз в минуту. */
 export function useBookingRequests() {
   const club = useClubKey();
   return useQuery({
     queryKey: [club, 'bookings', 'new'],
-    queryFn: () => api.get<{ bookings: BookingRequest[] }>('/bookings?status=new').then((r) => r.bookings),
+    // В «Событиях» — только заявки на мероприятия; записи на игру и обращения — в «Заявках».
+    queryFn: () => api.get<{ bookings: BookingRequest[] }>('/bookings?status=new&kind=event').then((r) => r.bookings),
     refetchInterval: 60_000,
   });
 }

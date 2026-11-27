@@ -25,7 +25,8 @@ const PICK_OPTIONS: ImagePicker.ImagePickerOptions = {
   quality: 1,
 };
 
-export async function uploadImage(asset: ImagePicker.ImagePickerAsset, fit: ImageFit): Promise<string> {
+/** Уменьшенная копия снимка в JPEG — как File для multipart. */
+export async function compressedImage(asset: ImagePicker.ImagePickerAsset, fit: ImageFit): Promise<File> {
   const w = asset.width ?? 0;
   const h = asset.height ?? 0;
   const scale = w && h ? Math.min(1, fit.long / Math.max(w, h), fit.short / Math.min(w, h)) : 1;
@@ -33,12 +34,34 @@ export async function uploadImage(asset: ImagePicker.ImagePickerAsset, fit: Imag
   if (scale < 1) context.resize({ width: Math.round(w * scale) });
   const image = await context.renderAsync();
   const saved = await image.saveAsync({ compress: fit.quality, format: SaveFormat.JPEG });
-  const form = new FormData();
   // Глобальный fetch в Expo 57 — expo/fetch: RN-объект `{ uri, name, type }` он не принимает
   // («Unsupported FormDataPart implementation»), и запрос не уходил. Файл — только как File.
-  form.append('file', new File(saved.uri));
+  return new File(saved.uri);
+}
+
+export async function uploadImage(asset: ImagePicker.ImagePickerAsset, fit: ImageFit): Promise<string> {
+  const form = new FormData();
+  form.append('file', await compressedImage(asset, fit));
   const { url } = await api.post<{ url: string }>('/upload/image', form);
   return url;
+}
+
+/** Фото в переписку: без обрезки, длинная сторона до 1600 px — читается на телефоне. */
+export const CHAT_PHOTO_FIT: ImageFit = { long: 1600, short: 1600, quality: 0.82 };
+
+/** Снять или выбрать фото без обрезки (для чата). null — отменили или нет доступа. */
+export async function pickChatPhoto(source: 'camera' | 'library'): Promise<ImagePicker.ImagePickerAsset | null> {
+  const permission = source === 'camera' ? await ImagePicker.requestCameraPermissionsAsync() : await ImagePicker.requestMediaLibraryPermissionsAsync();
+  if (!permission.granted) {
+    Alert.alert(source === 'camera' ? 'Нужен доступ к камере' : 'Нужен доступ к фото', 'Разрешите доступ в настройках телефона.', [
+      { text: 'Отмена', style: 'cancel' },
+      { text: 'Открыть настройки', onPress: () => void Linking.openSettings() },
+    ]);
+    return null;
+  }
+  const options: ImagePicker.ImagePickerOptions = { mediaTypes: ['images'], quality: 1 };
+  const result = source === 'camera' ? await ImagePicker.launchCameraAsync(options) : await ImagePicker.launchImageLibraryAsync(options);
+  return result.canceled ? null : (result.assets[0] ?? null);
 }
 
 /**

@@ -33,6 +33,7 @@ export const SHEET_ROUTES: Record<string, ReadonlySet<string>> = {
   events: new Set(['edit', 'participants', 'booking-new']),
   analytics: new Set(['check/[checkId]', 'period']),
   manage: new Set([
+    'requests/new',
     'goods/edit',
     'goods/pick',
     'goods/category',

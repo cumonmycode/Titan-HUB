@@ -110,6 +110,7 @@ export interface StoredMessage {
   voice?: boolean
   memo?: string | null
   staffId?: string | null
+  photoUrl?: string | null
 }
 
 export async function appendMessage(db: Database, m: StoredMessage): Promise<void> {
@@ -123,6 +124,7 @@ export async function appendMessage(db: Database, m: StoredMessage): Promise<voi
     voice: !!m.voice,
     memo: m.memo ? m.memo.slice(0, 1_500) : null,
     staffId: m.staffId ?? null,
+    photoUrl: m.photoUrl ?? null,
   })
 }
 

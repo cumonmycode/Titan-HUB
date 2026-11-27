@@ -40,6 +40,8 @@ export const taiMessages = pgTable('tai_messages', {
   voice: boolean('voice').notNull().default(false),
   memo: text('memo'),
   staffId: uuid('staff_id'),
+  // Фото в реплике (миграция 095): от сотрудника из HUB или от клиента, пока диалог ведёт сотрудник.
+  photoUrl: text('photo_url'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 })
 

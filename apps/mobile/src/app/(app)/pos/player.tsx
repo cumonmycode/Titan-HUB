@@ -143,7 +143,7 @@ export default function CheckPeopleSheet() {
               <Text style={[type.footnote, styles.hint]}>
                 {payerId ? 'Найдите клиента — он добавится участником этого чека' : 'Найдите клиента — он станет плательщиком чека'}
               </Text>
-              <PlayerSearch query={query} onQuery={setQuery} onPlayer={pickPlayer} excludeId={payerId} />
+              <PlayerSearch query={query} onQuery={setQuery} onPlayer={pickPlayer} excludeId={payerId} newcomers />
 
               {payerId && (
                 <GlassCard style={styles.nameRow}>
