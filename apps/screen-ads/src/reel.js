@@ -15,10 +15,7 @@
   var TR = 1.6
   var index = 0, cur = null, sent = false, pre = {}
 
-  var brand = document.createElement('div')
-  brand.className = 'reel-brand'
-  brand.innerHTML = '<img src="media/logo.png" alt=""><div>TITAN<small>клуб спортивной мафии</small></div>'
-  reel.appendChild(brand)
+  // Логотипа в ролике нет (владелец: заголовок «Титан, клуб спортивной мафии» мешает).
 
   function preload(s) {
     if (!pre[s.id]) { var box = document.createElement('div'); box.innerHTML = s.html; pre[s.id] = TitanLoad(box) }
@@ -29,7 +26,7 @@
     el.className = s.cls
     el.setAttribute('data-tpl', s.tpl)
     el.innerHTML = s.html
-    reel.insertBefore(el, brand)
+    reel.appendChild(el)
     return el
   }
   function drop(el) { if (el && el.parentNode) el.parentNode.removeChild(el) }
