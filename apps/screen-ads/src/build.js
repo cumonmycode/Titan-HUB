@@ -51,11 +51,11 @@ async function qrBlock(s) {
   return `<div class="qr ${cls}"><div class="qc">${svg}</div><div class="qt"><b>${s.qt}</b><span>${label}</span></div></div>`
 }
 
-function page(s, body) {
+function page(s, body, ver) {
   const cls = `stage t-${s.tpl}${s.tpl === 'faq' && s.tone === 'light' ? ' light-tone' : ''}`
   return `<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>TITAN · ${s.id}</title><link rel="stylesheet" href="ads.css"></head>
-<body><div class="${cls}" data-tpl="${s.tpl}">${body}</div><script src="gsap.min.js"></script><script src="motion.js"></script></body></html>\n`
+<title>TITAN · ${s.id}</title><link rel="stylesheet" href="ads.css?v=${ver}"></head>
+<body><div class="${cls}" data-tpl="${s.tpl}">${body}</div><script src="gsap.min.js?v=${ver}"></script><script src="motion.js?v=${ver}"></script></body></html>\n`
 }
 
 async function main() {
@@ -66,7 +66,7 @@ async function main() {
   for (const s of scenes) {
     if (!T[s.tpl]) throw new Error(`${s.id}: нет шаблона ${s.tpl}`)
     const ph = (photos[s.id] || []).map(photoUrl)
-    const html = page(s, T[s.tpl](s, ph, await qrBlock(s)))
+    const html = page(s, T[s.tpl](s, ph, await qrBlock(s)), shared)
     fs.writeFileSync(path.join(DIST, `${s.id}.html`), html)
     const v = sha(Buffer.concat([Buffer.from(html + shared), ...ph.map((u) => fs.readFileSync(path.join(DIST, u)))]))
     list.push({ id: s.id, file: `${s.id}.html`, tpl: s.tpl, v })
