@@ -6,6 +6,7 @@
 const fs = require('fs')
 const path = require('path')
 const crypto = require('crypto')
+const { execFileSync } = require('child_process')
 const QRCode = require('qrcode')
 const scenes = require('./scenes')
 const { T, QR_POS } = require('./templates')
@@ -58,20 +59,51 @@ function page(s, body, ver) {
 <body><div class="${cls}" data-tpl="${s.tpl}">${body}</div><script src="gsap.min.js?v=${ver}"></script><script src="motion.js?v=${ver}"></script></body></html>\n`
 }
 
+/** Сколько секунд сцена в ролике: где много текста — дольше. */
+const REEL_SECONDS = { faq: 9, quote: 9, steps: 9, chat: 9, daynight: 9, paper: 9, stat: 8.5, grid: 9 }
+
+const stageClass = (s) => `stage t-${s.tpl}${s.tpl === 'faq' && s.tone === 'light' ? ' light-tone' : ''}`
+
+/**
+ * Размытые фоны — заранее размытые маленькие копии (ffmpeg): живой blur на весь экран
+ * на слабой видеокарте даёт рывки.
+ */
+function blurred(html) {
+  return html.replace(/<img class="ph blurred" src="media\/([^"]+)\.(jpg|webp)"/g, (m, name, ext) => {
+    const out = path.join(DIST, 'media', `${name}_b.jpg`)
+    if (!fs.existsSync(out)) execFileSync('ffmpeg', ['-loglevel', 'error', '-y', '-i', path.join(DIST, 'media', `${name}.${ext}`), '-vf', 'scale=640:-2,gblur=sigma=14', '-q:v', '4', out])
+    return `<img class="ph blurred" src="media/${name}_b.jpg"`
+  })
+}
+
 async function main() {
   fs.rmSync(DIST, { recursive: true, force: true })
   copyStatic()
   const shared = sha(Buffer.concat(['ads.css', 'motion.js', 'gsap.min.js'].map((f) => fs.readFileSync(path.join(DIST, f)))))
   const list = []
+  const reelData = new Map()
   for (const s of scenes) {
     if (!T[s.tpl]) throw new Error(`${s.id}: нет шаблона ${s.tpl}`)
     const ph = (photos[s.id] || []).map(photoUrl)
-    const html = page(s, T[s.tpl](s, ph, await qrBlock(s)), shared)
+    const body = blurred(T[s.tpl](s, ph, await qrBlock(s)))
+    const html = page(s, body, shared)
     fs.writeFileSync(path.join(DIST, `${s.id}.html`), html)
     const v = sha(Buffer.concat([Buffer.from(html + shared), ...ph.map((u) => fs.readFileSync(path.join(DIST, u)))]))
     list.push({ id: s.id, file: `${s.id}.html`, tpl: s.tpl, v })
+    reelData.set(s.id, { id: s.id, tpl: s.tpl, cls: stageClass(s), d: REEL_SECONDS[s.tpl] || 8, html: body })
   }
   fs.writeFileSync(path.join(DIST, 'scenes.json'), JSON.stringify(list, null, 1) + '\n')
+
+  // Ролик: сцены в порядке reel-order.json (чередование тем), потом остальные.
+  copy(path.join(__dirname, 'reel.js'), path.join(DIST, 'reel.js'))
+  const order = JSON.parse(fs.readFileSync(path.join(ROOT, 'reel-order.json'), 'utf8')).filter((id) => reelData.has(id))
+  const reel = [...order, ...[...reelData.keys()].filter((id) => !order.includes(id))].map((id) => reelData.get(id))
+  const reelVer = sha(Buffer.from(JSON.stringify(reel) + shared + fs.readFileSync(path.join(DIST, 'reel.js'))))
+  fs.writeFileSync(path.join(DIST, 'reel.html'), `<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>TITAN · ролик</title><link rel="stylesheet" href="ads.css?v=${shared}"></head>
+<body><div class="reel"></div><script src="gsap.min.js?v=${shared}"></script><script src="motion.js?v=${shared}"></script>
+<script>window.REEL=${JSON.stringify(reel).replace(/<\//g, '<\\/')}</script><script src="reel.js?v=${reelVer}"></script></body></html>\n`)
+  fs.writeFileSync(path.join(DIST, 'reel.json'), JSON.stringify({ v: reelVer, scenes: reel.length, seconds: reel.reduce((n, s) => n + s.d - 1.1, 0) }) + '\n')
   const size = fs.readdirSync(path.join(DIST, 'media')).reduce((n, f) => n + fs.statSync(path.join(DIST, 'media', f)).size, 0)
   console.log(`${list.length} сцен, ${new Set(list.map((x) => x.tpl)).size} шаблонов, media ${(size / 1e6).toFixed(1)} МБ`)
 }
