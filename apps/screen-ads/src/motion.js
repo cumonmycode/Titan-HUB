@@ -106,19 +106,15 @@
     function qr(at) {
       var box = $('.qr'); if (!box) return
       tl.from(box, { opacity: 0, y: 50, scale: 0.9, duration: 1, ease: E }, at)
-      $$('.qc').forEach(function (qc) { for (var t = at + 1.1; t < D - 1.2; t += 3.6) tl.fromTo(qc, { '--shine': '-120%' }, { '--shine': '120%', duration: 1.1, ease: 'power2.inOut' }, t) })
     }
     function brand(at) { var b = $$('.a-brand'); if (b.length) tl.from(b, { opacity: 0, y: -24, duration: 1, ease: E }, at || 0.15) }
-    function sweep(at) { var s = $('.a-sweep'); if (s) tl.fromTo(s, { xPercent: -100 }, { xPercent: 100, duration: 1.7, ease: 'power2.inOut' }, at) }
+    function sweep() { /* блики убраны: владелец — «убери блики, которые остаются на изображении» */ }
 
     function atmosphere() {
       var grain = document.createElement('div'); grain.className = 'grain'
       var vig = document.createElement('div'); vig.className = 'vignette'
-      var leak = document.createElement('div'); leak.className = 'leak'
-      stage.appendChild(vig); stage.appendChild(grain); stage.appendChild(leak)
+      stage.appendChild(vig); stage.appendChild(grain)
       tl.to(grain, { x: -140, y: 90, duration: D, ease: 'steps(' + Math.round(D * 8) + ')' }, 0)
-      tl.fromTo(leak, { x: -1100, y: -700, opacity: 0 }, { x: 1500, y: 300, opacity: 1, duration: D * 0.6, ease: 'sine.inOut' }, 0.4)
-      tl.to(leak, { opacity: 0, duration: D * 0.25 }, 0.4 + D * 0.6)
     }
 
     function outro() {
@@ -136,7 +132,7 @@
     var CHOREO = {
       hero: function () {
         var mode = $('.a-bg').getAttribute('data-mode')
-        tl.from('.a-bg', { opacity: 0, duration: 1.2, ease: 'power2.out' }, 0)
+        if (!opts.noOutro) tl.from('.a-bg', { opacity: 0, duration: 1.2, ease: 'power2.out' }, 0)
         tl.fromTo('.a-bg .ph', { scale: 1.4 }, { scale: 1.12, duration: 1.9, ease: E }, 0)
         tl.to('.a-bg .ph', { scale: 1.0, xPercent: -3, duration: Math.max(1, D - 1.9), ease: 'none' }, 1.9)
         tl.from('.a-shade', { xPercent: mode === 'glass' ? 0 : -45, opacity: 0, duration: 1.3, ease: E }, 0.1)
@@ -148,7 +144,7 @@
       blinds: function () {
         var s1 = $$('.a-strips1 .strip-in'), s2 = $$('.a-strips2 .strip-in')
         tl.set(s2, { yPercent: function (i) { return i % 2 ? -101 : 101 } }, 0)
-        tl.from(s1, { yPercent: function (i) { return i % 2 ? 101 : -101 }, duration: 1.2, ease: 'power4.out', stagger: 0.07 }, 0.15)
+        if (!opts.noOutro) tl.from(s1, { yPercent: function (i) { return i % 2 ? 101 : -101 }, duration: 1.2, ease: 'power4.out', stagger: 0.07 }, 0.15)
         tl.to(s2, { yPercent: 0, duration: 1.25, ease: 'power4.inOut', stagger: 0.07 }, D * 0.47)
         kb('.bl-photos', { scale: 1.14 }, { scale: 1 }, 0)
         tl.from('.a-edge', { scaleY: 0, transformOrigin: '50% 0', duration: 1.2, ease: E }, 0.8)
@@ -220,8 +216,8 @@
       },
 
       diagonal: function () {
-        tl.from('.da', { x: -1150, duration: 1.3, ease: 'power4.out' }, 0.1)
-        tl.from('.db', { x: 1150, duration: 1.3, ease: 'power4.out' }, 0.25)
+        if (!opts.noOutro) tl.from('.da', { x: -1150, duration: 1.3, ease: 'power4.out' }, 0.1)
+        if (!opts.noOutro) tl.from('.db', { x: 1150, duration: 1.3, ease: 'power4.out' }, 0.25)
         kb('.a-dh .ph', { scale: 1.22 }, { scale: 1.02 }, 0)
         tl.from('.a-badge', { scale: 0, rotation: -200, duration: 0.95, ease: E }, 1.05)
         tl.to('.a-badge', { rotation: 12, duration: Math.max(1, D - 3), ease: 'sine.inOut' }, 2.2)
@@ -244,12 +240,11 @@
         var ph = $$('.a-phone')
         tl.from(ph, { y: 340, rotationY: -42, rotationX: 22, opacity: 0, duration: 1.5, ease: E, stagger: 0.16 }, 0.5)
         tl.to(ph, { rotationY: -10, rotationX: 4, y: -18, duration: Math.max(1, D - 2.5), ease: 'sine.inOut', stagger: 0.2 }, 2.0)
-        ph.forEach(function (p) { for (var t = 2.3; t < D - 2; t += 4) tl.fromTo(p.querySelector('.glare'), { '--g': '-120%' }, { '--g': '120%', duration: 1.4, ease: 'power2.inOut' }, t) })
         kicker(0.3); words('.a-title', 0.45); fadeUp('.a-lead', 1.0); qr(1.8); brand()
       },
 
       quote: function () {
-        tl.from('.a-qphoto', { xPercent: 100, duration: 1.4, ease: 'power4.inOut' }, 0.1)
+        if (!opts.noOutro) tl.from('.a-qphoto', { xPercent: 100, duration: 1.4, ease: 'power4.inOut' }, 0.1)
         kb('.a-qphoto .ph', { scale: 1.3 }, { scale: 1.02, yPercent: -2 }, 0)
         tl.from('.a-qq', { scale: 0, opacity: 0, rotate: -25, duration: 1, ease: E }, 0.6)
         var w = $$('.qtext .wi'), step = Math.min(0.12, 3.5 / Math.max(1, w.length))
@@ -301,7 +296,6 @@
           tl.fromTo(gift, { rotationY: -115, rotationX: 22, opacity: 0 }, { rotationY: -14, rotationX: 7, opacity: 1, duration: 1.6, ease: E }, 0.5)
           tl.to(gift, { rotationY: -3, rotationX: 2, duration: Math.max(1, D - 2.5), ease: 'sine.inOut' }, 2.1)
           kb('.gc-photo .ph', { scale: 1.3 }, { scale: 1.05 }, 0)
-          for (var t = 2.2; t < D - 1.5; t += 3.5) tl.fromTo('.a-shine', { xPercent: -120 }, { xPercent: 120, duration: 1.3, ease: 'power2.inOut' }, t)
         }
         var books = $$('.a-book')
         if (books.length) {
@@ -323,12 +317,12 @@
       },
 
       daynight: function () {
-        tl.from('.a-night', { xPercent: -100, duration: 1.3, ease: 'power4.inOut' }, 0.05)
+        if (!opts.noOutro) tl.from('.a-night', { xPercent: -100, duration: 1.3, ease: 'power4.inOut' }, 0.05)
         kb('.a-night .ph', { scale: 1.3 }, { scale: 1.05 }, 0)
         tl.from('.a-moon', { y: 240, opacity: 0, duration: 2.2, ease: 'power2.out' }, 0.7)
         chars('.night h2', 1.0)
         fadeUp('.a-lead', 1.9)
-        tl.from('.a-day', { xPercent: 100, duration: 1.3, ease: 'power4.inOut' }, 1.2)
+        if (!opts.noOutro) tl.from('.a-day', { xPercent: 100, duration: 1.3, ease: 'power4.inOut' }, 1.2)
         kb('.a-day .ph', { scale: 1.3 }, { scale: 1.05 }, 1.2)
         tl.from('.a-sun', { y: 320, opacity: 0, duration: 2.2, ease: 'power2.out' }, 1.7)
         chars('.day h2', 2.0)
@@ -344,7 +338,6 @@
         var box = $('.qr')
         if (box) {
           tl.from(box, { scale: 0.7, opacity: 0, rotation: -8, duration: 1.1, ease: E }, 0.9)
-          for (var t = 2.2; t < D - 1.2; t += 3.5) tl.fromTo($$('.qc'), { '--shine': '-120%' }, { '--shine': '120%', duration: 1.1, ease: 'power2.inOut' }, t)
         }
         brand(0.4)
       },

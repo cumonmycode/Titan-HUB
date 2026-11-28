@@ -1,7 +1,9 @@
 /**
- * Ролик: все сцены подряд по кругу, без остановок. Следующая сцена подгружается заранее,
- * входит переходом внахлёст, пока предыдущая ещё движется; после перехода предыдущая
- * удаляется (в документе не больше двух сцен). Переходы — на transform и opacity.
+ * Ролик — одна непрерывная композиция: сцены идут подряд по кругу, камера не
+ * останавливается. Следующая сцена выезжает из той же плоскости (сбоку, сверху или из
+ * глубины), её край растворяется в предыдущей сцене — на время перехода это один кадр.
+ * Логотип клуба один на весь ролик и не двигается. В документе не больше двух сцен.
+ * Движение — только transform, opacity и неподвижные маски краёв.
  * window.REEL = [{ id, tpl, cls, d, html }] — из build.js.
  */
 (function () {
@@ -10,8 +12,13 @@
   var reel = document.querySelector('.reel')
   var scale = TitanFit(reel)
   addEventListener('resize', function () { scale = TitanFit(reel) })
-  var TR = 1.1
+  var TR = 1.6
   var index = 0, cur = null, sent = false, pre = {}
+
+  var brand = document.createElement('div')
+  brand.className = 'reel-brand'
+  brand.innerHTML = '<img src="media/logo.png" alt=""><div>TITAN<small>клуб спортивной мафии</small></div>'
+  reel.appendChild(brand)
 
   function preload(s) {
     if (!pre[s.id]) { var box = document.createElement('div'); box.innerHTML = s.html; pre[s.id] = TitanLoad(box) }
@@ -22,89 +29,31 @@
     el.className = s.cls
     el.setAttribute('data-tpl', s.tpl)
     el.innerHTML = s.html
-    reel.appendChild(el)
+    reel.insertBefore(el, brand)
     return el
   }
-  function overlay(css) {
-    var d = document.createElement('div')
-    d.className = 'tr-bar'
-    for (var k in css) d.style[k] = css[k]
-    reel.appendChild(d)
-    return d
-  }
   function drop(el) { if (el && el.parentNode) el.parentNode.removeChild(el) }
+  function mask(el, value) { el.style.webkitMaskImage = value; el.style.maskImage = value }
 
-  // ── Переходы: a — уходящая сцена, b — входящая ──
-  var TRANSITIONS = [
-    function zoomThrough(a, b) {
-      return gsap.timeline()
-        .to(a, { scale: 1.45, opacity: 0, duration: TR, ease: 'power2.in' }, 0)
-        .fromTo(b, { scale: 0.82, opacity: 0 }, { scale: 1, opacity: 1, duration: TR, ease: 'expo.out' }, 0.3)
-    },
-    function violetWipe(a, b) {
-      var band = overlay({ left: '0', top: '-30%', width: '2700px', height: '160%', background: 'linear-gradient(90deg, #5b21b6, #8b5cf6 40%, #c4b5fd 50%, #8b5cf6 60%, #5b21b6)', transform: 'translateX(-2900px) skewX(-14deg)' })
-      gsap.set(b, { opacity: 0 })
-      return gsap.timeline({ onComplete: function () { drop(band) } })
-        .to(band, { x: 2900, duration: TR * 1.2, ease: 'power3.inOut' }, 0)
-        .set(b, { opacity: 1 }, TR * 0.6).set(a, { opacity: 0 }, TR * 0.6)
-        .fromTo(b, { x: -120 }, { x: 0, duration: TR, ease: 'expo.out' }, TR * 0.6)
-    },
-    function push(a, b) {
-      return gsap.timeline()
-        .to(a, { x: -1920, duration: TR, ease: 'power4.inOut' }, 0)
-        .fromTo(b, { x: 1920 }, { x: 0, duration: TR, ease: 'power4.inOut' }, 0)
-    },
-    function iris(a, b) {
-      return gsap.timeline()
-        .fromTo(b, { clipPath: 'circle(0% at 50% 50%)' }, { clipPath: 'circle(75% at 50% 50%)', duration: TR, ease: 'power3.inOut' }, 0)
-        .to(a, { scale: 1.12, duration: TR, ease: 'power2.in' }, 0)
-        .set(b, { clipPath: 'none' })
-    },
-    function shutter(a, b) {
-      var strips = []
-      for (var i = 0; i < 7; i++) strips.push(overlay({ left: (i * 1920 / 7) + 'px', top: '0', width: Math.ceil(1920 / 7) + 2 + 'px', height: '1080px', background: i % 2 ? '#7c3aed' : '#8b5cf6', transform: 'scaleY(0)', transformOrigin: '50% 0' }))
-      gsap.set(b, { opacity: 0 })
-      return gsap.timeline({ onComplete: function () { strips.forEach(drop) } })
-        .to(strips, { scaleY: 1, duration: TR * 0.5, ease: 'power3.in', stagger: 0.04 }, 0)
-        .set(b, { opacity: 1 }).set(a, { opacity: 0 })
-        .set(strips, { transformOrigin: '50% 100%' })
-        .to(strips, { scaleY: 0, duration: TR * 0.6, ease: 'power3.out', stagger: 0.04 })
-    },
-    function logoFly(a, b) {
-      var logo = document.createElement('img')
-      logo.src = 'media/logo.png'
-      logo.className = 'tr-bar'
-      logo.style.cssText = 'left:704px;top:284px;width:512px;height:512px;transform:scale(.05);opacity:0'
-      reel.appendChild(logo)
-      gsap.set(b, { opacity: 0 })
-      return gsap.timeline({ onComplete: function () { drop(logo) } })
-        .to(logo, { opacity: 1, duration: 0.15 }, 0)
-        .to(logo, { scale: 34, duration: TR, ease: 'power3.in' }, 0)
-        .set(b, { opacity: 1 }, TR).set(a, { opacity: 0 }, TR)
-        .to(logo, { opacity: 0, duration: 0.5, ease: 'power2.out' }, TR)
-        .fromTo(b, { scale: 1.12 }, { scale: 1, duration: 1, ease: 'expo.out' }, TR)
-    },
-    function flashCut(a, b) {
-      var flash = overlay({ left: '0', top: '0', width: '1920px', height: '1080px', background: '#fff', opacity: '0' })
-      gsap.set(b, { opacity: 0 })
-      return gsap.timeline({ onComplete: function () { drop(flash) } })
-        .to(a, { scale: 1.08, duration: 0.35, ease: 'power2.in' }, 0)
-        .to(flash, { opacity: 1, duration: 0.12 }, 0.25)
-        .set(b, { opacity: 1 }, 0.37).set(a, { opacity: 0 }, 0.37)
-        .fromTo(b, { scale: 1.18 }, { scale: 1, duration: 1.1, ease: 'expo.out' }, 0.37)
-        .to(flash, { opacity: 0, duration: 0.7, ease: 'power2.out' }, 0.37)
-    },
-    function riseUp(a, b) {
-      return gsap.timeline()
-        .to(a, { y: -380, opacity: 0.2, duration: TR, ease: 'power3.inOut' }, 0)
-        .fromTo(b, { y: 1080 }, { y: 0, duration: TR, ease: 'power4.inOut' }, 0)
-    },
-    function spin(a, b) {
-      return gsap.timeline()
-        .to(a, { rotation: -7, scale: 1.4, opacity: 0, duration: TR, ease: 'power2.in' }, 0)
-        .fromTo(b, { rotation: 7, scale: 1.35, opacity: 0 }, { rotation: 0, scale: 1, opacity: 1, duration: TR, ease: 'expo.out' }, 0.25)
-    },
-  ]
+  /** Камера едет дальше: dx, dy — откуда выезжает новая сцена; края сцен растворены. */
+  function pan(dx, dy) {
+    return function (a, b) {
+      var dir = dx > 0 ? '90deg' : dx < 0 ? '270deg' : dy > 0 ? '180deg' : '0deg'
+      mask(b, 'linear-gradient(' + dir + ', transparent 0%, #000 28%)')
+      mask(a, 'linear-gradient(' + dir + ', #000 72%, transparent 100%)')
+      return gsap.timeline({ onComplete: function () { mask(b, '') } })
+        .to(a, { x: -dx, y: -dy, scale: 1.04, duration: TR, ease: 'power2.inOut' }, 0)
+        .fromTo(b, { x: dx, y: dy, scale: 1.06 }, { x: 0, y: 0, scale: 1, duration: TR, ease: 'power2.inOut' }, 0)
+    }
+  }
+  /** Камера уходит в глубину: прежняя сцена наезжает и тает, новая проступает из-под неё. */
+  function depth(a, b) {
+    return gsap.timeline()
+      .to(a, { scale: 1.3, opacity: 0, duration: TR, ease: 'power2.in' }, 0)
+      .fromTo(b, { scale: 0.9, opacity: 0 }, { scale: 1, opacity: 1, duration: TR, ease: 'power2.out' }, 0)
+  }
+
+  var TRANSITIONS = [pan(1920, 0), depth, pan(0, 1080), pan(-1920, 0), depth, pan(0, -1080)]
 
   function next() {
     var k = index++

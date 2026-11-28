@@ -335,3 +335,13 @@ h1 em, h2 em { font-style: normal; color: var(--v2); }
 .reel > .stage { transform: none; will-change: transform, opacity; }
 .tr-bar { position: absolute; z-index: 90; pointer-events: none; will-change: transform; }
 .tr-flash { position: absolute; inset: 0; background: #fff; z-index: 90; opacity: 0; pointer-events: none; }
+
+/* Блики убраны (владелец: «убери блики, которые остаются на изображении»). */
+.qc::after, .glare, .gc-shine, .sweep, .leak { display: none !important; }
+
+/* Ролик — единая композиция: логотип клуба один на весь ролик, поверх сцен. */
+.reel .a-brand { visibility: hidden; }
+.reel-brand { position: absolute; left: 110px; top: 80px; z-index: 100; display: flex; align-items: center; gap: 16px; padding: 12px 24px 12px 14px; border-radius: 999px;
+  background: rgba(11,8,20,.72); color: #fff; font-weight: 700; font-size: 26px; letter-spacing: .18em; }
+.reel-brand img { width: 56px; height: 56px; }
+.reel-brand small { display: block; font-size: 17px; letter-spacing: .03em; font-weight: 500; color: var(--v3); margin-top: 2px; }
