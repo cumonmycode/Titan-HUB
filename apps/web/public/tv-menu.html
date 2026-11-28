@@ -1477,6 +1477,29 @@ html.t-halloween, .t-halloween body { background: #0b0712; }
       x.send();
     } catch (e) { /* без перезагрузки */ }
   }, RELOAD_MS);
+
+  // Новая версия страницы экрана на сервере (выкладка) — перезагружаемся сами, не дожидаясь
+  // 12 часов: старая вёрстка может не знать новых элементов показа. Версия — ETag или
+  // Last-Modified страницы; первая проверка запоминает текущую. Нет ответа — ничего не делаем.
+  var VERSION_CHECK_MS = 120000;
+  var pageVersion = null;
+  function checkVersion() {
+    try {
+      var x = new XMLHttpRequest();
+      x.open('HEAD', location.pathname + '?v=' + Date.now(), true);
+      x.timeout = 15000;
+      x.onreadystatechange = function () {
+        if (x.readyState !== 4 || x.status !== 200) return;
+        var v = x.getResponseHeader('ETag') || x.getResponseHeader('Last-Modified');
+        if (!v) return;
+        if (pageVersion === null) { pageVersion = v; return; }
+        if (v !== pageVersion) { report('Новая версия страницы экрана — перезагрузка'); location.reload(); }
+      };
+      x.send();
+    } catch (e) { /* без проверки */ }
+  }
+  setTimeout(checkVersion, 5000);
+  setInterval(checkVersion, VERSION_CHECK_MS);
   showMsg();
 })();
 </script>
