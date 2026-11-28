@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; frame-src https: http:; style-src 'self' 'unsafe-inline'; script-src 'self'">
+<title>Titan Screen — ТВ</title>
+<link rel="stylesheet" href="tv.css">
+</head>
+<body>
+  <!-- Страница показа /screen/<id>; поворот — классом на body (как висит телевизор). -->
+  <iframe id="show" title="Показ" allow="autoplay"></iframe>
+  <div id="offline" hidden>
+    <div class="mark">T</div>
+    <p id="offline-text">Подключаемся к клубу…</p>
+  </div>
+  <div id="message" hidden><span id="message-text"></span></div>
+  <script src="tv.js"></script>
+</body>
+</html>

@@ -1,0 +1,39 @@
+{
+  "name": "titan-screen",
+  "productName": "Titan Screen",
+  "version": "1.0.0",
+  "description": "Titan Screen — показ экрана Titan HUB на телевизоре, подключённом к компьютеру с Windows",
+  "main": "src/main.js",
+  "private": true,
+  "author": "Titan",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test test/*.test.js",
+    "dist:win": "electron-builder --win nsis --x64"
+  },
+  "devDependencies": {
+    "electron": "^39.2.0",
+    "electron-builder": "^26.0.12"
+  },
+  "build": {
+    "appId": "ru.titan.screen",
+    "productName": "Titan Screen",
+    "copyright": "Titan",
+    "directories": { "output": "dist", "buildResources": "build" },
+    "files": ["src/**/*", "package.json"],
+    "win": {
+      "target": [{ "target": "nsis", "arch": ["x64"] }],
+      "icon": "build/icon.png",
+      "signExecutable": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": true,
+      "allowToChangeInstallationDirectory": false,
+      "createDesktopShortcut": true,
+      "shortcutName": "Titan Screen",
+      "include": "build/installer.nsh",
+      "artifactName": "TitanScreen-Setup-${version}.exe"
+    }
+  }
+}

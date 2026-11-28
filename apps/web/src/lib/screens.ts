@@ -40,9 +40,21 @@ export interface Screen {
   /** ТВ в кабинке: реклама на главном экране и заставке, и чья лента (null — как на экране с меню). */
   adsEnabled: boolean
   adsScreenId: string | null
+  /** Компьютер с Titan Screen: монитор для показа (null — первый не основной). */
+  displayId?: string | null
 }
 
-export type DeviceApp = 'menu' | 'launcher'
+/** Что привязано: приставка Titan Menu, ТВ кабинки (Titan TV) или компьютер с Windows (Titan Screen). */
+export type DeviceApp = 'menu' | 'launcher' | 'desktop'
+
+/** Монитор компьютера с Titan Screen. */
+export interface ScreenDisplay {
+  id: string
+  label: string
+  width: number
+  height: number
+  primary: boolean
+}
 
 export interface DeviceState {
   screen: 'home' | 'saver' | 'cinema' | 'app' | 'input'
@@ -50,6 +62,9 @@ export interface DeviceState {
   airplay?: { title: string; artist: string; client: string; playing: boolean } | null
   volume?: { level: number; max: number; muted: boolean } | null
   ha?: 'connected' | 'connecting' | 'offline' | 'auth_failed' | 'idle' | null
+  /** Компьютер с Titan Screen: его мониторы и куда сейчас идёт показ. */
+  displays?: ScreenDisplay[] | null
+  output?: string | null
 }
 
 /** Пульт ТВ в кабинке (POST /screens/:id/command). */
@@ -60,6 +75,7 @@ export type ScreenCommand =
   | { action: 'message'; text: string; seconds: number }
   | { action: 'volume'; percent: number }
   | { action: 'mute'; muted: boolean }
+  | { action: 'identify' }
 
 /** Элемент экрана: в показе — меню или картинка, в ленте — картинка или карточка. */
 export interface ScreenSlide {
@@ -163,6 +179,12 @@ export function deviceStatus(s: Pick<Screen, 'paired' | 'online' | 'lastSeenAt'>
   const min = Math.max(1, Math.round((Date.now() - new Date(s.lastSeenAt).getTime()) / 60_000))
   const ago = min < 60 ? `${min} мин` : min < 48 * 60 ? `${Math.round(min / 60)} ч` : `${Math.round(min / 1440)} дн`
   return { label: `Не в сети · был ${ago} назад`, color: '#F59E0B' }
+}
+
+/** «Монитор 2 · 1920×1080», у основного — «основной». */
+export function displayLabel(d: ScreenDisplay, index: number): string {
+  const name = d.label?.trim() || `Монитор ${index + 1}`
+  return `${index + 1}. ${name} · ${d.width}×${d.height}${d.primary ? ' · основной' : ''}`
 }
 
 /** Загрузка картинки показа — общий загрузчик (сжатие до 1920/1080 px, JPEG < 900 КБ). */

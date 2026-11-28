@@ -8,6 +8,8 @@ packages:
   - "!apps/home"
   # Сайт клуба (titanmafia.ru) — отдельный npm-проект со своим Dockerfile.
   - "!apps/site"
+  # Titan Screen для Windows (Electron) — свой npm, в серверные сборки не входит.
+  - "!apps/screen-pc"
 allowBuilds:
   esbuild: true
   msgpackr-extract: true

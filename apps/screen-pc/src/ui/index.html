@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; frame-src https: http:; img-src 'self' data: https:; style-src 'self' 'unsafe-inline'; script-src 'self'">
+<title>Titan Screen</title>
+<link rel="stylesheet" href="ui.css">
+</head>
+<body>
+  <!-- Не подключён -->
+  <main id="pair-view" hidden>
+    <header class="brand"><div class="logo">T</div><div><h1>Titan Screen</h1><p>Экран Titan HUB на телевизоре этого компьютера</p></div></header>
+    <div class="pair-grid">
+      <section class="card">
+        <h2>С телефона</h2>
+        <p class="note">Titan HUB → Управление → Экраны → «Подключить ТВ». Телефон и компьютер — в одной сети.</p>
+        <div class="code" id="pair-code">····</div>
+        <p class="note">Код компьютера. Адрес в сети: <b id="pair-ips">—</b></p>
+        <p class="warn" id="local-error" hidden></p>
+      </section>
+      <section class="card">
+        <h2>Кодом из HUB</h2>
+        <p class="note">В HUB откройте экран → «Подключить компьютер с Windows» и введите код сюда.</p>
+        <form id="pair-form">
+          <label>Адрес клуба<input id="pair-host" placeholder="kbr.titanpos.ru" autocomplete="off" spellcheck="false"></label>
+          <label>Код<input id="pair-input" placeholder="XXXX-XXXX" maxlength="9" autocomplete="off" spellcheck="false"></label>
+          <button type="submit" class="primary" id="pair-submit">Подключить</button>
+        </form>
+        <p class="warn" id="pair-error" hidden></p>
+      </section>
+    </div>
+  </main>
+
+  <!-- Подключён -->
+  <main id="main-view" hidden>
+    <header class="top">
+      <div class="logo small">T</div>
+      <div class="title">
+        <h1 id="screen-name">Экран</h1>
+        <p><span class="dot" id="status-dot"></span><span id="status-text">—</span></p>
+      </div>
+      <nav class="tabs" role="tablist">
+        <button role="tab" data-tab="tv" class="active">Телевизор</button>
+        <button role="tab" data-tab="hub">Показ и реклама</button>
+      </nav>
+    </header>
+
+    <div class="tab" id="tab-tv">
+      <div class="grid">
+        <div class="col">
+          <section class="card">
+            <h2>Монитор для показа</h2>
+            <div class="layout" id="layout" aria-label="Мониторы компьютера"></div>
+            <div class="chips" id="display-chips"></div>
+            <p class="note" id="output-note"></p>
+            <div class="row"><button id="identify">Показать номера на мониторах</button></div>
+          </section>
+          <section class="card">
+            <h2>Как висит телевизор</h2>
+            <div class="segment" id="rotation">
+              <button data-rotation="0"><i class="ico r0"></i>Горизонтально</button>
+              <button data-rotation="90"><i class="ico r90"></i>Вертикально ↻</button>
+              <button data-rotation="270"><i class="ico r270"></i>Вертикально ↺</button>
+            </div>
+            <p class="note">Поворачивает картинку на телевизоре. То же поле, что в HUB: поменяете здесь — поменяется и там.</p>
+          </section>
+        </div>
+        <div class="col">
+          <section class="card">
+            <h2>Сейчас на телевизоре</h2>
+            <div class="preview" id="preview"><iframe id="preview-frame" title="Предпросмотр" tabindex="-1"></iframe></div>
+            <div class="row"><button id="reload">Перезагрузить показ</button><button id="open-hub-tab">Настроить показ и рекламу</button></div>
+          </section>
+          <section class="card">
+            <h2>Компьютер</h2>
+            <label class="toggle"><input type="checkbox" id="autostart"><span>Запускать вместе с Windows</span></label>
+            <p class="note" id="pc-info"></p>
+            <div class="row"><button class="danger" id="unpair">Отвязать от экрана</button></div>
+          </section>
+        </div>
+      </div>
+    </div>
+
+    <div class="tab" id="tab-hub" hidden>
+      <div class="hub-bar">
+        <span class="note">Тот же экран, что в Titan HUB: показ, картинки, реклама в ленте, тема. Войдите один раз — вход сохранится.</span>
+        <button id="hub-external">Открыть в браузере</button>
+      </div>
+      <div class="hub-frame" id="hub-frame"></div>
+    </div>
+  </main>
+
+  <div id="toast" hidden></div>
+  <script src="ui.js"></script>
+</body>
+</html>

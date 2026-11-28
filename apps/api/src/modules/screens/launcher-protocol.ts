@@ -25,6 +25,15 @@ export const DeviceStateSchema = z.object({
     muted: z.boolean(),
   }).nullable().optional(),
   ha: z.enum(['connected', 'connecting', 'offline', 'auth_failed', 'idle']).nullable().optional(),
+  // Компьютер с Titan Screen: его мониторы и куда сейчас выводится показ (null — никуда).
+  displays: z.array(z.object({
+    id: text(40),
+    label: text(80),
+    width: z.number().int().min(0).max(20000),
+    height: z.number().int().min(0).max(20000),
+    primary: z.boolean(),
+  })).max(8).nullable().optional(),
+  output: text(40).nullable().optional(),
 })
 
 /**
@@ -32,7 +41,8 @@ export const DeviceStateSchema = z.object({
  *   home — главный экран (закрывает приложение гостя), screensaver — заставка,
  *   reset — после гостей: главный экран, закрыть приложения, обычная громкость,
  *   message — надпись поверх всего, что идёт на ТВ, volume — громкость в процентах,
- *   mute — выключить или вернуть звук.
+ *   mute — выключить или вернуть звук,
+ *   identify — номера на мониторах (только компьютер с Titan Screen).
  */
 export const CommandSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('home') }),
@@ -45,14 +55,23 @@ export const CommandSchema = z.discriminatedUnion('action', [
   }),
   z.object({ action: z.literal('volume'), percent: z.number().int().min(0).max(100) }),
   z.object({ action: z.literal('mute'), muted: z.boolean() }),
+  // Компьютер с Titan Screen: крупные номера на всех мониторах — какой из них телевизор.
+  z.object({ action: z.literal('identify') }),
 ])
+
+/** Что из пульта умеет компьютер с Titan Screen. */
+export const DESKTOP_ACTIONS: ReadonlySet<ScreenCommand['action']> = new Set(['message', 'identify'])
 
 export type ScreenCommand = z.infer<typeof CommandSchema>
 
-/** Сигнал ТВ: команда одному экрану или «реклама поменялась» всем ('*'). */
+/**
+ * Сигнал ТВ: команда одному экрану, «реклама поменялась» всем ('*') или «поменялись
+ * монитор/поворот» — только компьютеру с Titan Screen (ТВ кабинок его не получают).
+ */
 export type ScreenSignal =
   | { type: 'command'; screenId: string; command: ScreenCommand & { id: string } }
   | { type: 'content'; screenId: string }
+  | { type: 'settings'; screenId: string }
 
 export const screensChannel = (clubId: string | null | undefined) => `titan:screens:${clubChannelSuffix(clubId)}`
 
@@ -63,7 +82,7 @@ export const commandSignal = (screenId: string, command: ScreenCommand): ScreenS
 export function signalFor(screenId: string, raw: string): ScreenSignal | null {
   try {
     const signal = JSON.parse(raw) as ScreenSignal
-    if (signal?.type !== 'command' && signal?.type !== 'content') return null
+    if (signal?.type !== 'command' && signal?.type !== 'content' && signal?.type !== 'settings') return null
     return signal.screenId === screenId || signal.screenId === '*' ? signal : null
   } catch {
     return null

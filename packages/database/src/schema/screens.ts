@@ -10,6 +10,18 @@ export type ScreenDeviceState = {
   volume?: { level: number; max: number; muted: boolean } | null
   /** Связь со «Светом и климатом» (Home Assistant). */
   ha?: 'connected' | 'connecting' | 'offline' | 'auth_failed' | 'idle' | null
+  /** Компьютер с Windows (миграция 100): его мониторы и на какой сейчас идёт показ. */
+  displays?: ScreenDisplay[] | null
+  output?: string | null
+}
+
+/** Монитор компьютера с Titan Screen: id — его номер в Windows, стабилен между запусками. */
+export type ScreenDisplay = {
+  id: string
+  label: string
+  width: number
+  height: number
+  primary: boolean
 }
 
 // «Экраны» (миграция 068): телевизоры клуба с приложением Titan Menu, у каждого свои
@@ -18,6 +30,8 @@ export type ScreenDeviceState = {
 // pairing_* — одноразовый секрет привязки, который телефон передаёт приставке.
 // С миграции 091 привязать можно и ТВ кабинки (device_app 'launcher', Titan TV): у него
 // пульт из HUB, состояние device_state и реклама ads_* на главном экране и заставке.
+// С миграции 100 — и компьютер с Windows (device_app 'desktop', Titan Screen): показ
+// идёт на второй монитор, display_id — на какой (NULL — первый не основной).
 export const screens = pgTable('screens', {
   id: uuid('id').primaryKey().defaultRandom(),
   name: text('name').notNull(),
@@ -35,9 +49,10 @@ export const screens = pgTable('screens', {
   lastSeenAt: timestamp('last_seen_at', { withTimezone: true }),
   pairingHash: text('pairing_hash'),
   pairingExpiresAt: timestamp('pairing_expires_at', { withTimezone: true }),
-  deviceApp: text('device_app').$type<'menu' | 'launcher'>(),
+  deviceApp: text('device_app').$type<'menu' | 'launcher' | 'desktop'>(),
   deviceState: jsonb('device_state').$type<ScreenDeviceState>(),
   adsEnabled: boolean('ads_enabled').notNull().default(true),
+  displayId: text('display_id'),
   adsScreenId: uuid('ads_screen_id').references((): AnyPgColumn => screens.id, { onDelete: 'set null' }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),

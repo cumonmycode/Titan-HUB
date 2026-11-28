@@ -20,6 +20,13 @@
  * своё состояние, берёт рекламу (GET /device/content) и слушает пульт из HUB
  * (GET /device/stream; команды — POST /:id/command, launcher.ts).
  *
+ * Компьютер с Windows (device_app 'desktop', Titan Screen, миграция 100): показ идёт
+ * на второй монитор. Привязать можно и с телефона (как приставку), и кодом из HUB
+ * (POST /:id/pairing?format=code — 8 знаков вводятся в самом приложении). В пульсе он
+ * присылает свои мониторы; на какой выводить — screens.display_id, его меняют и HUB
+ * (PATCH /:id), и само приложение (PATCH /device/settings). Поменяли — сигнал
+ * 'settings' по потоку, и компьютер переносит показ сразу.
+ *
  * Показ: GET /:id/public — без авторизации, то же, что видит гость на ТВ.
  */
 import type { AppEnv } from '../../types.js'
@@ -38,6 +45,7 @@ import { requestOrigin } from '../notifications/staff-calls.js'
 import { SCREEN_THEMES, screenPayload } from './screen-content.js'
 import {
   CommandSchema,
+  DESKTOP_ACTIONS,
   DeviceStateSchema,
   adsVersion,
   commandSignal,
@@ -48,12 +56,24 @@ import {
 } from './launcher.js'
 
 const PAIRING_TTL_MS = 10 * 60_000
+/** Код привязки для ввода руками: 8 знаков без похожих (0/O, 1/I/L) — 31⁸ ≈ 8·10¹¹. */
+const CODE_ALPHABET = '23456789ABCDEFGHJKMNPQRSTUVWXYZ'
+const CODE_LENGTH = 8
 /** Приставка отмечается раз в 20 с; дольше минуты тишины — «не в сети». */
 const ONLINE_WINDOW_MS = 60_000
 /** Поток пульта молчит не дольше 25 с, иначе nginx и Wi‑Fi роутер его закроют. */
 const STREAM_PING_MS = 25_000
 
 const sha256 = (value: string) => createHash('sha256').update(value).digest('hex')
+
+function pairingCode(): string {
+  const bytes = randomBytes(CODE_LENGTH)
+  return Array.from(bytes, (b) => CODE_ALPHABET[b % CODE_ALPHABET.length]).join('')
+}
+
+/** Секрет как его хэшируем: короткий код — без дефисов и пробелов, заглавными. */
+const pairingKey = (secret: string) =>
+  secret.length <= CODE_LENGTH + 4 ? secret.replace(/[\s-]/g, '').toUpperCase() : secret
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 const httpUrl = z.string().trim().max(1000).url().refine((u) => /^https?:\/\//i.test(u), 'Нужна ссылка http(s)')
@@ -68,6 +88,8 @@ const ScreenSchema = z.object({
   // ТВ в кабинке: показывать ли рекламу и чью ленту (null — как на экране с меню).
   adsEnabled: z.boolean().default(true),
   adsScreenId: z.string().uuid().nullable().default(null),
+  // Компьютер с Titan Screen: монитор для показа (null — первый не основной).
+  displayId: z.string().trim().min(1).max(40).nullable().default(null),
 })
 
 const SlideSchema = z.object({
@@ -94,11 +116,12 @@ function slideError(s: SlideShape): string | null {
   return null
 }
 
-/** Что привязано к экрану: приставка Titan Menu или ТВ кабинки с Titan TV. */
-const DeviceAppSchema = z.enum(['menu', 'launcher'])
+/** Что привязано к экрану: приставка Titan Menu, ТВ кабинки с Titan TV или компьютер с Titan Screen. */
+const DeviceAppSchema = z.enum(['menu', 'launcher', 'desktop'])
 
 const ClaimSchema = z.object({
-  secret: z.string().min(16).max(200),
+  // Секрет от телефона (32 знака) или код из HUB, набранный руками (8 знаков).
+  secret: z.string().trim().min(CODE_LENGTH).max(200),
   deviceId: z.string().trim().min(4).max(100),
   model: z.string().trim().max(100).optional(),
   appVersion: z.string().trim().max(30).optional(),
@@ -152,6 +175,7 @@ function publicScreen(s: Screen, summary?: ShowSummary) {
     deviceState: online ? s.deviceState : null,
     adsEnabled: s.adsEnabled,
     adsScreenId: s.adsScreenId,
+    displayId: s.displayId,
     deviceModel: s.deviceModel,
     appVersion: s.appVersion,
     deviceIp: s.deviceIp,
@@ -161,7 +185,20 @@ function publicScreen(s: Screen, summary?: ShowSummary) {
 }
 
 /** Что приставке нужно знать о своём экране (ответ привязки и пульса). */
-const deviceView = (s: Screen) => ({ screenId: s.id, name: s.name, kind: s.kind, rotation: s.rotation, app: s.deviceApp ?? 'menu' })
+const deviceView = (s: Screen) => ({
+  screenId: s.id, name: s.name, kind: s.kind, rotation: s.rotation, app: s.deviceApp ?? 'menu', displayId: s.displayId,
+})
+
+/** Компьютер с Titan Screen: монитор или поворот поменяли — перенести показ сразу. */
+const settingsChanged = (c: Context<AppEnv>, s: Screen) => {
+  if (s.deviceApp === 'desktop') void publishScreenSignal(c.var.club?.id, { type: 'settings', screenId: s.id })
+}
+
+/** Что компьютер с Titan Screen может поменять у своего экрана сам. */
+const DeviceSettingsSchema = z.object({
+  displayId: z.string().trim().min(1).max(40).nullable().optional(),
+  rotation: z.union([z.literal(0), z.literal(90), z.literal(270)]).optional(),
+})
 
 const unpairedFields = {
   deviceId: null,
@@ -198,8 +235,8 @@ screensRouter.post('/device/claim', zValidator('json', ClaimSchema), async (c) =
   const db = c.var.db
   const body = c.req.valid('json')
   const [screen] = await db.select().from(screens)
-    .where(and(eq(screens.pairingHash, sha256(body.secret)), gt(screens.pairingExpiresAt, new Date())))
-  if (!screen) return c.json({ error: 'Код привязки устарел — начните привязку на телефоне заново' }, 404)
+    .where(and(eq(screens.pairingHash, sha256(pairingKey(body.secret))), gt(screens.pairingExpiresAt, new Date())))
+  if (!screen) return c.json({ error: 'Код привязки неверный или устарел — получите новый в HUB' }, 404)
 
   const token = randomBytes(32).toString('base64url')
   const now = new Date()
@@ -244,6 +281,24 @@ screensRouter.post('/device/heartbeat', zValidator('json', HeartbeatSchema), asy
   if (!screen) return c.json({ error: 'Приставка не привязана' }, 401)
   if (screen.deviceApp !== 'launcher') return c.json(deviceView(screen))
   return c.json({ ...deviceView(screen), adsVersion: adsVersion(await launcherAds(db, screen)) })
+})
+
+// Компьютер с Titan Screen: монитор и поворот из самого приложения — то же поле, что в HUB.
+screensRouter.patch('/device/settings', zValidator('json', DeviceSettingsSchema), async (c) => {
+  const screen = await deviceScreen(c)
+  if (!screen) return c.json({ error: 'Приставка не привязана' }, 401)
+  const patch = c.req.valid('json')
+  const [updated] = await c.var.db.update(screens).set({ ...patch, updatedAt: new Date() })
+    .where(eq(screens.id, screen.id)).returning()
+  return c.json(deviceView(updated ?? screen))
+})
+
+// Устройство отвязывается само («Отвязать» в Titan Screen): экран остаётся, устройство уходит.
+screensRouter.post('/device/unpair', async (c) => {
+  const screen = await deviceScreen(c)
+  if (!screen) return c.json({ ok: true })
+  await c.var.db.update(screens).set({ ...unpairedFields, updatedAt: new Date() }).where(eq(screens.id, screen.id))
+  return c.json({ ok: true })
 })
 
 // ТВ в кабинке: реклама для главного экрана и заставки.
@@ -366,6 +421,7 @@ screensRouter.patch('/:id', requireAuth, requireRole('owner'), zValidator('json'
     showSummaries(db, screen.id),
   ])
   if ('adsEnabled' in patch || 'adsScreenId' in patch) contentChanged(c)
+  if (updated && ('displayId' in patch || 'rotation' in patch)) settingsChanged(c, updated)
   return c.json({ screen: publicScreen(updated ?? screen, summaries.get(screen.id)) })
 })
 
@@ -385,19 +441,23 @@ screensRouter.post('/:id/command', requireAuth, requireRole('owner', 'staff'), z
   const db = c.var.db
   const screen = await findScreen(db, c.req.param('id'))
   if (!screen) return c.json({ error: 'Экран не найден' }, 404)
-  if (!screen.deviceTokenHash || screen.deviceApp !== 'launcher') return c.json({ error: 'К экрану не подключён ТВ кабинки' }, 409)
-  const delivered = await publishScreenSignal(c.var.club?.id, commandSignal(screen.id, c.req.valid('json')))
+  const command = c.req.valid('json')
+  const supported = screen.deviceApp === 'launcher' ? command.action !== 'identify'
+    : screen.deviceApp === 'desktop' ? DESKTOP_ACTIONS.has(command.action) : false
+  if (!screen.deviceTokenHash || !supported) return c.json({ error: 'Этот экран такую команду не выполняет' }, 409)
+  const delivered = await publishScreenSignal(c.var.club?.id, commandSignal(screen.id, command))
   if (!delivered) return c.json({ error: 'Телевизор сейчас не на связи — команда не дошла' }, 409)
   return c.json({ ok: true })
 })
 
 // Одноразовый секрет для приставки: телефон передаёт его по локальной сети вместе
-// с адресом клуба. Новый запрос заменяет прежний секрет.
+// с адресом клуба. ?format=code — короткий код, его набирают руками в Titan Screen
+// на компьютере. Новый запрос заменяет прежний секрет.
 screensRouter.post('/:id/pairing', requireAuth, requireRole('owner'), async (c) => {
   const db = c.var.db
   const screen = await findScreen(db, c.req.param('id'))
   if (!screen) return c.json({ error: 'Экран не найден' }, 404)
-  const secret = randomBytes(24).toString('base64url')
+  const secret = c.req.query('format') === 'code' ? pairingCode() : randomBytes(24).toString('base64url')
   const expiresAt = new Date(Date.now() + PAIRING_TTL_MS)
   await db.update(screens).set({ pairingHash: sha256(secret), pairingExpiresAt: expiresAt, updatedAt: new Date() })
     .where(eq(screens.id, screen.id))

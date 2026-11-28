@@ -6,6 +6,9 @@
  * сразу — приставка подхватывает изменения в течение 20 секунд.
  * К экрану привязан ТВ в кабинке (Titan TV) — вместо показа и темы его пульт,
  * что на нём сейчас и реклама на главном экране и заставке (BoothTv).
+ * К экрану привязан компьютер с Windows (Titan Screen) — показ тот же, что у Titan Menu,
+ * плюс выбор монитора, на который он выводится (DesktopPc). Подключить компьютер можно
+ * прямо отсюда — кодом, который вводится в приложении.
  */
 import React, { use, useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
@@ -20,6 +23,7 @@ import { ScreenThemePicker } from '@/components/manage/screens/ScreenThemePicker
 import { ScreenSlides } from '@/components/manage/screens/ScreenSlides'
 import { ScreenShow } from '@/components/manage/screens/ScreenShow'
 import { BoothTvSections } from '@/components/manage/screens/BoothTv'
+import { DesktopMonitorSection, PairPcCode } from '@/components/manage/screens/DesktopPc'
 import {
   BAND_DURATIONS, ROTATIONS, SCREENS_KEY, deviceStatus, screenKey, showLabel, withCurrent,
   type Screen, type ScreenDetail,
@@ -106,11 +110,12 @@ export default function ScreenEditorPage({ params }: { params: Promise<{ id: str
   const active = data.show.filter((x) => x.isActive)
   const hasMenu = active.length === 0 || active.some((x) => x.kind === 'menu')
   const isBooth = screen.deviceApp === 'launcher'
-  const appName = isBooth ? 'Titan TV' : 'Titan Menu'
+  const isPc = screen.deviceApp === 'desktop'
+  const appName = isBooth ? 'Titan TV' : isPc ? 'Titan Screen' : 'Titan Menu'
 
   return (
     <div style={{ minHeight: '100dvh', display: 'flex', flexDirection: 'column' }}>
-      <PageHeader title={screen.name} subtitle={isBooth ? 'ТВ в кабинке' : showLabel(screen.show)} onBack={back} />
+      <PageHeader title={screen.name} subtitle={isBooth ? 'ТВ в кабинке' : isPc ? `Компьютер · ${showLabel(screen.show)}` : showLabel(screen.show)} onBack={back} />
       <div style={{ padding: '16px 16px var(--bottom-nav-clear, 24px)', maxWidth: 'var(--content-narrow)', margin: '0 auto', width: '100%', boxSizing: 'border-box', display: 'flex', flexDirection: 'column', gap: 16 }}>
 
         {/* Приставка */}
@@ -125,9 +130,13 @@ export default function ScreenEditorPage({ params }: { params: Promise<{ id: str
               {[screen.deviceModel, screen.appVersion && `${appName} ${screen.appVersion}`, screen.deviceIp].filter(Boolean).join(' · ') || 'Приставка подключена'}
             </p>
           ) : (
-            <p style={{ fontSize: 12.5, color: 'var(--on-surface-variant)', margin: 0, lineHeight: 1.5 }}>
-              Подключите ТВ с телефона: Titan HUB → Управление → Экраны → «Подключить ТВ». Телефон найдёт приставку в той же Wi-Fi сети.
-            </p>
+            <>
+              <p style={{ fontSize: 12.5, color: 'var(--on-surface-variant)', margin: 0, lineHeight: 1.5 }}>
+                Подключите ТВ с телефона: Titan HUB → Управление → Экраны → «Подключить ТВ». Телефон найдёт приставку в той же Wi-Fi сети.
+                Телевизор подключён к компьютеру с Windows — установите на компьютер Titan Screen и введите код отсюда.
+              </p>
+              {isOwner && <PairPcCode screen={screen} />}
+            </>
           )}
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
             {!isBooth && (
@@ -161,10 +170,17 @@ export default function ScreenEditorPage({ params }: { params: Promise<{ id: str
               ))}
             </div>
             <p style={{ fontSize: 12, color: 'var(--on-surface-variant)', margin: '8px 2px 0' }}>
-              Поворачивает картинку на приставке. Меню на боку или вверх ногами — выберите другой вариант.
+              Поворачивает картинку на {isPc ? 'телевизоре компьютера' : 'приставке'}. Меню на боку или вверх ногами — выберите другой вариант.
             </p>
           </div>}
         </section>
+
+        {isPc && (
+          <section className="glass-l2" style={CARD}>
+            <Title icon="desktop_windows">Монитор для показа</Title>
+            <DesktopMonitorSection screen={screen} isOwner={isOwner} />
+          </section>
+        )}
 
         {isBooth && <BoothTvSections screen={screen} slides={data.slides} isOwner={isOwner} />}
 

@@ -16,9 +16,11 @@ import {
   createSlide,
   deleteScreen,
   deviceStatus,
+  displayLabel,
   durationLabel,
   pickScreenImages,
   reorderSlides,
+  sendScreenCommand,
   ROTATIONS,
   screenPageUrl,
   showItemSummary,
@@ -75,7 +77,12 @@ export default function ScreenEditorScreen() {
   const hasMenu = active.length === 0 || active.some((s) => s.kind === 'menu');
   const status = deviceStatus(screen);
   const isBooth = screen.deviceApp === 'launcher';
-  const device = [screen.deviceModel, screen.appVersion && `${isBooth ? 'Titan TV' : 'Titan Menu'} ${screen.appVersion}`].filter(Boolean).join(' · ');
+  const isPc = screen.deviceApp === 'desktop';
+  const appName = isBooth ? 'Titan TV' : isPc ? 'Titan Screen' : 'Titan Menu';
+  const device = [screen.deviceModel, screen.appVersion && `${appName} ${screen.appVersion}`].filter(Boolean).join(' · ');
+  const displays = screen.deviceState?.displays ?? [];
+  // Выбранный монитор сейчас отключён — оставляем его в списке, чтобы выбор был виден.
+  const lostDisplay = screen.displayId && !displays.some((d) => d.id === screen.displayId) ? screen.displayId : null;
 
   const run = async (action: () => Promise<void>, failure: string) => {
     try {
@@ -217,6 +224,28 @@ export default function ScreenEditorScreen() {
                   </Text>
                 ))}
               </Picker>
+            ) : null}
+            {isPc ? (
+              <Picker
+                label="Монитор для показа"
+                selection={screen.displayId ?? 'auto'}
+                onSelectionChange={(next) => save({ displayId: next === 'auto' ? null : String(next) })}
+                modifiers={[pickerStyle('menu')]}>
+                <Text modifiers={[tag('auto')]}>Сам выберет (не основной)</Text>
+                {displays.map((d, i) => (
+                  <Text key={d.id} modifiers={[tag(d.id)]}>
+                    {displayLabel(d, i)}
+                  </Text>
+                ))}
+                {lostDisplay ? <Text modifiers={[tag(lostDisplay)]}>Выбранный монитор отключён</Text> : null}
+              </Picker>
+            ) : null}
+            {isPc && screen.online && displays.length > 0 ? (
+              <ActionRow
+                title="Показать номера на мониторах"
+                icon="number.square"
+                onPress={() => void run(() => sendScreenCommand(screen.id, { action: 'identify' }), 'Команда не дошла')}
+              />
             ) : null}
             {isOwner && !screen.paired ? (
               <ActionRow title="Подключить телевизор" icon="antenna.radiowaves.left.and.right" onPress={() => router.push({ pathname: '/manage/screens/connect', params: { screenId: screen.id } })} />

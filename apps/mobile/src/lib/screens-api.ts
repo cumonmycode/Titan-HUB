@@ -54,9 +54,15 @@ export type Screen = {
   /** ТВ в кабинке: реклама на главном экране и заставке и чья лента (null — как на экране с меню). */
   adsEnabled: boolean;
   adsScreenId: string | null;
+  /** Компьютер с Titan Screen: монитор для показа (null — первый не основной). */
+  displayId: string | null;
 };
 
-export type DeviceApp = 'menu' | 'launcher';
+/** Приставка Titan Menu, ТВ в кабинке (Titan TV) или компьютер с Windows (Titan Screen). */
+export type DeviceApp = 'menu' | 'launcher' | 'desktop';
+
+/** Монитор компьютера с Titan Screen. */
+export type ScreenDisplay = { id: string; label: string; width: number; height: number; primary: boolean };
 
 export type DeviceState = {
   screen: 'home' | 'saver' | 'cinema' | 'app' | 'input';
@@ -64,6 +70,9 @@ export type DeviceState = {
   airplay?: { title: string; artist: string; client: string; playing: boolean } | null;
   volume?: { level: number; max: number; muted: boolean } | null;
   ha?: 'connected' | 'connecting' | 'offline' | 'auth_failed' | 'idle' | null;
+  /** Компьютер с Titan Screen: его мониторы и куда сейчас идёт показ. */
+  displays?: ScreenDisplay[] | null;
+  output?: string | null;
 };
 
 /** Пульт ТВ в кабинке (POST /screens/:id/command). */
@@ -73,7 +82,8 @@ export type ScreenCommand =
   | { action: 'reset' }
   | { action: 'message'; text: string; seconds: number }
   | { action: 'volume'; percent: number }
-  | { action: 'mute'; muted: boolean };
+  | { action: 'mute'; muted: boolean }
+  | { action: 'identify' };
 
 /** Элемент экрана: в показе — меню или картинка, в ленте — картинка или карточка. */
 export type ScreenSlide = {
@@ -107,7 +117,13 @@ export type SlideInput = {
   isActive?: boolean;
 };
 
-export type ScreenPatch = Partial<Pick<Screen, 'name' | 'rotation' | 'theme' | 'bandSec' | 'adsEnabled' | 'adsScreenId'>>;
+export type ScreenPatch = Partial<Pick<Screen, 'name' | 'rotation' | 'theme' | 'bandSec' | 'adsEnabled' | 'adsScreenId' | 'displayId'>>;
+
+/** «1. DELL U2720Q · 2560×1440 · основной». */
+export function displayLabel(d: ScreenDisplay, index: number): string {
+  const name = d.label?.trim() || `Монитор ${index + 1}`;
+  return `${index + 1}. ${name} · ${d.width}×${d.height}${d.primary ? ' · основной' : ''}`;
+}
 
 /** GET /screens/:id — экран, его показ и реклама ленты. */
 export type ScreenDetail = { screen: Screen; show: ScreenSlide[]; slides: ScreenSlide[] };
@@ -226,8 +242,8 @@ export function refreshScreens(): void {
  * применяется и к сохранённому кэшу: достраиваем старый формат, а не падаем на нём,
  * пока не пришёл свежий ответ.
  */
-type StoredScreen = Omit<Screen, 'show' | 'deviceApp' | 'deviceState' | 'adsEnabled' | 'adsScreenId'> &
-  Partial<Pick<Screen, 'deviceApp' | 'deviceState' | 'adsEnabled' | 'adsScreenId'>> & { show?: ShowSummary; kind?: string };
+type StoredScreen = Omit<Screen, 'show' | 'deviceApp' | 'deviceState' | 'adsEnabled' | 'adsScreenId' | 'displayId'> &
+  Partial<Pick<Screen, 'deviceApp' | 'deviceState' | 'adsEnabled' | 'adsScreenId' | 'displayId'>> & { show?: ShowSummary; kind?: string };
 
 // ТВ в кабинке (миграция 091) — в старом кэше этих полей ещё нет.
 function normalizeScreen(s: StoredScreen): Screen {
@@ -238,6 +254,7 @@ function normalizeScreen(s: StoredScreen): Screen {
     deviceState: s.deviceState ?? null,
     adsEnabled: s.adsEnabled ?? true,
     adsScreenId: s.adsScreenId ?? null,
+    displayId: s.displayId ?? null,
   };
 }
 

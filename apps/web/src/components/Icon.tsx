@@ -576,6 +576,33 @@ const ICONS: Record<string, React.ReactNode> = {
       <line x1="15.5" y1="10" x2="17" y2="21" />
     </>
   ),
+  download: (
+    <>
+      <path d="M12 4v11" />
+      <path d="M7 10l5 5 5-5" />
+      <path d="M5 20h14" />
+    </>
+  ),
+  laptop: (
+    <>
+      <rect x="4" y="5" width="16" height="11" rx="1.5" />
+      <path d="M2 19h20" />
+    </>
+  ),
+  computer: (
+    <>
+      <rect x="3" y="4" width="18" height="12" rx="1.5" />
+      <path d="M9 20h6M12 16v4" />
+      <path d="M7 8h4" />
+    </>
+  ),
+  desktop_windows: (
+    <>
+      <rect x="3" y="4" width="18" height="12" rx="1.5" />
+      <path d="M9 20h6M12 16v4" />
+      <path d="M12 7v6M9 10h6" />
+    </>
+  ),
   tv: (
     <>
       <rect x="2" y="4" width="20" height="13" rx="2" />
