@@ -82,7 +82,8 @@ export interface ScreenSlide {
   id: string
   screenId: string
   placement: Placement
-  kind: 'image' | 'card' | 'menu'
+  /** page — анимированная сцена: linkUrl — её страница, imageUrl — статичный кадр. */
+  kind: 'image' | 'card' | 'menu' | 'page'
   imageUrl: string | null
   title: string | null
   body: string | null

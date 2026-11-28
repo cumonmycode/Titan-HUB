@@ -387,6 +387,12 @@ html.t-halloween, .t-halloween body { background: #0b0712; }
 .sl.post-fade { opacity: 0; }
 .sl.post-zoom { opacity: 0; -webkit-transform: scale(1.08); transform: scale(1.08); }
 .sl.instant { -webkit-transition: none; transition: none; }
+/* Анимация (kind 'page'): сцена в iframe поверх тёмного фона; статичный кадр — только если
+   сцена не ответила «готова» (нет сети, ошибка). */
+.sl-frame { position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: 0; opacity: 0; background: transparent; }
+.sl.page .sl-pic, .sl.page .sl-fill { visibility: hidden; }
+.sl.page.ready .sl-frame { opacity: 1; }
+.sl.page.fallback .sl-pic { visibility: visible; }
 
 @media (prefers-reduced-motion: reduce) {
   .sheen { -webkit-animation: none; animation: none; }
@@ -1133,10 +1139,38 @@ html.t-halloween, .t-halloween body { background: #0b0712; }
   function slideLayer(sl) {
     var el = document.createElement('div');
     var bg = ' style="background-image:url(\'' + esc(String(sl.imageUrl).replace(/'/g, '%27')) + '\')"';
-    el.className = 'sl' + (sl.fit === 'cover' ? ' cover' : '');
+    el.className = 'sl' + (sl.fit === 'cover' || sl.kind === 'page' ? ' cover' : '') + (sl.kind === 'page' ? ' page' : '');
     el.innerHTML = '<div class="sl-fill"' + bg + '></div><div class="sl-pic"' + bg + '></div>';
+    if (sl.kind === 'page') pageFrame(el, sl);
     return el;
   }
+
+  // Анимация: страница сцены в iframe. Сцена сама шлёт «titan-ad-ready», когда загрузила
+  // фото и шрифты, и только тогда начинает моушн; d — сколько секунд её покажут (уход
+  // сцены — перед сменой). Не ответила за 6 с — остаётся статичный кадр.
+  var PAGE_READY_MS = 6000;
+  function pageFrame(el, sl) {
+    var url = String(sl.pageUrl || '');
+    var f = document.createElement('iframe');
+    f.className = 'sl-frame';
+    f.setAttribute('scrolling', 'no');
+    f.setAttribute('allow', 'autoplay');
+    f.src = url + (url.indexOf('?') < 0 ? '?' : '&') + 'd=' + Math.max(3, Number(sl.durationSec) || 10);
+    el.appendChild(f);
+    el.frameEl = f;
+    setTimeout(function () {
+      if (el.className.indexOf(' ready') < 0) { el.className += ' fallback'; report('Анимация не ответила: ' + url); }
+    }, PAGE_READY_MS);
+  }
+
+  window.addEventListener('message', function (e) {
+    if (!e || !e.data || e.data.type !== 'titan-ad-ready') return;
+    var box = $('show'), kids = box ? box.children : [];
+    for (var i = 0; i < kids.length; i++) {
+      var k = kids[i];
+      if (k.frameEl && k.frameEl.contentWindow === e.source && k.className.indexOf(' ready') < 0) k.className += ' ready';
+    }
+  });
 
   // cb(ok): ok=false — картинка не загрузилась (нет ни в сети, ни в кэше приставки).
   // Долго грузится (>4 с) — показываем как есть, она дорисуется.
@@ -1153,7 +1187,7 @@ html.t-halloween, .t-halloween body { background: #0b0712; }
   // без интернета даже те, до которых очередь ещё не дошла.
   function warmImages(list) {
     var urls = [];
-    list.forEach(function (it) { if (it.kind === 'image') urls.push(it.imageUrl); });
+    list.forEach(function (it) { if (it.kind === 'image' || it.kind === 'page') urls.push(it.imageUrl); });
     var sig = urls.join('|');
     if (sig === play.warm) return;
     play.warm = sig;
@@ -1238,13 +1272,13 @@ html.t-halloween, .t-halloween body { background: #0b0712; }
     var go = function () {
       if (play.list !== list) return; // пока грузили, показ сменился
       var first = play.index < 0 && !play.layer;
-      if (it.kind === 'image') coverWith(it, first);
+      if (it.kind === 'image' || it.kind === 'page') coverWith(it, first);
       else revealMenu(it, first);
       play.index = i;
       play.fails = 0;
       if (list.length > 1) schedulePlay(itemMs(it));
     };
-    if (it.kind !== 'image') { go(); return; }
+    if (it.kind !== 'image' && it.kind !== 'page') { go(); return; }
     whenLoaded(it.imageUrl, function (ok) {
       if (play.list !== list) return;
       if (ok) { go(); return; }
@@ -1257,7 +1291,7 @@ html.t-halloween, .t-halloween body { background: #0b0712; }
     });
   }
 
-  function sameItem(a, b) { return a.kind === b.kind && (a.kind === 'menu' || a.imageUrl === b.imageUrl); }
+  function sameItem(a, b) { return a.kind === b.kind && (a.kind === 'menu' || (a.imageUrl === b.imageUrl && a.pageUrl === b.pageUrl)); }
 
   // Показ из ответа сервера. Сервер до миграции 069 (или старый кэш) показа не знает:
   // слайдшоу — его картинки, иначе — одно меню.
@@ -1268,6 +1302,7 @@ html.t-halloween, .t-halloween body { background: #0b0712; }
     src.forEach(function (it) {
       if (it && it.kind === 'menu') list.push(it);
       else if (it && it.kind === 'image' && it.imageUrl) list.push(it);
+      else if (it && it.kind === 'page' && it.imageUrl && it.pageUrl) list.push(it);
     });
     return list.length ? list : [MENU_ITEM];
   }

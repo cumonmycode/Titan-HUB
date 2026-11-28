@@ -27,7 +27,8 @@ export type Transition = 'fade' | 'slide' | 'zoom' | 'flip' | 'none';
 export type Fit = 'contain' | 'cover';
 /** 'show' — показ на весь экран (меню, картинки); 'band' — реклама в ленте меню. */
 export type Placement = 'show' | 'band';
-export type SlideKind = 'image' | 'card' | 'menu';
+/** page — анимированная сцена: linkUrl — её страница, imageUrl — статичный кадр. */
+export type SlideKind = 'image' | 'card' | 'menu' | 'page';
 
 /** Что в показе: есть ли меню и сколько картинок. */
 export type ShowSummary = { menu: boolean; images: number };

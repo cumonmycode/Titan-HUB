@@ -145,6 +145,7 @@ export default function ScreenEditorScreen() {
 
   const openItem = (slide: ScreenSlide) => router.push({ pathname: '/manage/screens/slide', params: { screenId: screen.id, slideId: slide.id } });
   const images = show.filter((s) => s.kind === 'image');
+  const pages = show.filter((s) => s.kind === 'page');
 
   return (
     <>
@@ -180,7 +181,7 @@ export default function ScreenEditorScreen() {
                 <RNHostView key={item.id} matchContents>
                   <PlaylistRow
                     item={item}
-                    title={item.kind === 'menu' ? 'Меню' : `Картинка ${images.indexOf(item) + 1}`}
+                    title={item.kind === 'menu' ? 'Меню' : item.kind === 'page' ? `Анимация ${pages.indexOf(item) + 1}` : `Картинка ${images.indexOf(item) + 1}`}
                     ordering={ordering}
                     first={index === 0}
                     last={index === show.length - 1}
@@ -287,7 +288,7 @@ function PlaylistRow({
   return (
     <Pressable onPress={onPress} disabled={!onPress} style={({ pressed }) => [styles.row, pressed && styles.pressed]} accessibilityRole={onPress ? 'button' : undefined}>
       <View style={[styles.thumb, !item.isActive && styles.off]}>
-        {item.kind === 'image' && item.imageUrl ? (
+        {(item.kind === 'image' || item.kind === 'page') && item.imageUrl ? (
           <Image source={{ uri: item.imageUrl }} style={StyleSheet.absoluteFill} contentFit="cover" />
         ) : (
           <SymbolView name="menucard.fill" size={22} tintColor="white" />

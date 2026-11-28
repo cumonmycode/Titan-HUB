@@ -121,7 +121,7 @@ export const screenSlides = pgTable('screen_slides', {
   screenId: uuid('screen_id').references(() => screens.id, { onDelete: 'cascade' }),
   // 'band' — реклама в ленте меню (image|card); 'show' — элемент показа (menu|image), миграция 069.
   placement: text('placement').$type<'band' | 'show'>().notNull().default('band'),
-  kind: text('kind').$type<'image' | 'card' | 'menu'>().notNull().default('image'),
+  kind: text('kind').$type<'image' | 'card' | 'menu' | 'page'>().notNull().default('image'),
   transition: text('transition').$type<'fade' | 'slide' | 'zoom' | 'flip' | 'none'>().notNull().default('fade'),
   transitionMs: integer('transition_ms').notNull().default(900),
   fit: text('fit').$type<'contain' | 'cover'>().notNull().default('contain'),

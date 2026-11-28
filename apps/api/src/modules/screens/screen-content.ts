@@ -87,8 +87,10 @@ export async function menuSections(db: Database): Promise<MenuSection[]> {
 }
 
 export type ShowItem = {
-  kind: 'menu' | 'image'
+  kind: 'menu' | 'image' | 'page'
   imageUrl: string | null
+  /** Анимация: страница сцены (imageUrl — её статичный кадр). */
+  pageUrl?: string | null
   durationSec: number
   transition: string
   transitionMs: number
@@ -117,10 +119,12 @@ async function screenContent(db: Database, screen: Screen) {
   const band = []
   for (const sl of rows) {
     if (sl.placement === 'show') {
-      if (sl.kind !== 'menu' && !(sl.kind === 'image' && sl.imageUrl)) continue
+      const isPage = sl.kind === 'page' && !!sl.imageUrl && !!sl.linkUrl
+      if (sl.kind !== 'menu' && !isPage && !(sl.kind === 'image' && sl.imageUrl)) continue
       playlist.push({
-        kind: sl.kind === 'menu' ? 'menu' : 'image',
-        imageUrl: sl.kind === 'image' ? sl.imageUrl : null,
+        kind: sl.kind === 'menu' ? 'menu' : isPage ? 'page' : 'image',
+        imageUrl: sl.kind === 'menu' ? null : sl.imageUrl,
+        ...(isPage ? { pageUrl: sl.linkUrl } : {}),
         durationSec: sl.durationSec,
         transition: sl.transition,
         transitionMs: sl.transitionMs,

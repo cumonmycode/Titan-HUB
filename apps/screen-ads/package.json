@@ -1,0 +1,17 @@
+{
+  "name": "titan-screen-ads",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Анимированные рекламные сцены для экранов Titan HUB (показ «анимация»)",
+  "scripts": {
+    "pick": "node src/pick-photos.js",
+    "fetch": "node src/fetch-photos.js",
+    "build": "node src/build.js",
+    "render": "node src/render.js"
+  },
+  "dependencies": {
+    "gsap": "^3.13.0",
+    "qrcode": "^1.5.4",
+    "@fontsource-variable/onest": "^5.2.5"
+  }
+}

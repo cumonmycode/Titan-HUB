@@ -94,7 +94,8 @@ const ScreenSchema = z.object({
 
 const SlideSchema = z.object({
   placement: z.enum(['band', 'show']).default('band'),
-  kind: z.enum(['image', 'card', 'menu']),
+  // page — анимированная сцена: linkUrl — её страница, imageUrl — статичный кадр (миграция 101).
+  kind: z.enum(['image', 'card', 'menu', 'page']),
   imageUrl: httpUrl.nullable().optional(),
   title: z.string().trim().max(80).nullable().optional(),
   body: z.string().trim().max(240).nullable().optional(),
@@ -106,11 +107,13 @@ const SlideSchema = z.object({
   isActive: z.boolean().default(true),
 })
 
-type SlideShape = { placement: 'band' | 'show'; kind: 'image' | 'card' | 'menu'; imageUrl?: string | null }
+type SlideShape = { placement: 'band' | 'show'; kind: 'image' | 'card' | 'menu' | 'page'; imageUrl?: string | null; linkUrl?: string | null }
 
-/** Что где допустимо: в показе — меню и картинки, в ленте — картинки и карточки. */
+/** Что где допустимо: в показе — меню, картинки и анимации, в ленте — картинки и карточки. */
 function slideError(s: SlideShape): string | null {
-  if (s.placement === 'show' && s.kind === 'card') return 'В показе — только меню и картинки'
+  if (s.placement === 'show' && s.kind === 'card') return 'В показе — только меню, картинки и анимации'
+  if (s.placement === 'band' && s.kind === 'page') return 'Анимация добавляется в показ, а не в ленту'
+  if (s.kind === 'page' && (!s.linkUrl || !s.imageUrl)) return 'Анимации нужны страница и статичный кадр'
   if (s.placement === 'band' && s.kind === 'menu') return 'Меню добавляется в показ, а не в ленту'
   if (s.kind === 'image' && !s.imageUrl) return 'Нужна картинка'
   return null

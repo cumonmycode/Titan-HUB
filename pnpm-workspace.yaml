@@ -10,6 +10,8 @@ packages:
   - "!apps/site"
   # Titan Screen для Windows (Electron) — свой npm, в серверные сборки не входит.
   - "!apps/screen-pc"
+  # Рекламные сцены экранов — генератор со своим npm, собирается локально.
+  - "!apps/screen-ads"
 allowBuilds:
   esbuild: true
   msgpackr-extract: true

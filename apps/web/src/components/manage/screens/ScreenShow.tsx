@@ -65,6 +65,7 @@ export function ScreenShow({ screen, items, isOwner }: { screen: Screen; items: 
   // Номер картинки среди картинок показа — «Картинка 2», а не «Элемент 3».
   const titleOf = (it: ScreenSlide) => {
     if (it.kind === 'menu') return 'Меню'
+    if (it.kind === 'page') return `Анимация ${items.filter((x) => x.kind === 'page').indexOf(it) + 1}`
     return `Картинка ${items.filter((x) => x.kind === 'image').indexOf(it) + 1}`
   }
 

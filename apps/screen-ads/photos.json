@@ -1,0 +1,736 @@
+{
+ "play-table": [
+  {
+   "id": "15SGRcrBTcO3jOg9Eec78KlWt5jHiKHzQ",
+   "o": "land"
+  }
+ ],
+ "city": [
+  {
+   "id": "1kMxdVCl9Lukqxd1EKLGldGsrmSJNRgOl",
+   "o": "land"
+  },
+  {
+   "id": "1uNDM82i_z4uvnF3zJKt3vLqt1w-5EN8x",
+   "o": "land"
+  }
+ ],
+ "every-night": [
+  {
+   "id": "1JBt-AV1jFS-rfCZd3V-k7kncpQAugMf0",
+   "o": "land"
+  }
+ ],
+ "daynight": [
+  {
+   "id": "1u_PZF2oPhtUK6jWWE2xw-L-l_r5Gk6bm",
+   "o": "land"
+  },
+  {
+   "id": "1CI5sUNCqIXUzRcKHolhaKZzfQpYDCzwr",
+   "o": "land"
+  }
+ ],
+ "how-evening": [
+  {
+   "id": "12q8Z1ntFTxQSkZlWlcIHaoBrsK-rz-0p",
+   "o": "land"
+  },
+  {
+   "id": "1dUHju_6-nstFplkQziRaBph3vvCP1wir",
+   "o": "land"
+  },
+  {
+   "id": "15xyWnb0YlEuuD0d2sOCqXh97BvZgOHUS",
+   "o": "land"
+  },
+  {
+   "id": "1UTOibXVII3yFF9M6XvrmdPT7qDC6_Hdt",
+   "o": "land"
+  }
+ ],
+ "play-noir": [
+  {
+   "id": "1MCoS-dHvaxXZu_dtkumWiZriepl-gyrH",
+   "o": "land"
+  },
+  {
+   "id": "1kPR0bMggEPuCKkcXlj3GHkskAaE9797D",
+   "o": "land"
+  }
+ ],
+ "noir-find": [
+  {
+   "id": "1MHSnMZLqXIejPNezggyrQq6qFCIbYCup",
+   "o": "land"
+  },
+  {
+   "id": "1Mz0bMLco31aZ0JKgKATcPAlHjcUeZNvv",
+   "o": "land"
+  }
+ ],
+ "faq-skill": [
+  {
+   "id": "1rtlAigG1bcwVk06vTzOPFSO-VgVxcnzx",
+   "o": "port"
+  }
+ ],
+ "faq-alone": [
+  {
+   "id": "1IwrEPswLUkuEypT-E36dCuUVANA9IA4I",
+   "o": "port"
+  }
+ ],
+ "faq-discount": [
+  {
+   "id": "1MyeDkmND-BSlU4K9K5k0qsfsROHxFSXV",
+   "o": "port"
+  }
+ ],
+ "faq-sport": [
+  {
+   "id": "1jLYn2HyGSgx0OuMFjYMLKsKKFiFreGNK",
+   "o": "port"
+  }
+ ],
+ "wanted-players": [
+  {
+   "id": "1JTHBrrqmjq7Ar6iwIgRpT8YqSB--wXSu",
+   "o": "port"
+  },
+  {
+   "id": "1fuh4aCePi9l7hs9PfK7cLzfNetnkI1Db",
+   "o": "land"
+  }
+ ],
+ "wanted-mafia": [
+  {
+   "id": "1v80ynCpCxSK_G5uIIHOKIhGKFRq-xIuL",
+   "o": "port"
+  },
+  {
+   "id": "18aqL5AzBhFwQRCOrvA9sCRnv7TQiio4z",
+   "o": "land"
+  }
+ ],
+ "students": [
+  {
+   "id": "1Jf3roDFN6hBd9LOwY38f-49Iv7cMYUHJ",
+   "o": "land"
+  }
+ ],
+ "board": [
+  {
+   "id": "1hVkDD0MPvX2OQDV05nUES0uR0WlPUupY",
+   "o": "land"
+  }
+ ],
+ "play-team": [
+  {
+   "id": "1p7IB49P4jLynOOodggUNhi4c9VsP-h4y",
+   "o": "port"
+  },
+  {
+   "id": "19kqrIEd0kB0NN1iBuHkb_Q9dCtEfp_5H",
+   "o": "port"
+  },
+  {
+   "id": "1vwaZoiBAaXY5_FEoWkAn8GxNC5woRQxw",
+   "o": "port"
+  },
+  {
+   "id": "1PmxAwiHHurzDLnZGhLBHiprH8Tr684OS",
+   "o": "port"
+  }
+ ],
+ "sport": [
+  {
+   "id": "17KDaUxo9bZw7AAHDJdivsfdNO7lQrDAu",
+   "o": "land"
+  },
+  {
+   "id": "1C0gNwa9uuFrucgmAx0MWgiPyHH2BsCa4",
+   "o": "land"
+  }
+ ],
+ "sport-school": [
+  {
+   "id": "1ZnDba04YNIWY2uCa1jdGC_-K1Mbf6P2X",
+   "o": "land"
+  },
+  {
+   "id": "1E44MplFuSQjk73ig2GkVMTeZ6n_vKo4W",
+   "o": "land"
+  }
+ ],
+ "cmp-formats": [
+  {
+   "id": "1uZ3Rll50QN4SFaM9o4wopLIxy__fjtjb",
+   "o": "land"
+  },
+  {
+   "id": "1UHoTjCqtrW-98VFnzInmsZaSbahxcYAc",
+   "o": "land"
+  }
+ ],
+ "smc": [
+  {
+   "id": "13aISggsdZZ9JAj7-Ji9fTgmMRkmLqEar",
+   "o": "land"
+  },
+  {
+   "id": "13hFHQ1ANlpUanw8QNTGHIXEG_BhzSmjJ",
+   "o": "land"
+  }
+ ],
+ "minicaps": [
+  {
+   "id": "16w1kcpUfJzfcgDG1Uq1EFNRYU0SPT-Rx",
+   "o": "port"
+  },
+  {
+   "id": "1R4DQgzscqIV9ZkQ17anBXrozg6hvy8i5",
+   "o": "port"
+  },
+  {
+   "id": "1Y7So8i9oZfTo7hrK_rh22f37CeOopXY7",
+   "o": "port"
+  },
+  {
+   "id": "1Lx-_ukhuNTvwRkdHfBoGTrUzHPyoqDVp",
+   "o": "port"
+  }
+ ],
+ "resident": [
+  {
+   "id": "1sVUhOFuyreebHc2h0-M6jL_iu-X8t6fn",
+   "o": "land"
+  }
+ ],
+ "books": [
+  {
+   "id": "15LPEVJ2f7dmZzJLCbty6i1iEnGgqclOs",
+   "o": "land"
+  }
+ ],
+ "books-red": [
+  {
+   "id": "1zdF6T2DDwvvInpOqZW7h-dQzq8G_y8-i",
+   "o": "land"
+  }
+ ],
+ "v-drive": [
+  {
+   "id": "1W77lcWpWOKs6su3_8Uzxb5EOq-kKMEZu",
+   "o": "land"
+  }
+ ],
+ "v-intellect": [
+  {
+   "id": "1HsF1OIUzTsQSdhO-TycSADmRrHhZ9HKM",
+   "o": "land"
+  }
+ ],
+ "v-team": [
+  {
+   "id": "1JjyGAFVabmjL4RuzwgvOT2nsu7wETfka",
+   "o": "land"
+  }
+ ],
+ "v-honest": [
+  {
+   "id": "1h-Fzclfv89kakTnhM-xzplbALuk4vJuG",
+   "o": "land"
+  }
+ ],
+ "v-emotion": [
+  {
+   "id": "1A8Y4ZPtLykcUtbMBBTbO8PwVrBdy7zCu",
+   "o": "land"
+  }
+ ],
+ "v-cozy": [
+  {
+   "id": "1T2NlPvU3I62inSnLYZOkwRHt_cS5Zjnn",
+   "o": "land"
+  }
+ ],
+ "q-anzor": [
+  {
+   "id": "1foosLBnxY3Zu85hXLk7Wf_rkzSAwluxW",
+   "o": "port"
+  }
+ ],
+ "q-zalina": [
+  {
+   "id": "1xArsTHAzNtCQaCwONcLAJ7aAV1ZQu25y",
+   "o": "port"
+  }
+ ],
+ "q-valeria": [
+  {
+   "id": "1sILckWN3DYZJj2JTqStFUbByZFaoewrj",
+   "o": "port"
+  }
+ ],
+ "birthday": [
+  {
+   "id": "site:5y-2",
+   "o": "land"
+  }
+ ],
+ "polar-bday": [
+  {
+   "id": "1Q64yfneln6W71GEqsZ9FO2HoobmedgGG",
+   "o": "port"
+  },
+  {
+   "id": "1eMmeK7Mngk1SHFnlaST8vCZp3BnvcA_n",
+   "o": "port"
+  },
+  {
+   "id": "1KTxFN9ytBt_GOfh246-BHrzhtAU66Uz9",
+   "o": "port"
+  },
+  {
+   "id": "1Z3lyNAN7sZPsCeKF11TbQKkDklGz_qBG",
+   "o": "port"
+  }
+ ],
+ "mag-events": [
+  {
+   "id": "1kzvN2a0CukfwPTvlXVdKQvdLEQ-wPWBk",
+   "o": "land"
+  }
+ ],
+ "how-order": [
+  {
+   "id": "1XNpF47gdgWHc5w6w-_yVk-K7dPp2JEz2",
+   "o": "land"
+  },
+  {
+   "id": "1NLCxChkIko3DJW7pDeofrOMF85XfoqN2",
+   "o": "land"
+  },
+  {
+   "id": "1cBLajpSJXMuhpIjM9UNmYW14NhZKjw1z",
+   "o": "land"
+  },
+  {
+   "id": "1uprUwrZl9MBSJtMtCeRK66YgugXpSoqS",
+   "o": "land"
+  }
+ ],
+ "corporate": [
+  {
+   "id": "1KT0d2kfQAD9PuZLg92RQ5s2SB-Ak_9go",
+   "o": "land"
+  },
+  {
+   "id": "1ZRyYHg04v9pV7zmRzXrwX4aNQcCcEHgQ",
+   "o": "land"
+  }
+ ],
+ "corp-diag": [
+  {
+   "id": "1pKXjwaaPKlrHAJTbB3tiBIN5BnRbO4sI",
+   "o": "land"
+  },
+  {
+   "id": "1PGUrLOdCx5C6owP9BNAXOd1ufFQJ5lBJ",
+   "o": "land"
+  }
+ ],
+ "outing": [
+  {
+   "id": "10qQtL9iRObQrYiAD9ecxAwB3keIHmdew",
+   "o": "land"
+  }
+ ],
+ "outing-poster": [
+  {
+   "id": "1m-q9dk5vP3BByYzGd453khdcasadoGUs",
+   "o": "land"
+  }
+ ],
+ "parties": [
+  {
+   "id": "11d7gelxvNty_16RFCeLEjwDUZik3wysO",
+   "o": "land"
+  },
+  {
+   "id": "1o8mPYVSirLwM8OzDgsrYvWxypD4JiShw",
+   "o": "land"
+  },
+  {
+   "id": "1qie1bVBGv6dz9U-_Ac5TTyszvy-H1MWU",
+   "o": "land"
+  }
+ ],
+ "parties-cards": [
+  {
+   "id": "1BWo1M6LnyjYftc7mUcbneLGX0pTEYRcR",
+   "o": "port"
+  },
+  {
+   "id": "1J6zDHkuRKu-R1z5WYqf9C4_sF5fxRZ3I",
+   "o": "port"
+  },
+  {
+   "id": "1hwrCaREUq17yDAlU64gZN5RoHG--vpH1",
+   "o": "land"
+  },
+  {
+   "id": "16ibEUIO5YE-u8qLjNbfjLG4V2zMrZ73D",
+   "o": "port"
+  },
+  {
+   "id": "151-PCQQ7kKHkL4YaLqIwR5ZNllpNQAYL",
+   "o": "land"
+  },
+  {
+   "id": "1u5ArmY8jM3-AzdWDUKH7KlJJiooVItWh",
+   "o": "port"
+  }
+ ],
+ "ny-corp": [
+  {
+   "id": "1c0wJbA1MQ5VguL2tIh2v-uIuu7IRwQUq",
+   "o": "land"
+  }
+ ],
+ "ny-neon": [
+  {
+   "id": "1kgEQ1tr7oMrRtIrCMdykvBtP73z5f6So",
+   "o": "land"
+  }
+ ],
+ "ny-mosaic": [
+  {
+   "id": "1jzOJZ4x8E0NE5BDqUKASZW_JMFaGXKwI",
+   "o": "port"
+  },
+  {
+   "id": "1wV-Mdqcdf2ehoFOYZ9gu6WnNn84GY9TB",
+   "o": "port"
+  },
+  {
+   "id": "1jiR1VJ1tihxYRPKtenGsGIG4oPpSwvUH",
+   "o": "land"
+  },
+  {
+   "id": "1Enu-1M7q6V989Lvf758rDQtcITPJCiuo",
+   "o": "port"
+  },
+  {
+   "id": "1hmnsBSWuqGZpxoZ3lZNd4GncP_9gstYk",
+   "o": "port"
+  },
+  {
+   "id": "1EEW1gn209lsGOMXCE18I-1kQQGRVJUjN",
+   "o": "land"
+  }
+ ],
+ "kids": [
+  {
+   "id": "site:kid-mask",
+   "o": "land"
+  }
+ ],
+ "kids-dossier": [
+  {
+   "id": "1EsweySwwN9sziyMF4imWWcD0cDksmtmP",
+   "o": "land"
+  }
+ ],
+ "certificate": [
+  {
+   "id": "1W4PQXeJfjn5Er4zVtgPQKAf5PaXNxQsR",
+   "o": "land"
+  }
+ ],
+ "cert-ticket": [
+  {
+   "id": "1XLhJ49EhnJITX_EPlkF85cE96oCQ8iBJ",
+   "o": "land"
+  }
+ ],
+ "cert-diag": [
+  {
+   "id": "1P42BNmPbQOG1r42fbc7hEvYs6aacPq5R",
+   "o": "land"
+  },
+  {
+   "id": "1VmfchuxS3qe_FNCRHUcbDxnCZjTXynWv",
+   "o": "land"
+  }
+ ],
+ "zones": [
+  {
+   "id": "1cwdUPdl7-Y0HiUzd1fhV7slMRoe35K2n",
+   "o": "land"
+  },
+  {
+   "id": "1cKZ6ZMQgB0rk5A87JP1UdRGMLJLfgIza",
+   "o": "land"
+  }
+ ],
+ "zones-glass": [
+  {
+   "id": "1VHvYu45ehBX1EDN-mPGNgobkFxibOav0",
+   "o": "land"
+  }
+ ],
+ "book-online": [
+  {
+   "id": "130wlgw37dTpvRcNHDO8yGZKFtHcDiWet",
+   "o": "land"
+  },
+  {
+   "id": "1M-JgIund8xgLrCUXneGmOP7Bpk_K2YjA",
+   "o": "land"
+  },
+  {
+   "id": "1L731pQlzbCsJMRA6ekXWGVg0me11TwEE",
+   "o": "land"
+  }
+ ],
+ "book-chat": [
+  {
+   "id": "1dIAgVg0nBMU-8AZ_gr8PhDrBu9r6wv2A",
+   "o": "land"
+  }
+ ],
+ "since": [
+  {
+   "id": "1axw8lKcLFXPRxxum5KwvH81KMkZkYMgN",
+   "o": "land"
+  }
+ ],
+ "mag-club": [
+  {
+   "id": "1fno7-svlp2tApVAVz73GQoC074sI446H",
+   "o": "land"
+  }
+ ],
+ "bento-club": [
+  {
+   "id": "1LvtL-q9YyVLx51ExBlP_S-EwcgWjTt2G",
+   "o": "land"
+  },
+  {
+   "id": "1uSi06fkCMGbLQmrSawIdItgE9dY71XcD",
+   "o": "port"
+  },
+  {
+   "id": "130Z4Etsr-4EQ-oJEqc3DaneLmv2VICqb",
+   "o": "land"
+  },
+  {
+   "id": "1Z84GbBWCMyNsizbIB1Fk6mg5DIg2ZoJ8",
+   "o": "port"
+  },
+  {
+   "id": "1jl8SmdTpAHM1B1Z5k5Zpc8D5dL3KCxYB",
+   "o": "land"
+  },
+  {
+   "id": "16Op9QGSx68CFNRA1r_XxOHwL7FkKlDJ_",
+   "o": "port"
+  }
+ ],
+ "services": [
+  {
+   "id": "1d50TPn9pKMQHDymQH3wS3SvDS1fDmh7H",
+   "o": "land"
+  },
+  {
+   "id": "1USd1pSNnCUKQ539QKNJidwh6wUV2_cN9",
+   "o": "land"
+  },
+  {
+   "id": "1JDkLg8MVrdQhT7NQXCIK37ZvDAxP0MuD",
+   "o": "land"
+  },
+  {
+   "id": "1YBdX6ruBoCIyEvlkoXrDHoJbOmJdWSYE",
+   "o": "land"
+  },
+  {
+   "id": "13PMgAg1sVBAt6e55IIbu6-6EPCaNRp-3",
+   "o": "land"
+  },
+  {
+   "id": "1njcGGo-YfgKpGu5w5TKcKHzdWR0gls3k",
+   "o": "land"
+  },
+  {
+   "id": "15YOvuUeooPDSKvxmGd8-lCJJff7VMLyB",
+   "o": "land"
+  },
+  {
+   "id": "1haZMp06HNPyM8pQIqOoDWdttZs2ng43f",
+   "o": "land"
+  },
+  {
+   "id": "1uWV8wE9mjSmsseB579CLnFZijUOtfWBs",
+   "o": "land"
+  }
+ ],
+ "app-phones": [
+  {
+   "id": "1BRrj_bSN_CAqZdodVOyesUcynvvoIf_U",
+   "o": "land"
+  }
+ ],
+ "app-stats": [
+  {
+   "id": "1AbyalSDmwV6EMZr3P6teAyBgoC1fW-Dj",
+   "o": "land"
+  }
+ ],
+ "streams": [
+  {
+   "id": "17IZMb866oglUzvhhio_eu8fiPjaVFmtH",
+   "o": "land"
+  }
+ ],
+ "pay": [
+  {
+   "id": "1ZX9JK5PdATEKPH8xo2hmI1osyjKLQ-B4",
+   "o": "land"
+  }
+ ],
+ "app-history": [
+  {
+   "id": "1IBnW6XEmG28tKi_MlcWPsnUhujLkumHR",
+   "o": "land"
+  }
+ ],
+ "app-cards": [
+  {
+   "id": "1snCW5f2WRHxgvoteRKL4rILaPaOj4lfx",
+   "o": "land"
+  }
+ ],
+ "app-bento": [
+  {
+   "id": "1SDk-9SVp9rZH4mQdTLKtI7PFju57Ch6p",
+   "o": "land"
+  }
+ ],
+ "app-demo": [
+  {
+   "id": "13uc2mdQEBcWP8WcvgM3wsl7RAsxTAb5e",
+   "o": "land"
+  }
+ ],
+ "app-bonus": [
+  {
+   "id": "1QyK5J7_iKKUQPxFY0SG9ZJ8B4HX4YDpt",
+   "o": "land"
+  }
+ ],
+ "app-half": [
+  {
+   "id": "12wrhtf3QU76PCl4VGQDHHX00XnPE8URn",
+   "o": "land"
+  }
+ ],
+ "app-burn": [
+  {
+   "id": "14xJWc3R4ip1wwQw811fjrFzIt90Be-gw",
+   "o": "land"
+  }
+ ],
+ "app-resident": [
+  {
+   "id": "10cNnXTsI7zE_s3MfcXil_3HIc8kQm764",
+   "o": "land"
+  }
+ ],
+ "app-login": [
+  {
+   "id": "1duN6FC2yQmZfFSoQyxKwLHGNJw6IKqh0",
+   "o": "land"
+  }
+ ],
+ "where": [
+  {
+   "id": "1XEo1DZEe4cF_FZ7ApQfniUuGs9_Xuyt_",
+   "o": "port"
+  },
+  {
+   "id": "1dgOR3ddiCs297YihpIzvhcP26wjspT6J",
+   "o": "port"
+  },
+  {
+   "id": "1-qAFmry5eM5EX1ZyWHJRCHjaorkbS4A4",
+   "o": "port"
+  },
+  {
+   "id": "1lSkZVvDRnI_GjtBvWcOpI8u1as7wRgy5",
+   "o": "port"
+  },
+  {
+   "id": "1aFknHFINUvBkKuIq070asZwLG9dADxe2",
+   "o": "port"
+  },
+  {
+   "id": "1YNcNCfp99inrlVirPg47rCBXwaxH3HpB",
+   "o": "port"
+  }
+ ],
+ "tg": [
+  {
+   "id": "1p1AqyroHnwYzpDN91Yq55aqLUC8S_Qtx",
+   "o": "port"
+  },
+  {
+   "id": "18s7FG4f2EYHfn3qpBPvpaaMBdGKmEWgb",
+   "o": "port"
+  },
+  {
+   "id": "1eHbx1iUDYxGcVWv7L3_-hCh5U7yNeizZ",
+   "o": "port"
+  },
+  {
+   "id": "16Y-6bgbl75ZpbZv7a1HUVDa3--aqKtdb",
+   "o": "port"
+  },
+  {
+   "id": "16rqycNZ5y9qvUPQMcN0AQUf7NWTYSEQ2",
+   "o": "port"
+  },
+  {
+   "id": "10pYIdpW3WxtQ22gYjViuSE4o0R-0K0pZ",
+   "o": "port"
+  }
+ ],
+ "wa": [
+  {
+   "id": "1Oa3Pn-7KvVX6858efsRHp8t0m5BRX2Hw",
+   "o": "port"
+  },
+  {
+   "id": "1TEDu_Q4H2X0KvYOuZYDw29zeDJffxe8r",
+   "o": "port"
+  },
+  {
+   "id": "1PAxRb3itukO786Clnq_BMyKbvLgMHhSJ",
+   "o": "port"
+  },
+  {
+   "id": "1sKgpC4TbMB7pa4uVN5i0alcjtnKtLmvX",
+   "o": "port"
+  },
+  {
+   "id": "1XBXMBoQf1ecftR_xrL2Pz2Ca3_kbau6t",
+   "o": "port"
+  },
+  {
+   "id": "1TJcInN7PIBd2A1lbU06iECMsP9KMigMX",
+   "o": "port"
+  }
+ ]
+}
