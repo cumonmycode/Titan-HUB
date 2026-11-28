@@ -12,7 +12,7 @@
   var reel = document.querySelector('.reel')
   var scale = TitanFit(reel)
   addEventListener('resize', function () { scale = TitanFit(reel) })
-  var TR = 1.6
+  var TR = 1.8
   var index = 0, cur = null, sent = false, pre = {}
 
   // Логотипа в ролике нет (владелец: заголовок «Титан, клуб спортивной мафии» мешает).
@@ -50,7 +50,23 @@
       .fromTo(b, { scale: 0.9, opacity: 0 }, { scale: 1, opacity: 1, duration: TR, ease: 'power2.out' }, 0)
   }
 
-  var TRANSITIONS = [pan(1920, 0), depth, pan(0, 1080), pan(-1920, 0), depth, pan(0, -1080)]
+  /**
+   * Бесшовное растворение: текст уходящей сцены тихо гаснет, фото новой проступает поверх
+   * старого, обе сцены дрейфуют в одну сторону — как одна камера. Без масок, затемнений и
+   * резких краёв. dx, dy — направление дрейфа (чередуется).
+   */
+  var TEXT = '.a-title, .a-lead, .a-lead2, .a-kicker, .pills, .qr, .a-type, .a-stamp, .ntitle, .fq, .qbody, .mlines, .ccard, .wsub, .stats-box, .stat-text, .thead, .ghead, .tlw, .tiles, .dlabel, .dtitle, .pols, .phones, .cwin, .side, .paperobj, .ticket, .gift, .books, .bignum-wrap, .ntext, .htext, .mos-panel, .sgrid, .pcols, .pbig, .paccent, .mast, .missue, .mbar, .wordwrap, .word-line'
+  function dissolve(dx, dy) {
+    return function (a, b) {
+      var text = a.querySelectorAll(TEXT)
+      return gsap.timeline()
+        .to(text, { opacity: 0, duration: 0.7, ease: 'sine.inOut' }, 0)
+        .to(a, { x: -dx, y: -dy, scale: 1.03, duration: TR + 0.6, ease: 'sine.inOut' }, 0)
+        .fromTo(b, { opacity: 0, x: dx, y: dy, scale: 1.03 }, { opacity: 1, x: 0, y: 0, scale: 1, duration: TR + 0.6, ease: 'sine.inOut' }, 0.2)
+    }
+  }
+
+  var TRANSITIONS = [dissolve(60, 0), dissolve(0, 40), dissolve(-60, 0), dissolve(0, -40)]
 
   function next() {
     var k = index++

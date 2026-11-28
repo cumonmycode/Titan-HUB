@@ -135,7 +135,7 @@
         if (!opts.noOutro) tl.from('.a-bg', { opacity: 0, duration: 1.2, ease: 'power2.out' }, 0)
         tl.fromTo('.a-bg .ph', { scale: 1.4 }, { scale: 1.12, duration: 1.9, ease: E }, 0)
         tl.to('.a-bg .ph', { scale: 1.0, xPercent: -3, duration: Math.max(1, D - 1.9), ease: 'none' }, 1.9)
-        tl.from('.a-shade', { xPercent: mode === 'glass' ? 0 : -45, opacity: 0, duration: 1.3, ease: E }, 0.1)
+        if (!opts.noOutro) tl.from('.a-shade', { xPercent: mode === 'glass' ? 0 : -45, opacity: 0, duration: 1.3, ease: E }, 0.1)
         if (mode === 'glass') tl.from('.a-glass', { opacity: 0, y: 70, scale: 0.95, duration: 1.2, ease: E }, 0.35)
         kicker(0.45); words('.a-title', 0.6); fadeUp('.a-lead', 1.15); pills(1.4); qr(1.9)
         sweep(2.5); sweep(D * 0.62)
@@ -147,7 +147,7 @@
         if (!opts.noOutro) tl.from(s1, { yPercent: function (i) { return i % 2 ? 101 : -101 }, duration: 1.2, ease: 'power4.out', stagger: 0.07 }, 0.15)
         tl.to(s2, { yPercent: 0, duration: 1.25, ease: 'power4.inOut', stagger: 0.07 }, D * 0.47)
         kb('.bl-photos', { scale: 1.14 }, { scale: 1 }, 0)
-        tl.from('.a-edge', { scaleY: 0, transformOrigin: '50% 0', duration: 1.2, ease: E }, 0.8)
+        if (!opts.noOutro) tl.from('.a-edge', { scaleY: 0, transformOrigin: '50% 0', duration: 1.2, ease: E }, 0.8)
         kicker(0.5); words('.a-title', 0.65); fadeUp('.a-lead', 1.2); pills(1.45); qr(2); brand()
       },
 
@@ -156,7 +156,7 @@
         tl.from(tiles, { scale: 0.3, opacity: 0, rotation: function (i) { return [-14, 9, -6, 12, -10, 7][i % 6] }, duration: 1.3, ease: E, stagger: { each: 0.08, from: 'center' } }, 0.05)
         tiles.forEach(function (t, i) { kb($$('.ph', t), { scale: 1.3 }, { scale: 1.04, xPercent: i % 2 ? 3 : -3 }, 0) })
         kb('.a-mos', { rotationX: 16, rotationZ: -5, scale: 1.18 }, { rotationX: 5, rotationZ: -1.5, scale: 1.02 }, 0)
-        tl.from('.a-dim', { opacity: 0, duration: 1.2, ease: 'power2.out' }, 0.9)
+        if (!opts.noOutro) tl.from('.a-dim', { opacity: 0, duration: 1.2, ease: 'power2.out' }, 0.9)
         tl.from('.a-panel', { scale: 0.92, opacity: 0, duration: 1.1, ease: E }, 1.0)
         kicker(1.0); words('.a-title', 1.15); fadeUp('.a-lead', 1.7); qr(2.2); brand(0.8)
       },
@@ -178,7 +178,7 @@
           tl.from(num, { opacity: 0, scale: 0.8, transformOrigin: '0 50%', duration: 1.2, ease: E }, 0.35)
           tl.to(o, { v: to, duration: 1.9, ease: 'power3.out', onUpdate: function () { num.textContent = fmt(o.v) } }, 0.5)
           tl.from('.a-unit', { opacity: 0, x: -40, duration: 0.8, ease: E }, 2.0)
-          tl.from('.a-shade', { opacity: 0, duration: 1 }, 0)
+          if (!opts.noOutro) tl.from('.a-shade', { opacity: 0, duration: 1 }, 0)
           kicker(1.0); words('.a-title', 1.1); fadeUp('.a-lead', 1.7)
         } else {
           tl.fromTo('.a-bg2', { opacity: 0 }, { opacity: 1, duration: 1.3, ease: 'power2.inOut' }, D * 0.5)
@@ -194,7 +194,7 @@
       },
 
       noir: function () {
-        tl.fromTo('.a-bar', { scaleY: 0 }, { scaleY: 1, duration: 1.1, ease: 'power4.inOut' }, 0)
+        if (!opts.noOutro) tl.fromTo('.a-bar', { scaleY: 0 }, { scaleY: 1, duration: 1.1, ease: 'power4.inOut' }, 0)
         kb('.a-bg .ph', { scale: 1.04 }, { scale: 1.26 }, 0)
         tl.to('.a-flash', { opacity: 0.85, duration: 0.07 }, D * 0.48)
         tl.set('.a-bg2', { opacity: 1 }, D * 0.48 + 0.06)
@@ -236,7 +236,7 @@
 
       phone: function () {
         kb('.a-bg .ph', { scale: 1.32 }, { scale: 1.12 }, 0)
-        tl.from('.a-glow', { opacity: 0, duration: 1.5 }, 0.3)
+        if (!opts.noOutro) tl.from('.a-glow', { opacity: 0, duration: 1.5 }, 0.3)
         var ph = $$('.a-phone')
         tl.from(ph, { y: 340, rotationY: -42, rotationX: 22, opacity: 0, duration: 1.5, ease: E, stagger: 0.16 }, 0.5)
         tl.to(ph, { rotationY: -10, rotationX: 4, y: -18, duration: Math.max(1, D - 2.5), ease: 'sine.inOut', stagger: 0.2 }, 2.0)
