@@ -19,7 +19,7 @@ const LAUGH = 'смех|смеются|смеётся|улыба'
 
 module.exports = [
   // ── Игровые вечера ──
-  { id: 'play-table', tpl: 'hero', kicker: 'TITAN · клуб спортивной мафии', title: 'Играй<br>в <em>мафию</em>',
+  { id: 'play-table', tpl: 'hero', kicker: 'Игровые вечера', title: 'Играй<br>в <em>мафию</em>',
     lead: 'Живые игры с ведущим, новые знакомства и азарт до последнего голосования.', pills: ['Игровые вечера', 'Новичкам — научим'],
     qr: '/games', qt: 'Расписание и запись', ph: [L(TABLE)] },
   { id: 'city', tpl: 'blinds', kicker: 'Игровые вечера', title: 'Городская<br><em>мафия</em>',
